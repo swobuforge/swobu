@@ -386,7 +386,11 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool call id is invalid")
 		}
-		declaration, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), state.WireName, canonical.ToolTypeFunction)
+		environment, err := canonical.EffectiveTools(s.request)
+		if err != nil {
+			return canonical.InternalError("chat completions streamed tool environment is ambiguous")
+		}
+		declaration, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), state.WireName, canonical.ToolTypeFunction)
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool name cannot be resolved against the effective request")
 		}

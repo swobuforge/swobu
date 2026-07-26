@@ -14,8 +14,7 @@ func TestEncode_PreservesCustomToolFormat(t *testing.T) {
 	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "edit files", canonical.NewToolFormatObject(canonicaltest.Object(t, formatRaw)))
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-4o-mini"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, customTool),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, customTool), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -35,9 +34,8 @@ func TestEncode_PreservesCustomToolFormat(t *testing.T) {
 
 func TestEncode_PreservesInstructions(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        canonical.Specify("gpt-4o-mini"),
-		Instructions: canonical.Specify(canonical.NewSystemInstructionSet("Use native tools for filesystem work.")),
-		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
+		Model: canonical.Specify("gpt-4o-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "Use native tools for filesystem work."), canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {

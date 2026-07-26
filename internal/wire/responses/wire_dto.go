@@ -20,6 +20,7 @@ type responsesRequestDTO struct {
 	Stream                 json.RawMessage               `json:"stream,omitempty"`
 	Reasoning              *responsesReasoningRequestDTO `json:"reasoning,omitempty"`
 	Include                json.RawMessage               `json:"include,omitempty"`
+	ClientMetadata         map[string]string             `json:"client_metadata,omitempty"`
 }
 
 type responsesReasoningRequestDTO struct {
@@ -48,12 +49,14 @@ type responsesWireOutputItemDTO struct {
 	Content          json.RawMessage                `json:"content,omitempty"`
 	CallID           string                         `json:"call_id,omitempty"`
 	Name             string                         `json:"name,omitempty"`
-	Arguments        string                         `json:"arguments,omitempty"`
+	Arguments        json.RawMessage                `json:"arguments,omitempty"`
 	Input            string                         `json:"input,omitempty"`
 	ServerLabel      string                         `json:"server_label,omitempty"`
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`
+	Execution        string                         `json:"execution,omitempty"`
+	Tools            json.RawMessage                `json:"tools,omitempty"`
 }
 
 type responsesReasoningSummaryDTO struct {
@@ -81,6 +84,7 @@ type responsesInputItemDTO struct {
 	Summary          []responsesReasoningSummaryDTO `json:"summary,omitempty"`
 	EncryptedContent string                         `json:"encrypted_content,omitempty"`
 	Action           json.RawMessage                `json:"action,omitempty"`
+	Execution        string                         `json:"execution,omitempty"`
 }
 
 type responsesResponseDTO struct {
@@ -256,6 +260,17 @@ type responsesToolDefinitionDTO struct {
 	Filters            *responsesWebSearchFiltersDTO  `json:"filters,omitempty"`
 	UserLocation       *responsesWebSearchLocationDTO `json:"user_location,omitempty"`
 	SearchContextSize  string                         `json:"search_context_size,omitempty"`
+	ServerLabel        string                         `json:"server_label,omitempty"`
+	ServerDescription  string                         `json:"server_description,omitempty"`
+	ServerURL          string                         `json:"server_url,omitempty"`
+	AllowedTools       json.RawMessage                `json:"allowed_tools,omitempty"`
+	AllowedCallers     json.RawMessage                `json:"allowed_callers,omitempty"`
+	RequireApproval    json.RawMessage                `json:"require_approval,omitempty"`
+	Headers            json.RawMessage                `json:"headers,omitempty"`
+	Authorization      *string                        `json:"authorization,omitempty"`
+	ConnectorID        *string                        `json:"connector_id,omitempty"`
+	TunnelID           *string                        `json:"tunnel_id,omitempty"`
+	DeferLoading       *bool                          `json:"defer_loading,omitempty"`
 }
 
 type responsesWebSearchFiltersDTO struct {

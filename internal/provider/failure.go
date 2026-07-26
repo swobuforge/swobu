@@ -14,36 +14,37 @@ type classifiedFailure interface {
 	providerFailure()
 }
 
-// CandidateIncompatibilityError means one exact target cannot represent a valid
+// IncompatibleTargetError means one exact target cannot represent a valid
 // canonical request. Exchange may try another candidate with the unchanged
 // request; this type is never a public client error.
-type CandidateIncompatibilityError struct {
-	Cause error
+type IncompatibleTargetError struct {
+	Reason string
+	cause  error
 }
 
-func (e CandidateIncompatibilityError) Error() string {
-	if e.Cause == nil {
+func (e IncompatibleTargetError) Error() string {
+	if e.Reason == "" {
 		return "canonical request is incompatible with provider candidate"
 	}
-	return fmt.Sprintf("canonical request is incompatible with provider candidate: %v", e.Cause)
+	return fmt.Sprintf("canonical request is incompatible with provider candidate: %s", e.Reason)
 }
 
-func (e CandidateIncompatibilityError) Unwrap() error  { return e.Cause }
-func (CandidateIncompatibilityError) providerFailure() {}
+func (IncompatibleTargetError) providerFailure() {}
+func (e IncompatibleTargetError) Unwrap() error  { return e.cause }
 
-// CandidateIncompatible retains a typed cause while marking an exact-target
+// IncompatibleTarget retains a typed cause while marking an exact-target
 // representation failure.
-func CandidateIncompatible(err error) error {
+func IncompatibleTarget(err error) error {
 	if err == nil {
 		return nil
 	}
-	return CandidateIncompatibilityError{Cause: err}
+	return IncompatibleTargetError{Reason: err.Error(), cause: err}
 }
 
-// NewCandidateIncompatibility marks an exact-target representation failure
+// NewIncompatibleTarget marks an exact-target representation failure
 // without constructing or wrapping a public Swobu error.
-func NewCandidateIncompatibility(message string) error {
-	return CandidateIncompatible(errors.New(message))
+func NewIncompatibleTarget(message string) error {
+	return IncompatibleTargetError{Reason: message}
 }
 
 // UnavailableError means provider I/O could not produce a usable backend
@@ -59,7 +60,7 @@ func (UnavailableError) providerFailure() {}
 
 // RejectedError means the backend returned a response rejecting this request.
 // Rejection is terminal unless the adapter has positively identified the
-// narrower CandidateIncompatibilityError contract.
+// narrower IncompatibleTargetError contract.
 type RejectedError struct{ Cause error }
 
 func (e RejectedError) Error() string {

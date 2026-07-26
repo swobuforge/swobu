@@ -36,7 +36,7 @@ func responsesRequestWithStrictToolAndJSONSchema(t *testing.T) canonical.Canonic
 	if err != nil {
 		t.Fatal(err)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Tools: canonical.Specify(tools), OutputFormat: canonical.Specify(format)})
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools.Declarations()...), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, OutputFormat: canonical.Specify(format)})
 }
 
 func assertResponsesDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {

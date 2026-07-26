@@ -18,7 +18,11 @@ func testProjectionRequest(t *testing.T) canonical.CanonicalRequest {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(tools)})
+	declarations, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 }
 
 func TestAdapterProjectsResolvedToolIdentityBeforeArgs(t *testing.T) {
@@ -29,7 +33,7 @@ func TestAdapterProjectsResolvedToolIdentityBeforeArgs(t *testing.T) {
 	}
 	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
 	callID, _ := canonical.NewToolCallID("call_1")
-	tool := request.Tools()[0].Key()
+	tool := canonicaltest.Tools(request)[0].Key()
 	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, EnvID: "i", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 7}, Payload: canonicaltest.MustToolCallStart(callID, tool)}})
 	if err != nil {
 		t.Fatal(err)

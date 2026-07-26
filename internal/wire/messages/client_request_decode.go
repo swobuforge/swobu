@@ -138,17 +138,25 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 	}
 	params := canonical.RequestParams{
 		Model:            canonical.Specify(strings.TrimSpace(dto.Model)), // swobu:io-string source=boundary
-		Items:            items,
 		Controls:         controls,
 		Reasoning:        reasoning,
 		PreviousResponse: previousResponse,
 	}
 	if len(dto.System) > 0 {
-		params.Instructions = canonical.Specify(canonical.NewSystemInstructionSet(instructions))
+		directive, err := canonical.NewScopedMessageItem(canonical.MessageRoleSystem, []canonical.MessagePart{canonical.NewTextMessagePart(instructions)}, canonical.ContextScopeRequest)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		params.Items = append(params.Items, directive)
 	}
 	if dto.Tools != nil {
-		params.Tools = canonical.Specify(toolSet)
+		declarations, err := canonical.NewToolDeclarationsItem(toolSet, canonical.ContextScopeRequest)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		params.Items = append(params.Items, declarations)
 	}
+	params.Items = append(params.Items, items...)
 	if len(dto.ToolChoice) > 0 {
 		params.ToolPolicy = canonical.Specify(toolPolicy)
 	}

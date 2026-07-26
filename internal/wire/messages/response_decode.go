@@ -106,7 +106,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use input is invalid JSON object")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), strings.TrimSpace(block.Name), canonical.ToolTypeFunction) // swobu:io-string source=boundary
+			environment, err := canonical.EffectiveTools(request)
+			if err != nil {
+				return nil, canonical.InternalError("messages tool environment is ambiguous")
+			}
+			resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), strings.TrimSpace(block.Name), canonical.ToolTypeFunction) // swobu:io-string source=boundary
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use references an unknown or ambiguous tool")
 			}

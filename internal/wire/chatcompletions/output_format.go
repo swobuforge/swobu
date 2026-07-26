@@ -66,7 +66,7 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 		return nil, nil
 	}
 	if format.Kind != canonical.OutputFormatJSONSchema {
-		return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent the canonical output format")
+		return nil, provider.NewIncompatibleTarget("Chat Completions cannot represent the canonical output format")
 	}
 	dto := chatCompletionsResponseFormatDTO{
 		Type: string(canonical.OutputFormatJSONSchema),

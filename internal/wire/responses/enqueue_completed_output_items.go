@@ -52,6 +52,8 @@ func (s *responsesResponseStream) enqueueCompletedOutputItemAt(ordinal uint32, i
 		s.enqueueItemCompleted(envID, ordinal, item)
 	case canonical.ItemKindReasoning:
 		s.enqueueItemCompleted(envID, ordinal, item)
+	case canonical.ItemKindToolDiscoveryResult:
+		s.enqueueItemCompleted(envID, ordinal, item)
 	case canonical.ItemKindToolResult:
 		if result, ok := item.ToolResult(); !ok {
 			return canonical.InternalError("responses completed tool result is invalid")

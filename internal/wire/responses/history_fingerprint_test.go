@@ -42,7 +42,7 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	if second.RebasedRequest == nil || second.RebasedRequest.Previous != wantPrevious {
 		t.Fatalf("rebased request = %#v, want history %#v", second.RebasedRequest, wantPrevious)
 	}
-	if len(second.RebasedRequest.Request.Items()) != 1 || second.RebasedRequest.Request.Model() != "other" || second.RebasedRequest.Request.Instructions().IsEmpty() {
+	if len(second.RebasedRequest.Request.Items()) != 2 || second.RebasedRequest.Request.Model() != "other" || canonicaltest.DirectiveText(second.RebasedRequest.Request.Items()) == "" {
 		t.Fatalf("rebased invocation did not preserve current fields: %#v", second.RebasedRequest.Request)
 	}
 	changed := decodeResponsesFingerprintRequest(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"changed"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)
@@ -52,6 +52,17 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	explicit := decodeResponsesFingerprintRequest(t, `{"model":"m","previous_response_id":"swobu_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)
 	if explicit.RebasedRequest != nil {
 		t.Fatalf("explicit request returned implicit rebasing %#v", explicit.RebasedRequest)
+	}
+}
+
+func TestToolSearchOutputHistoryPartitionUsesExecutionOwner(t *testing.T) {
+	client := responsesHistoryItemDTO{Type: "tool_search_output", Execution: "client"}
+	server := responsesHistoryItemDTO{Type: "tool_search_output", Execution: "server"}
+	if isResponsesHistoryOutput(client) {
+		t.Fatal("client-executed discovery output was classified as provider output")
+	}
+	if !isResponsesHistoryOutput(server) {
+		t.Fatal("provider-executed discovery output was classified as client input")
 	}
 }
 
@@ -346,8 +357,8 @@ func TestResponsesHistoryGroupsMultipleCallsOutputsAndRelationshipIDs(t *testing
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
 		]}`
 	decoded := decodeResponsesFingerprintRequest(t, base)
-	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 1 {
-		t.Fatalf("grouped rebased request = %#v, want only current user contribution", decoded.RebasedRequest)
+	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 2 {
+		t.Fatalf("grouped rebased request = %#v, want request declarations and current user contribution", decoded.RebasedRequest)
 	}
 
 	changedID := strings.Replace(base, `"call_id":"call_2"`, `"call_id":"call_changed"`, 1)
@@ -452,10 +463,10 @@ func assertCurrentResponsesToolResult(t *testing.T, decoded wire.ClientRequestRe
 		t.Fatalf("rebased predecessor = %#v, want %#v", decoded.RebasedRequest, previous)
 	}
 	items := decoded.RebasedRequest.Request.Items()
-	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolResult {
-		t.Fatalf("rebased items = %#v, want one current tool result", items)
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolDeclarations || items[1].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("rebased items = %#v, want request declarations and current tool result", items)
 	}
-	result, _ := items[0].ToolResult()
+	result, _ := items[1].ToolResult()
 	if result.CallID().String() != "call_1" {
 		t.Fatalf("tool result call ID = %q", result.CallID().String())
 	}

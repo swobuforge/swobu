@@ -1,0 +1,12 @@
+// Package mcp owns the complete request-scoped lifecycle of remote MCP tools.
+//
+// Access contains transient ingress credentials. Open resolves sources once and
+// returns exact canonical history plus a fully initialized Run. Run owns
+// official-SDK sessions, bounded per-source attempt declarations, an immutable
+// availability transformation, private callable bindings, effect budgets,
+// post-effect result projection, dependency-error translation, and close.
+// Required sources resolve before optional sources under one total discovery
+// deadline. Calls is pure classification; BeginBatch reserves effects only at
+// the exchange command boundary. Canonical owns only durable namespace meaning
+// and declaration ownership; exchange owns only orchestration consequences.
+package mcp

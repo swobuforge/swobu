@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -30,7 +31,11 @@ func TestToolKeyDoesNotInheritClientToolOrdinalAcrossProtocols(t *testing.T) {
 			t.Fatalf("%s decode: %v", test.family, err)
 		}
 		got := ""
-		for _, declaration := range decoded.Request.Request.Tools() {
+		tools, err := canonical.ToolEnvironmentAt(decoded.Request.Request.Items(), len(decoded.Request.Request.Items()))
+		if err != nil {
+			t.Fatalf("%s environment: %v", test.family, err)
+		}
+		for _, declaration := range tools.Declarations() {
 			if declaration.Key().Name() == "search" {
 				got = declaration.Key().String()
 			}

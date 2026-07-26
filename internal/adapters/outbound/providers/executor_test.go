@@ -322,9 +322,11 @@ func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T
 	}
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        canonical.Specify("m"),
-		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools:        canonicaltest.SpecifiedToolSet(t, tool),
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
+		},
 		OutputFormat: canonical.Specify(outputFormat),
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
@@ -361,8 +363,10 @@ func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *tes
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, tool),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
+		},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -397,8 +401,10 @@ func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *t
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, tool),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
+		},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	sink := &recordingDecisionSink{}
@@ -479,7 +485,7 @@ func TestServices_MessagesCodecReportsStructuredOutputRejection(t *testing.T) {
 	req.DecisionSink = sink
 
 	_, err = executeProviderRequest(composition, context.Background(), req)
-	var incompatible provider.CandidateIncompatibilityError
+	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("structured output error = %T %v, want candidate incompatibility", err, err)
 	}

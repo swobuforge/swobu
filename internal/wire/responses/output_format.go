@@ -66,6 +66,6 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 		}
 		return &responsesTextDTO{Format: dto}, nil
 	default:
-		return nil, provider.NewCandidateIncompatibility("Responses cannot represent the canonical output format")
+		return nil, provider.NewIncompatibleTarget("Responses cannot represent the canonical output format")
 	}
 }

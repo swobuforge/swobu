@@ -18,7 +18,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 		toolStates:    map[string]responsesToolState{},
 		toolInputs:    map[string]string{},
 		latestUsage:   canonical.NewUnknownTokenUsage(),
-		request:       canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonicaltest.SpecifiedToolSet(t, canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`))))}),
+		request:       canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`))))}}),
 	}
 
 	handled, _, err := s.handleFrame(context.Background(), streamFrame{

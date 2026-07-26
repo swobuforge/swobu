@@ -44,7 +44,7 @@ func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 	if got.Model() != "gpt-4o-mini" {
 		t.Fatalf("model = %q, want %q", got.Model(), "gpt-4o-mini")
 	}
-	tools := got.Tools()
+	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 {
 		t.Fatalf("tools len = %d, want 1", len(tools))
 	}
@@ -67,8 +67,8 @@ func TestDecodeRequest_PreservesTopLevelInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeClientRequest: %v", err)
 	}
-	if canonicaltest.InstructionSetText(got.Instructions()) != "Use tools for filesystem work." {
-		t.Fatalf("instructions = %q, want top-level instructions", canonicaltest.InstructionSetText(got.Instructions()))
+	if canonicaltest.DirectiveText(got.Items()) != "Use tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level instructions", canonicaltest.DirectiveText(got.Items()))
 	}
 }
 

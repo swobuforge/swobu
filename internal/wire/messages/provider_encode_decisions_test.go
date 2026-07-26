@@ -41,8 +41,7 @@ func requestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalRequest
 		t.Fatal(err)
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools:        canonical.Specify(tools),
+		Items:        []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools.Declarations()...), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		OutputFormat: canonical.Specify(format),
 	})
 }

@@ -11,14 +11,13 @@ import (
 )
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	return EncodeCarrierWithDecisions(req, d, nil, "", EncodeOptions{})
+	return EncodeCarrierWithDecisions(req, d, nil, "")
 }
 
 func TestEncodeCarrier_LowersInstructionsToLeadingSystemMessage(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        canonical.Specify("gpt-4o-mini"),
-		Instructions: canonical.Specify(canonical.NewSystemInstructionSet("Use native tools for filesystem work.")),
-		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
+		Model: canonical.Specify("gpt-4o-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "Use native tools for filesystem work."), canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
 	})
 
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
@@ -67,8 +66,7 @@ func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
 	}
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools: canonical.Specify(set),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, set.Declarations()...), canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
 	})
 
 	for _, tc := range []struct {

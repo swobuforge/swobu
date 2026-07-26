@@ -17,22 +17,28 @@
 //     Responses attempt cannot use exact native delta continuation
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
-//   - The reducer-owned provider-result edge where future concrete tool
-//     classification may be admitted before client handoff
+//   - Opening one fully initialized request-scoped MCP runtime before candidate
+//     selection
+//   - Delayed handoff, provider re-entry, usage accumulation, and fallback
+//     closure as consequences of runtime-owned MCP calls
+//   - Monotonic closure of provider fallback before the first MCP side effect
 //
 // It does NOT own:
 //   - Routing policy (internal/routing)
 //   - Provider adapters (internal/adapters/outbound/providers)
-//   - Canonical MCP semantics, MCP networking, attempt-local MCP lowering, or
-//     a generic tool runtime
+//   - Canonical MCP source/tool meaning (internal/domain/canonical)
+//   - MCP access, sessions, catalogs, ownership, budgets, protocol mechanics,
+//     and network hardening (internal/mcp)
+//   - A generic tool runtime
 //
 // Import rules:
-//   - exchange → routing, provider, session, profile, observation, domain
+//   - exchange → routing, provider, session, profile, observation, domain, mcp
 //   - Nothing may import exchange except adapters and bootstrap.
 //
-// Future external tool work must enter as a concrete command, event, and phase
-// only when a feature supplies real I/O and lifecycle ownership. This package
-// does not keep dormant tool phases or executor interfaces for extensibility.
+// Remote MCP enters as concrete runtime-open, batch-reservation, and call
+// commands/events.
+// Exchange stores one runtime pointer and no SDK sessions, bearer maps, catalog
+// indexes, executor interfaces, registries, pools, or provider-native MCP path.
 // New provider representations add explicit transient request choices and
 // closed transitions only when an implemented alternative exists. Attempt
 // requirements record issued-call facts; generic provider errors never infer

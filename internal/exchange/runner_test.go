@@ -388,7 +388,7 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 	var err error
 	switch c.protocol {
 	case protocolkind.ChatCompletions:
-		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestWithOptions(input, req.Delivery, "", chatcompletions.EncodeOptions{})
+		result, err = (chatcompletions.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	case protocolkind.Responses:
 		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	case protocolkind.Messages:

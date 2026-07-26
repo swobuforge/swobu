@@ -8,14 +8,11 @@ import (
 )
 
 func TestFlattenInstructionsForMessagesPreservesWhitespaceAndReportsRoleLoss(t *testing.T) {
-	set, err := canonical.NewInstructionSet([]canonical.Instruction{
+	items := []canonical.CanonicalItem{
 		canonicaltest.MustInstruction(canonical.MessageRoleSystem, "  system  "),
 		canonicaltest.MustInstruction(canonical.MessageRoleDeveloper, " developer\n"),
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	lowered := flattenInstructionsForMessages(set)
+	lowered := flattenInstructionsForMessages(items)
 	if lowered.Text != "  system  \n\n developer\n" || lowered.Exact || len(lowered.Decisions) != 1 {
 		t.Fatalf("lowered = %#v", lowered)
 	}

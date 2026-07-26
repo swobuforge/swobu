@@ -29,7 +29,7 @@ func rejectMessagesOutputFormat(format canonical.OutputFormat) error {
 		return nil
 	}
 	if format.Kind == canonical.OutputFormatJSONSchema {
-		return provider.NewCandidateIncompatibility("Messages cannot represent canonical structured output")
+		return provider.NewIncompatibleTarget("Messages cannot represent canonical structured output")
 	}
-	return provider.NewCandidateIncompatibility("Messages cannot represent the canonical output format")
+	return provider.NewIncompatibleTarget("Messages cannot represent the canonical output format")
 }

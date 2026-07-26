@@ -13,9 +13,9 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
+func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, delivery delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
 	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(input.Request, delivery, sink, exchangeID, options)
+		return EncodeCarrierWithDecisions(input.Request, delivery, sink, exchangeID)
 	})
 	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
 }

@@ -15,6 +15,14 @@ type ToolProjectionTable struct {
 	byWire      map[wireToolKey]canonical.ToolKey
 }
 
+// ToolProjection is the single alias authority for one provider attempt.
+// Every request view and the response decoder use this same immutable table.
+type ToolProjection struct {
+	table                ToolProjectionTable
+	declarationDecisions []compat.Decision
+	declared             map[canonical.ToolKey]bool
+}
+
 type wireToolKey struct {
 	kind canonical.ToolKind
 	name string
@@ -37,21 +45,41 @@ func (t ToolProjectionTable) OriginalKey(attemptKey canonical.ToolKey) (canonica
 	return t.CanonicalKey(attemptKey.Kind(), attemptKey.Name())
 }
 
+func (t *ToolProjectionTable) bindWire(key canonical.ToolKey, wire string) {
+	t.byWire[wireToolKey{kind: key.Kind(), name: wire}] = key.Clone()
+}
+
 // ProjectAttemptTools replaces declaration/call keys with request-scoped wire
 // aliases while retaining the reverse table outside checkpoint truth.
 func ProjectAttemptTools(request canonical.CanonicalRequest) (canonical.CanonicalRequest, ToolProjectionTable, []compat.Decision, error) {
+	projection, err := BuildToolProjection(request)
+	if err != nil {
+		return canonical.CanonicalRequest{}, ToolProjectionTable{}, nil, err
+	}
+	projected, decisions, err := projection.Rewrite(request)
+	return projected, projection.Table(), decisions, err
+}
+
+// BuildToolProjection allocates aliases once from the complete semantic tool
+// environment. Rewrite applies that closed decision to any view of the attempt.
+func BuildToolProjection(semantic canonical.CanonicalRequest) (ToolProjection, error) {
 	table := ToolProjectionTable{byCanonical: map[canonical.ToolKey]string{}, byWire: map[wireToolKey]canonical.ToolKey{}}
 	decisions := make([]compat.Decision, 0)
-	keys := make([]canonical.ToolKey, 0, len(request.Tools()))
-	for _, declaration := range request.Tools() {
-		keys = append(keys, declaration.Key())
+	environment, err := canonical.ToolEnvironmentAt(semantic.Items(), len(semantic.Items()))
+	if err != nil {
+		return ToolProjection{}, err
 	}
-	for _, item := range request.Items() {
+	declarations := environment.Declarations()
+	keys := make([]canonical.ToolKey, 0, len(declarations))
+	for _, declaration := range declarations {
+		keys = appendProjectionDeclarationKeys(keys, declaration)
+	}
+	for _, item := range semantic.Items() {
 		if call, ok := item.ToolCall(); ok {
 			keys = append(keys, call.Tool())
 		}
 	}
-	if key, ok := request.ToolPolicy().SpecificID(); ok {
+	if key, ok := semantic.ToolPolicy().SpecificID(); ok {
 		keys = append(keys, key)
 	}
 	// Legal literal request names have priority because changing them would be
@@ -62,7 +90,7 @@ func ProjectAttemptTools(request canonical.CanonicalRequest) (canonical.Canonica
 		}
 		wire := key.Name()
 		table.byCanonical[key] = wire
-		table.byWire[wireToolKey{kind: key.Kind(), name: wire}] = key.Clone()
+		table.bindWire(key, wire)
 	}
 	for _, key := range keys {
 		if _, exists := table.byCanonical[key]; exists {
@@ -73,7 +101,7 @@ func ProjectAttemptTools(request canonical.CanonicalRequest) (canonical.Canonica
 		if toolname.Safe(key.Name()) {
 			if _, occupied := table.byWire[leafIndex]; !occupied {
 				wire = key.Name()
-				table.byWire[leafIndex] = key.Clone()
+				table.bindWire(key, wire)
 			}
 		}
 		if wire == "" {
@@ -81,66 +109,127 @@ func ProjectAttemptTools(request canonical.CanonicalRequest) (canonical.Canonica
 				wire = toolname.Alias(key.String(), key.Name(), ordinal)
 				index := wireToolKey{kind: key.Kind(), name: wire}
 				if _, occupied := table.byWire[index]; !occupied {
-					table.byWire[index] = key.Clone()
+					table.bindWire(key, wire)
 					break
 				}
 				if ordinal == ^uint32(0) {
-					return canonical.CanonicalRequest{}, ToolProjectionTable{}, decisions, fmt.Errorf("attempt tool projection alias space exhausted")
+					return ToolProjection{}, fmt.Errorf("attempt tool projection alias space exhausted")
 				}
 			}
 		}
 		table.byCanonical[key] = wire
 	}
 	declared := map[canonical.ToolKey]bool{}
-	for _, declaration := range request.Tools() {
-		declared[declaration.Key()] = true
-		if wire, _ := table.WireName(declaration.Key()); wire != declaration.Key().Name() {
-			decisions = append(decisions, compat.Decision{Feature: compat.RequestToolsName, Outcome: compat.Approx, Subject: compat.Subject(declaration.Key().String())})
-		}
+	for _, declaration := range declarations {
+		recordProjectedDeclaration(declaration, table, declared, &decisions)
 	}
+	return ToolProjection{
+		table: table, declarationDecisions: decisions, declared: declared,
+	}, nil
+}
+
+func (p ToolProjection) Table() ToolProjectionTable { return p.table }
+
+func (p ToolProjection) Rewrite(request canonical.CanonicalRequest) (canonical.CanonicalRequest, []compat.Decision, error) {
+	decisions := append([]compat.Decision(nil), p.declarationDecisions...)
 	for _, item := range request.Items() {
-		if call, ok := item.ToolCall(); ok && !declared[call.Tool()] {
-			if wire, _ := table.WireName(call.Tool()); wire != call.Tool().Name() {
+		if call, ok := item.ToolCall(); ok && !p.declared[call.Tool()] {
+			if wire, _ := p.table.WireName(call.Tool()); wire != call.Tool().Name() {
 				decisions = append(decisions, compat.Decision{Feature: compat.RequestItemsToolCallName, Outcome: compat.Approx, Subject: compat.Subject(call.Tool().String())})
 			}
 		}
 	}
-	projected, err := rewriteAttemptToolKeys(request, table)
-	return projected, table, decisions, err
+	projected, err := rewriteAttemptToolKeys(request, p.table)
+	return projected, decisions, err
+}
+
+func appendProjectionDeclarationKeys(keys []canonical.ToolKey, declaration canonical.ToolDeclaration) []canonical.ToolKey {
+	switch declaration.Kind() {
+	case canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
+		return keys
+	}
+	keys = append(keys, declaration.Key())
+	if namespace, ok := declaration.Namespace(); ok {
+		for _, child := range namespace.Tools() {
+			keys = appendProjectionDeclarationKeys(keys, child)
+		}
+	}
+	return keys
+}
+
+func recordProjectedDeclaration(declaration canonical.ToolDeclaration, table ToolProjectionTable, declared map[canonical.ToolKey]bool, decisions *[]compat.Decision) {
+	declared[declaration.Key()] = true
+	if declaration.Kind() != canonical.ToolKindWebSearch && declaration.Kind() != canonical.ToolKindDiscovery {
+		if wire, _ := table.WireName(declaration.Key()); wire != declaration.Key().Name() {
+			*decisions = append(*decisions, compat.Decision{Feature: compat.RequestToolsName, Outcome: compat.Approx, Subject: compat.Subject(declaration.Key().String())})
+		}
+	}
+	if namespace, ok := declaration.Namespace(); ok {
+		for _, child := range namespace.Tools() {
+			recordProjectedDeclaration(child, table, declared, decisions)
+		}
+	}
 }
 
 func rewriteAttemptToolKeys(request canonical.CanonicalRequest, table ToolProjectionTable) (canonical.CanonicalRequest, error) {
-	declarations := request.Tools()
-	projectedDeclarations := make([]canonical.ToolDeclaration, len(declarations))
-	for i, declaration := range declarations {
-		wire, _ := table.WireName(declaration.Key())
-		key, err := canonical.NewToolKey(canonical.ToolNamespaceRequest, declaration.Kind(), wire)
-		if err != nil {
-			return canonical.CanonicalRequest{}, err
+	projectDeclarations := func(declarations []canonical.ToolDeclaration) ([]canonical.ToolDeclaration, error) {
+		var projectOne func(canonical.ToolDeclaration) (canonical.ToolDeclaration, error)
+		projectOne = func(declaration canonical.ToolDeclaration) (canonical.ToolDeclaration, error) {
+			if declaration.Kind() == canonical.ToolKindWebSearch {
+				return canonical.NewWebSearchDeclaration(), nil
+			}
+			if discovery, ok := declaration.Discovery(); ok {
+				return canonical.NewToolDiscoveryTool(discovery.Description(), discovery.InputSchema(), discovery.Executor())
+			}
+			wire, _ := table.WireName(declaration.Key())
+			key, err := canonical.NewToolKey(canonical.ToolNamespaceRequest, declaration.Kind(), wire)
+			if err != nil {
+				return canonical.ToolDeclaration{}, err
+			}
+			if function, ok := declaration.Function(); ok {
+				return canonical.NewFunctionTool(key, function.Description(), function.InputSchema(), function.Strict())
+			} else if custom, ok := declaration.Custom(); ok {
+				return canonical.NewCustomTool(key, custom.Description(), custom.Format())
+			}
+			if namespace, ok := declaration.Namespace(); ok {
+				children := make([]canonical.ToolDeclaration, len(namespace.Tools()))
+				for i, child := range namespace.Tools() {
+					children[i], err = projectOne(child)
+					if err != nil {
+						return canonical.ToolDeclaration{}, err
+					}
+				}
+				return canonical.NewToolNamespace(key, namespace.Description(), children)
+			}
+			return canonical.ToolDeclaration{}, canonical.InternalError("provider attempt projection encountered an invalid tool declaration")
 		}
-		if function, ok := declaration.Function(); ok {
-			projectedDeclarations[i], err = canonical.NewFunctionTool(key, function.Description(), function.InputSchema(), function.Strict())
-		} else if custom, ok := declaration.Custom(); ok {
-			projectedDeclarations[i], err = canonical.NewCustomTool(key, custom.Description(), custom.Format())
-		} else if declaration.Kind() == canonical.ToolKindWebSearch {
-			// Web search has one fixed canonical identity. Unlike caller-named
-			// tools, it has no declaration name that attempt projection may alias.
-			projectedDeclarations[i] = canonical.NewWebSearchDeclaration()
-		} else {
-			return canonical.CanonicalRequest{}, canonical.InternalError("provider attempt projection encountered an invalid tool declaration")
+		projectedDeclarations := make([]canonical.ToolDeclaration, 0, len(declarations))
+		for _, declaration := range declarations {
+			projected, err := projectOne(declaration)
+			if err != nil {
+				return nil, err
+			}
+			projectedDeclarations = append(projectedDeclarations, projected)
 		}
-		if err != nil {
-			return canonical.CanonicalRequest{}, err
-		}
+		return projectedDeclarations, nil
 	}
-	toolSet, err := canonical.NewToolSet(projectedDeclarations)
+	rewritten, err := canonical.RewriteToolContributions(request, func(set canonical.ToolSet) (canonical.ToolSet, error) {
+		projected, err := projectDeclarations(set.Declarations())
+		if err != nil {
+			return canonical.ToolSet{}, err
+		}
+		return canonical.NewToolSet(projected)
+	})
 	if err != nil {
 		return canonical.CanonicalRequest{}, err
 	}
-	items := request.Items()
+	items := rewritten.Items()
 	for i, item := range items {
 		call, ok := item.ToolCall()
 		if !ok {
+			continue
+		}
+		if call.Tool().Kind() == canonical.ToolKindWebSearch || call.Tool().Kind() == canonical.ToolKindDiscovery {
 			continue
 		}
 		wire, _ := table.WireName(call.Tool())
@@ -166,12 +255,9 @@ func rewriteAttemptToolKeys(request canonical.CanonicalRequest, table ToolProjec
 		toolPolicy = canonical.Specify(policy)
 	}
 	params := canonical.RequestParams{
-		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: items,
+		Model: request.ModelField(), Items: items,
 		ToolPolicy: toolPolicy, ToolCallBatch: request.ToolCallBatchField(), Controls: request.Controls(),
 		Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
-	}
-	if request.ToolsSpecified() {
-		params.Tools = canonical.Specify(toolSet)
 	}
 	if previous, ok := request.PreviousResponse(); ok {
 		params.PreviousResponse = &previous

@@ -32,10 +32,10 @@ func (s ToolSet) Declarations() []ToolDeclaration { return cloneToolDeclarations
 
 func (s ToolSet) Lookup(key ToolKey) (ToolDeclaration, bool) {
 	index, ok := s.byKey[key.String()]
-	if !ok || index < 0 || index >= len(s.ordered) {
-		return ToolDeclaration{}, false
+	if ok && index >= 0 && index < len(s.ordered) {
+		return s.ordered[index].Clone(), true
 	}
-	return s.ordered[index].Clone(), true
+	return ToolDeclaration{}, false
 }
 
 func (s ToolSet) IsEmpty() bool { return len(s.ordered) == 0 }

@@ -17,8 +17,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, functionTool), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -69,11 +68,11 @@ func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
 	if got.Model() != "claude" {
 		t.Fatalf("model=%q want claude", got.Model())
 	}
-	if len(got.Tools()) != 1 {
-		t.Fatalf("tools len=%d want 1", len(got.Tools()))
+	if len(canonicaltest.Tools(got)) != 1 {
+		t.Fatalf("tools len=%d want 1", len(canonicaltest.Tools(got)))
 	}
-	if len(got.Items()) != 1 {
-		t.Fatalf("items len=%d want 1", len(got.Items()))
+	if len(got.Items()) != 2 {
+		t.Fatalf("items len=%d want declarations plus message", len(got.Items()))
 	}
 }
 

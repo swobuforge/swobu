@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -16,6 +15,5 @@ type Request struct {
 	ExchangeID     string
 	Canonical      canonical.CanonicalRequest
 	Delivery       delivery.Delivery
-	Compatibility  compat.CompatibilityPolicy
 	ToolProjection ToolProjectionTable
 }

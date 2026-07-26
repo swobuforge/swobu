@@ -81,7 +81,6 @@ func encodeChatToolResultRun(
 	active *chatActiveToolBatch,
 	sink compat.Sink,
 	exchangeID string,
-	policy compat.CompatibilityPolicy,
 ) ([]ProviderRequestMessage, int, *chatActiveToolBatch, error) {
 	end := start
 	for end < len(items) && items[end].Kind() == canonical.ItemKindToolResult {
@@ -101,7 +100,7 @@ func encodeChatToolResultRun(
 		if !nextBatch.resolve(result.CallID()) {
 			allResultsMatch = false
 		}
-		if err := recordChatToolResultLosses(result, sink, exchangeID, policy); err != nil && contentLossErr == nil {
+		if err := recordChatToolResultLosses(result, sink, exchangeID); err != nil && contentLossErr == nil {
 			contentLossErr = err
 		}
 		for partIndex, part := range result.Content() {
@@ -115,19 +114,6 @@ func encodeChatToolResultRun(
 
 	if len(occurrences) > 0 {
 		first := occurrences[0]
-		if policy.EffectiveMode() == compat.CompatibilityStrict {
-			if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultImage, compat.Reject); err != nil {
-				return nil, start, active, err
-			}
-			for _, occurrence := range occurrences {
-				if detail, ok := occurrence.image.Detail().Get(); ok && detail == canonical.ImageDetailOriginal {
-					if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultImageDetail, compat.Reject); err != nil {
-						return nil, start, active, err
-					}
-				}
-			}
-			return nil, start, active, unsupportedToolResultImage(first, "strict compatibility requires exact placement")
-		}
 		if !provenBatch || !allResultsMatch || !nextBatch.closed() {
 			if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultImage, compat.Reject); err != nil {
 				return nil, start, active, err
@@ -173,7 +159,6 @@ func encodeChatToolResultRun(
 				compat.RequestItemsToolResultImageDetail,
 				sink,
 				exchangeID,
-				policy,
 			)
 			if err != nil {
 				return nil, start, active, err
@@ -191,33 +176,18 @@ func encodeChatToolResultRun(
 	return out, end, nextBatch, nil
 }
 
-func recordChatToolResultLosses(result canonical.ToolResultItem, sink compat.Sink, exchangeID string, policy compat.CompatibilityPolicy) error {
-	var terminal error
+func recordChatToolResultLosses(result canonical.ToolResultItem, sink compat.Sink, exchangeID string) error {
 	if result.IsError() {
-		outcome := compat.Approx
-		if policy.EffectiveMode() == compat.CompatibilityStrict {
-			outcome = compat.Reject
-		}
-		if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, outcome); err != nil {
+		if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultIsError, compat.Approx); err != nil {
 			return err
-		}
-		if outcome == compat.Reject {
-			terminal = provider.NewCandidateIncompatibility("Chat Completions cannot preserve canonical tool-result error state")
 		}
 	}
 	if len(result.Content()) > 1 {
-		outcome := compat.Approx
-		if policy.EffectiveMode() == compat.CompatibilityStrict {
-			outcome = compat.Reject
-		}
-		if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultContentBoundaries, outcome); err != nil {
+		if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsToolResultContentBoundaries, compat.Approx); err != nil {
 			return err
 		}
-		if outcome == compat.Reject && terminal == nil {
-			terminal = provider.NewCandidateIncompatibility("Chat Completions cannot preserve canonical tool-result content boundaries")
-		}
 	}
-	return terminal
+	return nil
 }
 
 func encodeChatToolResultContent(result canonical.ToolResultItem, itemIndex int) (string, []chatToolResultImageOccurrence, error) {
@@ -236,7 +206,7 @@ func encodeChatToolResultContent(result canonical.ToolResultItem, itemIndex int)
 		}
 		image, ok := part.Image()
 		if !ok {
-			return "", nil, provider.NewCandidateIncompatibility("Chat Completions tool results cannot represent this canonical content kind")
+			return "", nil, provider.NewIncompatibleTarget("Chat Completions tool results cannot represent this canonical content kind")
 		}
 		occurrence := chatToolResultImageOccurrence{
 			image: image, callID: result.CallID(), item: itemIndex, part: partIndex,
@@ -278,19 +248,12 @@ func encodeChatImage(
 	detailFeature compat.Feature,
 	sink compat.Sink,
 	exchangeID string,
-	policy compat.CompatibilityPolicy,
 ) (map[string]any, error) {
 	rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
 	if err != nil {
 		return nil, canonical.InternalError("canonical image source is invalid")
 	}
 	if detail == canonical.ImageDetailOriginal {
-		if policy.EffectiveMode() == compat.CompatibilityStrict {
-			if err := emitChatImageDecision(sink, exchangeID, detailFeature, compat.Reject); err != nil {
-				return nil, err
-			}
-			return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent original canonical image detail under strict policy")
-		}
 		if err := emitChatImageDecision(sink, exchangeID, detailFeature, compat.Approx); err != nil {
 			return nil, err
 		}
@@ -304,7 +267,7 @@ func encodeChatImage(
 }
 
 func unsupportedToolResultImage(occurrence chatToolResultImageOccurrence, reason string) error {
-	return provider.NewCandidateIncompatibility(fmt.Sprintf(
+	return provider.NewIncompatibleTarget(fmt.Sprintf(
 		"Chat Completions cannot preserve canonical tool-result image at request item %d part %d for call %q: %s",
 		occurrence.item,
 		occurrence.part,

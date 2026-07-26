@@ -34,7 +34,7 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	if second.RebasedRequest == nil || second.RebasedRequest.Previous != wantPrevious {
 		t.Fatalf("rebased request = %#v, want history %#v", second.RebasedRequest, wantPrevious)
 	}
-	if len(second.RebasedRequest.Request.Items()) != 1 || second.RebasedRequest.Request.Model() != "other" || second.RebasedRequest.Request.Instructions().IsEmpty() {
+	if len(second.RebasedRequest.Request.Items()) != 2 || second.RebasedRequest.Request.Model() != "other" || canonicaltest.DirectiveText(second.RebasedRequest.Request.Items()) == "" {
 		t.Fatalf("rebased invocation did not preserve current fields: %#v", second.RebasedRequest.Request)
 	}
 	changed := decodeMessagesFingerprintRequest(t, `{"model":"m","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":[{"type":"text","text":"changed"}]},{"role":"user","content":"again"}]}`)
@@ -154,8 +154,8 @@ func TestMessagesHistoryPartitionsToolLoopAndPreservesCallIDs(t *testing.T) {
 			{"role":"user","content":"next"}
 		]}`
 	decoded := decodeMessagesFingerprintRequest(t, base)
-	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 1 {
-		t.Fatalf("tool-loop rebased request = %#v, want current user contribution", decoded.RebasedRequest)
+	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 2 {
+		t.Fatalf("tool-loop rebased request = %#v, want request declarations and current user contribution", decoded.RebasedRequest)
 	}
 	changed := decodeMessagesFingerprintRequest(t, strings.ReplaceAll(base, "call_1", "call_changed"))
 	if changed.RebasedRequest == nil || changed.RebasedRequest.Previous == decoded.RebasedRequest.Previous {
@@ -260,10 +260,10 @@ func assertCurrentMessagesToolResult(t *testing.T, decoded wire.ClientRequestRes
 		t.Fatalf("rebased predecessor = %#v, want %#v", decoded.RebasedRequest, previous)
 	}
 	items := decoded.RebasedRequest.Request.Items()
-	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolResult {
-		t.Fatalf("rebased items = %#v, want one current tool result", items)
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolDeclarations || items[1].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("rebased items = %#v, want request declarations and current tool result", items)
 	}
-	result, _ := items[0].ToolResult()
+	result, _ := items[1].ToolResult()
 	if result.CallID().String() != "call_1" {
 		t.Fatalf("tool result call ID = %q", result.CallID().String())
 	}

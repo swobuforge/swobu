@@ -44,9 +44,8 @@ type RuntimePoliciesSpec struct {
 // WorkspacePolicy is resolved once after workspace selection and then
 // remains immutable for every provider attempt in the exchange.
 type WorkspacePolicy struct {
-	Compatibility compat.CompatibilityPolicy
-	ImageFetch    provider.ImageFetchPolicy
-	Limits        RuntimeLimits
+	ImageFetch provider.ImageFetchPolicy
+	Limits     RuntimeLimits
 }
 
 type WorkspacePolicyResolver interface {
@@ -60,7 +59,7 @@ func (r StaticWorkspacePolicyResolver) ResolveWorkspacePolicy(context.Context, r
 }
 
 func DefaultWorkspacePolicy() WorkspacePolicy {
-	return WorkspacePolicy{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityCompat}, ImageFetch: provider.DefaultImageFetchPolicy(), Limits: DefaultRuntimeLimits()}
+	return WorkspacePolicy{ImageFetch: provider.DefaultImageFetchPolicy(), Limits: DefaultRuntimeLimits()}
 }
 
 func (p WorkspacePolicy) Clone() WorkspacePolicy {
@@ -69,9 +68,6 @@ func (p WorkspacePolicy) Clone() WorkspacePolicy {
 }
 
 func (p WorkspacePolicy) Validate() error {
-	if err := p.Compatibility.Validate(); err != nil {
-		return err
-	}
 	if err := p.ImageFetch.Validate(); err != nil {
 		return err
 	}

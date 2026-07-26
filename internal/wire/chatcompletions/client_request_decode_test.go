@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.T) {
@@ -20,13 +21,13 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	}
 
 	items := got.Items()
-	if len(items) != 1 {
-		t.Fatalf("items len = %d, want 1", len(items))
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want declarations plus call", len(items))
 	}
-	if items[0].Kind() != canonical.ItemKindToolCall {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
+	if items[1].Kind() != canonical.ItemKindToolCall {
+		t.Fatalf("items[1].Kind = %q, want %q", items[1].Kind(), canonical.ItemKindToolCall)
 	}
-	toolUse, _ := items[0].ToolCall()
+	toolUse, _ := items[1].ToolCall()
 	if got := toolUse.CallID().String(); got != "tc_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want tc_1", got)
 	}
@@ -81,15 +82,14 @@ func TestDecodeClientRequest_PreservesSystemAndDeveloperMessagesAsInstructions(t
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
-	instructions := got.Instructions().Instructions()
-	if len(instructions) != 2 || instructions[0].Role() != canonical.MessageRoleSystem || instructions[0].Text() != "You are a coding agent." || instructions[1].Role() != canonical.MessageRoleDeveloper || instructions[1].Text() != "Use native tools for file edits." {
-		t.Fatalf("instructions = %#v", instructions)
+	if instructions := canonicaltest.DirectiveText(got.Items()); instructions != "You are a coding agent.\n\nUse native tools for file edits." {
+		t.Fatalf("instructions = %q", instructions)
 	}
 	items := got.Items()
-	if len(items) != 1 {
-		t.Fatalf("items len = %d, want only user message", len(items))
+	if len(items) != 3 {
+		t.Fatalf("items len = %d, want directives plus user message", len(items))
 	}
-	message, _ := items[0].Message()
+	message, _ := items[2].Message()
 	text, _ := message.Content()[0].Text()
 	if message.Role() != canonical.MessageRoleUser || text.Text() != "inspect files" {
 		t.Fatalf("item = %#v, want user inspect files", items[0])

@@ -21,8 +21,8 @@ func TestResponsesKnownItemPresentationMetadataDoesNotEnterReplay(t *testing.T) 
 	}
 
 	items := decoded.Request.Request.Items()
-	if len(items) != 4 {
-		t.Fatalf("canonical item count = %d, want 4", len(items))
+	if len(items) != 5 {
+		t.Fatalf("canonical item count = %d, want request declarations plus 4 history items", len(items))
 	}
 	document, err := EncodeCarrierWithDecisions(
 		EncodeInput{Request: decoded.Request.Request},
@@ -52,13 +52,13 @@ func TestDecodeClientRequest_AcceptsStringifiedFunctionCallArguments(t *testing.
 	}
 
 	items := got.Items()
-	if len(items) != 1 {
-		t.Fatalf("items len = %d, want 1", len(items))
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want declarations plus call", len(items))
 	}
-	if items[0].Kind() != canonical.ItemKindToolCall {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
+	if items[1].Kind() != canonical.ItemKindToolCall {
+		t.Fatalf("items[1].Kind = %q, want %q", items[1].Kind(), canonical.ItemKindToolCall)
 	}
-	toolUse, _ := items[0].ToolCall()
+	toolUse, _ := items[1].ToolCall()
 	if got := toolUse.CallID().String(); got != "call_1" {
 		t.Fatalf("items[0].ToolUseID = %q, want call_1", got)
 	}
@@ -207,11 +207,11 @@ func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.ModelSpecified() || !got.InstructionsSpecified() || !got.ToolsSpecified() || !got.ToolPolicySpecified() || !got.ToolCallBatchSpecified() || !got.OutputFormatSpecified() {
+	if !got.ModelSpecified() || !got.ToolPolicySpecified() || !got.ToolCallBatchSpecified() || !got.OutputFormatSpecified() {
 		t.Fatal("field-local durable-band presence was lost")
 	}
-	if canonicaltest.InstructionSetText(got.Instructions()) != "" || len(got.Tools()) != 0 || len(got.Controls().Limits.StopSequences) != 0 {
-		t.Fatalf("explicit clears changed value: instructions=%q tools=%#v controls=%#v", canonicaltest.InstructionSetText(got.Instructions()), got.Tools(), got.Controls())
+	if canonicaltest.DirectiveText(got.Items()) != "" || len(canonicaltest.Tools(got)) != 0 || len(got.Controls().Limits.StopSequences) != 0 {
+		t.Fatalf("explicit clears changed value: instructions=%q tools=%#v controls=%#v", canonicaltest.DirectiveText(got.Items()), canonicaltest.Tools(got), got.Controls())
 	}
 }
 

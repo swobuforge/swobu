@@ -51,7 +51,6 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 			req.Delivery,
 			sink,
 			req.ExchangeID,
-			chatcompletions.EncodeOptions{Compatibility: req.Compatibility},
 		)
 		if err != nil {
 			return chatcompletions.ProviderRequestDocument{}, err

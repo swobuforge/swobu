@@ -84,25 +84,61 @@ func MustToolFormat(raw string) canonical.ToolFormat {
 	return canonical.NewToolFormatObject(object)
 }
 
-func SpecifiedToolSet(t testing.TB, declarations ...canonical.ToolDeclaration) canonical.Specified[canonical.ToolSet] {
-	return canonical.Specify(ToolSet(t, declarations...))
+func ToolDeclarations(t testing.TB, declarations ...canonical.ToolDeclaration) canonical.CanonicalItem {
+	t.Helper()
+	item, err := canonical.NewToolDeclarationsItem(ToolSet(t, declarations...), canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return item
 }
 
-func MustInstruction(role canonical.MessageRole, text string) canonical.Instruction {
-	instruction, err := canonical.NewInstruction(role, text)
+func Tools(request canonical.CanonicalRequest) []canonical.ToolDeclaration {
+	environment, err := canonical.ToolEnvironmentAt(request.Items(), len(request.Items()))
+	if err != nil {
+		return nil
+	}
+	return environment.Declarations()
+}
+
+func HasRequestToolDeclarations(request canonical.CanonicalRequest) bool {
+	prelude, _, err := canonical.SplitRequestPrelude(request.Items())
+	if err != nil {
+		return false
+	}
+	for _, item := range prelude.Items() {
+		if _, ok := item.ToolDeclarations(); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func MustInstruction(role canonical.MessageRole, text string) canonical.CanonicalItem {
+	item, err := canonical.NewScopedMessageItem(role, []canonical.MessagePart{canonical.NewTextMessagePart(text)}, canonical.ContextScopeRequest)
 	if err != nil {
 		panic(err)
 	}
-	return instruction
+	return item
 }
 
-func InstructionSetText(set canonical.InstructionSet) string {
+func DirectiveText(items []canonical.CanonicalItem) string {
 	var out strings.Builder
-	for index, instruction := range set.Instructions() {
-		if index > 0 {
+	count := 0
+	for _, item := range items {
+		message, ok := item.Message()
+		if !ok || (message.Role() != canonical.MessageRoleSystem && message.Role() != canonical.MessageRoleDeveloper) {
+			continue
+		}
+		if count > 0 {
 			out.WriteString("\n\n")
 		}
-		out.WriteString(instruction.Text())
+		for _, part := range message.Content() {
+			if text, ok := part.Text(); ok {
+				out.WriteString(text.Text())
+			}
+		}
+		count++
 	}
 	return out.String()
 }
@@ -158,8 +194,8 @@ func LargeIntegerRequest(t testing.TB, model string) canonical.CanonicalRequest 
 		t.Fatal(err)
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify(model),
-		Items: []canonical.CanonicalItem{Message(t, canonical.MessageRoleUser, "probe"), call},
-		Tools: SpecifiedToolSet(t, tool), OutputFormat: canonical.Specify(format),
+		Model:        canonical.Specify(model),
+		Items:        []canonical.CanonicalItem{ToolDeclarations(t, tool), Message(t, canonical.MessageRoleUser, "probe"), call},
+		OutputFormat: canonical.Specify(format),
 	})
 }

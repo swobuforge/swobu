@@ -75,7 +75,7 @@ func rewriteWebSearch(document *chatcompletions.ProviderRequestDocument) error {
 	}
 	options, ok := raw.(map[string]any)
 	if !ok || len(options) != 0 {
-		return provider.NewCandidateIncompatibility("Z.AI target cannot represent the requested canonical web-search options")
+		return provider.NewIncompatibleTarget("Z.AI target cannot represent the requested canonical web-search options")
 	}
 	delete(document.Payload, "web_search_options")
 	tools := make([]requestTool, 0, len(document.Tools)+1)

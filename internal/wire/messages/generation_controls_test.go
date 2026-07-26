@@ -55,9 +55,8 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 
 func TestEncode_PreservesInstructionsAsTopLevelSystem(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        canonical.Specify("claude-3-5"),
-		Instructions: canonical.Specify(canonical.NewSystemInstructionSet("Use native tools for filesystem work.")),
-		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
+		Model: canonical.Specify("claude-3-5"),
+		Items: []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "Use native tools for filesystem work."), canonicaltest.Message(t, canonical.MessageRoleUser, "inspect files")},
 	})
 	wire, err := EncodeCarrier(req, delivery.BufferedDelivery())
 	if err != nil {
@@ -79,14 +78,14 @@ func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
-	if canonicaltest.InstructionSetText(got.Instructions()) != "Use native tools for filesystem work." {
-		t.Fatalf("instructions = %q, want top-level system", canonicaltest.InstructionSetText(got.Instructions()))
+	if canonicaltest.DirectiveText(got.Items()) != "Use native tools for filesystem work." {
+		t.Fatalf("instructions = %q, want top-level system", canonicaltest.DirectiveText(got.Items()))
 	}
 	items := got.Items()
-	message, _ := items[0].Message()
+	message, _ := items[1].Message()
 	text, textOK := message.Content()[0].Text()
-	if len(items) != 1 || !textOK || text.Text() != "inspect files" {
-		t.Fatalf("items = %#v, want user request only", items)
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindMessage || !textOK || text.Text() != "inspect files" {
+		t.Fatalf("items = %#v, want scoped directive and user request", items)
 	}
 }
 

@@ -21,7 +21,7 @@ func newBackendCodec(_ string) backendCodec {
 
 func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
 	if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {
-		return carrier.Document{}, nil, provider.NewCandidateIncompatibility("ChatGPT target requires SSE streaming delivery")
+		return carrier.Document{}, nil, provider.NewIncompatibleTarget("ChatGPT target requires SSE streaming delivery")
 	}
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
@@ -32,7 +32,7 @@ func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.D
 			req.Delivery,
 			sink,
 			req.ExchangeID,
-			responses.EncodeOptions{Compatibility: req.Compatibility},
+			responses.EncodeOptions{},
 		)
 	})
 	if err != nil {

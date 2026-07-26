@@ -123,7 +123,7 @@ func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (ProviderRequestT
 	if decl, ok := tool.Custom(); ok {
 		return encodeChatCompletionsCustomTool(tool, decl)
 	}
-	return ProviderRequestTool{}, provider.NewCandidateIncompatibility("Chat Completions cannot represent canonical tool declaration kind " + chatCompletionsUnsupportedToolKind(tool))
+	return ProviderRequestTool{}, provider.NewIncompatibleTarget("Chat Completions cannot represent canonical tool declaration kind " + chatCompletionsUnsupportedToolKind(tool))
 }
 
 func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
@@ -362,7 +362,7 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 				"type": canonical.ToolTypeWebSearch,
 			}, nil
 		default:
-			return nil, provider.NewCandidateIncompatibility("Chat Completions cannot represent this canonical specific tool choice")
+			return nil, provider.NewIncompatibleTarget("Chat Completions cannot represent this canonical specific tool choice")
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

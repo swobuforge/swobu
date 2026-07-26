@@ -27,7 +27,7 @@ func TestEncodeMessagesImages_PreservesDirectURLAndNestedToolResultImages(t *tes
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message, result}})
 
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,17 +97,14 @@ func TestDecodeMessagesImages_PreservesNestedToolResultOrderAndError(t *testing.
 	}
 }
 
-func TestEncodeMessagesImageDetail_StrictRejectsCompatOmitsWithDecision(t *testing.T) {
+func TestEncodeMessagesImageDetailOmitsWithDecision(t *testing.T) {
 	image, _ := canonical.NewURLImage("https://example.test/detail.png", canonical.Specify(canonical.ImageDetailHigh))
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
-	if _, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", EncodeOptions{Compatibility: compat.CompatibilityPolicy{Mode: compat.CompatibilityStrict}}); err == nil {
-		t.Fatal("strict Messages lowering accepted explicit image detail")
-	}
 	sink := &recordingDecisionSink{}
-	if _, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex", EncodeOptions{}); err != nil {
-		t.Fatalf("compat Messages lowering failed: %v", err)
+	if _, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex"); err != nil {
+		t.Fatalf("Messages lowering failed: %v", err)
 	}
 	if len(sink.effects) != 1 || sink.effects[0].Feature != compat.RequestItemsMessageImageDetail || sink.effects[0].Outcome != compat.Approx {
 		t.Fatalf("decisions = %#v", sink.effects)
@@ -118,7 +115,7 @@ func TestEncodeMessagesImages_URLCarrierUsesURLBlock(t *testing.T) {
 	image, _ := canonical.NewURLImage("https://example.test/bedrock.png", canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "ex", EncodeOptions{})
+	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +131,7 @@ func TestEncodeMessagesToolResult_MultipleTextPartsRemainAnArray(t *testing.T) {
 		canonical.NewTextToolResultPart("two"),
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

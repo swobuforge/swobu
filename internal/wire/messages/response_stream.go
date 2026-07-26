@@ -227,7 +227,11 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		if err != nil {
 			return canonical.InternalError("messages stream tool_use is missing id")
 		}
-		resolved, _, err := canonical.ResolveToolDeclarationByName(s.request.Tools(), payload.ContentBlock.Name, canonical.ToolTypeFunction)
+		environment, err := canonical.EffectiveTools(s.request)
+		if err != nil {
+			return canonical.InternalError("messages stream tool environment is ambiguous")
+		}
+		resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), payload.ContentBlock.Name, canonical.ToolTypeFunction)
 		if err != nil {
 			return canonical.InternalError("messages stream tool_use references an unknown or ambiguous tool")
 		}

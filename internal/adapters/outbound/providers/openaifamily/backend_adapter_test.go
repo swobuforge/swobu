@@ -66,8 +66,10 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
-		Tools: canonicaltest.SpecifiedToolSet(t, canonical.NewWebSearchDeclaration()),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
 	})
 	for _, tc := range []struct {
 		name       string
@@ -229,8 +231,10 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("reasoning-model"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Tools: canonicaltest.SpecifiedToolSet(t, tool),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
+		},
 	})
 	for _, tc := range []struct {
 		name       string
@@ -342,9 +346,9 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","tool_choice":"required"}`), carrier.Meta{})
 
 	_, err := exec.Send(context.Background(), target, doc)
-	var unsupported provider.CandidateIncompatibilityError
+	var unsupported provider.IncompatibleTargetError
 	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T, want provider.CandidateIncompatibilityError", err)
+		t.Fatalf("error = %T, want provider.IncompatibleTargetError", err)
 	}
 }
 

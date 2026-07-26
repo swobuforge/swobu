@@ -65,7 +65,10 @@ func TestClientRequestDecoder_DecodesToolChoiceBySurface(t *testing.T) {
 			if resolvedDelivery.Mode != delivery.Buffered {
 				t.Fatalf("delivery mode = %s, want buffered", resolvedDelivery.Mode)
 			}
-			policy := got.EffectiveToolPolicy()
+			policy, err := got.EffectiveToolPolicy()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if policy.Mode != tc.wantMode {
 				t.Fatalf("effective tool policy mode = %q, want %q", policy.Mode, tc.wantMode)
 			}
@@ -97,9 +100,9 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 	baseRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude-haiku"),
 		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, functionTool),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
-		Tools: canonicaltest.SpecifiedToolSet(t, functionTool),
 	})
 
 	tests := []struct {
@@ -142,8 +145,7 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 			t.Parallel()
 			req := canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model:      canonical.Specify(baseRequest.Model()),
-				Items:      baseRequest.Items(),
-				Tools:      canonicaltest.SpecifiedToolSet(t, tc.tools...),
+				Items:      []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tc.tools...), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 				ToolPolicy: canonical.Specify(tc.policy),
 			})
 			wire, err := EncodeCarrier(req, delivery.BufferedDelivery())

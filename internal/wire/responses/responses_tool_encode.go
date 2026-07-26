@@ -13,12 +13,14 @@ import (
 // ProviderRequestTool is one typed Responses tool declaration before exact-
 // provider spelling and the single JSON serialization boundary.
 type ProviderRequestTool struct {
-	Type        string `json:"type"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Parameters  any    `json:"parameters,omitempty"`
-	Strict      *bool  `json:"strict,omitempty"`
-	Format      any    `json:"format,omitempty"`
+	Type        string                `json:"type"`
+	Name        string                `json:"name,omitempty"`
+	Description string                `json:"description,omitempty"`
+	Parameters  any                   `json:"parameters,omitempty"`
+	Strict      *bool                 `json:"strict,omitempty"`
+	Format      any                   `json:"format,omitempty"`
+	Tools       []ProviderRequestTool `json:"tools,omitempty"`
+	Execution   string                `json:"execution,omitempty"`
 }
 
 func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
@@ -59,7 +61,37 @@ func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, e
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
 	}
-	return ProviderRequestTool{}, provider.NewCandidateIncompatibility("Responses cannot represent this canonical tool declaration type")
+	if namespace, ok := tool.Namespace(); ok {
+		children := make([]ProviderRequestTool, 0, len(namespace.Tools()))
+		for _, child := range namespace.Tools() {
+			wire, err := encodeResponsesTool(child)
+			if err != nil {
+				return ProviderRequestTool{}, err
+			}
+			wire.Name = responsesNamespaceLeafName(wire.Name)
+			children = append(children, wire)
+		}
+		return ProviderRequestTool{Type: "namespace", Name: responsesNamespaceLeafName(namespace.Key().Name()), Description: namespace.Description(), Tools: children}, nil
+	}
+	if discovery, ok := tool.Discovery(); ok {
+		parameters, err := responsesToolParametersFromSchema(discovery.InputSchema())
+		if err != nil {
+			return ProviderRequestTool{}, err
+		}
+		execution := "server"
+		if discovery.Executor() == canonical.DiscoveryExecutorClient {
+			execution = "client"
+		}
+		return ProviderRequestTool{Type: "tool_search", Description: discovery.Description(), Parameters: parameters, Execution: execution}, nil
+	}
+	return ProviderRequestTool{}, provider.NewIncompatibleTarget("Responses cannot represent this canonical tool declaration type")
+}
+
+func responsesNamespaceLeafName(name string) string {
+	if index := strings.LastIndex(name, "/"); index >= 0 {
+		return name[index+1:]
+	}
+	return name
 }
 
 func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
@@ -174,9 +206,8 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclara
 }
 
 type responsesToolNamespaceContext struct {
-	path         []string
-	descriptions []string
-	index        int
+	path  []string
+	index int
 }
 
 func cloneBoolPointer(ptr *bool) *bool {

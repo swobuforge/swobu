@@ -16,21 +16,31 @@ type loweredMessagesInstructions struct {
 	Decisions []compat.Decision
 }
 
-func flattenInstructionsForMessages(set canonical.InstructionSet) loweredMessagesInstructions {
-	instructions := set.Instructions()
+func flattenInstructionsForMessages(items []canonical.CanonicalItem) loweredMessagesInstructions {
 	var out strings.Builder
-	exact := len(instructions) <= 1
-	for index, instruction := range instructions {
-		if index > 0 {
+	count := 0
+	exact := true
+	for _, item := range items {
+		instruction, ok := item.Message()
+		if !ok || (instruction.Role() != canonical.MessageRoleSystem && instruction.Role() != canonical.MessageRoleDeveloper) {
+			continue
+		}
+		if count > 0 {
 			out.WriteString("\n\n")
 		}
-		out.WriteString(instruction.Text())
+		for _, part := range instruction.Content() {
+			if text, ok := part.Text(); ok {
+				out.WriteString(text.Text())
+			}
+		}
 		if instruction.Role() != canonical.MessageRoleSystem {
 			exact = false
 		}
+		count++
 	}
+	exact = exact && count <= 1
 	lowered := loweredMessagesInstructions{Text: out.String(), Exact: exact}
-	if !exact && len(instructions) > 0 {
+	if !exact && count > 0 {
 		lowered.Decisions = []compat.Decision{{Feature: compat.RequestInstructions, Outcome: compat.Approx, Subject: compat.Subject("messages.system")}}
 	}
 	return lowered

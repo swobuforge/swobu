@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestAdditionalToolsLiftIntoCanonicalAndResolveHistoricalCalls(t *testing.T) {
@@ -28,15 +29,19 @@ func TestAdditionalToolsLiftIntoCanonicalAndResolveHistoricalCalls(t *testing.T)
 		t.Fatal(err)
 	}
 	request := decoded.Request.Request
-	if !request.ToolsSpecified() || len(request.Tools()) != 1 {
-		t.Fatalf("canonical tools = %#v, specified=%t", request.Tools(), request.ToolsSpecified())
+	if len(canonicaltest.Tools(request)) != 1 {
+		t.Fatalf("canonical tools = %#v", canonicaltest.Tools(request))
 	}
-	if len(request.Items()) != 1 {
-		t.Fatalf("canonical items = %#v, want only historical call", request.Items())
+	if len(request.Items()) != 2 {
+		t.Fatalf("canonical items = %#v, want declaration and historical call", request.Items())
 	}
-	call, ok := request.Items()[0].ToolCall()
-	if !ok || call.Tool() != request.Tools()[0].Key() {
-		t.Fatalf("historical call = %#v, tools = %#v", call, request.Tools())
+	declarations, declared := request.Items()[0].ToolDeclarations()
+	if !declared || declarations.Scope() != canonical.ContextScopeHistory {
+		t.Fatalf("ordinary additional_tools = %#v, want ordered history declaration", request.Items()[0])
+	}
+	call, ok := request.Items()[1].ToolCall()
+	if !ok || call.Tool() != canonicaltest.Tools(request)[0].Key() {
+		t.Fatalf("historical call = %#v, tools = %#v", call, canonicaltest.Tools(request))
 	}
 }
 
@@ -57,30 +62,20 @@ func TestAdditionalToolsIdenticalDualCarriersReconcileOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(decoded.Request.Request.Tools()); got != 1 {
+	if got := len(canonicaltest.Tools(decoded.Request.Request)); got != 1 {
 		t.Fatalf("canonical tool count = %d, want 1", got)
 	}
 }
 
-func TestAdditionalToolsConflictingDualCarriersReturnBadRequest(t *testing.T) {
-	for _, raw := range [][]byte{
-		[]byte(`{
+func TestAdditionalToolsConflictingRedeclarationReturnsBadRequest(t *testing.T) {
+	raw := []byte(`{
 			"model":"m",
 			"tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],
 			"input":[{"type":"additional_tools","role":"developer","tools":[
-				{"type":"function","name":"inspect","parameters":{"type":"object"}}
+				{"type":"function","name":"search","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}
 			]}]
-		}`),
-		[]byte(`{
-			"model":"m",
-			"tools":[],
-			"input":[{"type":"additional_tools","role":"developer","tools":[
-				{"type":"function","name":"search","parameters":{"type":"object"}}
-			]}]
-		}`),
-	} {
-		assertAdditionalToolsErrorCode(t, raw, canonical.ErrorCodeBadRequest)
-	}
+		}`)
+	assertAdditionalToolsErrorCode(t, raw, canonical.ErrorCodeBadRequest)
 }
 
 func TestAdditionalToolsClassifyValidUnimplementedCarrierSemanticsAsSwobuOwned(t *testing.T) {
@@ -95,19 +90,9 @@ func TestAdditionalToolsClassifyValidUnimplementedCarrierSemanticsAsSwobuOwned(t
 			code: canonical.ErrorCodeNotImplemented,
 		},
 		{
-			name: "position",
-			raw:  `{"input":[{"type":"message","role":"user","content":"hi"},{"type":"additional_tools","role":"developer","tools":[]}]}`,
-			code: canonical.ErrorCodeNotImplemented,
-		},
-		{
-			name: "multiplicity",
-			raw:  `{"input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"additional_tools","role":"developer","tools":[]}]}`,
-			code: canonical.ErrorCodeNotImplemented,
-		},
-		{
-			name: "unsupported tool kind",
+			name: "malformed MCP source",
 			raw:  `{"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"mcp","name":"remote"}]}]}`,
-			code: canonical.ErrorCodeNotImplemented,
+			code: canonical.ErrorCodeBadRequest,
 		},
 		{
 			name: "malformed tools",
@@ -118,6 +103,26 @@ func TestAdditionalToolsClassifyValidUnimplementedCarrierSemanticsAsSwobuOwned(t
 		t.Run(tc.name, func(t *testing.T) {
 			assertAdditionalToolsErrorCode(t, []byte(tc.raw), tc.code)
 		})
+	}
+}
+
+func TestAdditionalToolsPreservesPositionAndMultiplicity(t *testing.T) {
+	raw := []byte(`{"input":[
+		{"type":"message","role":"user","content":"hi"},
+		{"type":"additional_tools","role":"developer","tools":[]},
+		{"type":"additional_tools","role":"developer","tools":[]}
+	]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
+		carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.Request.Items()
+	if len(items) != 3 || items[0].Kind() != canonical.ItemKindMessage ||
+		items[1].Kind() != canonical.ItemKindToolDeclarations ||
+		items[2].Kind() != canonical.ItemKindToolDeclarations {
+		t.Fatalf("ordered additional_tools = %#v", items)
 	}
 }
 
@@ -144,7 +149,7 @@ func TestAdditionalToolsUnsupportedKindReportsExactWireLocationAndType(t *testin
 	}
 }
 
-func TestAdditionalToolsPreambleSurvivesImplicitHistoryRebase(t *testing.T) {
+func TestAdditionalToolsPreambleRemainsWithPriorHistoryAfterImplicitRebase(t *testing.T) {
 	raw := []byte(`{
 		"model":"m",
 		"input":[
@@ -161,8 +166,8 @@ func TestAdditionalToolsPreambleSurvivesImplicitHistoryRebase(t *testing.T) {
 		t.Fatal(err)
 	}
 	rebased := decoded.Request.RebasedRequest
-	if rebased == nil || !rebased.Request.ToolsSpecified() || len(rebased.Request.Tools()) != 1 {
-		t.Fatalf("rebased request lost invocation tools: %#v", rebased)
+	if rebased == nil || len(canonicaltest.Tools(rebased.Request)) != 0 {
+		t.Fatalf("rebased request repeated historical declarations: %#v", rebased)
 	}
 	if len(rebased.Request.Items()) != 1 {
 		t.Fatalf("rebased items = %#v, want current message", rebased.Request.Items())

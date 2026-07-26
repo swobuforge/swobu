@@ -361,17 +361,17 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	}
 	typed := testDecodeCapturedRequest(t, capturing.got)
 	items := typed.Items()
-	if len(items) != 3 {
-		t.Fatalf("items len = %d, want 3", len(items))
+	if len(items) != 4 {
+		t.Fatalf("items len = %d, want declarations plus 3 history items", len(items))
 	}
-	if got := items[1].Kind(); got != canonical.ItemKindToolCall {
+	if got := items[2].Kind(); got != canonical.ItemKindToolCall {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolCall)
 	}
-	message, _ := items[0].Message()
+	message, _ := items[1].Message()
 	if got := message.Role(); got != canonical.MessageRoleAssistant {
 		t.Fatalf("author = %q, want %q", got, canonical.MessageRoleAssistant)
 	}
-	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
+	if got := items[3].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 }
@@ -458,13 +458,13 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 		t.Fatalf("previous_response = %#v, want resp_123", got)
 	}
 	items := typed.Items()
-	if len(items) != 3 {
-		t.Fatalf("conversation len = %d, want 3", len(items))
+	if len(items) != 4 {
+		t.Fatalf("conversation len = %d, want declarations plus 3 history items", len(items))
 	}
-	if got := items[1].Kind(); got != canonical.ItemKindToolCall {
+	if got := items[2].Kind(); got != canonical.ItemKindToolCall {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolCall)
 	}
-	if got := items[2].Kind(); got != canonical.ItemKindToolResult {
+	if got := items[3].Kind(); got != canonical.ItemKindToolResult {
 		t.Fatalf("item kind = %q, want %q", got, canonical.ItemKindToolResult)
 	}
 }

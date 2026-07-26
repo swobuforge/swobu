@@ -46,7 +46,10 @@ func Begin(request canonical.CanonicalRequest) (ResolvedRequest, error) {
 	if _, ok := request.PreviousResponse(); ok {
 		return ResolvedRequest{}, errors.New("session begin request contains previous response")
 	}
-	complete := withoutPreviousResponse(request)
+	complete, err := withoutPreviousResponse(request)
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
 	current := requestWithoutPreviousResponse(request)
 	return ResolvedRequest{Full: complete, Delta: current}, nil
 }
@@ -72,13 +75,17 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
 		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint media: %w", err)
 	}
-	effective, err := resolveToolContinuation(checkpoint, request)
+	effective, err := resolveTurnContinuation(checkpoint, request)
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
+	full, err := materialize(checkpoint, effective)
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
 	return ResolvedRequest{
-		Full:          materialize(checkpoint, effective),
-		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
+		Full:          full,
+		Delta:         nativeDelta(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
 	}, nil
 }
@@ -101,21 +108,25 @@ func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.Canoni
 	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
 		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint media: %w", err)
 	}
-	effective, err := resolveToolContinuation(checkpoint, rebased)
+	effective, err := resolveTurnContinuation(checkpoint, rebased)
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
+	full, err := materialize(checkpoint, effective)
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
 	return ResolvedRequest{
-		Full:          materialize(checkpoint, effective),
-		Delta:         inheritRequestBands(checkpoint.Request, effective, &response),
+		Full:          full,
+		Delta:         nativeDelta(checkpoint.Request, effective, &response),
 		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
 	}, nil
 }
 
-// resolveToolContinuation validates tool-result correlation and writes the
+// resolveTurnContinuation validates tool-result correlation and writes the
 // ongoing assistant turn's compute and effort into the one effective request.
 // The checkpoint request is the sole authority for omitted continuation values.
-func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+func resolveTurnContinuation(checkpoint Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
 	pendingSet := make(map[canonical.ToolCallID]canonical.ToolKind)
 	for _, item := range checkpoint.Response.Items() {
 		call, ok := item.ToolCall()
@@ -149,6 +160,10 @@ func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalR
 	if len(matched) == 0 {
 		return current.Clone(), nil
 	}
+	current, err := repeatUnfinishedTurnContext(checkpoint.Request, current)
+	if err != nil {
+		return canonical.CanonicalRequest{}, err
+	}
 	compute := current.Reasoning().ComputeField()
 	priorCompute := checkpoint.Request.Reasoning().ComputeField()
 	if explicit, ok := compute.Get(); ok {
@@ -179,6 +194,58 @@ func resolveToolContinuation(checkpoint Checkpoint, current canonical.CanonicalR
 	return replaceComputeControls(current, controls, reasoning), nil
 }
 
+func repeatUnfinishedTurnContext(previous, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+	previousPrelude, _, previousErr := canonical.SplitRequestPrelude(previous.Items())
+	currentPrelude, currentHistory, currentErr := canonical.SplitRequestPrelude(current.Items())
+	if previousErr != nil {
+		return canonical.CanonicalRequest{}, fmt.Errorf("invalid checkpoint request context: %w", previousErr)
+	}
+	if currentErr != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request-scoped context must precede history")
+	}
+	previousDirectives := previousPrelude.Directives()
+	previousTools := previousPrelude.Declarations()
+	previousToolsFirst := previousPrelude.ToolsFirst()
+	currentDirectives := currentPrelude.Directives()
+	currentTools := currentPrelude.Declarations()
+	currentToolsFirst := currentPrelude.ToolsFirst()
+	directives := currentDirectives
+	if len(directives) == 0 {
+		directives = previousDirectives
+	}
+	tools := currentTools
+	if len(tools) == 0 {
+		tools = previousTools
+	}
+	toolsFirst := previousToolsFirst
+	if len(currentDirectives) > 0 && len(currentTools) > 0 {
+		toolsFirst = currentToolsFirst
+	}
+	items := make([]canonical.CanonicalItem, 0, len(directives)+len(tools)+len(currentHistory))
+	if toolsFirst {
+		items = append(items, tools...)
+		items = append(items, directives...)
+	} else {
+		items = append(items, directives...)
+		items = append(items, tools...)
+	}
+	items = append(items, currentHistory...)
+	return replaceRequestItems(current, items), nil
+}
+
+func replaceRequestItems(request canonical.CanonicalRequest, items []canonical.CanonicalItem) canonical.CanonicalRequest {
+	previous, hasPrevious := request.PreviousResponse()
+	var previousPointer *canonical.ResponseRef
+	if hasPrevious {
+		previousPointer = &previous
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: request.ModelField(), Items: items, PreviousResponse: previousPointer,
+		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
+		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
+	})
+}
+
 func equalReasoningCompute(left, right canonical.ReasoningCompute) bool {
 	if left.Kind() != right.Kind() || left.Kind() == "" {
 		return false
@@ -195,33 +262,33 @@ func replaceComputeControls(request canonical.CanonicalRequest, controls canonic
 		previousPointer = &previous
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: request.ModelField(), Instructions: request.InstructionsField(), Items: request.Items(),
-		Tools: request.ToolsField(), PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
+		Model: request.ModelField(), Items: request.Items(),
+		PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(), Controls: controls, Reasoning: reasoning,
 		OutputFormat: request.OutputFormatField(),
 	})
 }
 
-func withoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
+func withoutPreviousResponse(request canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+	toolPolicy, err := request.EffectiveToolPolicy()
+	if err != nil {
+		return canonical.CanonicalRequest{}, err
+	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         canonical.Specify(request.Model()),
-		Instructions:  canonical.Specify(request.Instructions()),
 		Items:         cloneCanonicalItems(request.Items()),
-		Tools:         canonical.Specify(mustToolSet(request.Tools())),
-		ToolPolicy:    canonical.Specify(request.EffectiveToolPolicy()),
+		ToolPolicy:    canonical.Specify(toolPolicy),
 		ToolCallBatch: canonical.Specify(request.ToolCallBatch()),
 		Controls:      request.Controls(),
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  canonical.Specify(request.OutputFormat()),
-	})
+	}), nil
 }
 
 func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         request.ModelField(),
-		Instructions:  request.InstructionsField(),
 		Items:         cloneCanonicalItems(request.Items()),
-		Tools:         request.ToolsField(),
 		ToolPolicy:    request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(),
 		Controls:      request.Controls(),
@@ -230,45 +297,38 @@ func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonica
 	})
 }
 
-func inheritRequestBands(previous canonical.CanonicalRequest, current canonical.CanonicalRequest, previousResponse *canonical.ResponseRef) canonical.CanonicalRequest {
+func nativeDelta(previous canonical.CanonicalRequest, current canonical.CanonicalRequest, previousResponse *canonical.ResponseRef) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:            canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Model())),
-		Instructions:     canonical.Specify(inheritInstructions(current.InstructionsSpecified(), current.Instructions(), previous.Instructions())),
 		Items:            cloneCanonicalItems(current.Items()),
-		Tools:            canonical.Specify(mustToolSet(inheritToolDecls(current.ToolsSpecified(), current.Tools(), previous.Tools()))),
 		PreviousResponse: previousResponse,
-		ToolPolicy:       canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.ToolPolicy())),
-		ToolCallBatch:    canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.ToolCallBatch())),
-		Controls:         inheritControls(current.Controls(), previous.Controls()),
+		ToolPolicy:       current.ToolPolicyField(),
+		ToolCallBatch:    current.ToolCallBatchField(),
+		Controls:         current.Controls(),
 		Reasoning:        current.Reasoning(),
-		OutputFormat:     canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.OutputFormat())),
+		OutputFormat:     current.OutputFormatField(),
 	})
 }
 
-func materialize(previous Checkpoint, current canonical.CanonicalRequest) canonical.CanonicalRequest {
-	items := cloneCanonicalItems(previous.Request.Items())
+func materialize(previous Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+	prelude, currentHistory, err := canonical.SplitRequestPrelude(current.Items())
+	if err != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request-scoped context must precede history")
+	}
+	items := prelude.Items()
+	items = append(items, canonical.RetainedHistory(previous.Request.Items())...)
 	items = append(items, cloneCanonicalItems(previous.Response.Items())...)
-	items = append(items, cloneCanonicalItems(current.Items())...)
+	items = append(items, currentHistory...)
 
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Request.Model())),
-		Instructions:  canonical.Specify(inheritInstructions(current.InstructionsSpecified(), current.Instructions(), previous.Request.Instructions())),
 		Items:         items,
-		Tools:         canonical.Specify(mustToolSet(inheritToolDecls(current.ToolsSpecified(), current.Tools(), previous.Request.Tools()))),
-		ToolPolicy:    canonical.Specify(inheritCloneable(current.ToolPolicySpecified(), current.ToolPolicy(), previous.Request.ToolPolicy())),
-		ToolCallBatch: canonical.Specify(inheritCloneable(current.ToolCallBatchSpecified(), current.ToolCallBatch(), previous.Request.ToolCallBatch())),
-		Controls:      inheritControls(current.Controls(), previous.Request.Controls()),
+		ToolPolicy:    current.ToolPolicyField(),
+		ToolCallBatch: current.ToolCallBatchField(),
+		Controls:      current.Controls(),
 		Reasoning:     current.Reasoning(),
-		OutputFormat:  canonical.Specify(inheritCloneable(current.OutputFormatSpecified(), current.OutputFormat(), previous.Request.OutputFormat())),
-	})
-}
-
-func mustToolSet(tools []canonical.ToolDeclaration) canonical.ToolSet {
-	set, err := canonical.NewToolSet(tools)
-	if err != nil {
-		panic("session resolution received invalid canonical tool declarations: " + err.Error())
-	}
-	return set
+		OutputFormat:  current.OutputFormatField(),
+	}), nil
 }
 
 func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalItem {
@@ -282,67 +342,9 @@ func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalI
 	return cloned
 }
 
-func cloneToolDecls(tools []canonical.ToolDeclaration) []canonical.ToolDeclaration {
-	if tools == nil {
-		return nil
-	}
-	cloned := make([]canonical.ToolDeclaration, len(tools))
-	for i := range tools {
-		cloned[i] = tools[i].Clone()
-	}
-	return cloned
-}
-
-func inheritToolDecls(present bool, current, previous []canonical.ToolDeclaration) []canonical.ToolDeclaration {
-	if present {
-		return cloneToolDecls(current)
-	}
-	return cloneToolDecls(previous)
-}
-
 func inheritString(present bool, current, previous string) string {
 	if present {
 		return current
 	}
 	return previous
-}
-
-func inheritInstructions(present bool, current, previous canonical.InstructionSet) canonical.InstructionSet {
-	if present {
-		return current.Clone()
-	}
-	return previous.Clone()
-}
-
-// cloneabler is a constraint for types that have a Clone() T method.
-type cloneabler[T any] interface {
-	Clone() T
-	IsZero() bool
-}
-
-func inheritCloneable[T cloneabler[T]](present bool, current, previous T) T {
-	if present {
-		return current.Clone()
-	}
-	return previous.Clone()
-}
-
-func inheritControls(current, previous canonical.GenerationControls) canonical.GenerationControls {
-	out := previous.Clone()
-	if !current.Limits.MaxOutputTokens.IsZero() {
-		out.Limits.MaxOutputTokens = current.Limits.MaxOutputTokens.Clone()
-	}
-	if current.Limits.StopSequences != nil {
-		out.Limits.StopSequences = append([]string(nil), current.Limits.StopSequences...)
-	}
-	if !current.Sampling.Temperature.IsZero() {
-		out.Sampling.Temperature = current.Sampling.Temperature.Clone()
-	}
-	if !current.Sampling.TopP.IsZero() {
-		out.Sampling.TopP = current.Sampling.TopP.Clone()
-	}
-	// Inference effort is a per-invocation reasoning control. Unlike ordinary
-	// generation limits, omission must remain omission across session resume.
-	out.Effort = current.Clone().Effort
-	return out
 }

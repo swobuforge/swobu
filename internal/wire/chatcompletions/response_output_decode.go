@@ -13,6 +13,11 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 	if err != nil {
 		return nil, canonical.InternalError("chat completions response content is unsupported")
 	}
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return nil, canonical.InternalError("chat completions tool environment is ambiguous")
+	}
+	tools := environment.Declarations()
 	out := make([]canonical.CanonicalItem, 0, 1+len(toolCalls))
 	if hasMessage {
 		out = append(out, message)
@@ -38,7 +43,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			if functionName == "" {
 				return nil, canonical.InternalError("chat completions response function tool call is missing a name")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), functionName, canonical.ToolTypeFunction)
+			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, functionName, canonical.ToolTypeFunction)
 			if err != nil {
 				return nil, canonical.InternalError("chat completions response references an unknown or ambiguous function tool")
 			}
@@ -59,7 +64,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			if customName == "" {
 				return nil, canonical.InternalError("chat completions response custom tool call is missing a name")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), customName, canonical.ToolTypeCustom)
+			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, customName, canonical.ToolTypeCustom)
 			if err != nil {
 				return nil, canonical.InternalError("chat completions response references an unknown or ambiguous custom tool")
 			}

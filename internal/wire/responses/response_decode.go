@@ -154,6 +154,11 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 	if err != nil {
 		return nil, err
 	}
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return nil, canonical.InternalError("responses tool environment is ambiguous")
+	}
+	tools := environment.Declarations()
 	output := make([]canonical.CanonicalItem, 0, len(items))
 	for _, rawItem := range items {
 		var item responsesWireOutputItemDTO
@@ -169,8 +174,7 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 			}
 			output = append(output, message)
 		case "function_call":
-			rawArgs := item.Arguments
-			object, err := canonical.ParseJSONObject([]byte(rawArgs))
+			object, err := decodeResponsesFunctionCallArguments(item.Arguments)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool call arguments are invalid")
 			}
@@ -179,7 +183,7 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 			if callID == "" {
 				return nil, canonical.InternalError("responses tool call is missing call_id")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), name, canonical.ToolTypeFunction)
+			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeFunction)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
 			}
@@ -189,13 +193,57 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 				return nil, canonical.InternalError("responses tool call is invalid")
 			}
 			output = append(output, call)
+		case "tool_search_call":
+			execution := strings.TrimSpace(item.Execution)
+			executor, ok := decodeResponsesToolExecutor(execution)
+			if !ok {
+				return nil, canonical.InternalError("responses tool discovery call has invalid execution")
+			}
+			if declaration, ok := environment.Lookup(canonical.ToolDiscoveryKey()); !ok || declaration.Kind() != canonical.ToolKindDiscovery {
+				return nil, canonical.InternalError("responses tool discovery call was not available to the provider attempt")
+			}
+			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery call is missing call_id")
+			}
+			arguments, err := decodeResponsesFunctionCallArguments(item.Arguments)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery call arguments are invalid")
+			}
+			call, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(arguments), executor)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery call is invalid")
+			}
+			output = append(output, call)
+		case "tool_search_output":
+			executor, ok := decodeResponsesToolExecutor(item.Execution)
+			if !ok {
+				return nil, canonical.InternalError("responses tool discovery output has invalid execution")
+			}
+			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery output is missing call_id")
+			}
+			loaded, err := decodeResponsesAdditionalTools(item.Tools, nil, "")
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery output tools are invalid")
+			}
+			set, err := canonical.NewToolSet(loaded)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery output tools are ambiguous")
+			}
+			result, err := canonical.NewToolDiscoveryResultItem(callID, set, executor)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery output is invalid")
+			}
+			output = append(output, result)
 		case "custom_tool_call":
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
 			if callID == "" {
 				return nil, canonical.InternalError("responses custom tool call is missing call_id")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(request.Tools(), name, canonical.ToolTypeCustom)
+			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeCustom)
 			if err != nil {
 				return nil, canonical.InternalError("responses custom tool call references an unknown or ambiguous tool")
 			}

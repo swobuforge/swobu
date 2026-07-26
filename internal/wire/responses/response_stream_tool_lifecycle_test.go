@@ -64,7 +64,7 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
 	reader := decodeResponseStream(
-		canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonicaltest.SpecifiedToolSet(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Bash"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))}),
+		canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Bash"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))}}),
 		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_stream_tool_lifecycle",
 		nil,
@@ -204,7 +204,8 @@ func TestResponsesRoundTripCompletesSourceUndisclosedSearchBeforeAnswer(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	providerWire := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_provider\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"ws_1\",\"type\":\"web_search_call\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"ws_1\",\"type\":\"web_search_call\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"deadline\"],\"sources\":null}}}\n\n" +

@@ -181,8 +181,8 @@ func TestChatCompletionsHistoryPartitionsToolLoopAndPreservesCallIDs(t *testing.
 			{"role":"user","content":"next"}
 		]}`
 	decoded := decodeChatFingerprintRequest(t, base)
-	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 1 {
-		t.Fatalf("tool-loop rebased request = %#v, want current user contribution", decoded.RebasedRequest)
+	if decoded.RebasedRequest == nil || len(decoded.RebasedRequest.Request.Items()) != 2 {
+		t.Fatalf("tool-loop rebased request = %#v, want request declarations and current user contribution", decoded.RebasedRequest)
 	}
 	changed := decodeChatFingerprintRequest(t, strings.ReplaceAll(base, "call_1", "call_changed"))
 	if changed.RebasedRequest == nil || changed.RebasedRequest.Previous == decoded.RebasedRequest.Previous {
@@ -298,10 +298,10 @@ func assertCurrentChatToolResult(t *testing.T, decoded wire.ClientRequestResult,
 		t.Fatalf("rebased predecessor = %#v, want %#v", decoded.RebasedRequest, previous)
 	}
 	items := decoded.RebasedRequest.Request.Items()
-	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolResult {
-		t.Fatalf("rebased items = %#v, want one current tool result", items)
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolDeclarations || items[1].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("rebased items = %#v, want request declarations and current tool result", items)
 	}
-	result, _ := items[0].ToolResult()
+	result, _ := items[1].ToolResult()
 	if result.CallID().String() != "call_1" {
 		t.Fatalf("tool result call ID = %q", result.CallID().String())
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestDecodeRequestAcceptsCodexWebSearchDeclaration(t *testing.T) {
@@ -22,8 +23,8 @@ func TestDecodeRequestAcceptsCodexWebSearchDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := decoded.Request.Request
-	if len(request.Tools()) != 1 || request.Tools()[0].Kind() != canonical.ToolKindWebSearch {
-		t.Fatalf("tools = %#v", request.Tools())
+	if len(canonicaltest.Tools(request)) != 1 || canonicaltest.Tools(request)[0].Kind() != canonical.ToolKindWebSearch {
+		t.Fatalf("tools = %#v", canonicaltest.Tools(request))
 	}
 	wantSubjects := map[compat.Subject]bool{
 		"wire:/include/0":                       true,
@@ -62,8 +63,8 @@ func TestDecodeRequestResumesIDLessCodexWebSearchHistory(t *testing.T) {
 		t.Fatal("expected completed Codex history to rebase")
 	}
 	items := decoded.Request.RebasedRequest.Request.Items()
-	if len(items) != 1 || items[0].Kind() != canonical.ItemKindMessage {
-		t.Fatalf("rebased items = %#v, want current user message only", items)
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolDeclarations || items[1].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("rebased items = %#v, want request declarations and current user message", items)
 	}
 }
 
@@ -101,9 +102,9 @@ func TestDecodeRequestUsesActionlessCodexMarkerOnlyForHistoryPartition(t *testin
 		t.Fatal("expected actionless completed Codex history to rebase")
 	}
 	items := decoded.Request.RebasedRequest.Request.Items()
-	message, ok := items[0].Message()
-	if len(items) != 1 || !ok || message.Role() != canonical.MessageRoleUser {
-		t.Fatalf("rebased canonical input = %#v, want current user item", items)
+	message, ok := items[1].Message()
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolDeclarations || !ok || message.Role() != canonical.MessageRoleUser {
+		t.Fatalf("rebased canonical input = %#v, want request declarations and current user item", items)
 	}
 }
 
@@ -134,7 +135,8 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"in_progress\",\"summary\":[]}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\",\"summary\":[]}}\n\n" +
@@ -162,7 +164,8 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 func TestEncodeRequestLowersStableWebSearchTool(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
 	doc, err := EncodeCarrierWithDecisions(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +183,8 @@ func TestEncodeRequestLowersStableWebSearchTool(t *testing.T) {
 func TestDecodeBufferedWebSearchLifecycleAndUnicodeCitation(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	raw := []byte(`{"id":"resp_provider","model":"model","status":"completed","output":[{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one","one"],"sources":[{"type":"url","url":"https://example.com/a","title":"A"}]}},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"£source","annotations":[{"type":"url_citation","url":"https://example.com/a","title":"A","start_index":0,"end_index":0}]}]}]}`)
 	stream, err := decodeResponseBuffered(context.Background(), request, raw, "exchange", nil)
 	if err != nil {

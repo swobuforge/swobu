@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -45,12 +46,18 @@ func runExchange(
 			request:            canonical.CloneCanonicalRequest(decoded.Request),
 			rebasedRequest:     rebased,
 			requestFingerprint: decoded.RequestFingerprint,
+			mcpAccess:          decoded.MCPAccess,
 			workspace:          workspace, timing: timing,
 			requestPath: requestPath,
 		},
 		swobuResponseID: responseID,
 		phase:           startingPhase{},
 	}
+	defer func() {
+		if s.mcp != nil {
+			_ = s.mcp.Close()
+		}
+	}()
 	var current exchangeEvent = exchangeStarted{}
 	for steps := 0; steps < 1000; steps++ {
 		tr, reduceErr := reduce(ctx, s, current, runner)
@@ -105,12 +112,20 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 			}
 		}
 		return attemptImagesMaterialized{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, decisions: decisions, err: err}
+	case prepareMCPCommand:
+		full, run, decisions, err := mcp.Open(ctx, c.full, c.access)
+		return mcpPrepared{full: full, run: run, decisions: decisions, err: err}
 	case callProviderCommand:
 		ingress, err := c.backend.Transport.Send(ctx, c.document)
 		if err != nil {
 			return providerCallFailed{attemptID: c.attemptID, err: err}
 		}
 		return providerIngressReceived{attemptID: c.attemptID, ingress: ingress}
+	case callMCPCommand:
+		result, err := c.run.Call(ctx, c.call)
+		return mcpToolReturned{result: result, err: err}
+	case beginMCPBatchCommand:
+		return mcpBatchStarted{err: c.run.BeginBatch(c.calls)}
 	default:
 		panic(fmt.Sprintf("exchange invariant: unsupported closed command %T", cmd))
 	}

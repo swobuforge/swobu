@@ -77,6 +77,27 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			return nil, err
 		}
 		return []canonical.ToolDeclaration{decl}, nil
+	case "tool_search":
+		if len(ctx.path) > 0 {
+			return nil, canonical.BadRequest("responses tool_search cannot be nested")
+		}
+		schema, err := responsesToolParametersFromWire(tool.Parameters)
+		if err != nil {
+			return nil, err
+		}
+		executor := canonical.DiscoveryExecutorProvider
+		switch strings.TrimSpace(tool.Execution) {
+		case "client":
+			executor = canonical.DiscoveryExecutorClient
+		case "server", "":
+		default:
+			return nil, canonical.BadRequest("responses tool_search execution is invalid")
+		}
+		decl, err := canonical.NewToolDiscoveryTool(tool.Description, schema, executor)
+		if err != nil {
+			return nil, canonical.BadRequest("responses tool_search declaration is invalid")
+		}
+		return []canonical.ToolDeclaration{decl}, nil
 	case "web_search", "web_search_preview":
 		if len(ctx.path) > 0 {
 			return nil, canonical.BadRequest("responses web-search tool cannot be nested or renamed")
@@ -152,21 +173,28 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 		return nil, canonical.BadRequest("responses request tool namespace declarations require a name")
 	}
 	nextCtx := responsesToolNamespaceContext{
-		path:         append(append([]string(nil), ctx.path...), name),
-		descriptions: append(append([]string(nil), ctx.descriptions...), strings.TrimSpace(tool.Description)), // swobu:io-string source=domain
+		path: append(append([]string(nil), ctx.path...), name),
 	}
 	if len(tool.Tools) == 0 {
-		return nil, nil
+		return nil, canonical.BadRequest("responses request tool namespace declarations require child tools")
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tool.Tools))
 	for idx, child := range tool.Tools {
-		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, descriptions: nextCtx.descriptions, index: idx}, sink, exchangeID)
+		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, index: idx}, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, decls...)
 	}
-	return out, nil
+	key, err := canonical.NewRequestToolKey(canonical.ToolKindNamespace, strings.Join(nextCtx.path, "/"))
+	if err != nil {
+		return nil, err
+	}
+	namespace, err := canonical.NewToolNamespace(key, tool.Description, out)
+	if err != nil {
+		return nil, err
+	}
+	return []canonical.ToolDeclaration{namespace}, nil
 }
 
 func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
@@ -207,7 +235,7 @@ func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx resp
 	if err != nil {
 		return canonical.ToolDeclaration{}, err
 	}
-	return canonical.NewFunctionTool(key, composeResponsesToolDescription(ctx.descriptions, tool.Description), schema, strict)
+	return canonical.NewFunctionTool(key, tool.Description, schema, strict)
 }
 
 func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
@@ -240,20 +268,7 @@ func decodeResponsesNestedCustomTool(tool responsesToolDefinitionDTO, ctx respon
 	if err != nil {
 		return canonical.ToolDeclaration{}, err
 	}
-	return canonical.NewCustomTool(key, composeResponsesToolDescription(ctx.descriptions, tool.Description), format)
-}
-
-func composeResponsesToolDescription(parts []string, extra string) string {
-	values := make([]string, 0, len(parts)+1)
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" { // swobu:io-string source=domain
-			values = append(values, trimmed)
-		}
-	}
-	if trimmed := strings.TrimSpace(extra); trimmed != "" { // swobu:io-string source=domain
-		values = append(values, trimmed)
-	}
-	return strings.Join(values, "\n\n")
+	return canonical.NewCustomTool(key, tool.Description, format)
 }
 
 func responsesToolFormatFromWire(raw json.RawMessage) (canonical.ToolFormat, error) {

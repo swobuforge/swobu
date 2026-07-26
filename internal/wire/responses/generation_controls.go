@@ -107,17 +107,17 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	wireReasoning := map[string]any{}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return provider.NewCandidateIncompatibility("Responses cannot represent disabled reasoning with readable disclosure")
+			return provider.NewIncompatibleTarget("Responses cannot represent disabled reasoning with readable disclosure")
 		}
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			wireReasoning["effort"] = "none"
 		case canonical.ReasoningAutomatic:
 			if !effortField.IsSpecified() {
-				return provider.NewCandidateIncompatibility("Responses target has no proof that omitted effort enables dynamic reasoning")
+				return provider.NewIncompatibleTarget("Responses target has no proof that omitted effort enables dynamic reasoning")
 			}
 		case canonical.ReasoningBudget:
-			return provider.NewCandidateIncompatibility("Responses cannot represent a numeric reasoning budget")
+			return provider.NewIncompatibleTarget("Responses cannot represent a numeric reasoning budget")
 		}
 	}
 	if effort, ok := effortField.Get(); ok {
@@ -149,7 +149,7 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		payload["top_p"] = value
 	}
 	if len(controls.Limits.StopSequences) > 0 {
-		return provider.NewCandidateIncompatibility("Responses cannot represent canonical stop sequences")
+		return provider.NewIncompatibleTarget("Responses cannot represent canonical stop sequences")
 	}
 	return nil
 }

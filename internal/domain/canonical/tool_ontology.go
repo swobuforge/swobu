@@ -6,6 +6,8 @@ const (
 	ToolTypeFunction     = "function"
 	ToolTypeCustom       = "custom"
 	ToolTypeWebSearch    = "web_search"
+	ToolTypeNamespace    = "namespace"
+	ToolTypeDiscovery    = "tool_search"
 	ToolNamespaceRequest = "request"
 )
 
@@ -16,6 +18,8 @@ const (
 	ToolKindFunction  ToolKind = "function"
 	ToolKindCustom    ToolKind = "custom"
 	ToolKindWebSearch ToolKind = "web_search"
+	ToolKindNamespace ToolKind = "namespace"
+	ToolKindDiscovery ToolKind = "tool_search"
 )
 
 // ToolKey is the single canonical identity shared by a declaration and calls
@@ -34,13 +38,22 @@ func NewToolKey(namespace string, kind ToolKind, name string) (ToolKey, error) {
 	if namespace == "" || name == "" {
 		return ToolKey{}, BadRequest("canonical tool key requires namespace and name")
 	}
-	if kind != ToolKindFunction && kind != ToolKindCustom && kind != ToolKindWebSearch {
+	if kind != ToolKindFunction && kind != ToolKindCustom && kind != ToolKindWebSearch && kind != ToolKindNamespace && kind != ToolKindDiscovery {
 		return ToolKey{}, BadRequest("canonical tool key kind is invalid")
 	}
 	if strings.Contains(namespace, "//") || strings.Contains(name, "/") {
 		return ToolKey{}, BadRequest("canonical tool key namespace or name is invalid")
 	}
 	return ToolKey{namespace: namespace, kind: kind, name: name}, nil
+}
+
+// ToolDiscoveryKey returns the fixed provider-neutral discovery identity.
+func ToolDiscoveryKey() ToolKey {
+	key, err := NewToolKey(ToolNamespaceRequest, ToolKindDiscovery, ToolTypeDiscovery)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 // WebSearchToolKey returns the one fixed request identity for the built-in
@@ -155,7 +168,7 @@ func ResolveToolDeclarationByKey(tools []ToolDeclaration, key ToolKey, specificT
 		foundType string
 		matched   bool
 	)
-	for _, tool := range tools {
+	for _, tool := range callableToolDeclarations(tools) {
 		if tool.Key() != key {
 			continue
 		}
@@ -218,7 +231,7 @@ func resolvePlainToolDeclarationByName(tools []ToolDeclaration, name string, spe
 		foundType string
 		matched   bool
 	)
-	for _, tool := range tools {
+	for _, tool := range callableToolDeclarations(tools) {
 		toolType := string(tool.Kind())
 		if normalizedSpecific != "" && toolType != normalizedSpecific {
 			continue
@@ -237,4 +250,16 @@ func resolvePlainToolDeclarationByName(tools []ToolDeclaration, name string, spe
 		return ToolDeclaration{}, "", BadRequest("canonical request tool references are undeclared tool")
 	}
 	return found, foundType, nil
+}
+
+func callableToolDeclarations(tools []ToolDeclaration) []ToolDeclaration {
+	var out []ToolDeclaration
+	for _, tool := range tools {
+		if namespace, ok := tool.Namespace(); ok {
+			out = append(out, callableToolDeclarations(namespace.Tools())...)
+			continue
+		}
+		out = append(out, tool)
+	}
+	return out
 }

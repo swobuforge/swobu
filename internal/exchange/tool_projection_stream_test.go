@@ -13,12 +13,14 @@ func TestProviderToolProjectionStreamRestoresExactCanonicalKey(t *testing.T) {
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	declaration, _ := canonical.NewFunctionTool(original, "", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	projected, table, _, err := provider.ProjectAttemptTools(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	attemptKey := projected.Tools()[0].Key()
+	attemptTools, _ := canonical.ToolEnvironmentAt(projected.Items(), len(projected.Items()))
+	attemptKey := attemptTools.Declarations()[0].Key()
 	callID, _ := canonical.NewToolCallID("call_1")
 	input, _ := canonical.ParseJSONObject([]byte(`{"title":"bug"}`))
 	completed, _ := canonical.NewToolCallItem(callID, attemptKey, canonical.NewJSONObjectToolInput(input))
@@ -53,7 +55,8 @@ func TestProviderToolProjectionStreamPreservesWebSearchLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Tools: canonical.Specify(set)})
+	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	_, table, _, err := provider.ProjectAttemptTools(request)
 	if err != nil {
 		t.Fatal(err)
