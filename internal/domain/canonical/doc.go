@@ -10,7 +10,7 @@
 // summary/trace parts plus one
 // optional closed opaque-thinking branch. Opaque fields clone defensively,
 // format as redacted values, and remain attached to their exact artifact. User
-// and assistant messages may carry portable images; system and developer
+// messages may carry portable images; assistant, system, and developer
 // directives remain text-only. Messages and tool results preserve their
 // distinct, ordered part grammars. Tool calls
 // bind a typed correlation ID, immutable ToolKey, and object-or-text input, so

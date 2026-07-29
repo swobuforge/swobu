@@ -171,10 +171,10 @@ func NewScopedMessageItem(role MessageRole, content []MessagePart, scope Context
 	if scope == ContextScopeRequest && role != MessageRoleSystem && role != MessageRoleDeveloper {
 		return CanonicalItem{}, fmt.Errorf("canonical request-scoped messages require system or developer role")
 	}
-	if role != MessageRoleUser && role != MessageRoleAssistant {
+	if role != MessageRoleUser {
 		for _, part := range content {
 			if part.Kind() == PartKindImage {
-				return CanonicalItem{}, fmt.Errorf("canonical image messages require user or assistant role")
+				return CanonicalItem{}, fmt.Errorf("canonical image messages require user role")
 			}
 		}
 	}

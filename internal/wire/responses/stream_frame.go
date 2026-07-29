@@ -629,7 +629,7 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 			return canonical.NewBackendError("responses", 0, "responses stream ended with unfinished output", "")
 		}
 		if s.completedItems == 0 && s.erasedOutput {
-			return canonical.NewBackendError("responses", 0, "responses output has no surviving semantic items", "")
+			return canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 		}
 		s.completed = true
 		deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())

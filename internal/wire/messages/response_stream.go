@@ -614,7 +614,7 @@ func (s *messagesEventReader) handleMessageStop(ctx context.Context) error {
 		return canonical.NewBackendError("", 0, "messages response ended with incomplete content blocks", "")
 	}
 	if s.erasedBlock && s.completedItems == 0 {
-		return canonical.NewBackendError("", 0, "messages response has no surviving semantic items", "")
+		return canonical.NewBackendError("", 0, "backend produced no usable canonical output", "")
 	}
 	if s.finishReason == "tool_use" && s.completedToolCalls == 0 {
 		return canonical.NewBackendError("", 0, "messages stop reason requires a surviving tool call", "")

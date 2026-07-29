@@ -227,7 +227,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 
 func validateMessagesResponseResidual(items []canonical.CanonicalItem, stopReason string, wireItems int) error {
 	if wireItems > 0 && len(items) == 0 {
-		return canonical.NewBackendError("", 0, "messages response has no surviving semantic items", "")
+		return canonical.NewBackendError("", 0, "backend produced no usable canonical output", "")
 	}
 	if strings.TrimSpace(stopReason) != "tool_use" {
 		return nil

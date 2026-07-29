@@ -3,7 +3,6 @@ package chatcompletions
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -12,71 +11,48 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestChatAssistantImageFailsAsClientOutputContract(t *testing.T) {
-	image, _ := canonical.NewURLImage("https://example.test/output.png", canonical.Unspecified[canonical.ImageDetail]())
-	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{
-		canonical.NewImageMessagePart(image),
-	})
+func TestDecodeChatProviderAssistantImageBesideTextDropsImage(t *testing.T) {
+	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"Here is the result"},{"type":"image_url","image_url":{"url":"https://example.test/output.png"}}]},"finish_reason":"stop"}]}`)
+	sink := &recordingDecisionSink{}
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", sink)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := canonical.NewCanonicalResponse(
-		canonical.ResponseRef{SwobuID: "response-image"},
-		"model",
-		[]canonical.CanonicalItem{message},
-		canonical.Completed("stop"),
-		canonical.NewUnknownTokenUsage(),
-	)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "response-image"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
-	var backendErr canonical.BackendError
-	if !errors.As(err, &backendErr) {
-		t.Fatalf("image output error = %T %v, want BackendError", err, err)
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, ok := response.Items()[0].Message()
+	if !ok || len(message.Content()) != 1 {
+		t.Fatalf("surviving message = %#v", response.Items())
+	}
+	text, ok := message.Content()[0].Text()
+	if !ok || text.Text() != "Here is the result" {
+		t.Fatalf("surviving text = %q, %v", text, ok)
+	}
+	drops := 0
+	for _, decision := range sink.effects {
+		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop &&
+			decision.Subject == compat.Subject("wire:/choices/0/message/content/1/type") {
+			drops++
+		}
+	}
+	if drops != 1 {
+		t.Fatalf("assistant image drop decisions = %d, want 1; all=%#v", drops, sink.effects)
 	}
 }
 
-func TestChatStreamedAssistantImageFailsAsClientOutputContract(t *testing.T) {
-	response := chatAssistantImageResponse(t)
-	events := canonical.SynthesizeResponseEnvelopeEvents(
-		"exchange-image", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
-	)
-	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(
-		context.Background(),
-		canonical.CanonicalRequest{},
-		canonical.NewSliceEventReader(events),
-		delivery.StreamingDelivery(delivery.FramingSSE),
-	)
-	if err == nil {
-		_, err = io.Copy(io.Discard, encoded.Stream.Body)
-	}
+func TestDecodeChatProviderImageOnlyFailsOutputContract(t *testing.T) {
+	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":[{"type":"image_url","image_url":{"url":"https://example.test/output.png"}}]},"finish_reason":"stop"}]}`)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", nil)
 	var backendErr canonical.BackendError
-	if !errors.As(err, &backendErr) {
-		t.Fatalf("streamed image output error = %T %v, want BackendError", err, err)
+	if !errors.As(err, &backendErr) || backendErr.Message != "backend produced no usable canonical output" {
+		t.Fatalf("image-only error = %T %v, want backend output-contract failure", err, err)
 	}
-}
-
-func chatAssistantImageResponse(t *testing.T) canonical.CanonicalResponse {
-	t.Helper()
-	image, _ := canonical.NewURLImage("https://example.test/output.png", canonical.Unspecified[canonical.ImageDetail]())
-	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{
-		canonical.NewImageMessagePart(image),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := canonical.NewCanonicalResponse(
-		canonical.ResponseRef{SwobuID: "response-image"},
-		"model",
-		[]canonical.CanonicalItem{message},
-		canonical.Completed("stop"),
-		canonical.NewUnknownTokenUsage(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return response
 }
 
 func TestEncodeChatImageOriginalMapsHighWithDecision(t *testing.T) {
