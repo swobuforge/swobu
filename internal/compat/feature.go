@@ -60,6 +60,7 @@ const (
 	ResponseItemsKind             Feature = "response.items.kind"
 	ResponseItemsMessageRole      Feature = "response.items.message.role"
 	ResponseItemsMessageText      Feature = "response.items.message.content.text"
+	ResponseItemsMessageCitations Feature = "response.items.message.content.text.citations"
 	ResponseItemsToolCallCallID   Feature = "response.items.tool_call.call_id"
 	ResponseItemsToolCallTool     Feature = "response.items.tool_call.tool.kind"
 	ResponseItemsToolCallName     Feature = "response.items.tool_call.tool.name"

@@ -42,21 +42,20 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		}
 		switch itemType {
 		case "additional_tools":
-			if strings.TrimSpace(item.Role) != "developer" { // swobu:io-string source=boundary
-				return nil, canonical.NotImplemented("Swobu cannot yet project a Responses additional_tools carrier outside the developer role")
+			if role := strings.TrimSpace(item.Role); role != "" && role != "developer" { // swobu:io-string source=boundary
+				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsMessageRole, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
+					return nil, err
+				}
 			}
 			var wireTools []responsesToolDefinitionDTO
 			if err := json.Unmarshal(item.Tools, &wireTools); err != nil {
 				return nil, canonical.BadRequest("responses request additional_tools tools are invalid")
 			}
-			if path, kind, found := findResponsesUnsupportedAdditionalToolKind(wireTools, fmt.Sprintf("/input/%d/tools", idx)); found {
-				return nil, canonical.NotImplemented(fmt.Sprintf("Swobu has no canonical projection for Responses request %s tool type %q", path, kind))
-			}
 			scope := canonical.ContextScopeHistory
 			if lite && idx == 0 {
 				scope = canonical.ContextScopeRequest
 			}
-			occurrences, embeddedTools, updatedAccess, err := decodeResponsesToolOccurrences(wireTools, scope, sink, exchangeID, true, *access)
+			occurrences, embeddedTools, updatedAccess, err := decodeResponsesToolOccurrences(wireTools, scope, fmt.Sprintf("wire:/input/%d/tools", idx), sink, exchangeID, *access)
 			if err != nil {
 				return nil, err
 			}
@@ -80,7 +79,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			} else if role == "developer" {
 				author = canonical.MessageRoleDeveloper
 			}
-			parts, err := decodeResponsesMessageContent(item.Content, author, imageLimits)
+			parts, err := decodeResponsesMessageContent(item.Content, author, imageLimits, sink, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -165,7 +164,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				}
 				return nil, canonical.BadRequest("responses request function_call_output items require call_id")
 			}
-			output, err := decodeResponseOutputParts(item.Output, "function_call_output", imageLimits)
+			output, err := decodeResponseOutputParts(item.Output, "function_call_output", imageLimits, sink, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -184,7 +183,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if len(rawOutput) == 0 || bytes.Equal(rawOutput, []byte("null")) {
 				return nil, canonical.BadRequest("responses request custom_tool_call_output items require output")
 			}
-			output, err := decodeResponseOutputParts(item.Output, "custom_tool_call_output", imageLimits)
+			output, err := decodeResponseOutputParts(item.Output, "custom_tool_call_output", imageLimits, sink, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -203,7 +202,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_call requires call_id")
 			}
-			arguments, err := canonical.ParseJSONObject(item.Arguments)
+			arguments, err := decodeResponsesFunctionCallArguments(item.Arguments)
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_call arguments are invalid")
 			}
@@ -224,11 +223,14 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output requires call_id")
 			}
-			loaded, err := decodeResponsesAdditionalTools(item.Tools, sink, exchangeID)
+			projected, err := decodeResponsesAdditionalTools(item.Tools, fmt.Sprintf("wire:/input/%d/tools", idx), compat.RequestToolsKind, sink, exchangeID)
 			if err != nil {
 				return nil, err
 			}
-			set, err := canonical.NewToolSet(loaded)
+			if projected.allErased() {
+				return nil, canonical.BadRequest("responses tool_search_output has no surviving declarations")
+			}
+			set, err := canonical.NewToolSet(projected.declarations)
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output tools are invalid")
 			}
@@ -237,11 +239,24 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				return nil, err
 			}
 			decoded = append(decoded, result)
-			tools, err = mergeResponsesToolDeclarations(tools, loaded)
+			tools, err = mergeResponsesToolDeclarations(tools, projected.declarations)
 			if err != nil {
 				return nil, err
 			}
 		case "web_search_call":
+			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
+			if err != nil {
+				if err := emitResponsesCompatibilityDecision(
+					sink,
+					exchangeID,
+					compat.RequestItemsKind,
+					compat.Drop,
+					responsesInputSubject(idx, "status"),
+				); err != nil {
+					return nil, err
+				}
+				state = responsesWebSearchUnknown
+			}
 			rawAction := bytes.TrimSpace(item.Action)
 			if len(rawAction) == 0 || bytes.Equal(rawAction, []byte("null")) {
 				if strings.TrimSpace(item.Status) != "completed" { // swobu:io-string source=boundary
@@ -262,10 +277,6 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
 			}
-			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
-			if err != nil {
-				return nil, canonical.BadRequest("responses request web-search status is unsupported")
-			}
 			lifecycle, err := decodeResponsesWebSearchLifecycle(callID, rawAction, state)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request web-search history is invalid")
@@ -274,7 +285,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		case "reasoning":
 			reasoning, present, err := decodeResponsesReasoningItem(responsesWireOutputItemDTO{
 				Type: item.Type, ID: item.ID, Status: item.Status, Summary: item.Summary, Content: item.Content, EncryptedContent: item.EncryptedContent,
-			})
+			}, sink, exchangeID, compat.RequestItemsKind, fmt.Sprintf("wire:/input/%d", idx), false)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request reasoning item is invalid")
 			}
@@ -282,8 +293,9 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				decoded = append(decoded, reasoning)
 			}
 		default:
-			path := fmt.Sprintf("/input/%d/type", idx)
-			return nil, canonical.NotImplemented(fmt.Sprintf("Swobu has no canonical projection for Responses request %s item type %q", path, itemType))
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, responsesInputSubject(idx, "type")); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return decoded, nil
@@ -321,58 +333,32 @@ func mergeResponsesToolDeclarations(current, added []canonical.ToolDeclaration) 
 	return merged, nil
 }
 
-func decodeResponsesAdditionalTools(raw json.RawMessage, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+type responsesAdditionalToolsProjection struct {
+	declarations []canonical.ToolDeclaration
+	wireCount    int
+}
+
+func (p responsesAdditionalToolsProjection) allErased() bool {
+	return p.wireCount > 0 && len(p.declarations) == 0
+}
+
+func decodeResponsesAdditionalTools(raw json.RawMessage, subjectPrefix string, feature compat.Feature, sink compat.Sink, exchangeID string) (responsesAdditionalToolsProjection, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] != '[' {
-		return nil, canonical.BadRequest("responses request additional_tools tools must be an array")
+		return responsesAdditionalToolsProjection{}, canonical.BadRequest("responses request additional_tools tools must be an array")
 	}
 	var wireTools []responsesToolDefinitionDTO
 	if err := json.Unmarshal(trimmed, &wireTools); err != nil {
-		return nil, canonical.BadRequest("responses request additional_tools tools are invalid")
+		return responsesAdditionalToolsProjection{}, canonical.BadRequest("responses request additional_tools tools are invalid")
 	}
-	if path, kind, found := findResponsesUnsupportedAdditionalToolKind(wireTools, "/input/0/tools"); found {
-		return nil, canonical.NotImplemented(fmt.Sprintf("Swobu has no canonical projection for Responses request %s tool type %q", path, kind))
-	}
-	decoded, err := decodeResponsesTools(wireTools, sink, exchangeID)
+	decoded, err := decodeResponsesTools(wireTools, subjectPrefix, feature, sink, exchangeID)
 	if err != nil {
-		return nil, err
+		return responsesAdditionalToolsProjection{}, err
 	}
-	if decoded == nil {
-		return []canonical.ToolDeclaration{}, nil
-	}
-	return decoded, nil
-}
-
-func findResponsesUnsupportedAdditionalToolKind(tools []responsesToolDefinitionDTO, parentPath string) (string, string, bool) {
-	for index, tool := range tools {
-		observedKind := strings.TrimSpace(tool.Type)        // swobu:io-string source=boundary
-		kind := strings.ToLower(observedKind)               // swobu:io-string source=boundary
-		toolPath := fmt.Sprintf("%s/%d", parentPath, index) // swobu:io-string source=boundary
-		if kind == "" {
-			switch {
-			case len(tool.Tools) > 0:
-				kind = "namespace"
-			case len(tool.Format) > 0:
-				kind = "custom"
-			default:
-				kind = "function"
-			}
-		}
-		switch kind {
-		case "namespace":
-			if path, nestedKind, found := findResponsesUnsupportedAdditionalToolKind(tool.Tools, toolPath+"/tools"); found {
-				return path, nestedKind, true
-			}
-		case "function", "custom", "tool_search", "web_search", "web_search_preview":
-		case "mcp":
-			if strings.Count(parentPath, "/tools") != 1 {
-				return toolPath + "/type", observedKind, true
-			}
-		default:
-			return toolPath + "/type", observedKind, true
-		}
-	}
-	return "", "", false
+	return responsesAdditionalToolsProjection{
+		declarations: append([]canonical.ToolDeclaration(nil), decoded...),
+		wireCount:    len(wireTools),
+	}, nil
 }
 
 func equalResponsesToolDeclarations(left, right []canonical.ToolDeclaration) bool {

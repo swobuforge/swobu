@@ -43,7 +43,7 @@ func mustMessageItem(author canonical.MessageRole, text string) canonical.Canoni
 }
 
 func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalResponse {
-	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_output"}, "gpt-4o", items, "stop", canonical.NewUnknownTokenUsage())
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_output"}, "gpt-4o", items, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func makeResponse(items ...canonical.CanonicalItem) canonical.CanonicalResponse 
 }
 
 func checkpoint(id canonical.SwobuResponseID, request canonical.CanonicalRequest, response canonical.CanonicalResponse, responses *canonical.ResponsesContinuation) Checkpoint {
-	bound, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id, Responses: responses}, response.Model(), response.Items(), response.CompletionReason(), response.Usage())
+	bound, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id, Responses: responses}, response.Model(), response.Items(), response.Completion(), response.Usage())
 	if err != nil {
 		panic(err)
 	}
@@ -189,6 +189,79 @@ func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
 	})
 	if _, err := Resume(duplicate, multipleRecord); err == nil {
 		t.Fatal("duplicate tool results silently abandoned unfinished turn")
+	}
+}
+
+func TestResumeValidatesRequiredPolicyAfterRestoringUnfinishedTurnTools(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
+	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("m"),
+		Items:      []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tool), canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+	})
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	record := checkpoint("resp_previous", previous, makeResponse(call), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:            canonical.Specify("m"),
+		Items:            []canonical.CanonicalItem{result},
+		ToolPolicy:       canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatalf("Resume rejected valid restored tool environment: %v", err)
+	}
+	if len(canonicaltest.Tools(resolved.Full)) != 1 {
+		t.Fatalf("resolved tools = %#v, want restored search declaration", canonicaltest.Tools(resolved.Full))
+	}
+}
+
+func TestBeginValidatesRequiredPolicyAfterSessionMaterialization(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("m"),
+		Items:      makeItems("run"),
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+	})
+	if _, err := Begin(request); err == nil {
+		t.Fatal("Begin accepted required policy without a materialized tool")
+	}
+}
+
+func TestBeginRejectsOrphanToolResult(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("call_1")
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	request := makeRequest("m", []canonical.CanonicalItem{result}, nil)
+	if _, err := Begin(request); err == nil {
+		t.Fatal("Begin accepted a tool result without a preceding call")
+	}
+}
+
+func TestBeginRejectsOrphanDiscoveryResult(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_1")
+	loaded := mustTestToolSet(t, canonical.NewWebSearchDeclaration())
+	result, _ := canonical.NewToolDiscoveryResultItem(callID, loaded, canonical.DiscoveryExecutorClient)
+	request := makeRequest("m", []canonical.CanonicalItem{result}, nil)
+	if _, err := Begin(request); err == nil {
+		t.Fatal("Begin accepted a discovery result without a preceding discovery call")
+	}
+}
+
+func TestResolvedRequestValidatesFullButNotNativeDelta(t *testing.T) {
+	full := makeRequest("m", makeItems("materialized history"), nil)
+	callID, _ := canonical.NewToolCallID("call_1")
+	orphan, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	delta := makeRequest("m", []canonical.CanonicalItem{orphan}, nil)
+
+	resolved, err := newResolvedRequest(full, delta, ResolvedMedia{})
+	if err != nil {
+		t.Fatalf("native delta was incorrectly subjected to full-history validation: %v", err)
+	}
+	if len(resolved.Delta.Items()) != 1 || resolved.Delta.Items()[0].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("resolved delta = %#v, want target-held-state-dependent result", resolved.Delta.Items())
 	}
 }
 
@@ -443,7 +516,7 @@ func TestResumeExplicitDisabledReasoningClearsInheritedDisclosure(t *testing.T) 
 }
 
 func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
-	source := canonical.NewCanonicalRequest(canonical.RequestParams{})
+	source := canonical.NewCanonicalRequest(canonical.RequestParams{Items: makeItems("turn")})
 	prepared, err := Begin(source)
 	if err != nil {
 		t.Fatal(err)
@@ -471,6 +544,7 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	}
 	explicit := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:      canonical.Specify(""),
+		Items:      makeItems("turn"),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),
 	})
 	explicitPrepared, err := Begin(explicit)
@@ -574,13 +648,13 @@ func TestResolvedRequestUsesDeltaOnlyForApplicableNativeContinuation(t *testing.
 }
 
 func TestResumeIsDeterministicOverStoreResolvedCheckpoint(t *testing.T) {
-	record := checkpoint("resp_prev", makeRequest("m", nil, nil), makeResponse(), nil)
+	record := checkpoint("resp_prev", makeRequest("m", makeItems("turn"), nil), makeResponse(), nil)
 	expired := time.Now().UTC().Add(-time.Minute)
 	record.ExpiresAt = &expired
-	if _, err := Resume(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "resp_prev"}), record); err != nil {
+	if _, err := Resume(makeRequest("m", makeItems("continue"), &canonical.ResponseRef{SwobuID: "resp_prev"}), record); err != nil {
 		t.Fatalf("store-resolved checkpoint rejected: %v", err)
 	}
-	if _, err := Resume(makeRequest("m", nil, &canonical.ResponseRef{SwobuID: "other"}), record); err == nil {
+	if _, err := Resume(makeRequest("m", makeItems("continue"), &canonical.ResponseRef{SwobuID: "other"}), record); err == nil {
 		t.Fatal("mismatched record accepted")
 	}
 }
