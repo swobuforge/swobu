@@ -16,6 +16,7 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -48,7 +49,10 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes one exact Bedrock Mantle backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	codec := protocolcodec.Codec{Protocol: target.ProtocolKind}
+	codec := provider.Codec(protocolcodec.Codec{Protocol: target.ProtocolKind})
+	if target.ProtocolKind == protocolkind.Messages {
+		codec = mantleMessagesCodec{Codec: codec}
+	}
 	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
@@ -68,6 +72,13 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	if err != nil {
 		return nil, provider.NewIncompatibleTarget(err.Error())
 	}
+	requestURL := httpedge.JoinBaseURLAndPath(target.BaseURL, path)
+	if target.ProtocolKind == protocolkind.Messages {
+		path = "/anthropic/v1/messages"
+		baseURL := strings.TrimRight(target.BaseURL, "/")
+		baseURL = strings.TrimSuffix(baseURL, "/v1")
+		requestURL = httpedge.JoinBaseURLAndPath(baseURL, path)
+	}
 
 	wireReqCarrier := doc
 	if wireReqCarrier.IsEmpty() {
@@ -77,7 +88,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		httpedge.JoinBaseURLAndPath(target.BaseURL, path),
+		requestURL,
 		bytes.NewReader(wireReqBody),
 	)
 	if err != nil {
@@ -85,6 +96,9 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	if target.ProtocolKind == protocolkind.Messages {
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
 	}
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 

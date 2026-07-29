@@ -348,7 +348,7 @@ func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T
 
 func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/messages" {
+		if r.URL.Path != "/anthropic/v1/messages" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

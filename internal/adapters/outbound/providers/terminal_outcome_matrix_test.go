@@ -135,7 +135,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			responseStatus:   http.StatusOK,
 			responseHeaders:  map[string]string{"Content-Type": "application/json"},
 			responseBody:     `{"id":"msg_1","model":"openai.gpt-4.1-mini","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`,
-			wantPath:         "/v1/messages",
+			wantPath:         "/anthropic/v1/messages",
 			wantOutputReason: "end_turn",
 			wantWireContains: []string{`"stop_reason":"end_turn"`},
 		},
@@ -222,7 +222,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ProjectResponse returned error: %v", err)
 				}
-				if got := out.CompletionReason(); got != tc.wantOutputReason {
+				if got := out.Completion().Reason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
 				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseDocument(canonical.CanonicalRequest{}, *out)
@@ -254,10 +254,10 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ProjectResponse returned error: %v", err)
 				}
-				if got := out.CompletionReason(); got != tc.wantOutputReason {
+				if got := out.Completion().Reason(); got != tc.wantOutputReason {
 					t.Fatalf("finish reason = %q, want %q", got, tc.wantOutputReason)
 				}
-				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())
+				events := canonical.SynthesizeResponseEnvelopeEvents(req.ExchangeID, out.Response(), out.Model(), out.Items(), out.Completion(), out.Usage())
 				clientResult, err := resolver.ClientCodec(clientFamilyForProtocol(tc.protocolKind)).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), tc.providerDelivery)
 				if err != nil {
 					t.Fatalf("EncodeResponseStream returned error: %v", err)

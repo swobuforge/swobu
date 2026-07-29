@@ -3,6 +3,7 @@ package bedrock
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,106 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 		"",
 		string(kind))
 
+}
+
+func TestBedrockMantleMessagesRejectsStructuredOutputBeforeTransport(t *testing.T) {
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:   canonical.OutputFormatJSONSchema,
+		Name:   "reply",
+		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+		Strict: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        canonical.Specify("model"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(format),
+	})
+	target := newBedrockTarget(
+		"https://bedrock-mantle.us-east-1.api.aws/v1",
+		"env:AWS_BEARER_TOKEN_BEDROCK",
+		protocolkind.Messages,
+	)
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = backend.Codec.Encode(provider.Request{
+		Canonical: request,
+		Delivery:  delivery.BufferedDelivery(),
+	})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("encode error = %T %v, want IncompatibleTargetError", err, err)
+	}
+}
+
+func TestBedrockMantleNonMessagesProtocolsKeepTheirStructuredOutputSemantics(t *testing.T) {
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:   canonical.OutputFormatJSONSchema,
+		Name:   "reply",
+		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+		Strict: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        canonical.Specify("model"),
+		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(format),
+	})
+	for _, kind := range []protocolkind.ProtocolKind{
+		protocolkind.ChatCompletions,
+		protocolkind.Responses,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			target := newBedrockTarget(
+				"https://bedrock-mantle.us-east-1.api.aws/v1",
+				"env:AWS_BEARER_TOKEN_BEDROCK",
+				kind,
+			)
+			target.Model = request.Model()
+			backend, err := NewExecutor(nil).ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := backend.Codec.Encode(provider.Request{
+				Canonical: request,
+				Delivery:  delivery.BufferedDelivery(),
+			}); err != nil {
+				t.Fatalf("%s structured output rejected by Messages-only Mantle policy: %v", kind, err)
+			}
+		})
+	}
+}
+
+func TestBedrockConverseEndpointIsNotMisrepresentedAsACompatibleMessagesTarget(t *testing.T) {
+	called := false
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("transport must not be reached")
+	})}
+	target := newBedrockTarget(
+		"https://bedrock-runtime.us-east-1.amazonaws.com",
+		"env:AWS_BEARER_TOKEN_BEDROCK",
+		protocolkind.Messages,
+	)
+	_, err := NewExecutor(client).Send(
+		context.Background(),
+		target,
+		carrier.NewDocument(protocolkind.Messages, "application/json", nil, []byte(`{"output_config":{"format":{"type":"json_schema"}}}`), carrier.Meta{}),
+	)
+	var endpointErr canonical.Error
+	if !errors.As(err, &endpointErr) || endpointErr.Code != canonical.ErrorCodeBadEndpoint {
+		t.Fatalf("send error = %T %v, want unsupported endpoint error", err, err)
+	}
+	if called {
+		t.Fatal("Bedrock Converse endpoint reached transport through Mantle adapter")
+	}
 }
 
 func TestBedrockChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
@@ -496,8 +597,11 @@ func TestSendProviderRequest_StreamingMessagesRoutesToMantlePath(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method=%q want POST", r.Method)
 		}
-		if r.URL.Path != "/messages" {
-			t.Fatalf("path=%q want /messages", r.URL.Path)
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("path=%q want /anthropic/v1/messages", r.URL.Path)
+		}
+		if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Fatalf("anthropic-version=%q want 2023-06-01", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("authorization=%q want Bearer test-token", got)
@@ -546,8 +650,8 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 		if r.Method != http.MethodPost {
 			t.Fatalf("method=%q want POST", r.Method)
 		}
-		if r.URL.Path != "/messages" {
-			t.Fatalf("path=%q want /messages", r.URL.Path)
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("path=%q want /anthropic/v1/messages", r.URL.Path)
 		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
