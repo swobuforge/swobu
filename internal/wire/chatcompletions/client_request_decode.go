@@ -95,7 +95,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	outputFormat, err := decodeChatCompletionsOutputFormat(dto.ResponseFormat)
+	outputFormat, err := decodeChatCompletionsOutputFormat(dto.ResponseFormat, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -116,7 +116,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions tools are invalid")
 	}
 	contextItems := append([]canonical.CanonicalItem(nil), instructions...)
-	if dto.Tools != nil {
+	if len(tools) > 0 {
 		declarations, err := canonical.NewToolDeclarationsItem(toolSet, canonical.ContextScopeRequest)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -154,7 +154,12 @@ func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canoni
 			if role == "developer" {
 				author = canonical.MessageRoleDeveloper
 			}
-			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", author, imageLimits)
+			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", author, imageLimits, func(partIndex int, _ string) error {
+				return emitChatCompletionsCompatibilityDecision(
+					sink, exchangeID, compat.RequestItemsKind, compat.Drop,
+					compat.Subject("wire:/messages/"+strconv.Itoa(idx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+				)
+			})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -179,7 +184,8 @@ func newChatCanonicalRequest(params canonical.RequestParams, resolvedDelivery de
 	if err := shared.ValidateImageDecodeLimits(params.Items, imageLimits); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request image limits are exceeded")
 	}
-	return canonical.NewCanonicalRequest(params), resolvedDelivery, nil
+	request := canonical.NewCanonicalRequest(params)
+	return request, resolvedDelivery, nil
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes wire tool-call kinds.
@@ -203,7 +209,12 @@ func decodeChatCompletionsItems(
 			return nil, canonical.BadRequest("chat completions tool messages require tool_call_id")
 		}
 		callID, _ := canonical.NewToolCallID(toolCallID)
-		parts, err := decodeChatCompletionsTextParts(content, imageLimits)
+		parts, err := decodeChatCompletionsTextParts(content, imageLimits, func(partIndex int, _ string) error {
+			return emitChatCompletionsCompatibilityDecision(
+				sink, exchangeID, compat.RequestItemsKind, compat.Drop,
+				compat.Subject("wire:/messages/"+strconv.Itoa(msgIdx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+			)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -219,12 +230,24 @@ func decodeChatCompletionsItems(
 	} else if role == "developer" {
 		author = canonical.MessageRoleDeveloper
 	}
-	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author, imageLimits)
+	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author, imageLimits, func(partIndex int, _ string) error {
+		return emitChatCompletionsCompatibilityDecision(
+			sink, exchangeID, compat.RequestItemsKind, compat.Drop,
+			compat.Subject("wire:/messages/"+strconv.Itoa(msgIdx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+		)
+	})
 	if err != nil {
 		return nil, err
 	}
 	items := append([]canonical.CanonicalItem(nil), textItems...)
 	for idx, call := range toolCalls {
+		callType := strings.ToLower(strings.TrimSpace(call.Type)) // swobu:io-string source=domain
+		if callType != "" && callType != canonical.ToolTypeFunction && callType != canonical.ToolTypeCustom {
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallTool, compat.Drop, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
 			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
@@ -232,7 +255,7 @@ func decodeChatCompletionsItems(
 			}
 			id = openaiwire.GeneratedToolUseID(msgIdx, idx)
 		}
-		switch strings.ToLower(strings.TrimSpace(call.Type)) { // swobu:io-string source=domain
+		switch callType {
 		case "", "function":
 			if call.Function == nil {
 				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
@@ -280,11 +303,6 @@ func decodeChatCompletionsItems(
 				return nil, canonical.BadRequest("chat completions custom tool call is invalid")
 			}
 			items = append(items, item)
-		default:
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallTool, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
-				return nil, err
-			}
-			return nil, canonical.BadRequest("chat completions request contains an unsupported tool call type")
 		}
 	}
 	return items, nil
@@ -353,8 +371,12 @@ func joinItemText(items []canonical.CanonicalItem) string {
 	return builder.String()
 }
 
-func decodeChatCompletionsTextParts(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
-	items, err := openaiwire.DecodeTextContentItems(raw, "chat completions", canonical.MessageRoleUser, imageLimits)
+func decodeChatCompletionsTextParts(
+	raw json.RawMessage,
+	imageLimits shared.ImageDecodeLimitPolicy,
+	onUnknown func(int, string) error,
+) ([]canonical.ToolResultPart, error) {
+	items, err := openaiwire.DecodeTextContentItems(raw, "chat completions", canonical.MessageRoleUser, imageLimits, onUnknown)
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}

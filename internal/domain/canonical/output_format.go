@@ -2,7 +2,6 @@ package canonical
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -11,13 +10,14 @@ type OutputFormatKind string
 const (
 	OutputFormatUnspecified OutputFormatKind = ""
 	OutputFormatText        OutputFormatKind = "text"
+	OutputFormatJSONObject  OutputFormatKind = "json_object"
 	OutputFormatJSONSchema  OutputFormatKind = "json_schema"
 )
 
 // OutputFormat describes the final answer format requested for one canonical
-// request. Plain text remains the default; structured output is represented
-// explicitly and must validate against the supported subset before adapters
-// lower it.
+// request. Plain text remains the default. Structured output preserves a valid
+// JSON-object schema opaquely; provider adapters, not canonical admission, own
+// support for particular JSON Schema dialects and keywords.
 type OutputFormat struct {
 	Kind        OutputFormatKind
 	Name        string
@@ -48,6 +48,11 @@ func NewOutputFormat(params OutputFormatParams) (OutputFormat, error) {
 			return OutputFormat{}, BadRequest("output format text does not accept schema, description, or strict mode")
 		}
 		return OutputFormat{Kind: OutputFormatText}, nil
+	case OutputFormatJSONObject:
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
+			return OutputFormat{}, BadRequest("output format json_object does not accept schema, description, or strict mode")
+		}
+		return OutputFormat{Kind: OutputFormatJSONObject}, nil
 	case OutputFormatJSONSchema:
 		name := strings.TrimSpace(params.Name) // swobu:io-string source=domain
 		if err := validateOutputFormatName(name); err != nil {
@@ -124,130 +129,9 @@ func validateOutputFormatSchema(raw string) error {
 	if err := json.Unmarshal([]byte(trimmed), &node); err != nil {
 		return BadRequest("output format schema is invalid")
 	}
-	obj, ok := node.(map[string]any)
+	_, ok := node.(map[string]any)
 	if !ok {
 		return BadRequest("output format schema must be a JSON object")
-	}
-	if err := validateOutputFormatSchemaObject(obj); err != nil {
-		return err
-	}
-	return nil
-}
-
-// swobu:lint ignore string-switch because=JSON Schema boundary validation branches on keyword strings.
-func validateOutputFormatSchemaObject(obj map[string]any) error {
-	for key, value := range obj {
-		switch key {
-		case "type":
-			if err := validateOutputFormatSchemaType(value); err != nil {
-				return err
-			}
-		case "properties":
-			props, ok := value.(map[string]any)
-			if !ok {
-				return BadRequest("output format schema properties must be an object")
-			}
-			for _, propValue := range props {
-				propSchema, ok := propValue.(map[string]any)
-				if !ok {
-					return BadRequest("output format schema properties must contain objects")
-				}
-				if err := validateOutputFormatSchemaObject(propSchema); err != nil {
-					return err
-				}
-			}
-		case "required":
-			if err := validateOutputFormatSchemaRequired(value); err != nil {
-				return err
-			}
-		case "additionalProperties":
-			if err := validateOutputFormatSchemaAdditionalProperties(value); err != nil {
-				return err
-			}
-		case "items":
-			itemSchema, ok := value.(map[string]any)
-			if !ok {
-				return BadRequest("output format schema items must be an object")
-			}
-			if err := validateOutputFormatSchemaObject(itemSchema); err != nil {
-				return err
-			}
-		case "enum":
-			if err := validateOutputFormatSchemaEnum(value); err != nil {
-				return err
-			}
-		case "description":
-			if _, ok := value.(string); !ok {
-				return BadRequest("output format schema description must be a string")
-			}
-		case "oneOf", "anyOf", "allOf", "not", "patternProperties", "dependentSchemas", "$ref":
-			return BadRequest(fmt.Sprintf("output format schema contains unsupported keyword %q", key))
-		default:
-			return BadRequest(fmt.Sprintf("output format schema contains unsupported keyword %q", key))
-		}
-	}
-	return nil
-}
-
-func validateOutputFormatSchemaType(value any) error {
-	switch typed := value.(type) {
-	case string:
-		if strings.TrimSpace(typed) == "" { // swobu:io-string source=domain
-			return BadRequest("output format schema type must not be empty")
-		}
-		return nil
-	case []any:
-		if len(typed) == 0 {
-			return BadRequest("output format schema type must not be empty")
-		}
-		for _, item := range typed {
-			if _, ok := item.(string); !ok {
-				return BadRequest("output format schema type array must contain strings")
-			}
-		}
-		return nil
-	default:
-		return BadRequest("output format schema type must be a string")
-	}
-}
-
-func validateOutputFormatSchemaRequired(value any) error {
-	items, ok := value.([]any)
-	if !ok {
-		return BadRequest("output format schema required must be an array")
-	}
-	for _, item := range items {
-		if _, ok := item.(string); !ok {
-			return BadRequest("output format schema required must contain strings")
-		}
-	}
-	return nil
-}
-
-func validateOutputFormatSchemaAdditionalProperties(value any) error {
-	switch typed := value.(type) {
-	case bool:
-		_ = typed
-		return nil
-	case map[string]any:
-		return validateOutputFormatSchemaObject(typed)
-	default:
-		return BadRequest("output format schema additionalProperties must be a boolean or object")
-	}
-}
-
-func validateOutputFormatSchemaEnum(value any) error {
-	items, ok := value.([]any)
-	if !ok {
-		return BadRequest("output format schema enum must be an array")
-	}
-	for _, item := range items {
-		switch item.(type) {
-		case string, bool, float64, nil:
-			continue
-		default:
-			return BadRequest("output format schema enum must contain primitive values")
-		}
 	}
 	return nil
 }

@@ -83,7 +83,7 @@ func TestDecodeTextContentItems_UsesWalker(t *testing.T) {
 	items, err := DecodeTextContentItems(json.RawMessage(`[
 		{"type":"input_text","input_text":"hello"},
 		{"type":"output_text","text":"world"}
-	]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024}, nil)
 	if err != nil {
 		t.Fatalf("DecodeTextContentItems returned error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestOpenAIImageAutoCollapsesAndMediaAliasNormalizes(t *testing.T) {
 }
 
 func TestDecodeTextContentItemsRejectsImageOutsideUserRole(t *testing.T) {
-	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]`), "surface", canonical.MessageRoleAssistant, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024}, nil)
 	if err == nil {
 		t.Fatal("assistant image input was accepted")
 	}
@@ -137,7 +137,7 @@ func TestDecodeTextContentItemsRejectsImageOutsideUserRole(t *testing.T) {
 
 func TestDecodeTextContentItemsRejectsProviderFileIDWithoutEchoingIt(t *testing.T) {
 	const fileID = "file_secret_123"
-	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"input_image","file_id":"`+fileID+`"}]`), "surface", canonical.MessageRoleUser, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024})
+	_, err := DecodeTextContentItems(json.RawMessage(`[{"type":"input_image","file_id":"`+fileID+`"}]`), "surface", canonical.MessageRoleUser, shared.ImageDecodeLimitPolicy{MaxInlineBytes: 1024}, nil)
 	if err == nil {
 		t.Fatal("provider image file ID was accepted")
 	}

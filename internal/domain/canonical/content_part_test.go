@@ -27,12 +27,17 @@ func TestCanonicalRejectsWireAutoAsExplicitDetail(t *testing.T) {
 	}
 }
 
-func TestCanonicalImagePlacementRequiresUserMessageOrToolResult(t *testing.T) {
+func TestCanonicalImagePlacementAllowsConversationMessagesAndToolResults(t *testing.T) {
 	image, err := NewInlineImage(ImageMediaPNG, pngSignature(), Unspecified[ImageDetail]())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, role := range []MessageRole{MessageRoleAssistant, MessageRoleSystem, MessageRoleDeveloper} {
+	for _, role := range []MessageRole{MessageRoleUser, MessageRoleAssistant} {
+		if _, err := NewMessageItem(role, []MessagePart{NewImageMessagePart(image)}); err != nil {
+			t.Fatalf("canonical rejected image in %s message: %v", role, err)
+		}
+	}
+	for _, role := range []MessageRole{MessageRoleSystem, MessageRoleDeveloper} {
 		if _, err := NewMessageItem(role, []MessagePart{NewImageMessagePart(image)}); err == nil {
 			t.Fatalf("canonical accepted image in %s message", role)
 		}

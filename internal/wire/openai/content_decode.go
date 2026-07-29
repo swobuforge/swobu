@@ -93,14 +93,14 @@ func WalkContentParts(parts []ContentPartItem, visit func(int, ContentPartItem) 
 	return nil
 }
 
-func DecodeTextContentItems(raw json.RawMessage, surface string, author canonical.MessageRole, limits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, error) {
+func DecodeTextContentItems(raw json.RawMessage, surface string, author canonical.MessageRole, limits shared.ImageDecodeLimitPolicy, onUnknown func(int, string) error) ([]canonical.CanonicalItem, error) {
 	parts, err := DecodeContentParts(raw, surface+" message content is invalid")
 	if err != nil {
 		return nil, err
 	}
 
 	content := make([]canonical.MessagePart, 0, len(parts))
-	err = WalkContentParts(parts, func(_ int, part ContentPartItem) error {
+	err = WalkContentParts(parts, func(index int, part ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if partType == "" {
 			partType = "text"
@@ -131,7 +131,10 @@ func DecodeTextContentItems(raw json.RawMessage, surface string, author canonica
 			}
 			content = append(content, canonical.NewImageMessagePart(image))
 		default:
-			return canonical.BadRequest(surface + " message content contains an unsupported part type")
+			if onUnknown != nil {
+				return onUnknown(index, partType)
+			}
+			return nil
 		}
 		return nil
 	})

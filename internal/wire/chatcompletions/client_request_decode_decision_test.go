@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeClientRequestWithDecisions_RecordsToolCallIDAndKindScars(t *testing.T) {
+func TestDecodeClientRequestWithDecisions_DropsUnknownToolCallAndPreservesKnownSibling(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -19,24 +19,17 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallIDAndKindScars(t *testi
 		"tools":[{"type":"function","function":{"name":"search","parameters":{"type":"object"}}}],
 		"messages":[
 			{"role":"user","tool_calls":[{"type":"function","function":{"name":"search","arguments":{"query":"hello"}}}]},
-			{"role":"assistant","tool_calls":[{"type":"unsupported","id":"tc_2"}]}
+			{"role":"assistant","content":"kept","tool_calls":[{"type":"unsupported","id":"tc_2"}]}
 		]
 	}`)
 	sink := &recordingDecisionSink{}
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_decode")
-	if err == nil {
-		t.Fatal("expected DecodeClientRequestWithDecisions to reject unsupported tool call type")
+	request, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_decode")
+	if err != nil {
+		t.Fatal(err)
 	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
-	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
-	}
-	if !strings.Contains(compatErr.Message, "unsupported tool call type") {
-		t.Fatalf("error message = %q, want unsupported tool call type", compatErr.Message)
+	if got := joinItemText(request.Items()); got != "kept" {
+		t.Fatalf("surviving text = %q, want kept", got)
 	}
 	if len(sink.effects) != 2 {
 		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
@@ -47,13 +40,39 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallIDAndKindScars(t *testi
 		subject compat.Subject
 	}{
 		{feature: compat.RequestItemsToolCallCallID, outcome: compat.Approx, subject: compat.Subject("wire:/messages/0/tool_calls/0/id")},
-		{feature: compat.RequestItemsToolCallTool, outcome: compat.Reject, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
+		{feature: compat.RequestItemsToolCallTool, outcome: compat.Drop, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
 	}
 	for i, effectItem := range sink.effects {
 		compatEffect := effectItem
 		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome || compatEffect.Subject != want[i].subject {
 			t.Fatalf("effect[%d] = %#v, want %s %s %q", i, compatEffect, want[i].feature, want[i].outcome, want[i].subject)
 		}
+	}
+}
+
+func TestDecodeClientRequestWithDecisions_DropsUnknownToolDeclarationBesideKnown(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-4o-mini",
+		"tools":[
+			{"type":"function","function":{"name":"search","parameters":{"type":"object"}}},
+			{"type":"future_tool","name":"ignored"}
+		],
+		"messages":[{"role":"user","content":"run"}]
+	}`)
+	sink := &recordingDecisionSink{}
+	request, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(environment.Declarations()) != 1 {
+		t.Fatalf("surviving tools = %#v, want one", environment.Declarations())
+	}
+	if len(sink.effects) != 1 || sink.effects[0].Subject != compat.Subject("wire:/tools/1/type") {
+		t.Fatalf("compatibility effects = %#v", sink.effects)
 	}
 }
 

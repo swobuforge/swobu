@@ -15,13 +15,13 @@ import (
 // decodeResponsesMessageContent preserves the scalar-input acceptance surface:
 // an explicit empty input_text is the appendable history form of input: "".
 // Other OpenAI-family codecs retain their own empty-part validity rules.
-func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, error) {
+func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy, sink compat.Sink, exchangeID string, itemIndex int) ([]canonical.CanonicalItem, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "responses message content is invalid")
 	if err != nil {
 		return nil, err
 	}
 	content := make([]canonical.MessagePart, 0, len(parts))
-	for _, part := range parts {
+	for partIndex, part := range parts {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		if partType == "" {
 			partType = "text"
@@ -49,7 +49,9 @@ func decodeResponsesMessageContent(raw json.RawMessage, author canonical.Message
 			}
 			content = append(content, canonical.NewImageMessagePart(image))
 		default:
-			return nil, canonical.BadRequest("responses message content contains an unsupported part type")
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject("wire:/input/"+strconv.Itoa(itemIndex)+"/content/"+strconv.Itoa(partIndex)+"/type")); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(content) == 0 {
@@ -108,7 +110,7 @@ func responsesInputSubject(index int, field string) compat.Subject {
 	return compat.Subject("wire:/input/" + strconv.Itoa(index) + "/" + field)
 }
 
-func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.ToolResultPart, error) {
+func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits shared.ImageDecodeLimitPolicy, sink compat.Sink, exchangeID string, itemIndex int) ([]canonical.ToolResultPart, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return []canonical.ToolResultPart{canonical.NewTextToolResultPart(text)}, nil
@@ -118,7 +120,7 @@ func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits
 		return nil, canonical.BadRequest("responses request " + itemType + " is invalid")
 	}
 	parts := make([]canonical.ToolResultPart, 0, len(content))
-	for _, part := range content {
+	for partIndex, part := range content {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
 		switch partType {
 		case "", "text", "input_text", "output_text":
@@ -142,8 +144,13 @@ func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits
 		case "input_file", "file":
 			return nil, canonical.BadRequest("responses request " + itemType + " file content is not portable")
 		default:
-			return nil, canonical.BadRequest("responses request " + itemType + " contains an unsupported part type")
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultContent, compat.Drop, compat.Subject("wire:/input/"+strconv.Itoa(itemIndex)+"/output/"+strconv.Itoa(partIndex)+"/type")); err != nil {
+				return nil, err
+			}
 		}
+	}
+	if len(content) > 0 && len(parts) == 0 {
+		return nil, canonical.BadRequest("responses request " + itemType + " has no surviving result content")
 	}
 	return parts, nil
 }

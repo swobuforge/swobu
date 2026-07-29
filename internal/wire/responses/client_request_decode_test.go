@@ -169,25 +169,6 @@ func TestDecodeClientRequest_CustomToolCallInputPresence(t *testing.T) {
 	})
 }
 
-func TestDecodeClientRequest_NotImplementedNamesInputItemTypeAndPath(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"future_valid_item"}]}`)
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("DecodeClientRequest err type = %T, want canonical.Error", err)
-	}
-	if compatErr.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeNotImplemented)
-	}
-	for _, want := range []string{"/input/0/type", `"future_valid_item"`} {
-		if !strings.Contains(compatErr.Message, want) {
-			t.Fatalf("error message = %q, want %q", compatErr.Message, want)
-		}
-	}
-}
-
 func TestDecodeClientRequest_PreservesExplicitEmptyDurableBands(t *testing.T) {
 	raw := []byte(`{
 		"input":"continue",

@@ -105,7 +105,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto resp
 		}
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses conversation is not supported in swobu v0")
 	}
-	toolContextItems, tools, updatedAccess, err := decodeResponsesToolOccurrences(dto.Tools, canonical.ContextScopeRequest, sink, exchangeID, supplied.Tools, *access)
+	toolContextItems, tools, updatedAccess, err := decodeResponsesToolOccurrences(dto.Tools, canonical.ContextScopeRequest, "wire:/tools", sink, exchangeID, *access)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -147,11 +147,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto resp
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	reasoning, err := decodeResponsesReasoning(dto.Reasoning, dto.Include)
+	reasoning, err := decodeResponsesReasoning(dto.Reasoning, dto.Include, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	outputFormat, err := decodeResponsesOutputFormat(dto.Text)
+	outputFormat, err := decodeResponsesOutputFormat(dto.Text, sink, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}

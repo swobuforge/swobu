@@ -51,7 +51,7 @@ func Begin(request canonical.CanonicalRequest) (ResolvedRequest, error) {
 		return ResolvedRequest{}, err
 	}
 	current := requestWithoutPreviousResponse(request)
-	return ResolvedRequest{Full: complete, Delta: current}, nil
+	return newResolvedRequest(complete, current, ResolvedMedia{})
 }
 
 // Resume applies request to one already-loaded immutable checkpoint. The
@@ -83,11 +83,7 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	return ResolvedRequest{
-		Full:          full,
-		Delta:         nativeDelta(checkpoint.Request, effective, &response),
-		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
-	}, nil
+	return newResolvedRequest(full, nativeDelta(checkpoint.Request, effective, &response), checkpoint.ResolvedMedia)
 }
 
 // ResumeHistory uses the complete supplied request only as the history value
@@ -116,11 +112,18 @@ func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.Canoni
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	return ResolvedRequest{
-		Full:          full,
-		Delta:         nativeDelta(checkpoint.Request, effective, &response),
-		ResolvedMedia: checkpoint.ResolvedMedia.Clone(),
-	}, nil
+	return newResolvedRequest(full, nativeDelta(checkpoint.Request, effective, &response), checkpoint.ResolvedMedia)
+}
+
+// newResolvedRequest validates only the fully materialized request. Delta may
+// intentionally omit state retained behind an exact provider continuation
+// handle, so applying full-history invariants to it would reject valid native
+// resumptions.
+func newResolvedRequest(full, delta canonical.CanonicalRequest, media ResolvedMedia) (ResolvedRequest, error) {
+	if err := canonical.ValidateMaterializedRequest(full); err != nil {
+		return ResolvedRequest{}, err
+	}
+	return ResolvedRequest{Full: full, Delta: delta, ResolvedMedia: media.Clone()}, nil
 }
 
 // resolveTurnContinuation validates tool-result correlation and writes the
