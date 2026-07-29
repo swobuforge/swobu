@@ -1,14 +1,20 @@
 # Swobu
 
-![Swobu README hero](./assets/readme/swobu-readme-hero.png)
+**Local AI gateway for routing clients across providers, regions, accounts, and local models.**
 
-**Use AI capacity across providers, regions, accounts, and local models.**
+Connect AI clients once. Then route, balance, and fail over across providers, regions, accounts, and local models from one local control point.
 
-Swobu gives each AI client one local endpoint. You can route requests across providers, regions, accounts, and local models. You do not have to change the client integration.
-
-> **The client names the route. Swobu selects the target.**
+> The client names the route. Swobu selects the target.
 
 Swobu is beta. Behavior can change between releases.
+
+---
+
+## Demo
+
+![Swobu Cockpit demo](./assets/readme/swobu-cli-demo.gif)
+
+*Swobu Cockpit in a terminal.*
 
 ---
 
@@ -90,63 +96,15 @@ Anthropic-family clients use the workspace endpoint without `/v1`. They send req
 
 If a client needs an API key field, use a non-secret placeholder such as `swobu`. Provider credentials stay in Swobu. Do not put a real provider credential in the client configuration.
 
-For client setup instructions, read [`docs/clients/`](./docs/clients/).
-
 ---
 
-## Demo
+## Current interfaces
 
-![Swobu Cockpit demo](./assets/readme/swobu-cli-demo.gif)
-
-*Swobu Cockpit in a terminal.*
-
----
-
-## Built with Codex and GPT-5.6
-
-Swobu was reimplemented from the ground up during OpenAI Build Week using Codex with GPT-5.6. An earlier prototype established the idea, but none of its implementation remains.
-
-During the hackathon, I rebuilt the daemon and Cockpit around a new architecture and a different TUI framework, added tiered routing and capability-aware fallback, and strengthened testing, linting, and visual verification.
-
-Codex and GPT-5.6 did much of the implementation. I defined the product semantics, set the architectural rails, argued through the system designs in RFCs, and kept the result from drifting into unnecessary complexity.
-
----
-
-## Why Swobu exists
-
-The client and the model provider are different choices. A direct connection joins these choices together.
-
-A client that connects directly to one provider has these limits:
-
-- The models that the provider supplies
-- The quota for one region or account
-- The credits and contract terms for that provider
-- The outages and throttling for that provider
-- The protocol that the provider accepts
-- The credentials that the client must hold.
-
-This connection can leave useful capacity unused. It also makes each provider change a client change.
-
----
-
-## The Swobu routing model
-
-```text
-workspace
-  route        client-visible model name
-    tier       primary, or ordered fallback
-      target   provider + connection + model + protocol + credential
-```
-
-A workspace gives one client context its own endpoint. A route is the model name that the client sends. A tier is a set of targets at the same priority. A target is one concrete backend.
-
-Swobu does not make providers or deployments the same. Model behavior, protocol support, limits, and errors can differ between targets. Swobu controls these differences at one boundary. Swobu does not hide them.
-
----
-
-## What works today
-
-These surfaces are the current focus.
+These are the interfaces Swobu currently exposes. An interface being available
+does not imply that every protocol-specific semantic can be translated across
+every client/backend pair. Cross-family support claims come from the executed
+[conformance suites](../test/integration/conformance/README.md); unsupported
+whole-output contracts and unresolved provider effects fail explicitly.
 
 ### Tested clients
 
@@ -178,164 +136,75 @@ These surfaces are the current focus.
 - Server-Sent Events
 - WebSocket on `/responses` only
 
-### Known gaps
-
-- Behavior varies by client and backend.
-- Some clients need specific environment variables.
-- Token and cache fields that providers report are not uniform.
-- The release installer covers Linux and macOS on AMD64 and ARM64 only.
-
 ---
 
-## Cockpit
+## The Swobu routing model
 
-Swobu includes Cockpit, a local terminal surface for setup and operation. Use Cockpit to:
-
-- add, rename, and delete workspaces;
-- add routes and set the default route;
-- add targets and select their providers;
-- configure connections and credential references;
-- read readiness and the latest traffic outcome.
-
-Cockpit is the primary local operator surface.
-
----
-
-## Command surface
-
-```sh
-swobu                  # open Cockpit
-swobu daemon           # start the daemon in the foreground
-swobu status           # print daemon health
-swobu daemon down      # stop the daemon
-swobu version          # print the version
+```text
+workspace
+  route        client-visible model name
+    tier       primary, or ordered fallback
+      target   provider + connection + model + protocol + credential
 ```
 
-Help:
+A workspace gives one client context its own endpoint. A route is the model name that the client sends. A tier is a set of targets at the same priority. A target is one concrete backend.
 
-```sh
-swobu --help
-swobu daemon --help
-swobu status --help
-```
-
----
-
-## Daemon and health
-
-Start the daemon without Cockpit:
-
-```sh
-swobu daemon
-```
-
-Use an explicit configuration file:
-
-```sh
-swobu daemon --config /path/to/swobu.yaml
-```
-
-Check health from a script or from CI:
-
-```sh
-swobu status
-```
-
-The exit code is a machine-readable health signal:
-
-| Exit code | Meaning |
-| --- | --- |
-| `0` | healthy |
-| `1` | uninitialized or degraded |
-| `2` | not reachable |
-
-Stop the daemon:
-
-```sh
-swobu daemon down
-```
-
----
-
-## Run from source
-
-Run the current `master` branch without an install:
-
-```sh
-go run github.com/swobuforge/swobu/cmd/swobu@master --help
-```
-
-Use this when you want current development behavior, not a release.
-
----
-
-## What Swobu is
-
-Swobu is:
-
-- a local exchange layer;
-- a protocol boundary;
-- a client-to-backend boundary;
-- a local operator surface (Cockpit);
-- a way to change the backend behind an existing AI client.
-
-## What Swobu is not
-
-Swobu is not, today:
-
-- an SDK;
-- a hosted model marketplace;
-- a new AI client;
-- an observability platform;
-- a prompt management system;
-- a managed enterprise gateway.
+Swobu does not make providers or deployments the same. Model behavior, protocol support, limits, and errors can differ between targets. Swobu controls these differences at one boundary. Swobu does not hide them.
 
 ---
 
 ## Security and privacy
 
-Swobu is local-first: it binds to the loopback address, keeps control traffic
-on your machine, and sends only **anonymous aggregate telemetry** (counts — no
-prompts, completions, auth, or identifiers). Turn it off with
-`swobu telemetry off` or `DO_NOT_TRACK`. Local-first is not offline-only; if you
-route to a hosted backend, the request still goes to that backend.
+Swobu is local-first: it binds to loopback by default (`127.0.0.1:7926`), keeps control traffic on your machine, and sends only anonymous aggregate telemetry (counts — no prompts, completions, auth, or identifiers). Turn it off with `swobu telemetry off` or `DO_NOT_TRACK`. Local-first is not offline-only; if you route to a hosted backend, the request still goes to that backend.
 
 ---
 
-## Roadmap
+## Known gaps
 
-Near-term work:
-
-- deeper client and backend profiles;
-- better configuration generation;
-- clearer exchange diagnostics and error translation;
-- stronger streaming support;
-- safer local defaults;
-- easier backend changes.
-
-The goal: make it routine to route any supported AI client to the backend you choose.
+- Protocol-specific behavior varies by client and backend. Swobu preserves
+  portable semantics, records deliberate approximations or drops, and rejects
+  operations whose authority or result contract cannot be preserved.
+- Some clients need specific environment variables.
+- Token and cache fields that providers report are not uniform.
+- Swobu changes candidate target order; it does not read live provider quota, remaining TPM, or latency.
+- The release installer covers Linux and macOS on AMD64 and ARM64 only.
 
 ---
 
-## Contributing
+## Documentation links
+
+- [Documentation Root](https://swobu.com/docs/)
+- [Quickstart Guide](https://swobu.com/docs/start/first-route/)
+- [Provider Capabilities Reference](https://swobu.com/docs/reference/provider-capabilities/)
+- [Protocols Reference](https://swobu.com/docs/reference/protocols/)
+- [CLI Reference](https://swobu.com/docs/reference/cli/)
+- [Configuration Reference](https://swobu.com/docs/reference/configuration/)
+
+---
+
+## Discuss your routing setup
+
+If your model capacity is split across providers, regions, accounts, or local infrastructure, we will help you map your routes, balance capacity, and configure failover. Visit [`swobu.com/discuss/`](https://swobu.com/discuss/).
+
+---
+
+## Contributing and security reporting
 
 We welcome contributions. Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before you open a pull request.
 
-Swobu uses a Contributor License Agreement. When you submit a contribution, you agree to the terms in [`CLA.md`](./CLA.md). The CLA allows Swobu to maintain, sublicense, dual-license, and relicense contributions in the future. Contributors keep ownership of their contributions.
+Swobu uses a Contributor License Agreement (`CLA.md`). When you submit a contribution, you agree to the terms in [`CLA.md`](./CLA.md).
 
-Swobu uses the AGPL-3.0-only license. It can also offer commercial licenses for teams that cannot use AGPL software. The CLA keeps that option open while the public repository stays open.
-
----
-
-## Security
-
-Do not report security vulnerabilities in public issues. Read [`SECURITY.md`](./SECURITY.md) before you report one.
+For security vulnerabilities, do not report in public issues. Read [`SECURITY.md`](./SECURITY.md) before reporting.
 
 ---
 
-## Commercial licensing
+## Development history
 
-For commercial licenses and additional permissions, write to `contact@swobu.com`.
+Swobu was reimplemented from the ground up during OpenAI Build Week using Codex with GPT-5.6. An earlier prototype established the idea, but none of its implementation remains.
+
+During the hackathon, the daemon and Cockpit were rebuilt around a clean architecture, tiered routing and capability-aware fallback were added, and testing, linting, and visual verification were strengthened.
+
+Codex and GPT-5.6 completed much of the code implementation while product semantics and architectural rails were defined in RFCs.
 
 ---
 
