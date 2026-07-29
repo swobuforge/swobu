@@ -7,6 +7,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -23,7 +24,7 @@ func TestMessagesCitationExcerptRoundTripsAsCitationEvidence(t *testing.T) {
 		CitedText:      "evidence",
 		StartCharIndex: &start,
 		EndCharIndex:   &end,
-	}})
+	}}, messagesProjectionEvidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestMessagesResponseOmitsCompletedUnrepresentableWebSearchPair(t *testing.T
 			resultItem, _ := canonical.NewWebSearchResultItem(callID, result)
 			response, err := canonical.NewCanonicalResponse(
 				canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")},
-				"model", []canonical.CanonicalItem{call, resultItem, message}, "stop", canonical.NewUnknownTokenUsage(),
+				"model", []canonical.CanonicalItem{call, resultItem, message}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage(),
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -105,10 +106,10 @@ func TestMessagesStreamingResponseOmitsCompletedUnrepresentableWebSearchPair(t *
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("answer")})
 	response, _ := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")},
-		"model", []canonical.CanonicalItem{call, result, message}, "stop", canonical.NewUnknownTokenUsage(),
+		"model", []canonical.CanonicalItem{call, result, message}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage(),
 	)
 	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"exchange", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage(),
+		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
 	))
 	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
@@ -134,6 +135,35 @@ func TestMessagesStreamingResponseOmitsCompletedUnrepresentableWebSearchPair(t *
 	}
 }
 
+func TestMessagesProjectionPairsReusedWebSearchIDByOccurrence(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_reused")
+	input := mustWebSearchToolInput(t, canonical.WebSearchCall{
+		Action: canonical.WebSearchActionOpenPage,
+		URL:    canonical.Specify(mustWebURL(t, "https://example.com/source")),
+	})
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	searchResult, _ := canonical.NewWebSearchResult(nil)
+	result, _ := canonical.NewWebSearchResultItem(callID, searchResult)
+	message, _ := canonical.NewMessageItem(
+		canonical.MessageRoleAssistant,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("answer")},
+	)
+
+	projected, decisions, err := projectMessagesWebSearchLifecycles(
+		[]canonical.CanonicalItem{call, result, call, result, message},
+		compat.ResponseItemsKind,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("projected items = %#v, want only message", projected)
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("decisions = %#v, want two occurrence-local drops", decisions)
+	}
+}
+
 func TestMessagesWebSearchFailureProjectionUsesObjectContent(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("search_original")
 	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{
@@ -144,7 +174,7 @@ func TestMessagesWebSearchFailureProjectionUsesObjectContent(t *testing.T) {
 	result, _ := canonical.NewWebSearchResultItem(callID, failure)
 	response, _ := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")},
-		"model", []canonical.CanonicalItem{call, result}, "stop", canonical.NewUnknownTokenUsage(),
+		"model", []canonical.CanonicalItem{call, result}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage(),
 	)
 	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
@@ -214,5 +244,117 @@ func TestMessagesSingleQuerySearchPreservesOriginalCallID(t *testing.T) {
 	}
 	if !bytes.Contains(document.RawBytes(), []byte(`"id":"search_original"`)) || !bytes.Contains(document.RawBytes(), []byte(`"query":"one"`)) {
 		t.Fatalf("single query lifecycle changed: %s", document.RawBytes())
+	}
+}
+
+func TestMessagesWebSearchBufferedAndStreamedSemanticsAgree(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_original")
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{
+		Action: canonical.WebSearchActionSearch, Queries: []string{"deadline"},
+	}))
+	webURL := mustWebURL(t, "https://example.com/source")
+	source, _ := canonical.NewWebSource(webURL, canonical.Specify("Source"))
+	searchResult, _ := canonical.NewWebSearchResult([]canonical.WebSource{source})
+	result, _ := canonical.NewWebSearchResultItem(callID, searchResult)
+	part, _ := canonical.NewCitedTextMessagePart("Deadline", []canonical.WebCitation{{Source: source}})
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{part})
+	inputTokens, outputTokens, cacheRead, cacheWrite := 2, 3, 1, 1
+	usage, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens: &inputTokens, OutputTokens: &outputTokens,
+		CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite,
+	})
+	response, _ := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")},
+		"model", []canonical.CanonicalItem{call, result, message}, canonical.Completed("stop"), usage,
+	)
+
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bufferedReader, err := decodeResponseBuffered(
+		context.Background(), canonical.CanonicalRequest{}, buffered.Document.RawBytes(), "buffered", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMessagesWebSearchSemantics(t, bufferedReader, callID)
+
+	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
+	))
+	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(
+		context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(streamed.Stream.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`"type":"server_tool_use"`,
+		`"type":"web_search_tool_result"`,
+		`"type":"citations_delta"`,
+		`"input_tokens":2`,
+		`"output_tokens":3`,
+		`"cache_read_input_tokens":1`,
+		`"cache_creation_input_tokens":1`,
+	} {
+		if !bytes.Contains(raw, []byte(required)) {
+			t.Fatalf("Messages stream lost %q: %s", required, raw)
+		}
+	}
+	streamReader := decodeResponseStream(
+		canonical.CanonicalRequest{},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(bytes.NewReader(raw))},
+		"streamed", nil,
+	)
+	assertMessagesWebSearchSemantics(t, streamReader, callID)
+}
+
+func assertMessagesWebSearchSemantics(t *testing.T, reader canonical.ResponseStream, callID canonical.ToolCallID) {
+	t.Helper()
+	closed, err := canonical.ReadClosedEnvelope(
+		context.Background(),
+		canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "replayed"}),
+		canonical.EnvResponse,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := response.Items()
+	if len(items) != 3 {
+		t.Fatalf("items = %#v", items)
+	}
+	call, _ := items[0].ToolCall()
+	if call.CallID() != callID || call.Tool().Kind() != canonical.ToolKindWebSearch {
+		t.Fatalf("call = %#v", call)
+	}
+	result, _ := items[1].ToolResult()
+	search, _ := result.WebSearch()
+	if len(search.Sources()) != 1 || search.Sources()[0].URL.String() != "https://example.com/source" {
+		t.Fatalf("sources = %#v", search.Sources())
+	}
+	message, _ := items[2].Message()
+	if len(message.Content()[0].Citations()) != 1 {
+		t.Fatalf("citations = %#v", message.Content()[0].Citations())
+	}
+	if input, ok := response.Usage().InputTokens(); !ok || input != 2 {
+		t.Fatalf("input usage = (%d,%t)", input, ok)
+	}
+	if output, ok := response.Usage().OutputTokens(); !ok || output != 3 {
+		t.Fatalf("output usage = (%d,%t)", output, ok)
+	}
+	if value, ok := response.Usage().CacheReadTokens(); !ok || value != 1 {
+		t.Fatalf("cache-read usage = (%d,%t)", value, ok)
+	}
+	if value, ok := response.Usage().CacheWriteTokens(); !ok || value != 1 {
+		t.Fatalf("cache-write usage = (%d,%t)", value, ok)
 	}
 }

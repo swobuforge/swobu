@@ -31,39 +31,146 @@ func decodeResponsesWebSearchInclude(raw json.RawMessage, sink compat.Sink, exch
 }
 
 func (s *responsesResponseStream) completeMessageItem(frame streamFrame) (bool, error) {
-	item, err := decodeResponsesMessageOutputItem(responsesWireOutputItemDTO{Type: "message", ID: frame.Item.ID, Status: frame.Item.Status, Role: "assistant", Content: frame.Item.Content})
+	index := *frame.OutputIndex
+	item, present, err := decodeResponsesMessageOutputItem(responsesWireOutputItemDTO{Type: "message", ID: frame.Item.ID, Status: frame.Item.Status, Role: "assistant", Content: frame.Item.Content}, s.sink, s.exchangeID, fmt.Sprintf("wire:/output/%d/content", index))
 	if err != nil {
 		return false, err
 	}
-	s.emittedOutput = true
-	ordinal := s.ordinalFor(fallbackItemID(frame.Item.ID, "message", frame.OutputIndex), frame.OutputIndex)
-	if s.textState != nil {
-		ordinal = s.textState.ordinal
-		s.textState = nil
+	output := s.outputAt(index)
+	state := output.text
+	if !present {
+		if state != nil {
+			return false, canonical.NewBackendError("responses", 0, "responses terminal message is missing streamed text content", "")
+		}
+		var wireParts []json.RawMessage
+		if json.Unmarshal(frame.Item.Content, &wireParts) == nil && len(wireParts) > 0 {
+			s.erasedOutput = true
+			s.omitProviderOutput(frame.OutputIndex)
+		}
+		return true, nil
 	}
-	s.enqueueItemCompleted("", ordinal, item)
+	ordinal := uint32(0)
+	if state != nil {
+		if err := s.reconcileMessageParts(frame, state, item); err != nil {
+			return false, err
+		}
+		ordinal = state.ordinal
+		output.text = nil
+		s.enqueueItemCompleted(frame.OutputIndex, ordinal, item)
+		return true, nil
+	}
+	if err := s.enqueueCompletedOutputItemAt(frame.OutputIndex, ordinal, item); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
-func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame) (bool, error) {
-	s.emittedOutput = true
-	s.closeOpenText(canonical.EnvelopeStatusCompleted)
+func (s *responsesResponseStream) reconcileMessageParts(frame streamFrame, state *responsesTextState, item canonical.CanonicalItem) error {
+	var wireParts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(frame.Item.Content, &wireParts); err != nil {
+		return canonical.InternalError("responses terminal message content is invalid")
+	}
+	message, _ := item.Message()
+	content := message.Content()
+	terminalOrdinal := uint32(0)
+	for wireIndex, wirePart := range wireParts {
+		part := state.parts[wireIndex]
+		if part == nil {
+			part = &responsesTextPartState{}
+			state.parts[wireIndex] = part
+		}
+		switch strings.TrimSpace(wirePart.Type) {
+		case "text", "output_text", "input_text":
+			if int(terminalOrdinal) >= len(content) {
+				return canonical.InternalError("responses terminal message content mapping is invalid")
+			}
+			text, ok := content[terminalOrdinal].Text()
+			if !ok {
+				return canonical.NewBackendError("responses", 0, "responses terminal message changed streamed content kind", "")
+			}
+			if part.classified && part.erased {
+				return canonical.NewBackendError("responses", 0, "responses terminal message changed streamed content kind", "")
+			}
+			suffix, err := responsesTerminalSuffix(part.text.String(), text.Text())
+			if err != nil {
+				return err
+			}
+			if suffix != "" {
+				part.text.WriteString(suffix)
+				if part.emitted {
+					s.enqueueTextDelta(frame.OutputIndex, state.ordinal, part.ordinal, suffix)
+				} else {
+					part.deltas = append(part.deltas, suffix)
+				}
+			}
+			part.classified = true
+			terminalOrdinal++
+		default:
+			if part.classified && !part.erased {
+				return canonical.NewBackendError("responses", 0, "responses terminal message changed streamed content kind", "")
+			}
+			part.classified = true
+			part.erased = true
+		}
+	}
+	if int(terminalOrdinal) != len(content) {
+		return canonical.InternalError("responses terminal message content mapping is incomplete")
+	}
+	for wireIndex, part := range state.parts {
+		if wireIndex >= len(wireParts) || !part.classified {
+			return canonical.NewBackendError("responses", 0, "responses terminal message is missing streamed content", "")
+		}
+	}
+	s.flushMessagePartFrontier(*frame.OutputIndex, state)
+	if state.partFrontier != len(wireParts) {
+		return canonical.NewBackendError("responses", 0, "responses terminal message has unresolved content", "")
+	}
+	return nil
+}
+
+// flushMessagePartFrontier assigns compact canonical part ordinals only after
+// every earlier wire content index is classified as known or erased.
+func (s *responsesResponseStream) flushMessagePartFrontier(outputIndex int, state *responsesTextState) {
+	for {
+		part := state.parts[state.partFrontier]
+		if part == nil || !part.classified {
+			return
+		}
+		if !part.erased {
+			part.ordinal = state.nextPartOrdinal
+			state.nextPartOrdinal++
+			part.emitted = true
+			s.enqueueContentStart(&outputIndex, state.ordinal, part.ordinal)
+			for _, delta := range part.deltas {
+				s.enqueueTextDelta(&outputIndex, state.ordinal, part.ordinal, delta)
+			}
+			part.deltas = nil
+		}
+		state.partFrontier++
+	}
+}
+
+func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame, state responsesWebSearchLifecycleState) (bool, error) {
 	itemID := strings.TrimSpace(frame.Item.ID) // swobu:io-string source=provider-wire
 	if itemID == "" {
 		itemID = strings.TrimSpace(frame.ItemID)
 	} // swobu:io-string source=provider-wire
-	lifecycle, err := decodeResponsesWebSearchLifecycle(itemID, frame.Item.Action, responsesWebSearchSucceeded)
+	index := 0
+	if frame.OutputIndex != nil {
+		index = *frame.OutputIndex
+	}
+	lifecycle, err := decodeResponsesWebSearchLifecycleWithDecisions(itemID, frame.Item.Action, state, s.sink, s.exchangeID, fmt.Sprintf("wire:/output/%d/action/sources", index), true)
 	if err != nil {
 		return false, err
 	}
-	base := s.ordinalFor(itemID, frame.OutputIndex)
+	base := uint32(0)
 	for index, item := range lifecycle {
-		if err := s.enqueueCompletedOutputItemAt(base+uint32(index), item); err != nil {
+		if err := s.enqueueCompletedOutputItemAt(frame.OutputIndex, base+uint32(index), item); err != nil {
 			return false, err
 		}
-	}
-	if len(lifecycle) > 1 {
-		s.ordinalOffset += int64(len(lifecycle) - 1)
 	}
 	return true, nil
 }
@@ -73,32 +180,46 @@ type responsesWebSearchLifecycleState uint8
 const (
 	responsesWebSearchPending responsesWebSearchLifecycleState = iota + 1
 	responsesWebSearchSucceeded
+	responsesWebSearchFailed
+	// responsesWebSearchUnknown is projection state, not a canonical lifecycle
+	// value. It preserves the known call while omitting any result whose meaning
+	// depends on an unfamiliar wire status; response settlement remains strict.
+	responsesWebSearchUnknown
 )
 
 // decodeResponsesWebSearchLifecycleState collapses wire-only pending aliases.
-// Failed durable history is rejected until canonical has a failure value that
-// can preserve its execution meaning without inventing a message.
 func decodeResponsesWebSearchLifecycleState(raw string) (responsesWebSearchLifecycleState, error) {
 	switch strings.TrimSpace(raw) { // swobu:io-string source=boundary
-	case "", "in_progress", "searching":
+	case "", "in_progress", "searching", "incomplete":
 		return responsesWebSearchPending, nil
 	case "completed":
 		return responsesWebSearchSucceeded, nil
 	case "failed":
-		return 0, fmt.Errorf("failed web-search history has no canonical failure detail")
+		return responsesWebSearchFailed, nil
 	default:
 		return 0, fmt.Errorf("web-search status is unsupported")
 	}
 }
 
 func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState) ([]canonical.CanonicalItem, error) {
+	return decodeResponsesWebSearchLifecycleWithDecisions(id, rawAction, state, nil, "", "", false)
+}
+
+func responsesWebSearchMalformed(providerOutput bool, message string) error {
+	if providerOutput {
+		return canonical.NewBackendError("responses", 0, message, "")
+	}
+	return canonical.BadRequest(message)
+}
+
+func decodeResponsesWebSearchLifecycleWithDecisions(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState, sink compat.Sink, exchangeID string, sourcesSubjectPrefix string, providerOutput bool) ([]canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(strings.TrimSpace(id)) // swobu:io-string source=provider-wire
 	if err != nil {
-		return nil, canonical.InternalError("responses web-search call is missing id")
+		return nil, responsesWebSearchMalformed(providerOutput, "responses web-search call is missing id")
 	}
 	var action responsesWebSearchActionDTO
 	if err := json.Unmarshal(rawAction, &action); err != nil {
-		return nil, canonical.InternalError("responses web-search action is invalid")
+		return nil, responsesWebSearchMalformed(providerOutput, "responses web-search action is invalid")
 	}
 	call := canonical.WebSearchCall{Action: canonical.WebSearchAction(strings.TrimSpace(action.Type))} // swobu:io-string source=provider-wire
 	if len(action.Queries) > 0 {
@@ -109,7 +230,7 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 	if strings.TrimSpace(action.URL) != "" { // swobu:io-string source=provider-wire
 		webURL, err := canonical.NewWebURL(action.URL)
 		if err != nil {
-			return nil, canonical.InternalError("responses web-search action URL is invalid")
+			return nil, responsesWebSearchMalformed(providerOutput, "responses web-search action URL is invalid")
 		}
 		call.URL = canonical.Specify(webURL)
 	}
@@ -117,7 +238,7 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 		call.Match = canonical.Specify(action.Pattern)
 	}
 	if err := call.Validate(); err != nil {
-		return nil, canonical.InternalError("responses web-search action is invalid")
+		return nil, responsesWebSearchMalformed(providerOutput, "responses web-search action is invalid")
 	}
 	input, err := canonical.NewWebSearchToolInput(call)
 	if err != nil {
@@ -128,6 +249,20 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 		return nil, canonical.InternalError("responses web-search call is invalid")
 	}
 	items := []canonical.CanonicalItem{callItem}
+	if state == responsesWebSearchUnknown {
+		return items, nil
+	}
+	if state == responsesWebSearchFailed {
+		result, err := canonical.NewWebSearchFailureResult("provider reported failed web search")
+		if err != nil {
+			return nil, canonical.InternalError("responses web-search failure is invalid")
+		}
+		resultItem, err := canonical.NewWebSearchResultItem(callID, result)
+		if err != nil {
+			return nil, canonical.InternalError("responses web-search failure result is invalid")
+		}
+		return append(items, resultItem), nil
+	}
 	var wireSources []responsesWebSearchSourceDTO
 	sourcesDisclosed := false
 	// A completed provider call with undisclosed sources is still a completed
@@ -135,20 +270,29 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 	if rawSources := bytes.TrimSpace(action.Sources); len(rawSources) > 0 && !bytes.Equal(rawSources, []byte("null")) {
 		sourcesDisclosed = true
 		if err := json.Unmarshal(rawSources, &wireSources); err != nil {
-			return nil, canonical.InternalError("responses web-search sources are invalid")
+			return nil, responsesWebSearchMalformed(providerOutput, "responses web-search sources are invalid")
 		}
 	}
 	if state == responsesWebSearchPending && !sourcesDisclosed {
 		return items, nil
 	}
 	sources := make([]canonical.WebSource, 0, len(wireSources))
-	for _, wireSource := range wireSources {
-		if kind := strings.TrimSpace(wireSource.Type); kind != "" && kind != "url" { // swobu:io-string source=provider-wire
-			return nil, canonical.NotImplemented("Swobu cannot project a Responses web-search source without a URL")
+	for index, wireSource := range wireSources {
+		kind := strings.TrimSpace(wireSource.Type) // swobu:io-string source=provider-wire
+		if providerOutput {
+			if err := admitResponsesProviderOutputChild(kind); err != nil {
+				return nil, err
+			}
+		}
+		if kind != "" && kind != "url" {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", sourcesSubjectPrefix, index))); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		webURL, err := canonical.NewWebURL(wireSource.URL)
 		if err != nil {
-			return nil, canonical.InternalError("responses web-search source URL is invalid")
+			return nil, responsesWebSearchMalformed(providerOutput, "responses web-search source URL is invalid")
 		}
 		title := canonical.Unspecified[string]()
 		if strings.TrimSpace(wireSource.Title) != "" { // swobu:io-string source=provider-wire
@@ -156,7 +300,7 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 		}
 		source, err := canonical.NewWebSource(webURL, title)
 		if err != nil {
-			return nil, canonical.InternalError("responses web-search source is invalid")
+			return nil, responsesWebSearchMalformed(providerOutput, "responses web-search source is invalid")
 		}
 		sources = append(sources, source)
 	}
@@ -168,22 +312,29 @@ func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, sta
 	return append(items, resultItem), nil
 }
 
-func decodeResponsesAnnotations(text string, raw json.RawMessage) ([]canonical.WebCitation, error) {
+func decodeResponsesAnnotations(text string, raw json.RawMessage, sink compat.Sink, exchangeID string, subjectPrefix string) ([]canonical.WebCitation, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil
 	}
 	var annotations []responsesAnnotationDTO
 	if err := json.Unmarshal(raw, &annotations); err != nil {
-		return nil, canonical.InternalError("responses output annotations are invalid")
+		return nil, canonical.NewBackendError("responses", 0, "responses output annotations are invalid", "")
 	}
 	citations := make([]canonical.WebCitation, 0, len(annotations))
-	for _, annotation := range annotations {
-		if strings.TrimSpace(annotation.Type) != "url_citation" { // swobu:io-string source=provider-wire
-			return nil, canonical.NotImplemented("Swobu has no canonical projection for this Responses output annotation type")
+	for index, annotation := range annotations {
+		annotationType := strings.TrimSpace(annotation.Type) // swobu:io-string source=provider-wire
+		if err := admitResponsesProviderOutputChild(annotationType); err != nil {
+			return nil, err
+		}
+		if annotationType != "url_citation" {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", subjectPrefix, index))); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		webURL, err := canonical.NewWebURL(annotation.URL)
 		if err != nil {
-			return nil, canonical.InternalError("responses URL citation is invalid")
+			return nil, canonical.NewBackendError("responses", 0, "responses URL citation is invalid", "")
 		}
 		title := canonical.Unspecified[string]()
 		if strings.TrimSpace(annotation.Title) != "" { // swobu:io-string source=provider-wire
@@ -192,16 +343,16 @@ func decodeResponsesAnnotations(text string, raw json.RawMessage) ([]canonical.W
 		source, _ := canonical.NewWebSource(webURL, title)
 		citation := canonical.WebCitation{Source: source}
 		if (annotation.StartIndex == nil) != (annotation.EndIndex == nil) {
-			return nil, canonical.InternalError("responses URL citation offsets are incomplete")
+			return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are incomplete", "")
 		}
 		if annotation.StartIndex != nil {
 			start, ok := responsesCharacterIndexToByteOffset(text, *annotation.StartIndex)
 			if !ok || *annotation.EndIndex < *annotation.StartIndex {
-				return nil, canonical.InternalError("responses URL citation offsets are invalid")
+				return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are invalid", "")
 			}
 			end, ok := responsesCharacterIndexToByteOffset(text, *annotation.EndIndex+1)
 			if !ok {
-				return nil, canonical.InternalError("responses URL citation offsets are invalid")
+				return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are invalid", "")
 			}
 			citation.Start = canonical.Specify(uint32(start))
 			citation.End = canonical.Specify(uint32(end))

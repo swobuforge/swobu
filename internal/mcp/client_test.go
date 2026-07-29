@@ -141,7 +141,7 @@ func TestMCPToolOutputSchemaIsApproximationEvidence(t *testing.T) {
 	}
 }
 
-func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
+func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	ctx := context.Background()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1"}, nil)
@@ -199,10 +199,10 @@ func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
 	)
 	sourceDeclaration, _ := canonical.NewMCPToolNamespace(sourceKey, "", remote, nil)
 	source, _ := sourceDeclaration.Namespace()
-	session := &session{source: source, sdk: sdkSession}
-	defer session.close()
+	activeSession := &session{source: source, sdk: sdkSession}
+	defer activeSession.close()
 
-	declarations, decisions, err := session.listTools(ctx)
+	declarations, decisions, err := activeSession.listTools(ctx)
 	if err != nil || len(declarations) != 2 {
 		t.Fatalf("declarations = %#v, %v", declarations, err)
 	}
@@ -215,7 +215,7 @@ func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
 	}
 	tool, _ := declarations[1].Function()
 	input, _ := canonical.ParseJSONObject([]byte(`{"q":"docs"}`))
-	parts, isError, err := session.call(ctx, tool.Key().Name(), input)
+	parts, isError, err := activeSession.call(ctx, tool.Key().Name(), input)
 	if err != nil || isError || len(parts) != 1 {
 		t.Fatalf("result = %#v isError=%v err=%v", parts, isError, err)
 	}
@@ -223,12 +223,86 @@ func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
 	if !strings.Contains(text.Text(), `"q":"docs"`) {
 		t.Fatalf("result text = %q", text.Text())
 	}
+
+	run := &Run{
+		sessions: map[canonical.ToolKey]*session{sourceKey: activeSession},
+		bindings: map[canonical.ToolKey]binding{
+			tool.Key(): {source: sourceKey, remoteName: tool.Key().Name()},
+		},
+	}
+	callID, _ := canonical.NewToolCallID("call_search")
+	callItem, err := canonical.NewToolCallItem(
+		callID, tool.Key(), canonical.NewJSONObjectToolInput(input),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, err := run.Calls(runtimeTestResponse(t, callItem))
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("provider call classification = %#v, %v", calls, err)
+	}
+	if err := run.BeginBatch(calls); err != nil {
+		t.Fatal(err)
+	}
+	resultItem, err := run.Call(ctx, calls[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := resultItem.ToolResult()
+	if !ok || result.CallID() != callID {
+		t.Fatalf("correlated MCP result = %#v", resultItem)
+	}
+	catalogDeclaration, err := canonical.NewMCPToolNamespace(
+		sourceKey, "", remote, declarations,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{catalogDeclaration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarationItem, err := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userItem, err := canonical.NewMessageItem(
+		canonical.MessageRoleUser,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("search docs")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			declarationItem, userItem, callItem, resultItem,
+		},
+	})
+	if err := canonical.ValidateMaterializedRequest(continuation); err != nil {
+		t.Fatalf("MCP continuation is invalid: %v", err)
+	}
+	finalItem, err := canonical.NewMessageItem(
+		canonical.MessageRoleAssistant,
+		[]canonical.MessagePart{canonical.NewTextMessagePart("done")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "resp_mcp_final"}, "model",
+		[]canonical.CanonicalItem{finalItem}, canonical.Completed("stop"),
+		canonical.NewUnknownTokenUsage(),
+	); err != nil {
+		t.Fatalf("MCP final answer is invalid: %v", err)
+	}
+
 	oversized, _ := canonical.ParseJSONObject([]byte(`{"oversized":true}`))
-	if _, _, err := session.call(ctx, tool.Key().Name(), oversized); err == nil {
+	if _, _, err := activeSession.call(ctx, tool.Key().Name(), oversized); err == nil {
 		t.Fatal("oversized tool result was admitted")
 	}
 	structured, _ := canonical.ParseJSONObject([]byte(`{"structured":true}`))
-	parts, isError, err = session.call(ctx, tool.Key().Name(), structured)
+	parts, isError, err = activeSession.call(ctx, tool.Key().Name(), structured)
 	if err != nil || isError || len(parts) != 1 {
 		t.Fatalf("structured result = %#v isError=%v err=%v", parts, isError, err)
 	}
@@ -236,7 +310,7 @@ func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
 	if structuredText.Text() != `{"answer":1}` {
 		t.Fatalf("structured result text = %q", structuredText.Text())
 	}
-	parts, isError, err = session.call(ctx, "unsupported", input)
+	parts, isError, err = activeSession.call(ctx, "unsupported", input)
 	if err != nil || !isError || len(parts) != 1 {
 		t.Fatalf("unsupported result = %#v isError=%v err=%v", parts, isError, err)
 	}
@@ -246,11 +320,11 @@ func TestOfficialSDKSessionListsAndCallsTools(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, _, err := session.call(cancelled, "slow", input); err == nil {
+	if _, _, err := activeSession.call(cancelled, "slow", input); err == nil {
 		t.Fatal("cancelled MCP call did not terminate")
 	}
 	started := time.Now()
-	if _, _, err := session.callWithTimeout(ctx, "slow", input, 20*time.Millisecond); err == nil {
+	if _, _, err := activeSession.callWithTimeout(ctx, "slow", input, 20*time.Millisecond); err == nil {
 		t.Fatal("hanging MCP call outlived its adapter deadline")
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {

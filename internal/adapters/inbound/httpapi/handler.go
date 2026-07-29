@@ -352,7 +352,18 @@ func statusCodeForExchangeError(err error) int {
 	if errors.As(err, &swobuErr) {
 		return statusCodeForSwobuError(swobuErr.Code)
 	}
+	var backendErr canonical.BackendError
+	if errors.As(err, &backendErr) {
+		return statusCodeForBackendError(backendErr)
+	}
 	return http.StatusInternalServerError
+}
+
+func statusCodeForBackendError(err canonical.BackendError) int {
+	if err.StatusCode >= http.StatusBadRequest && err.StatusCode <= 599 {
+		return err.StatusCode
+	}
+	return http.StatusBadGateway
 }
 
 func writeExchangeError(w http.ResponseWriter, err error) {
@@ -364,16 +375,17 @@ func writeExchangeError(w http.ResponseWriter, err error) {
 
 	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
+		statusCode := statusCodeForBackendError(backendErr)
 		if backendErr.RetryAfterHeaderValue != "" {
 			w.Header().Set("Retry-After", backendErr.RetryAfterHeaderValue)
 		}
 		if backendErr.Message != "" {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(backendErr.StatusCode)
+			w.WriteHeader(statusCode)
 			_, _ = w.Write([]byte(backendErr.Message))
 			return
 		}
-		w.WriteHeader(backendErr.StatusCode)
+		w.WriteHeader(statusCode)
 		return
 	}
 

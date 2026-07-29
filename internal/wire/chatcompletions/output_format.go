@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type chatCompletionsResponseFormatDTO struct {
@@ -21,7 +23,7 @@ type chatCompletionsJSONSchemaFormatDTO struct {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes response_format variants.
-func decodeChatCompletionsOutputFormat(raw json.RawMessage) (canonical.OutputFormat, error) {
+func decodeChatCompletionsOutputFormat(raw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {
 		return canonical.OutputFormat{}, nil
@@ -49,9 +51,9 @@ func decodeChatCompletionsOutputFormat(raw json.RawMessage) (canonical.OutputFor
 			Strict:      strict,
 		})
 	case "json_object":
-		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet preserve Chat Completions json_object response_format")
+		return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONObject})
 	default:
-		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet project this Chat Completions response_format type")
+		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Chat Completions", "response_format type "+strings.TrimSpace(dto.Type))
 	}
 }
 
@@ -64,6 +66,9 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 	}
 	if format.Kind == canonical.OutputFormatText {
 		return nil, nil
+	}
+	if format.Kind == canonical.OutputFormatJSONObject {
+		return json.RawMessage(`{"type":"json_object"}`), nil
 	}
 	if format.Kind != canonical.OutputFormatJSONSchema {
 		return nil, provider.NewIncompatibleTarget("Chat Completions cannot represent the canonical output format")

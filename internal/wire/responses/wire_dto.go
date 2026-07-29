@@ -214,9 +214,9 @@ type responsesContentPartEventDTO struct {
 }
 
 type responsesOutputTextStreamDTO struct {
-	Type        string `json:"type"`
-	Text        string `json:"text"`
-	Annotations []any  `json:"annotations"`
+	Type        string                   `json:"type"`
+	Text        string                   `json:"text"`
+	Annotations []responsesAnnotationDTO `json:"annotations"`
 }
 
 type responsesOutputItemMessageDTO struct {

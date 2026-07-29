@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -31,6 +33,27 @@ type targetMutatingRuntime struct{ candidateSelectiveRuntime }
 type protocolProjectionRuntime struct {
 	testRuntimeResolver
 	transport testProviderTransport
+}
+
+type bedrockStructuredFallbackRuntime struct {
+	testRuntimeResolver
+	transport testProviderTransport
+}
+
+func (r bedrockStructuredFallbackRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	if target.ProviderSpec == string(routing.ProviderBedrock) {
+		backend, err := bedrock.NewExecutor(nil).ResolveBackend(target)
+		if err != nil {
+			return provider.Backend{}, err
+		}
+		backend.Transport = provider.BindTransport(target, r.transport)
+		return backend, nil
+	}
+	return provider.Backend{
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, r.transport),
+	}, nil
 }
 
 func (r protocolProjectionRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
@@ -944,7 +967,151 @@ func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
 	}
 }
 
-func TestFailedResponsesWebSearchProviderOutputIsSwobuOwnedAndTerminal(t *testing.T) {
+func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
+	targetID, _ := routing.ParseTargetID("mantle-a")
+	model, _ := routing.ParseUpstreamModel("model-a")
+	region, _ := routing.ParseBedrockRegion("us-east-1")
+	connection, err := routing.NewBedrockConnection(region, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messagesProtocol, err := routing.ParseProtocol(
+		"messages",
+		routing.ProviderBedrock,
+		func(routing.Provider, string) bool { return true },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mantle, err := routing.NewTarget(targetID, model, messagesProtocol, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatible := requestpathTargetWithProtocol(t, "responses-b", "responses")
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("a")
+	firstTier, _ := routing.NewTier([]routing.Target{mantle})
+	secondTier, _ := routing.NewTier([]routing.Target{compatible})
+	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:   canonical.OutputFormatJSONSchema,
+		Name:   "reply",
+		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+		Strict: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:        canonical.Specify("model-a"),
+		Items:        []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
+		OutputFormat: canonical.Specify(format),
+	})
+	var transported []string
+	runner := withRuntime(nil)
+	runner.Runtime = bedrockStructuredFallbackRuntime{transport: func(
+		_ context.Context,
+		target provider.TargetSnapshot,
+		_ carrier.Document,
+	) (provider.Ingress, error) {
+		transported = append(transported, target.TargetID)
+		return provider.DocumentIngress{Document: carrier.NewDocument(
+			protocolkind.Responses,
+			"application/json",
+			nil,
+			[]byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}`),
+			carrier.Meta{},
+		)}, nil
+	}}
+	_, err = runExchange(
+		context.Background(),
+		runner,
+		"ex_mantle_structured_fallback",
+		"unknown",
+		canonical.ClientFamilyResponses,
+		delivery.BufferedDelivery(),
+		testDecodedRequest(request),
+		workspace,
+		nil,
+		canonical.NormalizedPathResponses,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(transported, []string{"responses-b"}) {
+		t.Fatalf("transported targets = %v, want only compatible fallback", transported)
+	}
+}
+
+func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("a")
+	responsesTarget := requestpathTargetWithProtocol(t, "responses-a", "responses")
+	chatTarget := requestpathTargetWithProtocol(t, "chat-b", "chat_completions")
+	firstTier, _ := routing.NewTier([]routing.Target{responsesTarget})
+	secondTier, _ := routing.NewTier([]routing.Target{chatTarget})
+	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		StopSequences: []string{"END"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:    canonical.Specify("model-a"),
+		Items:    []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
+		Controls: controls,
+	})
+	var transported []string
+	var providerDocument string
+	runner := withRuntime(nil)
+	runner.Runtime = protocolProjectionRuntime{transport: func(
+		_ context.Context,
+		target provider.TargetSnapshot,
+		document carrier.Document,
+	) (provider.Ingress, error) {
+		transported = append(transported, target.TargetID)
+		providerDocument = string(document.RawBytes())
+		return provider.DocumentIngress{Document: carrier.NewDocument(
+			protocolkind.ChatCompletions,
+			"application/json",
+			nil,
+			[]byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`),
+			carrier.Meta{},
+		)}, nil
+	}}
+	_, err = runExchange(
+		context.Background(),
+		runner,
+		"ex_responses_stop_fallback",
+		"unknown",
+		canonical.ClientFamilyResponses,
+		delivery.BufferedDelivery(),
+		testDecodedRequest(request),
+		workspace,
+		nil,
+		canonical.NormalizedPathResponses,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(transported, []string{"chat-b"}) {
+		t.Fatalf("transported targets = %v, want only Chat fallback", transported)
+	}
+	if !strings.Contains(providerDocument, `"stop":"END"`) {
+		t.Fatalf("Chat fallback lost canonical stop sequence: %s", providerDocument)
+	}
+}
+
+func TestFailedResponsesWebSearchLifecycleCompletesAsTypedProviderOutput(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTargetWithProtocol(t, "responses-a", "responses"),
@@ -967,7 +1134,7 @@ func TestFailedResponsesWebSearchProviderOutputIsSwobuOwnedAndTerminal(t *testin
 		[]byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`),
 		carrier.Meta{},
 	)
-	failed, err := reduce(
+	completed, err := reduce(
 		context.Background(),
 		started.nextState,
 		providerIngressReceived{attemptID: first.id, ingress: provider.DocumentIngress{Document: failedSearch}},
@@ -976,18 +1143,16 @@ func TestFailedResponsesWebSearchProviderOutputIsSwobuOwnedAndTerminal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordedFirst, ok := findProviderCallAttempt(failed.nextState, first.id)
-	if !ok || recordedFirst.failure == nil {
-		t.Fatalf("failed Responses attempt = %#v", recordedFirst)
+	recordedFirst, ok := findProviderCallAttempt(completed.nextState, first.id)
+	if !ok || recordedFirst.failure != nil || recordedFirst.status != providerCallAttemptHandoffReady {
+		t.Fatalf("completed Responses attempt = %#v", recordedFirst)
 	}
-	var canonicalError canonical.Error
-	if !errors.As(recordedFirst.failure.Cause, &canonicalError) ||
-		canonicalError.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("failed Responses cause = %#v, want %s", recordedFirst.failure.Cause, canonical.ErrorCodeNotImplemented)
-	}
-	terminal, ok := failed.nextState.phase.(failedPhase)
+	terminal, ok := completed.nextState.phase.(completedPhase)
 	if !ok || terminal.target.TargetID != "responses-a" {
-		t.Fatalf("terminal phase = %#v, want first target failure", failed.nextState.phase)
+		t.Fatalf("terminal phase = %#v, want first target completion", completed.nextState.phase)
+	}
+	if len(completed.nextState.providerCallAttempts) != 1 {
+		t.Fatalf("provider attempts = %#v, want no fallback", completed.nextState.providerCallAttempts)
 	}
 }
 
@@ -1033,7 +1198,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	store := &countingCheckpointStore{base: session.NewMemoryStore()}
 	previousResponse, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_previous"}, "a", []canonical.CanonicalItem{
 		testMessage(canonical.MessageRoleAssistant, "answer one"),
-	}, "stop", canonical.NewUnknownTokenUsage())
+	}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -343,7 +343,7 @@ func TestMemoryStorePartitionsCheckpointsByWorkspaceSlug(t *testing.T) {
 }
 
 func storeRecord(id canonical.SwobuResponseID) Checkpoint {
-	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id.String())}, "test-model", nil, "stop", canonical.NewUnknownTokenUsage())
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id.String())}, "test-model", nil, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		panic(err)
 	}

@@ -42,7 +42,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 	}
 	previousResponse, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_previous", Responses: &canonical.ResponsesContinuation{
 		ProviderResponseID: "provider_previous", TargetID: target.TargetID, TargetVersion: target.TargetVersion,
-	}}, "m", []canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "answer")}, "completed", canonical.NewUnknownTokenUsage())
+	}}, "m", []canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "answer")}, canonical.Completed("completed"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 	nextResponse, err := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: "resp_next"}, "m",
 		[]canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "next answer")},
-		"completed", canonical.NewUnknownTokenUsage(),
+		canonical.Completed("completed"), canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestImplicitFingerprintAmbiguityNeverSelectsHiddenCheckpointState(t *testin
 	history := testExchangeHistoryFingerprint(t, "responses", "indistinguishable")
 	for _, id := range []canonical.SwobuResponseID{"resp_hidden_a", "resp_hidden_b"} {
 		response, err := canonical.NewCanonicalResponse(
-			canonical.ResponseRef{SwobuID: id}, "m", nil, "completed", canonical.NewUnknownTokenUsage(),
+			canonical.ResponseRef{SwobuID: id}, "m", nil, canonical.Completed("completed"), canonical.NewUnknownTokenUsage(),
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -217,7 +217,7 @@ func TestExplicitSameSchemePredecessorCreatesCompleteHistoryAdvance(t *testing.T
 	parent := testExchangeHistoryFingerprint(t, "responses", "parent")
 	parentResponse, err := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: "resp_explicit"}, "m", nil,
-		"completed", canonical.NewUnknownTokenUsage(),
+		canonical.Completed("completed"), canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestExplicitSameSchemePredecessorCreatesCompleteHistoryAdvance(t *testing.T
 func TestExplicitCrossSchemePredecessorStoresNoFalseFingerprintRoot(t *testing.T) {
 	store := session.NewMemoryStore()
 	checkpointFingerprint := testExchangeHistoryFingerprint(t, "messages", "messages-chain")
-	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_explicit"}, "m", nil, "completed", canonical.NewUnknownTokenUsage())
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_explicit"}, "m", nil, canonical.Completed("completed"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 		canonical.ResponseRef{SwobuID: "swobu_no_history"},
 		"m",
 		[]canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed",
+		canonical.Completed("completed"),
 		canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {
@@ -441,7 +441,7 @@ func TestHistoryComposeFailureUsesOptionalIndexDiagnosticAndStillCommits(t *test
 	response, err := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: "swobu_compose_failure"}, "m",
 		[]canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed", canonical.NewUnknownTokenUsage(),
+		canonical.Completed("completed"), canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {
 		t.Fatal(err)

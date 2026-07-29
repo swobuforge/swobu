@@ -108,5 +108,5 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 			}
 		}
 	}
-	t.Fatalf("Azure Codex returned no required tool call; text=%q finish=%q", strings.Join(text, "\n"), output.CompletionReason())
+	t.Fatalf("Azure Codex returned no required tool call; text=%q finish=%q", strings.Join(text, "\n"), output.Completion().Reason())
 }

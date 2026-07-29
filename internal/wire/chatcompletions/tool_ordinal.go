@@ -10,14 +10,6 @@ func (s *chatCompletionsEventReader) textOrdinal() uint32 {
 	return 0
 }
 
-func (s *chatCompletionsEventReader) toolOrdinal(index int) uint32 {
-	ordinal := uint32(index)
-	if s.textEnvID != "" {
-		ordinal++
-	}
-	return ordinal
-}
-
 func (s *chatCompletionsEventReader) nextSeq() int64 { s.seq++; return s.seq }
 
 func (s *chatCompletionsEventReader) enqueue(ev canonical.Event) {

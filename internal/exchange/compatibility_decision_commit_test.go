@@ -37,7 +37,7 @@ func assertCompatibilityEffect(t *testing.T, got compat.Decision, feature compat
 func TestRunnerRun_RecordsDeliveryStreamingDecisionExact(t *testing.T) {
 	sink := &recordingDecisionSink{}
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader(providerSSE))))
 	runner.DecisionSink = sink
@@ -101,7 +101,7 @@ func TestRunnerRun_RecordsDeliveryStreamingDecisionApproxWhenBuffered(t *testing
 func TestRunnerRun_RecordsDeliveryWebSocketConversionApproxWhenProviderIsSSE(t *testing.T) {
 	sink := &recordingDecisionSink{}
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader(providerSSE))))
 	runner.DecisionSink = sink
@@ -135,7 +135,7 @@ func TestRunnerRun_RecordsDeliveryWebSocketConversionApproxWhenProviderIsSSE(t *
 func TestRunnerRun_RecordsDeliveryTerminalEventDropWhenProviderStreamLacksUsage(t *testing.T) {
 	sink := &recordingDecisionSink{}
 	providerSSE := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader(providerSSE))))
 	runner.DecisionSink = sink

@@ -99,6 +99,10 @@ func replayFixturePriorRequest(t *testing.T) (canonical.CanonicalRequest, sessio
 				"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
 			),
 			canonical.NewWebSearchDeclaration(),
+			canonicaltest.MustCustomTool(
+				canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell"),
+				"", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"text"}`)),
+			),
 		), message},
 	})
 	media, err := (session.ResolvedMedia{}).Bind(
@@ -114,7 +118,7 @@ func replayFixturePriorRequest(t *testing.T) (canonical.CanonicalRequest, sessio
 
 func decodeReplayFixtureResponse(t *testing.T, request canonical.CanonicalRequest, streamed bool) canonical.CanonicalResponse {
 	t.Helper()
-	output := `[{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher"},{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"output_text","text":"use the tool"}]},{"type":"function_call","id":"fc_1","status":"completed","call_id":"call_1","name":"search","arguments":"{}"},{"type":"web_search_call","id":"ws_lifecycle","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}}]`
+	output := `[{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher"},{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"output_text","text":"use the tool"}]},{"type":"function_call","id":"fc_1","status":"completed","call_id":"call_1","name":"search","arguments":"{}"},{"type":"web_search_call","id":"ws_lifecycle","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}},{"type":"custom_tool_call","id":"ct_1","status":"completed","call_id":"call_custom","name":"shell","input":"echo exact"}]`
 	var reader canonical.ResponseStream
 	if streamed {
 		raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_turn_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
@@ -127,6 +131,9 @@ func decodeReplayFixtureResponse(t *testing.T, request canonical.CanonicalReques
 			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\",\"arguments\":\"{}\"}}\n\n" +
 			"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":3,\"item\":{\"id\":\"ws_lifecycle\",\"type\":\"web_search_call\",\"status\":\"in_progress\"}}\n\n" +
 			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":3,\"item\":{\"id\":\"ws_lifecycle\",\"type\":\"web_search_call\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"deadline\"],\"sources\":[{\"type\":\"url\",\"url\":\"https://example.test/rules\",\"title\":\"Rules\"}]}}}\n\n" +
+			"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":4,\"item\":{\"id\":\"ct_1\",\"type\":\"custom_tool_call\",\"call_id\":\"call_custom\",\"name\":\"shell\"}}\n\n" +
+			"event: response.custom_tool_call_input.delta\ndata: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":4,\"item_id\":\"ct_1\",\"call_id\":\"call_custom\",\"name\":\"shell\",\"delta\":\"echo exact\"}\n\n" +
+			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":4,\"item\":{\"id\":\"ct_1\",\"type\":\"custom_tool_call\",\"status\":\"completed\",\"call_id\":\"call_custom\",\"name\":\"shell\",\"input\":\"echo exact\"}}\n\n" +
 			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_turn_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 		reader = decodeResponseStream(
 			request,
@@ -164,10 +171,10 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.PreviousResponseID != "" || len(payload.Input) != 6 {
+	if payload.PreviousResponseID != "" || len(payload.Input) != 7 {
 		t.Fatalf("stateless payload shape = %#v: %s", payload, raw)
 	}
-	wantTypes := []string{"message", "reasoning", "message", "function_call", "web_search_call", "message"}
+	wantTypes := []string{"message", "reasoning", "message", "function_call", "web_search_call", "custom_tool_call", "message"}
 	for index, want := range wantTypes {
 		var header struct {
 			Type string `json:"type"`
@@ -182,6 +189,8 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 		`"id":"ws_lifecycle"`,
 		`"query":"deadline"`,
 		`"url":"https://example.test/rules"`,
+		`"call_id":"call_custom"`,
+		`"input":"echo exact"`,
 		`turn two`,
 	} {
 		if !strings.Contains(string(raw), token) {

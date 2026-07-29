@@ -69,6 +69,26 @@ func TestToolDiscoveryLifecycleLoadsDeclarationsInOrder(t *testing.T) {
 	}
 }
 
+func TestToolDiscoveryRequestRejectsAllErasedResultDeclarations(t *testing.T) {
+	raw := []byte(`{
+		"model":"m",
+		"input":[
+			{"type":"additional_tools","role":"developer","tools":[
+				{"type":"tool_search","execution":"server","description":"find tools","parameters":{"type":"object"}}
+			]},
+			{"type":"tool_search_call","call_id":"search_1","execution":"server","arguments":{}},
+			{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"server","tools":[
+				{"type":"future_tool"}
+			]}
+		]
+	}`)
+	if _, err := (ClientRequestDecoder{}).DecodeClientRequest(
+		carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}),
+	); err == nil {
+		t.Fatal("all-erased request discovery result fabricated an empty result")
+	}
+}
+
 func TestProviderToolDiscoveryOutputDecodesSemantically(t *testing.T) {
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonical.NewToolSchemaObject(schema), canonical.DiscoveryExecutorProvider)
@@ -102,7 +122,7 @@ func TestProviderToolDiscoveryOutputDecodesSemantically(t *testing.T) {
 		items[1].Owner() != canonical.TurnOwnerAssistant {
 		t.Fatalf("provider discovery ownership was not retained: call=%v result=%v", callExecutor, result.Executor())
 	}
-	response := canonicaltest.Response(t, "resp_discovery", "m", items, "completed")
+	response := canonicaltest.Response(t, "resp_discovery", "m", items, canonical.Completed("completed"))
 	document, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(request, response)
 	if err != nil {
 		t.Fatal(err)

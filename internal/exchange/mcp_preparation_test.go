@@ -74,13 +74,20 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	}
 	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	callID, _ := canonical.NewToolCallID("discovery_current_full")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	discoveryCall, err := canonical.NewToolDiscoveryCallItem(
+		callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := canonical.NewToolDiscoveryResultItem(
 		callID, tools, canonical.DiscoveryExecutorProvider,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request = request.WithItems(append(request.Items(), result))
+	request = request.WithItems(append(request.Items(), discoveryCall, result))
 	prepared := mustBeginSession(t, request)
 	state := reducerTestState(t)
 	state.input.request = request

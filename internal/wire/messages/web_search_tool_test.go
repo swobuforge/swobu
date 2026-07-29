@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -84,6 +85,183 @@ func TestDecodeResponseBufferedPreservesWebSearchLifecycle(t *testing.T) {
 	}
 }
 
+func TestDecodeResponseBufferedErasesUnknownWebSearchChildren(t *testing.T) {
+	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[
+		{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},
+		{"type":"web_search_tool_result","tool_use_id":"s","content":[
+			{"type":"future_result","value":"ignored"},
+			{"type":"web_search_result","url":"https://example.com/x","title":"Example"}
+		]},
+		{"type":"text","text":"answer","citations":[
+			{"type":"future_citation","value":"ignored"},
+			{"type":"web_search_result_location","url":"https://example.com/x","title":"Example"}
+		]}
+	]}`)
+	sink := &compat.RecordingSink{}
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Items()) != 3 {
+		t.Fatalf("items = %#v, want call, result, and cited message", response.Items())
+	}
+	want := map[compat.Subject]struct{}{
+		"wire:/content/1/content/0/type":   {},
+		"wire:/content/2/citations/0/type": {},
+	}
+	if len(sink.Decisions()) != len(want) {
+		t.Fatalf("decisions = %#v", sink.Decisions())
+	}
+	for _, decision := range sink.Decisions() {
+		if _, ok := want[decision.Subject]; !ok || decision.Outcome != compat.Drop {
+			t.Fatalf("decision = %#v", decision)
+		}
+	}
+}
+
+func TestDecodeResponseBufferedRejectsMissingNestedWebSearchDiscriminators(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "result child",
+			raw: `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[
+				{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},
+				{"type":"web_search_tool_result","tool_use_id":"s","content":[
+					{"url":"https://example.com/malformed"},
+					{"type":"web_search_result","url":"https://example.com/kept"}
+				]}
+			]}`,
+		},
+		{
+			name: "citation",
+			raw: `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[
+				{"type":"text","text":"answer","citations":[
+					{"url":"https://example.com/malformed"},
+					{"type":"web_search_result_location","url":"https://example.com/kept"}
+				]}
+			]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sink := &compat.RecordingSink{}
+			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", sink)
+			var backendErr canonical.BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("error = %v, want backend error", err)
+			}
+			if len(sink.Decisions()) != 0 {
+				t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+			}
+		})
+	}
+}
+
+func TestDecodeResponseBufferedClassifiesMalformedWebSearchProviderDataAsBackend(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "missing call id",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","name":"web_search","input":{"query":"x"}}]}`,
+		},
+		{
+			name: "malformed action",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":""}}]}`,
+		},
+		{
+			name: "missing result id",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"web_search_tool_result","content":[{"type":"web_search_result","url":"https://example.com"}]}]}`,
+		},
+		{
+			name: "malformed result content",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"web_search_tool_result","tool_use_id":"s","content":"bad"}]}`,
+		},
+		{
+			name: "invalid result URL",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"web_search_result","url":"not-a-url"}]}]}`,
+		},
+		{
+			name: "invalid citation URL",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"not-a-url"}]}]}`,
+		},
+		{
+			name: "invalid citation range",
+			raw:  `{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://example.com","start_char_index":4,"end_char_index":8}]}]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", nil)
+			var backendErr canonical.BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("error = %T %v, want backend error", err, err)
+			}
+		})
+	}
+}
+
+func TestMessagesWebSearchCallerMalformationRemainsBadRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "missing result child type",
+			run: func() error {
+				_, err := decodeMessagesWebSearchResult(
+					"s",
+					json.RawMessage(`[{"url":"https://example.com"}]`),
+					false,
+					messagesProjectionEvidence{feature: compat.RequestItemsKind},
+				)
+				return err
+			},
+		},
+		{
+			name: "invalid citation URL",
+			run: func() error {
+				_, err := decodeMessagesCitedText(
+					"answer",
+					[]messagesCitationDTO{{Type: "web_search_result_location", URL: "not-a-url"}},
+					messagesProjectionEvidence{feature: compat.RequestItemsKind},
+				)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var canonicalErr canonical.Error
+			if err := test.run(); !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+				t.Fatalf("error = %T %v, want BAD_REQUEST", err, err)
+			}
+		})
+	}
+}
+
+func TestDecodeResponseBufferedRejectsAllErasedWebSearchResult(t *testing.T) {
+	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[
+		{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},
+		{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"future_result"}]}
+	]}`)
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &compat.RecordingSink{}); err == nil ||
+		!strings.Contains(err.Error(), "backend error from messages") {
+		t.Fatalf("error = %v, want backend-origin all-erased result", err)
+	}
+}
+
 func TestDecodeResponseBufferedPreservesWebSearchFailure(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","tool_use_id":"s","content":{"type":"web_search_tool_result_error","error_code":"unavailable"}}]}`)
 	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
@@ -97,6 +275,9 @@ func TestDecodeResponseBufferedPreservesWebSearchFailure(t *testing.T) {
 	response, err := closed.ProjectResponse()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(response.Items()) < 2 {
+		t.Fatalf("response items = %#v, want call and result", response.Items())
 	}
 	result, ok := response.Items()[1].ToolResult()
 	if !ok {
@@ -122,17 +303,36 @@ func TestEncodeMessagesWebSearchFailureUsesObjectContent(t *testing.T) {
 	}
 }
 
-func TestDecodeResponseStreamRejectsUnknownServerToolLifecycle(t *testing.T) {
-	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" + "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s\",\"name\":\"code_execution\"}}\n\n"
+func TestDecodeResponseStreamSkipsUnknownBlockUntilStopAndPreservesKnownSibling(t *testing.T) {
+	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s\",\"name\":\"code_execution\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"future_delta\",\"text\":\"ignored\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: response.future\ndata: {\"type\":\"response.future\",\"value\":\"ignored\"}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"kept\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
-	if _, err := reader.Next(context.Background()); err != nil {
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reader.Next(context.Background()); err != nil {
+	response, err := closed.ProjectResponse()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reader.Next(context.Background()); err == nil {
-		t.Fatal("unknown server tool stream lifecycle was silently dropped")
+	if len(response.Items()) < 1 {
+		t.Fatal("response has no surviving items")
+	}
+	message, ok := response.Items()[0].Message()
+	if !ok {
+		t.Fatalf("response items = %#v, want message", response.Items())
+	}
+	text, _ := message.Content()[0].Text()
+	if text.Text() != "kept" {
+		t.Fatalf("message text = %q, want kept", text.Text())
 	}
 }
 
@@ -159,6 +359,29 @@ func TestDecodeResponseStreamPreservesWebSearchLifecycle(t *testing.T) {
 	}
 }
 
+func TestDecodeResponseStreamClassifiesMalformedWebSearchSourceAsBackend(t *testing.T) {
+	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"s\",\"content\":[{\"type\":\"web_search_result\",\"url\":\"not-a-url\"}]}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+	reader := decodeResponseStream(
+		canonical.CanonicalRequest{},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex",
+		nil,
+	)
+	for {
+		_, err := reader.Next(context.Background())
+		if err == nil {
+			continue
+		}
+		var backendErr canonical.BackendError
+		if !errors.As(err, &backendErr) {
+			t.Fatalf("error = %T %v, want backend error", err, err)
+		}
+		return
+	}
+}
+
 func TestDecodeResponseStreamPreservesWebSearchFailure(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"s\",\"name\":\"web_search\",\"input\":{\"query\":\"x\"}}}\n\n" +
@@ -175,6 +398,9 @@ func TestDecodeResponseStreamPreservesWebSearchFailure(t *testing.T) {
 	response, err := closed.ProjectResponse()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(response.Items()) < 2 {
+		t.Fatalf("response items = %#v, want call and result", response.Items())
 	}
 	result, ok := response.Items()[1].ToolResult()
 	if !ok {

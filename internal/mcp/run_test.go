@@ -47,7 +47,7 @@ func TestRunClassifiesOnlyUnresolvedCallerWorkAsMixedWithMCP(t *testing.T) {
 	request, remoteKey, localKey := runtimeTestRequest(t)
 	run := runtimeTestRun(t, request, remoteKey)
 	remoteCall := runtimeTestCall(t, "call_remote", remoteKey)
-	webCall := runtimeTestWebSearchCall(t, "call_web")
+	webCall, webResult := runtimeTestWebSearchLifecycle(t, "call_web")
 	providerDiscoveryCall, providerDiscoveryResult := runtimeTestDiscoveryLifecycle(
 		t, "call_provider_discovery", canonical.DiscoveryExecutorProvider,
 	)
@@ -62,7 +62,7 @@ func TestRunClassifiesOnlyUnresolvedCallerWorkAsMixedWithMCP(t *testing.T) {
 		items     []canonical.CanonicalItem
 		wantMixed bool
 	}{
-		{name: "web search", items: []canonical.CanonicalItem{remoteCall, webCall}},
+		{name: "web search", items: []canonical.CanonicalItem{remoteCall, webCall, webResult}},
 		{name: "provider discovery", items: []canonical.CanonicalItem{remoteCall, providerDiscoveryCall, providerDiscoveryResult}},
 		{name: "function", items: []canonical.CanonicalItem{remoteCall, runtimeTestCall(t, "call_function", localKey)}, wantMixed: true},
 		{name: "custom", items: []canonical.CanonicalItem{remoteCall, customCall}, wantMixed: true},
@@ -492,8 +492,10 @@ func TestOpenResolvesMCPSourceContributedByDiscoveryResult(t *testing.T) {
 	unresolved, _ := canonical.NewMCPToolNamespace(sourceKey, "Docs", source, nil)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{unresolved})
 	callID, _ := canonical.NewToolCallID("discovery_1")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider)
 	result, _ := canonical.NewToolDiscoveryResultItem(callID, set, canonical.DiscoveryExecutorProvider)
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{result}})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{call, result}})
 	catalog := runtimeTestCatalog(t, sourceKey, remoteKey, "Docs", "Search")
 
 	prepared, run, _, err := openWith(
@@ -505,10 +507,10 @@ func TestOpenResolvesMCPSourceContributedByDiscoveryResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preparedResult, ok := prepared.Items()[0].ToolDiscoveryResult()
+	preparedResult, ok := prepared.Items()[1].ToolDiscoveryResult()
 	if !ok || preparedResult.CallID() != callID ||
 		preparedResult.Executor() != canonical.DiscoveryExecutorProvider {
-		t.Fatalf("prepared discovery carrier = %#v", prepared.Items()[0])
+		t.Fatalf("prepared discovery carrier = %#v", prepared.Items()[1])
 	}
 	environment, _ := canonical.EffectiveTools(prepared)
 	if _, ok := environment.Lookup(remoteKey); !ok || !run.CanExecute() {
@@ -840,7 +842,7 @@ func runtimeTestTextCall(t *testing.T, id string, key canonical.ToolKey) canonic
 	return call
 }
 
-func runtimeTestWebSearchCall(t *testing.T, id string) canonical.CanonicalItem {
+func runtimeTestWebSearchLifecycle(t *testing.T, id string) (canonical.CanonicalItem, canonical.CanonicalItem) {
 	t.Helper()
 	callID, _ := canonical.NewToolCallID(id)
 	input, err := canonical.NewWebSearchToolInput(
@@ -853,7 +855,15 @@ func runtimeTestWebSearchCall(t *testing.T, id string) canonical.CanonicalItem {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return call
+	searchResult, err := canonical.NewWebSearchResult(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewWebSearchResultItem(callID, searchResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return call, result
 }
 
 func runtimeTestDiscoveryLifecycle(
@@ -908,7 +918,7 @@ func assertAttemptHasNoMCP(
 func runtimeTestResponse(t *testing.T, items ...canonical.CanonicalItem) canonical.CanonicalResponse {
 	t.Helper()
 	response, err := canonical.NewCanonicalResponse(
-		canonical.ResponseRef{SwobuID: "resp_mcp"}, "model", items, "tool_calls",
+		canonical.ResponseRef{SwobuID: "resp_mcp"}, "model", items, canonical.Completed("tool_calls"),
 		canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {

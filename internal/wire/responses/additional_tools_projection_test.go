@@ -36,7 +36,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		canonical.ResponseRef{SwobuID: responseID},
 		"m",
 		nil,
-		"stop",
+		canonical.Completed("stop"),
 		canonical.NewUnknownTokenUsage(),
 	)
 	if err != nil {

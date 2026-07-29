@@ -3,11 +3,13 @@ package chatcompletions
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -17,7 +19,7 @@ func decodeChatCompletionsTools(tools []ProviderRequestTool, sink compat.Sink, e
 		return nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
-	for _, tool := range tools {
+	for index, tool := range tools {
 		kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 		switch kind {
 		case "function":
@@ -67,7 +69,9 @@ func decodeChatCompletionsTools(tools []ProviderRequestTool, sink compat.Sink, e
 			}
 			out = append(out, decl)
 		default:
-			return nil, canonical.BadRequest("chat completions request contains an unsupported tool type")
+			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestToolsKind, compat.Drop, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/type")); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return out, nil
@@ -86,6 +90,18 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 }
 
 func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
+	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return nil, err
+	}
+	for range flattened.RemovedNamespaces {
+		if err := emitChatImageDecision(sink, exchangeID, compat.RequestTools, compat.Approx); err != nil {
+			return nil, err
+		}
+	}
+	tools = flattened.Declarations
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -296,15 +312,6 @@ func cloneBoolPointer(ptr *bool) *bool {
 	}
 	value := *ptr
 	return &value
-}
-
-func hasChatCompletionsCustomTools(tools []canonical.ToolDeclaration) bool {
-	for _, tool := range tools {
-		if string(tool.Kind()) == canonical.ToolTypeCustom {
-			return true
-		}
-	}
-	return false
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.

@@ -2,13 +2,15 @@ package responses
 
 import (
 	"encoding/json"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -48,7 +50,7 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 	}
 }
 
-func TestEncode_RejectsStopSequences(t *testing.T) {
+func TestEncode_RejectsStopSequencesWithoutTargetExtension(t *testing.T) {
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
 		StopSequences: []string{"END"},
 	})
@@ -60,8 +62,9 @@ func TestEncode_RejectsStopSequences(t *testing.T) {
 		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		Controls: controls,
 	}), delivery.BufferedDelivery())
-	if err == nil || !strings.Contains(err.Error(), "stop sequences") {
-		t.Fatalf("EncodeCarrier err=%v, want explicit stop-sequence rejection", err)
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("EncodeCarrier error = %T %v, want IncompatibleTargetError", err, err)
 	}
 }
 
@@ -83,12 +86,15 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 	}
 }
 
-func TestDecodeRequest_RejectsStopSequences(t *testing.T) {
+func TestDecodeRequest_PreservesStopSequences(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","stop":["END"]}`)
-	_, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
-	if err == nil || !strings.Contains(err.Error(), "stop sequences") {
-		t.Fatalf("DecodeClientRequest err=%v, want explicit stop-sequence rejection", err)
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop := got.Controls().Limits.StopSequences; len(stop) != 1 || stop[0] != "END" {
+		t.Fatalf("stop sequences = %#v, want [END]", stop)
 	}
 }
 
@@ -153,6 +159,39 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 	}
 	if got := answer["type"]; got != "string" {
 		t.Fatalf("schema.properties.answer.type = %#v, want string", got)
+	}
+}
+
+func TestResponsesJSONObjectRoundTrips(t *testing.T) {
+	decoded, err := decodeResponsesOutputFormat(&responsesTextDTO{
+		Format: responsesTextFormatDTO{Type: "json_object"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != canonical.OutputFormatJSONObject {
+		t.Fatalf("decoded format = %#v", decoded)
+	}
+	encoded, err := encodeResponsesOutputFormat(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded == nil || encoded.Format.Type != "json_object" {
+		t.Fatalf("encoded format = %#v", encoded)
+	}
+}
+
+func TestResponsesUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
+	sink := &compat.RecordingSink{}
+	_, err := decodeResponsesOutputFormat(&responsesTextDTO{
+		Format: responsesTextFormatDTO{Type: "future_format"},
+	}, sink, "ex")
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %v, want BAD_REQUEST", err)
+	}
+	if len(sink.Decisions()) != 0 {
+		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
 	}
 }
 

@@ -103,7 +103,7 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 				"chatcmpl_1",
 				"m",
 				[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-				"stop",
+				canonical.Completed("stop"),
 			),
 		),
 	})
@@ -153,6 +153,23 @@ func TestExchangeFailureDeliveryResult_PreservesClientCancellation(t *testing.T)
 	}
 	if got := statusCodeForExchangeError(result.Err); got != clientClosedRequestStatus {
 		t.Fatalf("cancellation status = %d, want %d", got, clientClosedRequestStatus)
+	}
+}
+
+func TestWriteExchangeErrorDefaultsStatuslessBackendFailureToBadGateway(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	err := canonical.NewBackendError("responses", 0, "provider contract failed", "")
+
+	writeExchangeError(recorder, err)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadGateway)
+	}
+	if body := recorder.Body.String(); body != "provider contract failed" {
+		t.Fatalf("body = %q", body)
+	}
+	if got := statusCodeForExchangeError(err); got != http.StatusBadGateway {
+		t.Fatalf("traffic status = %d, want %d", got, http.StatusBadGateway)
 	}
 }
 
@@ -321,7 +338,7 @@ func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
 			"chatcmpl_1",
 			"resolved-model",
 			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-			"stop",
+			canonical.Completed("stop"),
 		),
 	)
 	handler := newTestHandler(staticRequestIngress{
@@ -893,7 +910,7 @@ func (h *capturingRequestIngress) HandleRequest(ctx context.Context, in exchange
 			[]canonical.CanonicalItem{
 				canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok"),
 			},
-			"stop",
+			canonical.Completed("stop"),
 		),
 	))
 	if err != nil {
@@ -939,7 +956,7 @@ func testProviderIngressFromOutput(output canonical.CanonicalResponse) canonical
 		output.Response(),
 		output.Model(),
 		output.Items(),
-		output.CompletionReason(),
+		output.Completion(),
 		output.Usage(),
 	))
 }
@@ -966,7 +983,7 @@ func testStreamingTextResponse(resultID string, model string, itemID string, tex
 		{ExchangeID: "test_exchange", Seq: 3, Kind: canonical.EventItemStart, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustMessageStart(canonical.MessageRoleAssistant)}, Meta: canonical.EventMetadataFields{NativeID: itemID}},
 		{ExchangeID: "test_exchange", Seq: 4, Kind: canonical.EventTextDelta, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.TextDeltaPayload{Text: text}}},
 		{ExchangeID: "test_exchange", Seq: 5, Kind: canonical.EventItemCompleted, EnvID: "msg_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: item}}},
-		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
+		{ExchangeID: "test_exchange", Seq: 6, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Completion: canonical.Completed(finish)}},
 		{ExchangeID: "test_exchange", Seq: 7, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	}
 	return canonical.NewSliceEventReader(events)
@@ -1001,7 +1018,7 @@ func testStreamingToolResponse(resultID string, model string, itemID string, too
 	}
 	events = append(events,
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq, Kind: canonical.EventItemCompleted, EnvID: "tool_1", ParentID: "res_1", Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: item}}},
-		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Reason: finish}},
+		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 1, Kind: canonical.EventFinish, EnvID: "res_1", Payload: canonical.FinishPayload{Completion: canonical.Completed(finish)}},
 		canonical.Event{ExchangeID: "test_exchange", Seq: seq + 2, Kind: canonical.EventEnvelopeEnd, EnvID: "res_1", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}},
 	)
 	return canonical.NewSliceEventReader(events)
@@ -1022,7 +1039,7 @@ func (h *modelsCapableHandler) HandleRequest(_ context.Context, _ exchange.Reque
 			[]canonical.CanonicalItem{
 				canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok"),
 			},
-			"stop",
+			canonical.Completed("stop"),
 		),
 	))}, nil
 }

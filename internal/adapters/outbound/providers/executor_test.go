@@ -3,7 +3,6 @@ package providers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -455,10 +454,7 @@ func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t 
 	}
 }
 
-func TestServices_MessagesCodecReportsStructuredOutputRejection(t *testing.T) {
-	t.Parallel()
-
-	composition := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
+func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:        canonical.OutputFormatJSONSchema,
 		Name:        "reply_shape",
@@ -474,22 +470,41 @@ func TestServices_MessagesCodecReportsStructuredOutputRejection(t *testing.T) {
 		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		OutputFormat: canonical.Specify(outputFormat),
 	})
-	req := newTestProviderRequest(
-		"test-ex", protocolkind.Responses, request,
-		carrier.Document{},
-		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-b", "anthropic", "https://example.test/v1", "cred-1", protocolkind.Messages, "", "messages"),
-	)
-	req.ExchangeID = "ex-structured-output"
-	sink := &recordingDecisionSink{}
-	req.DecisionSink = sink
+	for _, providerSpec := range []string{"anthropic", "custom"} {
+		t.Run(providerSpec, func(t *testing.T) {
+			var providerBody []byte
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				providerBody, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"{}"}],"stop_reason":"end_turn"}`))
+			}))
+			defer upstream.Close()
+			composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+			req := newTestProviderRequest(
+				"test-ex", protocolkind.Responses, request,
+				carrier.Document{},
+				exchange.NewExecutionContract(delivery.BufferedDelivery()),
+				provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "", "messages"),
+			)
+			req.ExchangeID = "ex-structured-output"
+			sink := &recordingDecisionSink{}
+			req.DecisionSink = sink
 
-	_, err = executeProviderRequest(composition, context.Background(), req)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("structured output error = %T %v, want candidate incompatibility", err, err)
+			if _, err = executeProviderRequest(composition, context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			body := mustJSONBodyMap(t, providerBody)
+			outputConfig, ok := body["output_config"].(map[string]any)
+			if !ok {
+				t.Fatalf("output_config = %#v", body["output_config"])
+			}
+			format, ok := outputConfig["format"].(map[string]any)
+			if !ok || format["type"] != "json_schema" {
+				t.Fatalf("output_config.format = %#v", outputConfig["format"])
+			}
+			assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Approx)
+		})
 	}
-	assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Reject)
 }
 
 func assertProviderDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -58,11 +59,12 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 				ID:           sse.FallbackID(event.ResultID, "msg_swobu"),
 				Type:         "message",
 				Role:         "assistant",
+				Model:        event.Model,
 				Content:      []messagesResponsePartDTO{},
 				StopReason:   nil,
 				StopSequence: nil,
+				Usage:        messagesUsageDTO{},
 			},
-			Usage: messagesUsageDTO{},
 		})
 		frames := [][]byte{sse.SSEEventFrame("message_start", raw)}
 		for _, frame := range frames {
@@ -110,11 +112,16 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		case canonical.ItemKindReasoning:
 			return nil, nil
 		default:
-			return nil, canonical.NotImplemented("Swobu cannot project this canonical output item kind to a Messages stream")
+			return nil, canonical.InternalError("Messages stream received a request-only canonical item kind")
 		}
 	case sse.StreamEventContentStarted:
 		if event.PartKind != canonical.PartKindText {
-			return nil, canonical.NotImplemented("Swobu cannot project this canonical content part kind to a Messages stream")
+			return nil, canonical.NewBackendError(
+				"messages",
+				0,
+				"Messages client stream cannot represent the backend image response",
+				"",
+			)
 		}
 		key := messagesStreamPartKey(event.ItemID, event.PartOrdinal)
 		if _, exists := s.blockIndexByID[key]; exists {
@@ -216,24 +223,23 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			return append(frames, more...), err
 		}
 		if len(s.unresolvedWebSearchCallIDs) > 0 {
-			return nil, canonical.NotImplemented("Swobu cannot project an unresolved canonical web-search call to a Messages response")
+			return nil, provider.NewIncompatibleTarget("Messages cannot represent an unresolved canonical web-search call")
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {
 			raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 			frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 		}
-		outputTokens := 0
-		if usageTokens, ok := event.Usage.OutputTokens(); ok {
-			outputTokens = usageTokens
-		}
 		raw, _ := json.Marshal(messagesDeltaEventDTO{
 			Type: "message_delta",
 			Delta: messagesDeltaBodyDTO{
-				StopReason:   messagesStopReasonForFinishReason(event.FinishReason, s.sawToolUse),
+				StopReason:   messagesStopReasonForCompletion(event.Completion, s.sawToolUse),
 				StopSequence: nil,
 			},
-			Usage: messagesDeltaUsageDTO{OutputTokens: outputTokens},
+			// Messages terminal usage is cumulative. Carry every known
+			// canonical counter here because a cross-family source may not
+			// expose input/cache usage before message_start.
+			Usage: messagesDeltaUsageFromCanonical(event.Usage),
 		})
 		frames = append(frames, sse.SSEEventFrame("message_delta", raw))
 		raw, _ = json.Marshal(struct {
@@ -259,7 +265,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		logMessagesEgressStreamFrame(frame)
 		return [][]byte{frame}, nil
 	default:
-		return nil, canonical.NotImplemented("Swobu cannot project this canonical event to a Messages stream")
+		return nil, canonical.InternalError("Messages stream received an unknown canonical event kind")
 	}
 }
 

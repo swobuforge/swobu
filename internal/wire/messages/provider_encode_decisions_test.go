@@ -13,11 +13,11 @@ import (
 func TestProviderEncodeDecisionsDescribeActualMessagesProjection(t *testing.T) {
 	request := requestWithStrictToolAndJSONSchema(t)
 	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "exchange")
-	if err == nil {
-		t.Fatal("expected Messages structured-output rejection")
+	if err != nil {
+		t.Fatal(err)
 	}
 	assertDecision(t, result.Decisions, compat.RequestToolsSchemaStrict, compat.Drop)
-	assertDecision(t, result.Decisions, compat.RequestOutputFormat, compat.Reject)
+	assertDecision(t, result.Decisions, compat.RequestOutputFormat, compat.Approx)
 }
 
 func requestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalRequest {

@@ -2,11 +2,31 @@ package messages
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
+
+type messagesProjectionEvidence struct {
+	feature       compat.Feature
+	sink          compat.Sink
+	exchangeID    string
+	subjectPrefix string
+}
+
+func (e messagesProjectionEvidence) drop(index int) error {
+	return emitMessagesWireDecision(e.sink, e.exchangeID, e.feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", e.subjectPrefix, index)))
+}
+
+func (e messagesProjectionEvidence) malformed(message string) error {
+	if e.feature == compat.ResponseItemsKind {
+		return canonical.NewBackendError("messages", 0, message, "")
+	}
+	return canonical.BadRequest(message)
+}
 
 type messagesWebSearchResultBlock struct {
 	Type      string `json:"type"`
@@ -16,29 +36,29 @@ type messagesWebSearchResultBlock struct {
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
-func decodeMessagesWebSearchCall(id string, input json.RawMessage) (canonical.CanonicalItem, error) {
+func decodeMessagesWebSearchCall(id string, input json.RawMessage, evidence messagesProjectionEvidence) (canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(id)
 	if err != nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search call is missing id")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search call is missing id")
 	}
 	var body struct {
 		Query string `json:"query"`
 	}
 	if err := json.Unmarshal(input, &body); err != nil || strings.TrimSpace(body.Query) == "" { // swobu:io-string source=provider-wire
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search call input is invalid")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search call input is invalid")
 	}
 	call := canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{body.Query}}
 	toolInput, err := canonical.NewWebSearchToolInput(call)
 	if err != nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search call input is invalid")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search call input is invalid")
 	}
 	return canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), toolInput)
 }
 
-func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, isError bool) (canonical.CanonicalItem, error) {
+func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, isError bool, evidence messagesProjectionEvidence) (canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(callIDText)
 	if err != nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search result is missing tool_use_id")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search result is missing tool_use_id")
 	}
 	// Messages defines content as an array for successful searches and one
 	// object for a search failure. Keep that wire union here at the codec edge.
@@ -46,35 +66,42 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 	switch firstJSONByte(content) {
 	case '[':
 		if err := json.Unmarshal(content, &blocks); err != nil {
-			return canonical.CanonicalItem{}, canonical.InternalError("messages web-search result content is invalid")
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
 		}
 	case '{':
 		var block messagesWebSearchResultBlock
 		if err := json.Unmarshal(content, &block); err != nil || block.Type != "web_search_tool_result_error" {
-			return canonical.CanonicalItem{}, canonical.InternalError("messages web-search result content is invalid")
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
 		}
 		blocks = []messagesWebSearchResultBlock{block}
 	default:
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search result content is invalid")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
 	}
 	if len(blocks) == 1 && blocks[0].Type == "web_search_tool_result_error" {
 		failure, err := canonical.NewWebSearchFailureResult(blocks[0].ErrorCode)
 		if err != nil {
-			return canonical.CanonicalItem{}, err
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search failure result is invalid")
 		}
 		return canonical.NewWebSearchResultItem(callID, failure)
 	}
 	if isError {
-		return canonical.CanonicalItem{}, canonical.InternalError("messages web-search error result content is invalid")
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search error result content is invalid")
 	}
 	sources := make([]canonical.WebSource, 0, len(blocks))
-	for _, block := range blocks {
-		if block.Type != "web_search_result" {
-			return canonical.CanonicalItem{}, canonical.NotImplemented("Swobu has no canonical projection for this Messages web-search result block type")
+	for index, block := range blocks {
+		kind := strings.TrimSpace(block.Type) // swobu:io-string source=provider-wire
+		if kind == "" {
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result child is missing type")
+		}
+		if kind != "web_search_result" {
+			if err := evidence.drop(index); err != nil {
+				return canonical.CanonicalItem{}, err
+			}
+			continue
 		}
 		webURL, err := canonical.NewWebURL(block.URL)
 		if err != nil {
-			return canonical.CanonicalItem{}, canonical.InternalError("messages web-search result URL is invalid")
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result URL is invalid")
 		}
 		title := canonical.Unspecified[string]()
 		if strings.TrimSpace(block.Title) != "" { // swobu:io-string source=provider-wire
@@ -82,13 +109,19 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 		}
 		source, err := canonical.NewWebSource(webURL, title)
 		if err != nil {
-			return canonical.CanonicalItem{}, err
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result source is invalid")
 		}
 		sources = append(sources, source)
 	}
+	if len(blocks) > 0 && len(sources) == 0 {
+		if evidence.feature == compat.ResponseItemsKind {
+			return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages web-search result has no surviving sources", "")
+		}
+		return canonical.CanonicalItem{}, canonical.BadRequest("messages web-search result has no surviving sources")
+	}
 	result, err := canonical.NewWebSearchResult(sources)
 	if err != nil {
-		return canonical.CanonicalItem{}, err
+		return canonical.CanonicalItem{}, evidence.malformed("messages web-search result is invalid")
 	}
 	return canonical.NewWebSearchResultItem(callID, result)
 }
@@ -101,15 +134,22 @@ func firstJSONByte(raw json.RawMessage) byte {
 	return trimmed[0]
 }
 
-func decodeMessagesCitedText(text string, citations []messagesCitationDTO) (canonical.MessagePart, error) {
+func decodeMessagesCitedText(text string, citations []messagesCitationDTO, evidence messagesProjectionEvidence) (canonical.MessagePart, error) {
 	canonicalCitations := make([]canonical.WebCitation, 0, len(citations))
-	for _, citation := range citations {
-		if citation.Type != "web_search_result_location" && citation.Type != "web_search_result" {
-			return canonical.MessagePart{}, canonical.NotImplemented("Swobu has no canonical projection for this Messages citation type")
+	for index, citation := range citations {
+		kind := strings.TrimSpace(citation.Type) // swobu:io-string source=provider-wire
+		if kind == "" {
+			return canonical.MessagePart{}, evidence.malformed("messages citation is missing type")
+		}
+		if kind != "web_search_result_location" && kind != "web_search_result" {
+			if err := evidence.drop(index); err != nil {
+				return canonical.MessagePart{}, err
+			}
+			continue
 		}
 		webURL, err := canonical.NewWebURL(citation.URL)
 		if err != nil {
-			return canonical.MessagePart{}, canonical.InternalError("messages citation URL is invalid")
+			return canonical.MessagePart{}, evidence.malformed("messages citation URL is invalid")
 		}
 		title := canonical.Unspecified[string]()
 		if strings.TrimSpace(citation.Title) != "" { // swobu:io-string source=provider-wire
@@ -121,21 +161,24 @@ func decodeMessagesCitedText(text string, citations []messagesCitationDTO) (cano
 		}
 		source, err := canonical.NewWebSource(webURL, title)
 		if err != nil {
-			return canonical.MessagePart{}, err
+			return canonical.MessagePart{}, evidence.malformed("messages citation source is invalid")
 		}
 		value := canonical.WebCitation{Source: source, Excerpt: excerpt}
 		if citation.StartCharIndex != nil && citation.EndCharIndex != nil {
 			start, ok := messagesRuneOffset(text, *citation.StartCharIndex)
 			if !ok {
-				return canonical.MessagePart{}, canonical.InternalError("messages citation start index is invalid")
+				return canonical.MessagePart{}, evidence.malformed("messages citation start index is invalid")
 			}
 			end, ok := messagesRuneOffset(text, *citation.EndCharIndex)
 			if !ok {
-				return canonical.MessagePart{}, canonical.InternalError("messages citation end index is invalid")
+				return canonical.MessagePart{}, evidence.malformed("messages citation end index is invalid")
 			}
 			value.Start, value.End = canonical.Specify(uint32(start)), canonical.Specify(uint32(end))
 		}
 		canonicalCitations = append(canonicalCitations, value)
+	}
+	if len(canonicalCitations) == 0 {
+		return canonical.NewTextMessagePart(text), nil
 	}
 	return canonical.NewCitedTextMessagePart(text, canonicalCitations)
 }

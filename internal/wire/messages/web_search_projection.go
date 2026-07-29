@@ -12,43 +12,53 @@ import (
 // that Messages cannot express exactly. The leaf encoders remain strict so an
 // unresolved call still rejects and can drive ordinary target fallback.
 func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature compat.Feature) ([]canonical.CanonicalItem, []compat.Decision, error) {
-	type callRecord struct {
-		index         int
-		representable bool
-	}
-	calls := map[string]callRecord{}
-	results := map[string]int{}
-	for index, item := range items {
-		if call, ok := item.ToolCall(); ok && call.Tool().Kind() == canonical.ToolKindWebSearch {
-			search, valid := call.Input().WebSearch()
-			calls[call.CallID().String()] = callRecord{
-				index:         index,
-				representable: valid && search.Action == canonical.WebSearchActionSearch && len(search.Queries) == 1,
-			}
-			continue
-		}
-		if result, ok := item.ToolResult(); ok {
-			if _, search := result.WebSearch(); search {
-				results[result.CallID().String()] = index
-			}
-		}
-	}
 	drop := map[int]struct{}{}
 	decisions := make([]compat.Decision, 0)
-	for callID, call := range calls {
-		if call.representable {
+	var matcher canonical.ToolEffectMatcher
+	effects := make([]canonical.ToolEffect, 0)
+	for index, item := range items {
+		if call, ok := item.ToolCall(); ok && call.Tool().Kind() != canonical.ToolKindWebSearch {
 			continue
 		}
-		resultIndex, completed := results[callID]
-		if !completed {
-			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent unresolved canonical web-search call " + callID)
+		if _, call := item.ToolCall(); !call {
+			result, ok := item.ToolResult()
+			if !ok {
+				continue
+			}
+			if _, webSearch := result.WebSearch(); !webSearch {
+				continue
+			}
 		}
-		drop[call.index] = struct{}{}
-		drop[resultIndex] = struct{}{}
+		completed, err := matcher.Accept(index, item)
+		if err != nil {
+			if feature == compat.ResponseItemsKind {
+				return nil, nil, canonical.NewBackendError("messages", 0, "backend returned an invalid web-search lifecycle: "+err.Error(), "")
+			}
+			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent invalid canonical web-search lifecycle: " + err.Error())
+		}
+		if completed != nil {
+			effects = append(effects, *completed)
+		}
+	}
+	effects = append(effects, matcher.Pending()...)
+	for _, effect := range effects {
+		if effect.Kind != canonical.ToolKindWebSearch {
+			continue
+		}
+		call, _ := items[effect.CallIndex].ToolCall()
+		search, valid := call.Input().WebSearch()
+		if valid && search.Action == canonical.WebSearchActionSearch && len(search.Queries) == 1 {
+			continue
+		}
+		if effect.ResultIndex < 0 {
+			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent unresolved canonical web-search call " + effect.CallID.String())
+		}
+		drop[effect.CallIndex] = struct{}{}
+		drop[effect.ResultIndex] = struct{}{}
 		decisions = append(decisions, compat.Decision{
 			Feature: feature,
 			Outcome: compat.Drop,
-			Subject: compat.Subject("web_search:" + callID),
+			Subject: compat.Subject("web_search:" + effect.CallID.String()),
 		})
 	}
 	if len(drop) == 0 {

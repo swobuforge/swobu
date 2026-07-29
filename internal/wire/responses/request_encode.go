@@ -413,7 +413,11 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
-	callKinds := toolCallKindsByID(request.Items())
+	pendingContentCalls := make(map[canonical.ToolCallID]canonical.ToolKind)
+	contentResultKinds, err := contentResultKindsByOccurrence(request.Items())
+	if err != nil {
+		return nil, err
+	}
 	for _, current := range items {
 		switch current.Kind() {
 		case canonical.ItemKindMessage:
@@ -450,19 +454,27 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			name := tool.Name()
 			switch tool.Kind() {
 			case canonical.ToolKindFunction:
+				if _, exists := pendingContentCalls[call.CallID()]; exists {
+					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
+				}
 				object, ok := call.Input().Object()
 				if !ok {
 					return nil, canonical.BadRequest("responses function calls require object input")
 				}
 				item := functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: name, Arguments: object.String()}
 				encoded = append(encoded, item)
+				pendingContentCalls[call.CallID()] = canonical.ToolKindFunction
 			case canonical.ToolKindCustom:
+				if _, exists := pendingContentCalls[call.CallID()]; exists {
+					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
+				}
 				text, ok := call.Input().Text()
 				if !ok {
 					return nil, canonical.BadRequest("responses custom tool calls require text input")
 				}
 				item := customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: name, Input: text}
 				encoded = append(encoded, item)
+				pendingContentCalls[call.CallID()] = canonical.ToolKindCustom
 			case canonical.ToolKindWebSearch:
 				if _, exists := pendingWebSearch[call.CallID()]; exists {
 					return nil, canonical.BadRequest("responses web-search history contains a duplicate unresolved call")
@@ -530,9 +542,28 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				return nil, err
 			}
 			outputType := "function_call_output"
-			if callKinds[result.CallID()] == canonical.ToolKindCustom {
+			callKind, found := pendingContentCalls[result.CallID()]
+			if !found {
+				occurrences := contentResultKinds[result.CallID()]
+				if len(occurrences) == 0 {
+					// A result-only request contribution has no canonical call
+					// kind. Preserve the Responses portable default.
+					callKind = canonical.ToolKindFunction
+				} else {
+					callKind = occurrences[0]
+					contentResultKinds[result.CallID()] = occurrences[1:]
+				}
+			} else {
+				occurrences := contentResultKinds[result.CallID()]
+				if len(occurrences) == 0 || occurrences[0] != callKind {
+					return nil, canonical.InternalError("responses tool-result occurrence pairing is inconsistent")
+				}
+				contentResultKinds[result.CallID()] = occurrences[1:]
+			}
+			if callKind == canonical.ToolKindCustom {
 				outputType = "custom_tool_call_output"
 			}
+			delete(pendingContentCalls, result.CallID())
 			item := toolCallOutputItem{
 				Type:   outputType,
 				CallID: result.CallID().String(),
@@ -579,16 +610,34 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 	return encoded, nil
 }
 
-func toolCallKindsByID(items []canonical.CanonicalItem) map[canonical.ToolCallID]canonical.ToolKind {
-	kinds := make(map[canonical.ToolCallID]canonical.ToolKind)
-	for _, item := range items {
-		call, ok := item.ToolCall()
-		if !ok {
+func contentResultKindsByOccurrence(items []canonical.CanonicalItem) (map[canonical.ToolCallID][]canonical.ToolKind, error) {
+	kinds := make(map[canonical.ToolCallID][]canonical.ToolKind)
+	var matcher canonical.ToolEffectMatcher
+	for index, item := range items {
+		if call, ok := item.ToolCall(); ok {
+			if call.Tool().Kind() != canonical.ToolKindFunction && call.Tool().Kind() != canonical.ToolKindCustom {
+				continue
+			}
+		} else if result, ok := item.ToolResult(); !ok {
+			continue
+		} else if _, webSearch := result.WebSearch(); webSearch {
 			continue
 		}
-		kinds[call.CallID()] = call.Tool().Kind()
+		completed, err := matcher.Accept(index, item)
+		if err != nil {
+			// A native continuation contribution may contain only the result;
+			// its call kind remains behind the provider handle. The encoder
+			// preserves Responses' portable function-result default below.
+			if _, resultOnly := item.ToolResult(); resultOnly {
+				continue
+			}
+			return nil, canonical.BadRequest("responses history has invalid tool-effect correlation: " + err.Error())
+		}
+		if completed != nil {
+			kinds[completed.CallID] = append(kinds[completed.CallID], completed.Kind)
+		}
 	}
-	return kinds
+	return kinds, nil
 }
 
 func emitResponsesRequestDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome) error {

@@ -41,9 +41,10 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 	}
 
 	var objectMode struct {
-		Type     string `json:"type"`
-		Name     string `json:"name"`
-		Function struct {
+		Type        string `json:"type"`
+		Name        string `json:"name"`
+		ServerLabel string `json:"server_label"`
+		Function    struct {
 			Name string `json:"name"`
 		} `json:"function"`
 	}
@@ -67,6 +68,16 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 			return canonical.ToolPolicy{}, err
 		}
 		specific := decl.Key()
+		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
+	case "mcp":
+		label := strings.TrimSpace(objectMode.ServerLabel) // swobu:io-string source=provider-wire
+		if label == "" {
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request MCP tool_choice requires server_label")
+		}
+		specific, err := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "mcp/"+label)
+		if err != nil {
+			return canonical.ToolPolicy{}, canonical.BadRequest("responses request MCP tool_choice server_label is invalid")
+		}
 		return canonical.NewToolPolicy(canonical.ToolPolicySpecific, &specific), nil
 	case "function", "custom":
 		name := strings.TrimSpace(objectMode.Name) // swobu:io-string source=provider-wire

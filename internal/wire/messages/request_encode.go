@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -81,6 +82,21 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		return ProviderRequestDocument{}, err
 	}
 	tools := environment.Declarations()
+	staticTools, err := wire.PrepareStaticToolSet(items, tools)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	items, tools = staticTools.Items, staticTools.Declarations
+	for range staticTools.RemovedEffects {
+		if err := emitMessagesDecision(sink, exchangeID, compat.RequestItemsKind, compat.Approx); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	for range staticTools.RemovedDeclarations {
+		if err := emitMessagesDecision(sink, exchangeID, compat.RequestToolsKind, compat.Approx); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	conversation, err := lowerMessagesContextPrefix(items, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -116,11 +132,27 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		}
 		return ProviderRequestDocument{}, err
 	}
-	if err := rejectMessagesOutputFormat(req.OutputFormat()); err != nil {
+	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat())
+	if err != nil {
 		if decisionErr := emitMessagesDecision(sink, exchangeID, compat.RequestOutputFormat, compat.Reject); decisionErr != nil {
 			return ProviderRequestDocument{}, decisionErr
 		}
 		return ProviderRequestDocument{}, err
+	}
+	if len(responseFormat) > 0 {
+		var format any
+		if err := json.Unmarshal(responseFormat, &format); err != nil {
+			return ProviderRequestDocument{}, canonical.InternalError("messages output format could not be materialized")
+		}
+		outputConfig, _ := payload["output_config"].(map[string]any)
+		if outputConfig == nil {
+			outputConfig = map[string]any{}
+		}
+		outputConfig["format"] = format
+		payload["output_config"] = outputConfig
+		if err := emitMessagesDecision(sink, exchangeID, compat.RequestOutputFormat, compat.Approx); err != nil {
+			return ProviderRequestDocument{}, err
+		}
 	}
 	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
@@ -410,6 +442,18 @@ func emitMessagesDecision(sink compat.Sink, exchangeID string, feature compat.Fe
 }
 
 func encodeMessagesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
+	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return nil, err
+	}
+	for range flattened.RemovedNamespaces {
+		if err := emitMessagesDecision(sink, exchangeID, compat.RequestTools, compat.Approx); err != nil {
+			return nil, err
+		}
+	}
+	tools = flattened.Declarations
 	if len(tools) == 0 {
 		return nil, nil
 	}

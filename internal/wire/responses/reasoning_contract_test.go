@@ -109,6 +109,26 @@ func TestResponsesReasoningRequestNormalizesToMinimalControls(t *testing.T) {
 	}
 }
 
+func TestResponsesFutureReasoningQualityHintsApproximateToOmission(t *testing.T) {
+	raw := []byte(`{"model":"gpt","input":"hi","reasoning":{"effort":"future_effort","summary":"future_summary"}}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Request.Request.Reasoning().ComputeField().IsSpecified() ||
+		decoded.Request.Request.Reasoning().DisclosureField().IsSpecified() {
+		t.Fatalf("future reasoning hints survived canonically: %#v", decoded.Request.Request.Reasoning())
+	}
+	if len(decoded.Decisions) != 2 {
+		t.Fatalf("decisions = %#v, want two approximations", decoded.Decisions)
+	}
+	for _, decision := range decoded.Decisions {
+		if decision.Feature != compat.RequestReasoning || decision.Outcome != compat.Approx {
+			t.Fatalf("decision = %#v, want request.reasoning Approx", decision)
+		}
+	}
+}
+
 func TestResponsesPreservesClientEncryptedContinuation(t *testing.T) {
 	raw := []byte(`{"model":"gpt","input":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"secret"}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))

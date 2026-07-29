@@ -142,16 +142,6 @@ func normalizeMessagesRawJSON(source json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(value)
 }
 
-func fingerprintMessagesResponse(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
-	state := messagesResponseHistoryState{request: request.Clone()}
-	for _, item := range output.Items() {
-		if err := state.appendItem(item); err != nil {
-			return historyfingerprint.Response{}, err
-		}
-	}
-	return state.fingerprint()
-}
-
 // messagesResponseHistoryState owns the private assistant content value a
 // client appends to a later Messages request.
 type messagesResponseHistoryState struct {
@@ -169,7 +159,12 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		for _, part := range message.Content() {
 			text, ok := part.Text()
 			if !ok {
-				return canonical.NotImplemented("Swobu cannot project canonical image output to Messages response history")
+				return canonical.NewBackendError(
+					"messages",
+					0,
+					"Messages client output cannot represent the backend image response",
+					"",
+				)
 			}
 			citations, err := encodeMessagesCitations(text.Text(), part.Citations())
 			if err != nil {
@@ -184,7 +179,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		if tool.Kind() == canonical.ToolKindWebSearch {
 			search, ok := call.Input().WebSearch()
 			if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-				return canonical.NotImplemented("Swobu cannot project this canonical web-search call to Messages response history")
+				return canonical.InternalError("Messages response history admitted an unprojected web-search call")
 			}
 			input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 			if err != nil {
@@ -194,7 +189,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 			return nil
 		}
 		if tool.Kind() != canonical.ToolKindFunction {
-			return canonical.NotImplemented("Swobu cannot project this canonical tool-call kind to Messages response history")
+			return canonical.InternalError("Messages response history received an unprojected canonical tool-call kind")
 		}
 		object, ok := call.Input().Object()
 		if !ok {
@@ -258,7 +253,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		s.content = append(s.content, native)
 		return nil
 	default:
-		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Messages response history")
+		return canonical.InternalError("Messages response history received a request-only canonical item kind")
 	}
 }
 

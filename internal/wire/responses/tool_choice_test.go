@@ -195,6 +195,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 		tools  []canonical.ToolDeclaration
 		want   string
 	}{
+		{name: "none without tools is inert", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), want: `null`},
 		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil), tools: []canonical.ToolDeclaration{plainFunctionTool}, want: `"none"`},
 		{name: "auto", policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), tools: []canonical.ToolDeclaration{plainFunctionTool}, want: `"auto"`},
 		{name: "required", policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), tools: []canonical.ToolDeclaration{plainFunctionTool}, want: `"required"`},
