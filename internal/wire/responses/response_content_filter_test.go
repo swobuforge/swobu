@@ -36,7 +36,7 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 	if err != nil {
 		t.Fatalf("ProjectResponse returned error: %v", err)
 	}
-	if got := out.CompletionReason(); got != "content_filter" {
+	if got := out.Completion().Reason(); got != "content_filter" {
 		t.Fatalf("finish reason = %q, want content_filter", got)
 	}
 	if len(out.Items()) != 0 {
@@ -108,7 +108,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 			if err != nil {
 				t.Fatalf("ProjectResponse returned error: %v", err)
 			}
-			if got := out.CompletionReason(); got != "content_filter" {
+			if got := out.Completion().Reason(); got != "content_filter" {
 				t.Fatalf("finish reason = %q, want content_filter", got)
 			}
 			if len(out.Items()) != 0 {

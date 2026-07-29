@@ -18,7 +18,7 @@ func TestResponsesWireEventEncoder_TextLifecycleMatchesOfficialOrder(t *testing.
 	events := []sse.StreamEvent{
 		{Kind: sse.StreamEventStarted, ResultID: "resp_1", Model: "m"},
 		{Kind: sse.StreamEventTextDelta, ItemID: "text_0", TextDelta: "ok"},
-		{Kind: sse.StreamEventCompleted, FinishReason: "completed", Usage: mustUsageForStream(t, 12, 2, 6, 1)},
+		{Kind: sse.StreamEventCompleted, Completion: canonical.Completed("completed"), Usage: mustUsageForStream(t, 12, 2, 6, 1)},
 	}
 
 	frames := encodeAllFrames(t, &encoder, events)
@@ -147,7 +147,7 @@ func TestResponsesWireEventEncoder_ToolLifecycleIncludesItemFrames(t *testing.T)
 		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
 		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep", ArgumentsDelta: "{\"pattern\":\"TODO\"}"},
 		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolCall, ItemID: "tool_0", ToolUseID: "call_1", Name: "grep"},
-		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
+		{Kind: sse.StreamEventCompleted, Completion: canonical.Completed("completed")},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
 	types := eventTypes(frames)
@@ -202,7 +202,7 @@ func TestResponsesWireEventEncoder_CustomToolLifecycleUsesInputField(t *testing.
 		{Kind: sse.StreamEventItemStarted, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
 		{Kind: sse.StreamEventToolUseArgumentsDelta, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom, ArgumentsDelta: "{\"patch\":\"x\"}"},
 		{Kind: sse.StreamEventItemCompleted, ItemKind: canonical.ItemKindToolCall, ItemID: "custom_0", ToolUseID: "call_2", Name: "apply_patch", ToolType: canonical.ToolTypeCustom},
-		{Kind: sse.StreamEventCompleted, FinishReason: "completed"},
+		{Kind: sse.StreamEventCompleted, Completion: canonical.Completed("completed")},
 	}
 	frames := encodeAllFrames(t, &encoder, events)
 
@@ -280,7 +280,7 @@ func encodeAllFrames(t *testing.T, encoder *responses.ResponseStreamWireEncoder,
 			Name:           event.Name,
 			ToolType:       event.ToolType,
 			ArgumentsDelta: event.ArgumentsDelta,
-			FinishReason:   event.FinishReason,
+			Completion:     event.Completion,
 			Usage:          event.Usage,
 			ErrorCode:      event.ErrorCode,
 			ErrorMessage:   event.ErrorMessage,

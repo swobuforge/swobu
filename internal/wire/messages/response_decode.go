@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -36,17 +37,20 @@ type bufferedContentBlockBody struct {
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	InputPaths: [][]string{
 		{"usage", "input_tokens"},
+		{"message", "usage", "input_tokens"},
 		{"usage", "prompt_tokens"},
 		{"usageMetadata", "promptTokenCount"},
 		{"usage", "inputTokens"},
 	},
 	OutputPaths: [][]string{
 		{"usage", "output_tokens"},
+		{"message", "usage", "output_tokens"},
 		{"usage", "completion_tokens"},
 		{"usageMetadata", "candidatesTokenCount"},
 		{"usage", "outputTokens"},
 	},
 	CacheReadPaths: [][]string{
+		{"message", "usage", "cache_read_input_tokens"},
 		{"usage", "cache_read_input_tokens"},
 		{"usage", "input_tokens_details", "cached_tokens"},
 		{"usage", "prompt_tokens_details", "cached_tokens"},
@@ -54,6 +58,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 		{"usage", "cacheReadInputTokens"},
 	},
 	CacheWritePaths: [][]string{
+		{"message", "usage", "cache_creation_input_tokens"},
 		{"usage", "cache_creation_input_tokens"},
 		{"usage", "input_tokens_details", "cache_write_tokens"},
 		{"usage", "prompt_tokens_details", "cache_write_tokens"},
@@ -81,15 +86,21 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		textParts = nil
 		return nil
 	}
-	for _, rawBlock := range dto.Content {
+	for index, rawBlock := range dto.Content {
 		var block bufferedContentBlockBody
 		if err := json.Unmarshal(rawBlock, &block); err != nil {
 			return nil, canonical.InternalError("messages response content block is invalid")
 		}
 		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
+		if blockType == "" {
+			return nil, canonical.NewBackendError("messages", 0, "messages response content block is missing type", "")
+		}
 		switch blockType {
 		case "text":
-			part, err := decodeMessagesCitedText(block.Text, block.Citations)
+			part, err := decodeMessagesCitedText(block.Text, block.Citations, messagesProjectionEvidence{
+				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
+				subjectPrefix: fmt.Sprintf("wire:/content/%d/citations", index),
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -154,13 +165,19 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			}
 			items = append(items, item)
 		case "server_tool_use":
+			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
+				if err := emitMessagesWireDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content/%d/name", index))); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if err := flushMessage(); err != nil {
 				return nil, canonical.InternalError("messages response message item is invalid")
 			}
-			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
-				return nil, canonical.NotImplemented("Swobu has no canonical projection for this Messages server-tool output type")
-			}
-			item, err := decodeMessagesWebSearchCall(block.ID, block.Input)
+			item, err := decodeMessagesWebSearchCall(block.ID, block.Input, messagesProjectionEvidence{
+				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
+				subjectPrefix: fmt.Sprintf("wire:/content/%d/input", index),
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -169,17 +186,26 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			if err := flushMessage(); err != nil {
 				return nil, canonical.InternalError("messages response message item is invalid")
 			}
-			item, err := decodeMessagesWebSearchResult(block.ToolUseID, block.Content, block.IsError)
+			item, err := decodeMessagesWebSearchResult(block.ToolUseID, block.Content, block.IsError, messagesProjectionEvidence{
+				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
+				subjectPrefix: fmt.Sprintf("wire:/content/%d/content", index),
+			})
 			if err != nil {
 				return nil, err
 			}
 			items = append(items, item)
 		default:
-			return nil, canonical.InternalError("messages response content block is unsupported")
+			if err := emitMessagesWireDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content/%d/type", index))); err != nil {
+				return nil, err
+			}
+			continue
 		}
 	}
 	if err := flushMessage(); err != nil {
 		return nil, canonical.InternalError("messages response message item is invalid")
+	}
+	if err := validateMessagesResponseResidual(items, dto.StopReason, len(dto.Content)); err != nil {
+		return nil, err
 	}
 	_, inputPresent := usage.InputTokens()
 	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
@@ -194,9 +220,24 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		canonical.ResponseRef{},
 		dto.Model,
 		items,
-		dto.StopReason,
+		messagesCompletion(dto.StopReason),
 		usage,
 	)), nil
+}
+
+func validateMessagesResponseResidual(items []canonical.CanonicalItem, stopReason string, wireItems int) error {
+	if wireItems > 0 && len(items) == 0 {
+		return canonical.NewBackendError("", 0, "messages response has no surviving semantic items", "")
+	}
+	if strings.TrimSpace(stopReason) != "tool_use" {
+		return nil
+	}
+	for _, item := range items {
+		if _, ok := item.ToolCall(); ok {
+			return nil
+		}
+	}
+	return canonical.NewBackendError("", 0, "messages stop reason requires a surviving tool call", "")
 }
 
 func messagesResponseReasoningKind(request canonical.CanonicalRequest) canonical.ReasoningPartKind {

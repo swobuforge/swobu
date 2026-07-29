@@ -15,7 +15,7 @@ type EnvelopeEventAdapter struct {
 	model        string
 	itemKinds    map[uint32]canonical.ItemKind
 	itemIDs      map[uint32]string
-	finish       string
+	completion   canonical.Completion
 	usage        canonical.TokenUsage
 	errorCode    string
 	errorText    string
@@ -207,7 +207,7 @@ func (a *EnvelopeEventAdapter) translateEnvelopeEnd(ev canonical.Event, emitted 
 			a.completed = true
 			return
 		}
-		*emitted = append(*emitted, StreamEvent{Kind: StreamEventCompleted, ResultID: a.resultID, Model: a.model, FinishReason: a.finish, Usage: a.usage})
+		*emitted = append(*emitted, StreamEvent{Kind: StreamEventCompleted, ResultID: a.resultID, Model: a.model, Completion: a.completion, Usage: a.usage})
 		a.completed = true
 	}
 }
@@ -219,10 +219,10 @@ func (a *EnvelopeEventAdapter) translateUsage(ev canonical.Event) {
 
 func (a *EnvelopeEventAdapter) translateFinish(ev canonical.Event, emitted *[]StreamEvent) {
 	payload, _ := ev.Payload.(canonical.FinishPayload)
-	a.finish = payload.Reason
+	a.completion = payload.Completion
 	for i := len(*emitted) - 1; i >= 0; i-- {
 		if (*emitted)[i].Kind == StreamEventCompleted {
-			(*emitted)[i].FinishReason = a.finish
+			(*emitted)[i].Completion = a.completion
 		}
 	}
 }

@@ -198,7 +198,7 @@ func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
 			"chatcmpl_1",
 			"model",
 			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-			"stop",
+			canonical.Completed("stop"),
 		)),
 	})
 	server := httptest.NewServer(handler)
@@ -218,7 +218,7 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 			"chatcmpl_1",
 			"model",
 			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-			"stop",
+			canonical.Completed("stop"),
 		)),
 	})
 	server := httptest.NewServer(handler)
@@ -240,7 +240,7 @@ func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 			"chatcmpl_1",
 			"model",
 			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-			"stop",
+			canonical.Completed("stop"),
 		)),
 	})
 	server := httptest.NewServer(handler)

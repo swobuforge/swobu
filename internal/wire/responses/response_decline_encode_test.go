@@ -9,13 +9,21 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestResponseDocumentEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 	t.Parallel()
 
-	output := canonicaltest.Response(t, "resp_1", "m", nil, "content_filter")
+	output, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "resp_1"},
+		"m",
+		nil,
+		canonical.Declined("content_filter"),
+		canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatalf("EncodeResponseDocument returned error: %v", err)
@@ -39,7 +47,7 @@ func TestResponseDocumentEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 func TestResponseStreamEncoder_ContentFilterLowersToIncomplete(t *testing.T) {
 	t.Parallel()
 
-	events := canonical.SynthesizeResponseEnvelopeEvents("ex_resp", canonical.ResponseRef{SwobuID: "resp_1"}, "m", nil, "content_filter", canonical.NewUnknownTokenUsage())
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex_resp", canonical.ResponseRef{SwobuID: "resp_1"}, "m", nil, canonical.Declined("content_filter"), canonical.NewUnknownTokenUsage())
 	stream, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream returned error: %v", err)

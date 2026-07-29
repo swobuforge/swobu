@@ -29,6 +29,7 @@ type responsesTextItemState struct {
 	itemID      string
 	outputIndex int
 	parts       map[uint32]*strings.Builder
+	annotations map[uint32][]responsesAnnotationDTO
 }
 
 type responsesToolItemState struct {
@@ -86,8 +87,8 @@ func (e *ResponseStreamWireEncoder) Encode(event sse.StreamEvent) ([][]byte, err
 		if err != nil {
 			return nil, err
 		}
-		status, incompleteReason := responsesWireStatusForFinishReason(event.FinishReason)
-		if len(e.outputItems) == 0 && trimmedResponseString(event.FinishReason) == "" {
+		status, incompleteReason := responsesWireStatusForCompletion(event.Completion)
+		if len(e.outputItems) == 0 && trimmedResponseString(event.Completion.Reason()) == "" {
 			failed, err := e.encodeFailed(event, responsesStreamCompletedWithoutOutputItemsCode, responsesStreamCompletedWithoutOutputItemsMessage)
 			if err != nil {
 				return nil, err
@@ -228,7 +229,12 @@ func (e *ResponseStreamWireEncoder) encodeTextDelta(event sse.StreamEvent) ([][]
 
 func (e *ResponseStreamWireEncoder) encodeContentStarted(event sse.StreamEvent) ([][]byte, error) {
 	if event.PartKind != canonical.PartKindText {
-		return nil, canonical.NotImplemented("Swobu cannot project this canonical content part kind to a Responses stream")
+		return nil, canonical.NewBackendError(
+			"responses",
+			0,
+			"Responses client stream cannot represent the backend image response",
+			"",
+		)
 	}
 	frames, err := e.ensureTextItem(event.ItemID)
 	if err != nil || e.textItem == nil {
@@ -284,7 +290,7 @@ func (e *ResponseStreamWireEncoder) encodeItemCompleted(event sse.StreamEvent) (
 	case canonical.ItemKindMessage:
 		itemID := strings.TrimSpace(event.ItemID) // swobu:io-string source=boundary
 		if e.textItem != nil && (itemID == "" || itemID == e.textItem.itemID) {
-			return e.flushOpenTextItem()
+			return e.completeTextItem(event.CompletedItem)
 		}
 		return nil, nil
 	case canonical.ItemKindToolCall:
@@ -365,6 +371,7 @@ func (e *ResponseStreamWireEncoder) openTextItem(itemID string) ([][]byte, error
 		itemID:      itemID,
 		outputIndex: e.nextOutputIndex,
 		parts:       map[uint32]*strings.Builder{},
+		annotations: map[uint32][]responsesAnnotationDTO{},
 	}
 	e.nextOutputIndex++
 	e.textItem = state
@@ -398,7 +405,7 @@ func (e *ResponseStreamWireEncoder) openTextPart(state *responsesTextItemState, 
 		Part: responsesOutputTextStreamDTO{
 			Type:        "output_text",
 			Text:        "",
-			Annotations: []any{},
+			Annotations: []responsesAnnotationDTO{},
 		},
 	})
 	if err != nil {
@@ -425,7 +432,11 @@ func (e *ResponseStreamWireEncoder) flushOpenTextItem() ([][]byte, error) {
 		if err != nil {
 			return nil, canonical.InternalError("responses event encoding failed")
 		}
-		partValue := responsesOutputTextStreamDTO{Type: "output_text", Text: text, Annotations: []any{}}
+		annotations := state.annotations[uint32(rawOrdinal)]
+		if annotations == nil {
+			annotations = []responsesAnnotationDTO{}
+		}
+		partValue := responsesOutputTextStreamDTO{Type: "output_text", Text: text, Annotations: annotations}
 		partDone, err := json.Marshal(responsesContentPartEventDTO{Type: "response.content_part.done", ItemID: state.itemID, OutputIndex: state.outputIndex, ContentIndex: rawOrdinal, Part: partValue})
 		if err != nil {
 			return nil, canonical.InternalError("responses event encoding failed")
@@ -456,4 +467,34 @@ func (e *ResponseStreamWireEncoder) flushOpenTextItem() ([][]byte, error) {
 	})
 	e.textItem = nil
 	return append(frames, itemDone), nil
+}
+
+func (e *ResponseStreamWireEncoder) completeTextItem(completed *canonical.CanonicalItem) ([][]byte, error) {
+	if e.textItem == nil {
+		return nil, nil
+	}
+	if completed == nil {
+		return nil, canonical.InternalError("responses message completion is missing canonical item")
+	}
+	message, ok := completed.Message()
+	if !ok {
+		return nil, canonical.InternalError("responses message completion has invalid canonical item")
+	}
+	for ordinal, part := range message.Content() {
+		text, ok := part.Text()
+		if !ok {
+			return nil, canonical.NewBackendError(
+				"responses",
+				0,
+				"Responses client stream cannot represent the backend image response",
+				"",
+			)
+		}
+		annotations, err := encodeResponsesAnnotations(text.Text(), part.Citations())
+		if err != nil {
+			return nil, err
+		}
+		e.textItem.annotations[uint32(ordinal)] = annotations
+	}
+	return e.flushOpenTextItem()
 }

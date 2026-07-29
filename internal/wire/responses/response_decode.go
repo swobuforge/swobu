@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -93,7 +95,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
 	} else {
-		items, err := decodeOutputItems(ctx, request, dto.Output, dto.OutputText, exchangeID, sink)
+		responseStatus := responsesTerminalStatus("", dto.Status, "")
+		if err := admitResponsesProjectableResponseStatus(responseStatus); err != nil {
+			return nil, err
+		}
+		items, err := decodeOutputItemsForResponse(ctx, request, dto.Output, dto.OutputText, responseStatus, exchangeID, sink)
 		if err != nil {
 			return nil, err
 		}
@@ -103,9 +109,18 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(dto.ID)}},
 			dto.Model,
 			items,
-			terminalReason,
+			responsesCompletion(responseStatus, terminalReason),
 			usage,
 		)), nil
+	}
+}
+
+func admitResponsesProjectableResponseStatus(status string) error {
+	switch strings.TrimSpace(status) { // swobu:io-string source=provider-wire
+	case "completed", "incomplete":
+		return nil
+	default:
+		return canonical.NewBackendError("responses", 0, "responses terminal status cannot carry successful canonical output", "")
 	}
 }
 
@@ -121,38 +136,38 @@ func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchang
 }
 
 func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
-	items, err := rawResponsesOutputItems(wireItems)
-	if err != nil {
-		return nil, err
-	}
-	output := make([]canonical.CanonicalItem, 0, len(items))
-	for _, raw := range items {
-		decoded, err := decodeCompletedResponsesItem(request, raw)
-		if err != nil {
-			return nil, err
-		}
-		output = append(output, decoded...)
-	}
-	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
-		message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(outputText)})
-		if err != nil {
-			return nil, canonical.InternalError("responses output text is invalid")
-		}
-		output = append(output, message)
-	}
-	return output, nil
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, sink)
 }
 
-// decodeCompletedResponsesItem is the sole complete Responses item switch for
-// buffered output and terminal streaming objects.
-func decodeCompletedResponsesItem(request canonical.CanonicalRequest, raw json.RawMessage) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSet(context.Background(), request, []json.RawMessage{raw}, "", "", nil)
+func decodeOutputItemsForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, responseStatus, exchangeID, sink)
 }
 
 func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, sink)
+}
+
+func decodeCompletedResponsesItemSetForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetAtIndexes(ctx, request, wireItems, outputText, nil, false, responseStatus, exchangeID, sink)
+}
+
+func decodeCompletedResponsesItemSetAtIndexes(
+	ctx context.Context,
+	request canonical.CanonicalRequest,
+	wireItems any,
+	outputText string,
+	originalIndexes []int,
+	survivingOutput bool,
+	responseStatus string,
+	exchangeID string,
+	sink compat.Sink,
+) ([]canonical.CanonicalItem, error) {
 	items, err := rawResponsesOutputItems(wireItems)
 	if err != nil {
 		return nil, err
+	}
+	if originalIndexes != nil && len(originalIndexes) != len(items) {
+		return nil, canonical.InternalError("responses output indexes do not match output items")
 	}
 	environment, err := canonical.EffectiveTools(request)
 	if err != nil {
@@ -160,19 +175,39 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 	}
 	tools := environment.Declarations()
 	output := make([]canonical.CanonicalItem, 0, len(items))
-	for _, rawItem := range items {
+	erasedSemantic := false
+	for position, rawItem := range items {
+		index := position
+		if originalIndexes != nil {
+			index = originalIndexes[position]
+		}
 		var item responsesWireOutputItemDTO
 		if err := json.Unmarshal(rawItem, &item); err != nil {
 			return nil, canonical.InternalError("responses output item is invalid JSON")
 		}
-		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
+		admission, err := admitCompletedResponsesOutputItem(item, responseStatus)
+		if err != nil {
+			return nil, err
+		}
+		itemType := admission.itemType
+		if admission.disposition == responsesOutputErase {
+			erasedSemantic = true
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/output/%d/%s", index, admission.eraseField))); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		switch itemType {
 		case "message":
-			message, err := decodeResponsesMessageOutputItem(item)
+			message, present, err := decodeResponsesMessageOutputItem(item, sink, exchangeID, fmt.Sprintf("wire:/output/%d/content", index))
 			if err != nil {
 				return nil, err
 			}
-			output = append(output, message)
+			if present {
+				output = append(output, message)
+			} else if len(bytes.TrimSpace(item.Content)) > 0 && !bytes.Equal(bytes.TrimSpace(item.Content), []byte("null")) {
+				erasedSemantic = true
+			}
 		case "function_call":
 			object, err := decodeResponsesFunctionCallArguments(item.Arguments)
 			if err != nil {
@@ -224,11 +259,14 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output is missing call_id")
 			}
-			loaded, err := decodeResponsesAdditionalTools(item.Tools, nil, "")
+			projected, err := decodeResponsesProviderAdditionalTools(item.Tools, fmt.Sprintf("wire:/output/%d/tools", index), sink, exchangeID)
 			if err != nil {
-				return nil, canonical.InternalError("responses tool discovery output tools are invalid")
+				return nil, err
 			}
-			set, err := canonical.NewToolSet(loaded)
+			if projected.allErased() {
+				return nil, canonical.NewBackendError("responses", 0, "responses tool discovery output has no surviving declarations", "")
+			}
+			set, err := canonical.NewToolSet(projected.declarations)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output tools are ambiguous")
 			}
@@ -257,33 +295,41 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 			rawAction := bytes.TrimSpace(item.Action)
 			if len(rawAction) == 0 || bytes.Equal(rawAction, []byte("null")) {
 				if strings.TrimSpace(item.Status) != "completed" { // swobu:io-string source=provider-wire
-					return nil, canonical.InternalError("responses actionless web-search marker is not completed")
+					return nil, canonical.NewBackendError("responses", 0, "responses actionless web-search marker is not completed", "")
 				}
 				// The marker has no visible-output or continuation consumer.
 				break
 			}
 			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
 			if err != nil {
-				return nil, canonical.NotImplemented("Swobu cannot project this valid Responses web-search history state")
+				if err := emitResponsesCompatibilityDecision(
+					sink,
+					exchangeID,
+					compat.ResponseItemsKind,
+					compat.Drop,
+					compat.Subject(fmt.Sprintf("wire:/output/%d/status", index)),
+				); err != nil {
+					return nil, err
+				}
+				state = responsesWebSearchUnknown
 			}
-			lifecycle, err := decodeResponsesWebSearchLifecycle(item.ID, item.Action, state)
+			lifecycle, err := decodeResponsesWebSearchLifecycleWithDecisions(item.ID, item.Action, state, sink, exchangeID, fmt.Sprintf("wire:/output/%d/action/sources", index), true)
 			if err != nil {
 				return nil, err
 			}
 			output = append(output, lifecycle...)
-		case "mcp_call":
-			// No demonstrated client-output or continuation consumer.
 		case "reasoning":
-			reasoning, present, err := decodeResponsesReasoningItem(item)
+			reasoning, present, err := decodeResponsesReasoningItem(item, sink, exchangeID, compat.ResponseItemsKind, fmt.Sprintf("wire:/output/%d", index), true)
 			if err != nil {
 				return nil, err
 			}
 			if present {
 				output = append(output, reasoning)
+			} else if len(item.Summary) > 0 || len(bytes.TrimSpace(item.Content)) > 0 && !bytes.Equal(bytes.TrimSpace(item.Content), []byte("null")) {
+				erasedSemantic = true
 			}
 		default:
-			// Unknown provider output is ignored until a named behavioral
-			// consumer justifies a narrowly typed canonical representation.
+			return nil, canonical.InternalError("responses admitted output disposition has no projector")
 		}
 	}
 	if len(output) == 0 && strings.TrimSpace(outputText) != "" { // swobu:io-string source=boundary
@@ -293,7 +339,98 @@ func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.Cano
 		}
 		output = append(output, message)
 	}
+	if erasedSemantic && len(output) == 0 && !survivingOutput {
+		return nil, canonical.NewBackendError("responses", 0, "responses output has no surviving semantic items", "")
+	}
 	return output, nil
+}
+
+type responsesOutputDisposition uint8
+
+const (
+	responsesOutputProject responsesOutputDisposition = iota + 1
+	responsesOutputDeferPartial
+	responsesOutputErase
+)
+
+type responsesOutputAdmission struct {
+	itemType    string
+	disposition responsesOutputDisposition
+	eraseField  string
+}
+
+// admitCompletedResponsesOutputItem composes provider item kind/status with the
+// enclosing response contract. An empty responseStatus means output_item.done
+// arrived before the response terminal and partial text/reasoning must defer.
+func admitCompletedResponsesOutputItem(item responsesWireOutputItemDTO, responseStatus string) (responsesOutputAdmission, error) {
+	itemType := strings.TrimSpace(item.Type) // swobu:io-string source=provider-wire
+	if itemType == "" {
+		return responsesOutputAdmission{}, canonical.NewBackendError("responses", 0, "responses output item is missing type", "")
+	}
+	if !responsesRecognizesWireOutputKind(itemType) {
+		return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputErase, eraseField: "type"}, nil
+	}
+	itemStatus := strings.TrimSpace(item.Status) // swobu:io-string source=provider-wire
+	if itemStatus == "" {
+		itemStatus = "completed"
+	}
+	enclosingStatus := strings.TrimSpace(responseStatus) // swobu:io-string source=provider-wire
+	switch itemType {
+	case "mcp_call":
+		return responsesOutputAdmission{}, responsesProviderMCPContradiction()
+	case "message", "reasoning":
+		switch itemStatus {
+		case "completed":
+			return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+		case "incomplete":
+			switch enclosingStatus {
+			case "":
+				return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputDeferPartial}, nil
+			case "incomplete":
+				return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+			}
+		}
+	case "web_search_call":
+		switch itemStatus {
+		case "completed", "failed":
+			return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+		case "incomplete":
+			if enclosingStatus == "" {
+				return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputDeferPartial}, nil
+			}
+			if enclosingStatus == "incomplete" {
+				return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+			}
+			return responsesOutputAdmission{}, canonical.NewBackendError("responses", 0, "incomplete web-search output requires an incomplete response", "")
+		default:
+			return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+		}
+	case "function_call", "custom_tool_call", "tool_search_call", "tool_search_output":
+		if itemStatus == "completed" {
+			return responsesOutputAdmission{itemType: itemType, disposition: responsesOutputProject}, nil
+		}
+	}
+	return responsesOutputAdmission{}, canonical.NewBackendError("responses", 0, "responses output item status is inconsistent with its semantic kind and response", "")
+}
+
+func decodeResponsesProviderAdditionalTools(raw json.RawMessage, subjectPrefix string, sink compat.Sink, exchangeID string) (responsesAdditionalToolsProjection, error) {
+	projected, err := decodeResponsesAdditionalTools(raw, subjectPrefix, compat.ResponseItemsKind, sink, exchangeID)
+	if err == nil {
+		return projected, nil
+	}
+	var wireErr canonical.Error
+	if errors.As(err, &wireErr) && wireErr.Code == canonical.ErrorCodeBadRequest {
+		message := strings.Replace(wireErr.Message, "responses request ", "responses provider ", 1)
+		return responsesAdditionalToolsProjection{}, canonical.NewBackendError("responses", 0, message, "")
+	}
+	return responsesAdditionalToolsProjection{}, err
+}
+
+func admitResponsesProviderOutputChild(kind string) error {
+	if strings.TrimSpace(kind) == "" {
+		return canonical.NewBackendError("responses", 0, "responses output child is missing type", "")
+	}
+	return nil
 }
 
 func rawResponsesOutputItems(items any) ([]json.RawMessage, error) {
@@ -315,17 +452,20 @@ func rawResponsesOutputItems(items any) ([]json.RawMessage, error) {
 	}
 }
 
-func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonical.CanonicalItem, error) {
+func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, sink compat.Sink, exchangeID string, subjectPrefix string) (canonical.CanonicalItem, bool, error) {
 	parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
 	if err != nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("responses message content is invalid")
+		return canonical.CanonicalItem{}, false, canonical.InternalError("responses message content is invalid")
 	}
 	content := make([]canonical.MessagePart, 0, len(parts))
-	err = openaiwire.WalkContentParts(parts, func(_ int, part openaiwire.ContentPartItem) error {
+	err = openaiwire.WalkContentParts(parts, func(index int, part openaiwire.ContentPartItem) error {
 		partType := strings.TrimSpace(part.Type) // swobu:io-string source=boundary
+		if err := admitResponsesProviderOutputChild(partType); err != nil {
+			return err
+		}
 		switch partType {
 		case "text", "output_text", "input_text":
-			citations, err := decodeResponsesAnnotations(part.Text, part.Annotations)
+			citations, err := decodeResponsesAnnotations(part.Text, part.Annotations, sink, exchangeID, fmt.Sprintf("%s/%d/annotations", subjectPrefix, index))
 			if err != nil {
 				return err
 			}
@@ -335,30 +475,42 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO) (canonica
 			}
 			content = append(content, messagePart)
 		default:
-			return canonical.NotImplemented("Swobu has no canonical projection for this Responses output content part type")
+			return emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", subjectPrefix, index)))
 		}
 		return nil
 	})
 	if err != nil {
-		return canonical.CanonicalItem{}, err
+		return canonical.CanonicalItem{}, false, err
+	}
+	if len(content) == 0 {
+		return canonical.CanonicalItem{}, false, nil
 	}
 	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, content)
 	if err != nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("responses message item is invalid")
+		return canonical.CanonicalItem{}, false, canonical.InternalError("responses message item is invalid")
 	}
-	return message, nil
+	return message, true, nil
 }
 
 // swobu:lint ignore string-switch because=Responses provider-wire summary types select canonical reasoning part kinds.
-func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.CanonicalItem, bool, error) {
+func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, sink compat.Sink, exchangeID string, feature compat.Feature, subjectPrefix string, providerOutput bool) (canonical.CanonicalItem, bool, error) {
 	content, err := decodeResponsesReasoningContent(item.Content)
 	if err != nil {
 		return canonical.CanonicalItem{}, false, err
 	}
 	parts := make([]canonical.ReasoningPart, 0, len(item.Summary)+len(content))
-	for _, summary := range item.Summary {
-		if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
-			return canonical.CanonicalItem{}, false, canonical.NotImplemented("Swobu has no canonical projection for this Responses reasoning summary part type")
+	for index, summary := range item.Summary {
+		summaryType := strings.TrimSpace(summary.Type) // swobu:io-string source=provider-wire
+		if providerOutput {
+			if err := admitResponsesProviderOutputChild(summaryType); err != nil {
+				return canonical.CanonicalItem{}, false, err
+			}
+		}
+		if summaryType != "summary_text" {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/summary/%d/type", subjectPrefix, index))); err != nil {
+				return canonical.CanonicalItem{}, false, err
+			}
+			continue
 		}
 		part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
 		if err != nil {
@@ -366,8 +518,17 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO) (canonical.Ca
 		}
 		parts = append(parts, part)
 	}
-	for _, trace := range content {
-		if strings.TrimSpace(trace.Type) != "reasoning_text" { // swobu:io-string source=provider-wire
+	for index, trace := range content {
+		traceType := strings.TrimSpace(trace.Type) // swobu:io-string source=provider-wire
+		if providerOutput {
+			if err := admitResponsesProviderOutputChild(traceType); err != nil {
+				return canonical.CanonicalItem{}, false, err
+			}
+		}
+		if traceType != "reasoning_text" {
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/content/%d/type", subjectPrefix, index))); err != nil {
+				return canonical.CanonicalItem{}, false, err
+			}
 			continue
 		}
 		part, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, trace.Text)

@@ -24,26 +24,26 @@ func Message(t testing.TB, role canonical.MessageRole, text string) canonical.Ca
 	return item
 }
 
-func Response(t testing.TB, id, model string, items []canonical.CanonicalItem, finish string) canonical.CanonicalResponse {
-	return ResponseWithUsage(t, id, model, items, finish, canonical.NewUnknownTokenUsage())
+func Response(t testing.TB, id, model string, items []canonical.CanonicalItem, completion canonical.Completion) canonical.CanonicalResponse {
+	return ResponseWithUsage(t, id, model, items, completion, canonical.NewUnknownTokenUsage())
 }
 
 // MustResponse is for test doubles whose interface does not carry testing.TB.
-func MustResponse(id, model string, items []canonical.CanonicalItem, finish string) canonical.CanonicalResponse {
-	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id)}, model, items, finish, canonical.NewUnknownTokenUsage())
+func MustResponse(id, model string, items []canonical.CanonicalItem, completion canonical.Completion) canonical.CanonicalResponse {
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id)}, model, items, completion, canonical.NewUnknownTokenUsage())
 	if err != nil {
 		panic(err)
 	}
 	return response
 }
 
-func ResponseWithUsage(t testing.TB, id, model string, items []canonical.CanonicalItem, finish string, usage canonical.TokenUsage) canonical.CanonicalResponse {
-	return ResponseWithRef(t, canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id)}, model, items, finish, usage)
+func ResponseWithUsage(t testing.TB, id, model string, items []canonical.CanonicalItem, completion canonical.Completion, usage canonical.TokenUsage) canonical.CanonicalResponse {
+	return ResponseWithRef(t, canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id)}, model, items, completion, usage)
 }
 
-func ResponseWithRef(t testing.TB, responseRef canonical.ResponseRef, model string, items []canonical.CanonicalItem, finish string, usage canonical.TokenUsage) canonical.CanonicalResponse {
+func ResponseWithRef(t testing.TB, responseRef canonical.ResponseRef, model string, items []canonical.CanonicalItem, completion canonical.Completion, usage canonical.TokenUsage) canonical.CanonicalResponse {
 	t.Helper()
-	response, err := canonical.NewCanonicalResponse(responseRef, model, items, finish, usage)
+	response, err := canonical.NewCanonicalResponse(responseRef, model, items, completion, usage)
 	if err != nil {
 		t.Fatal(err)
 	}

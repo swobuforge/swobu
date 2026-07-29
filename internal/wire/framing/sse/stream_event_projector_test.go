@@ -76,3 +76,20 @@ func TestAdapterPreservesContentPartCoordinates(t *testing.T) {
 		t.Fatalf("delta = %#v, err=%v", delta, err)
 	}
 }
+
+func TestAdapterPreservesCompletionClassAndReason(t *testing.T) {
+	adapter := NewEnvelopeEventAdapter()
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventFinish, EnvID: "r", Payload: canonical.FinishPayload{Completion: canonical.Failed("future_interrupted")}})
+	events, err := adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: "r", Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != StreamEventCompleted {
+		t.Fatalf("terminal events = %#v, want one completion", events)
+	}
+	if events[0].Completion.Class() != canonical.CompletionFailed || events[0].Completion.Reason() != "future_interrupted" {
+		t.Fatalf("completion = (%q, %q), want failed with original reason", events[0].Completion.Class(), events[0].Completion.Reason())
+	}
+}

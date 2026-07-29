@@ -80,6 +80,41 @@ func TestDecodeResponseBuffered_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 	}
 }
 
+func TestDecodeResponseStreamMergesCumulativeUsageAcrossStartAndDelta(t *testing.T) {
+	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"m\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":1,\"cache_read_input_tokens\":4}}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":15}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	reader := decodeResponseStream(
+		canonical.CanonicalRequest{},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex_usage", nil,
+	)
+	closed, err := canonical.ReadClosedEnvelope(
+		context.Background(),
+		canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}),
+		canonical.EnvResponse,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input, ok := response.Usage().InputTokens(); !ok || input != 25 {
+		t.Fatalf("input tokens = (%d,%t), want (25,true)", input, ok)
+	}
+	if output, ok := response.Usage().OutputTokens(); !ok || output != 15 {
+		t.Fatalf("output tokens = (%d,%t), want (15,true)", output, ok)
+	}
+	if cacheRead, ok := response.Usage().CacheReadTokens(); !ok || cacheRead != 4 {
+		t.Fatalf("cache-read tokens = (%d,%t), want (4,true)", cacheRead, ok)
+	}
+}
+
 func TestDecodeResponseStream_EmitsUsageBeforeTerminalDecision(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-x\"}}\n\n" +
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n" +

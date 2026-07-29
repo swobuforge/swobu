@@ -226,7 +226,7 @@ type UsagePayload struct {
 }
 
 type FinishPayload struct {
-	Reason string
+	Completion Completion
 }
 
 type ErrorPayload struct {

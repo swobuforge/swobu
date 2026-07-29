@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -162,14 +161,8 @@ func bufferedProviderTransport(raw []byte) testProviderTransport {
 }
 
 func streamingProviderTransport(stream io.ReadCloser) testProviderTransport {
-	_ = stream
 	return func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
-		return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream",
-			Body: io.NopCloser(strings.NewReader(
-				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
-					"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
-			)),
-		}}, nil
+		return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: stream}}, nil
 	}
 }
 
@@ -468,7 +461,7 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 			Time:       now,
 			Kind:       canonical.EventFinish,
 			EnvID:      "r1",
-			Payload:    canonical.FinishPayload{Reason: "stop"},
+			Payload:    canonical.FinishPayload{Completion: canonical.Completed("stop")},
 		},
 		{
 			ExchangeID: exchangeID,

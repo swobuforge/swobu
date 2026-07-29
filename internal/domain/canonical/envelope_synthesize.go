@@ -8,7 +8,7 @@ import (
 // SynthesizeResponseEnvelopeEvents converts one buffered canonical response
 // into progressive delivery evidence plus one authoritative completed snapshot
 // per item.
-func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) []Event {
+func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, model string, items []CanonicalItem, completion Completion, usage TokenUsage) []Event {
 	seq := int64(0)
 	next := func(kind EventKind, envID, parentID EnvelopeID, payload any) Event {
 		seq++
@@ -40,7 +40,7 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, m
 			} else if text, ok := call.Input().Text(); ok {
 				events = append(events, next(EventArgsDelta, "", "", ItemEvent{Position: ItemPosition{Item: ordinal}, Payload: ArgsDeltaPayload{Args: text}}))
 			}
-		case ItemKindToolResult:
+		case ItemKindToolResult, ItemKindToolDiscoveryResult:
 			// Exchange-resolved tool results cross the shared stream as atomic
 			// completed checkpoints; partial values never enter durable history.
 		case ItemKindReasoning:
@@ -53,7 +53,7 @@ func SynthesizeResponseEnvelopeEvents(exchangeID string, response ResponseRef, m
 	}
 	events = append(events,
 		next(EventUsage, responseID, "", UsagePayload{Usage: usage}),
-		next(EventFinish, responseID, "", FinishPayload{Reason: finishReason}),
+		next(EventFinish, responseID, "", FinishPayload{Completion: completion}),
 		next(EventEnvelopeEnd, responseID, "", EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}),
 	)
 	return events

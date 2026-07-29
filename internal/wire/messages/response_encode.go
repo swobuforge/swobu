@@ -27,7 +27,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 		Role:       "assistant",
 		Model:      output.Model(),
 		Content:    content,
-		StopReason: messagesStopReasonForFinishReason(output.CompletionReason(), sse.ContainsToolUseOutput(items)),
+		StopReason: messagesStopReasonForCompletion(output.Completion(), sse.ContainsToolUseOutput(items)),
 		Usage:      messagesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {
@@ -72,6 +72,19 @@ func messagesUsageFromCanonical(usage canonical.TokenUsage) *messagesUsageDTO {
 		return nil
 	}
 	return &messagesUsageDTO{
+		InputTokens:              input,
+		OutputTokens:             output,
+		CacheReadInputTokens:     cacheRead,
+		CacheCreationInputTokens: cacheWrite,
+	}
+}
+
+func messagesDeltaUsageFromCanonical(usage canonical.TokenUsage) messagesDeltaUsageDTO {
+	input, _ := usage.InputTokens()
+	output, _ := usage.OutputTokens()
+	cacheRead, _ := usage.CacheReadTokens()
+	cacheWrite, _ := usage.CacheWriteTokens()
+	return messagesDeltaUsageDTO{
 		InputTokens:              input,
 		OutputTokens:             output,
 		CacheReadInputTokens:     cacheRead,

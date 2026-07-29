@@ -16,7 +16,7 @@ func TestSynthesizeAndProjectReasoningIsIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := ResponseRef{SwobuID: NewSwobuResponseID("resp_reasoning")}
-	events := SynthesizeResponseEnvelopeEvents("ex", response, "model", []CanonicalItem{reasoning}, "stop", NewUnknownTokenUsage())
+	events := SynthesizeResponseEnvelopeEvents("ex", response, "model", []CanonicalItem{reasoning}, Completed("stop"), NewUnknownTokenUsage())
 	closed := &ClosedEnvelope{Kind: EnvResponse, Events: events}
 	projected, err := closed.ProjectResponse()
 	if err != nil {
@@ -29,11 +29,11 @@ func TestSynthesizeAndProjectReasoningIsIdentity(t *testing.T) {
 
 func TestSynthesizedResponseProjectsOnlyCompletedCheckpoints(t *testing.T) {
 	message, _ := NewMessageItem(MessageRoleAssistant, []MessagePart{NewTextMessagePart("hello")})
-	output, err := NewCanonicalResponse(ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}, "model", []CanonicalItem{message}, "stop", NewUnknownTokenUsage())
+	output, err := NewCanonicalResponse(ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}, "model", []CanonicalItem{message}, Completed("stop"), NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := SynthesizeResponseEnvelopeEvents("ex", output.Response(), output.Model(), output.Items(), output.CompletionReason(), output.Usage())
+	events := SynthesizeResponseEnvelopeEvents("ex", output.Response(), output.Model(), output.Items(), output.Completion(), output.Usage())
 	closed, err := ReadClosedEnvelope(context.Background(), NewSliceEventReader(events), EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestResponseProjectionRejectsIncompleteStartedItem(t *testing.T) {
 
 func TestResponseProjectionRejectsRequestOnlyItems(t *testing.T) {
 	userMessage, _ := NewMessageItem(MessageRoleUser, []MessagePart{NewTextMessagePart("not model output")})
-	events := SynthesizeResponseEnvelopeEvents("ex", ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}, "model", []CanonicalItem{userMessage}, "stop", NewUnknownTokenUsage())
+	events := SynthesizeResponseEnvelopeEvents("ex", ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}, "model", []CanonicalItem{userMessage}, Completed("stop"), NewUnknownTokenUsage())
 	closed, err := ReadClosedEnvelope(context.Background(), NewSliceEventReader(events), EnvResponse)
 	if err != nil {
 		t.Fatal(err)

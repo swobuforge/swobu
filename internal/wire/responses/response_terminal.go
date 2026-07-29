@@ -2,9 +2,25 @@ package responses
 
 import (
 	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 const responsesContentFilterReason = "content_filter"
+
+func responsesCompletion(status string, reason string) canonical.Completion {
+	if normalizedResponseString(reason) == responsesContentFilterReason {
+		return canonical.Declined(reason)
+	}
+	switch normalizedResponseString(status) {
+	case "completed":
+		return canonical.Completed(reason)
+	case "incomplete":
+		return canonical.Incomplete(reason)
+	default:
+		return canonical.Failed(reason)
+	}
+}
 
 func trimmedResponseString(value string) string {
 	return strings.TrimSpace(value) // swobu:io-string source=boundary

@@ -9,8 +9,10 @@
 // only after their ordered position. Reasoning owns ordered portable
 // summary/trace parts plus one
 // optional closed opaque-thinking branch. Opaque fields clone defensively,
-// format as redacted values, and remain attached to their exact artifact. Messages and
-// tool results preserve their distinct, ordered part grammars. Tool calls
+// format as redacted values, and remain attached to their exact artifact. User
+// and assistant messages may carry portable images; system and developer
+// directives remain text-only. Messages and tool results preserve their
+// distinct, ordered part grammars. Tool calls
 // bind a typed correlation ID, immutable ToolKey, and object-or-text input, so
 // historical calls remain intelligible without the current environment.
 // JSONObject owns deterministic object-semantic values, while ToolSet owns
@@ -40,6 +42,20 @@
 // results continue an unfinished assistant turn under its existing compute.
 // RequestPartRef names durable request-tree
 // occurrences; ItemPosition is only a progressive stream coordinate. A
+// fully materialized request consumes each tool result against the preceding
+// pending call with the same ID; completed pairs release that ID for later
+// unambiguous reuse. Function and custom calls consume content results,
+// web-search calls consume typed search results, and discovery pairs must agree
+// on both result branch and execution owner. Every response tool call reserves
+// its ID through the response. Provider-owned web-search and discovery results
+// consume their matching reservation and permit later reuse; function and
+// custom calls remain reserved because no response-owned result branch consumes
+// them. CompletionClass is the closed lifecycle truth; the provider's original
+// stop reason remains opaque projection and diagnostic data. Only
+// CompletionCompleted rejects a pending provider-hosted web search or
+// provider-executed discovery call; caller-executed function, custom, and
+// discovery calls may remain pending for the caller. A duplicate pending
+// call or duplicate provider result is contradictory canonical truth. A
 // response stream has one response envelope, one finish, at most one usage,
 // and either completed success or terminal error. Response construction admits
 // only assistant messages, reasoning artifacts, tool calls, provider-executed

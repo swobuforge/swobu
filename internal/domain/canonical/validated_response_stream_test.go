@@ -11,7 +11,7 @@ func TestValidatedResponseStreamRejectsPrematureEOF(t *testing.T) {
 	t.Parallel()
 	start := Event{Kind: EventEnvelopeStart, EnvID: "response", Payload: EnvelopeStartPayload{Kind: EnvResponse}}
 	identity := Event{Kind: EventResponseIdentity, EnvID: "response", Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}}}
-	finish := Event{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Reason: "stop"}}
+	finish := Event{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Completion: Completed("stop")}}
 	tests := map[string][]Event{
 		"before response start": nil,
 		"after response start":  {start},
@@ -43,7 +43,7 @@ func TestValidatedResponseStreamAllowsEOFAfterCompletedEnvelope(t *testing.T) {
 	events := []Event{
 		{Kind: EventEnvelopeStart, EnvID: "response", Payload: EnvelopeStartPayload{Kind: EnvResponse}},
 		{Kind: EventResponseIdentity, EnvID: "response", Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}}},
-		{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Reason: "stop"}},
+		{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Completion: Completed("stop")}},
 		{Kind: EventEnvelopeEnd, EnvID: "response", Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}},
 	}
 	reader := NewValidatedResponseStream(NewSliceEventReader(events))
@@ -54,6 +54,32 @@ func TestValidatedResponseStreamAllowsEOFAfterCompletedEnvelope(t *testing.T) {
 	}
 	if _, err := reader.Next(context.Background()); !errors.Is(err, io.EOF) {
 		t.Fatalf("completed stream EOF = %v", err)
+	}
+}
+
+func TestValidatedResponseStreamFinalizesPendingProviderEffects(t *testing.T) {
+	webCall, _ := responseWebSearchPair(t, "web_1")
+	call, _ := webCall.ToolCall()
+	start, err := NewToolCallStart(call.CallID(), call.Tool())
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []Event{
+		{Kind: EventEnvelopeStart, EnvID: "response", Payload: EnvelopeStartPayload{Kind: EnvResponse}},
+		{Kind: EventResponseIdentity, EnvID: "response", Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}}},
+		{Kind: EventItemStart, Payload: ItemEvent{Position: ItemPosition{Item: 0}, Payload: start}},
+		{Kind: EventItemCompleted, Payload: ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: webCall}}},
+		{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Completion: Completed("stop")}},
+		{Kind: EventEnvelopeEnd, EnvID: "response", Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}},
+	}
+	reader := NewValidatedResponseStream(NewSliceEventReader(events))
+	for index := 0; index < len(events)-1; index++ {
+		if _, err := reader.Next(context.Background()); err != nil {
+			t.Fatalf("event %d: %v", index, err)
+		}
+	}
+	if _, err := reader.Next(context.Background()); err == nil {
+		t.Fatal("completed stream accepted an unresolved provider-owned web-search effect")
 	}
 }
 
@@ -166,7 +192,7 @@ func TestValidatedResponseStreamRejectsSequenceRegressionAndDoubleClose(t *testi
 func TestValidatedResponseStreamOwnsTerminalCardinalityAndExclusivity(t *testing.T) {
 	start := Event{Kind: EventEnvelopeStart, EnvID: "response", Payload: EnvelopeStartPayload{Kind: EnvResponse}}
 	identity := Event{Kind: EventResponseIdentity, EnvID: "response", Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}}}
-	finish := Event{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Reason: "stop"}}
+	finish := Event{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Completion: Completed("stop")}}
 	usage := Event{Kind: EventUsage, EnvID: "response", Payload: UsagePayload{Usage: NewUnknownTokenUsage()}}
 	terminalError := Event{Kind: EventError, EnvID: "response", Payload: ErrorPayload{Code: "failed", Message: "failed"}}
 	completed := Event{Kind: EventEnvelopeEnd, EnvID: "response", Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}}
@@ -201,7 +227,7 @@ func TestValidatedResponseStreamAllowsProtocolNeutralTerminalOrderings(t *testin
 	tests := map[string][]Event{
 		"usage after finish": {
 			start, identity,
-			{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Reason: "stop"}},
+			{Kind: EventFinish, EnvID: "response", Payload: FinishPayload{Completion: Completed("stop")}},
 			{Kind: EventUsage, EnvID: "response", Payload: UsagePayload{Usage: NewUnknownTokenUsage()}},
 			{Kind: EventEnvelopeEnd, EnvID: "response", Payload: EnvelopeEndPayload{Kind: EnvResponse, Status: EnvelopeStatusCompleted}},
 		},

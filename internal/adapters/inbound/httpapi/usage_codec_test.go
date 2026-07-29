@@ -16,7 +16,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	output := canonicaltest.ResponseWithUsage(t, "chatcmpl_1",
 		"m",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"stop",
+		canonical.Completed("stop"),
 		usage,
 	)
 	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
@@ -48,7 +48,7 @@ func TestChatCompletionsCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	output := canonicaltest.ResponseWithUsage(t, "chatcmpl_reasoning",
 		"m",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"stop",
+		canonical.Completed("stop"),
 		usage,
 	)
 	doc, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
@@ -67,7 +67,7 @@ func TestResponsesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	output := canonicaltest.ResponseWithUsage(t, "resp_1",
 		"m",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed",
+		canonical.Completed("completed"),
 		usage,
 	)
 	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
@@ -99,7 +99,7 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	output := canonicaltest.ResponseWithUsage(t, "resp_reasoning",
 		"m",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed",
+		canonical.Completed("completed"),
 		usage,
 	)
 	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
@@ -123,7 +123,7 @@ func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPrese
 	outputValue := canonicaltest.ResponseWithUsage(t, "resp_compat",
 		"m",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"completed",
+		canonical.Completed("completed"),
 		usage,
 	)
 	doc, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, outputValue)
@@ -142,7 +142,7 @@ func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	output := canonicaltest.ResponseWithUsage(t, "msg_1",
 		"claude",
 		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-		"end_turn",
+		canonical.Completed("end_turn"),
 		usage,
 	)
 	doc, err := (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)

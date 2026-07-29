@@ -19,81 +19,130 @@ import (
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
 func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesResponseStream {
 	recording := &compat.RecordingSink{Delegate: sink}
+	streamSink := &responsesStreamDecisionSink{
+		recording: recording,
+		seen:      make(map[responsesStreamDecisionKey]struct{}),
+	}
 	return &responsesResponseStream{
 		exchangeID:      exchangeID,
 		responseEnvID:   canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:            recording,
+		sink:            streamSink,
 		recording:       recording,
 		reader:          core.NewSSEReader(stream.Body),
-		toolStates:      map[string]responsesToolState{},
-		toolInputs:      map[string]string{},
-		reasoningStates: map[string]*responsesReasoningState{},
+		providerOutputs: map[int]*pendingResponseOutput{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
 		request:         request.Clone(),
 	}
 }
 
+type responsesStreamDecisionKey struct {
+	feature compat.Feature
+	outcome compat.Outcome
+	subject compat.Subject
+}
+
+// responsesStreamDecisionSink records each semantic compatibility occurrence
+// once even when output_item.done and response.completed repeat a checkpoint.
+// A terminal-only child has a new subject and therefore remains observable.
+type responsesStreamDecisionSink struct {
+	recording *compat.RecordingSink
+	seen      map[responsesStreamDecisionKey]struct{}
+}
+
+func (s *responsesStreamDecisionSink) Commit(ctx context.Context, exchangeID string, decisions []compat.Decision) error {
+	if s == nil || s.recording == nil {
+		return nil
+	}
+	fresh := make([]compat.Decision, 0, len(decisions))
+	for _, decision := range decisions {
+		key := responsesStreamDecisionKey{
+			feature: decision.Feature,
+			outcome: decision.Outcome,
+			subject: decision.Subject,
+		}
+		if _, exists := s.seen[key]; exists {
+			continue
+		}
+		s.seen[key] = struct{}{}
+		fresh = append(fresh, decision)
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	return s.recording.Commit(ctx, exchangeID, fresh)
+}
+
 type responsesResponseStream struct {
-	exchangeID      string
-	responseEnvID   canonical.EnvelopeID
-	sink            compat.Sink
-	recording       *compat.RecordingSink
-	reader          *core.SSEReaderCloser
-	pending         canonical.EventSequence
-	toolStates      map[string]responsesToolState
-	toolInputs      map[string]string
-	reasoningStates map[string]*responsesReasoningState
-	omittedOutputs  map[int]struct{}
-	textState       *responsesTextState
-	emittedOutput   bool
-	started         bool
-	completed       bool
-	latestUsage     canonical.TokenUsage
-	seq             int64
-	request         canonical.CanonicalRequest
-	nextOrdinal     uint32
-	// ordinalOffset is the signed cardinality delta between provider output
-	// items and admitted canonical items. Expanded search results increase it;
-	// intentionally omitted provider artifacts decrease it.
-	ordinalOffset int64
+	exchangeID            string
+	responseEnvID         canonical.EnvelopeID
+	sink                  compat.Sink
+	recording             *compat.RecordingSink
+	reader                *core.SSEReaderCloser
+	pending               canonical.EventSequence
+	unknownEventDecisions map[string]struct{}
+	providerOutputs       map[int]*pendingResponseOutput
+	outputFrontier        int
+	erasedOutput          bool
+	completedItems        uint32
+	started               bool
+	completed             bool
+	latestUsage           canonical.TokenUsage
+	seq                   int64
+	request               canonical.CanonicalRequest
+	nextOrdinal           uint32
+	frameIndex            int
+}
+
+func (s *responsesResponseStream) unresolvedTerminalOutputs(items []json.RawMessage) ([]json.RawMessage, []int) {
+	output := make([]json.RawMessage, 0, len(items))
+	indexes := make([]int, 0, len(items))
+	for index, item := range items {
+		if s.isOutputComplete(index) {
+			continue
+		}
+		output = append(output, item)
+		indexes = append(indexes, index)
+	}
+	return output, indexes
 }
 
 type responsesReasoningStreamPartState struct {
-	kind canonical.ReasoningPartKind
 	text strings.Builder
 }
 
 type responsesReasoningState struct {
-	id     string
-	status string
-	parts  []*responsesReasoningStreamPartState
+	summaryParts map[int]*responsesReasoningStreamPartState
+	traceParts   map[int]*responsesReasoningStreamPartState
 }
 
-// responsesTextState binds one open provider message to its canonical
-// placement. Keeping both coordinate systems in one optional state prevents a
-// partially open lifecycle after one-to-many item projection.
+func newResponsesReasoningState() *responsesReasoningState {
+	return &responsesReasoningState{
+		summaryParts: make(map[int]*responsesReasoningStreamPartState),
+		traceParts:   make(map[int]*responsesReasoningStreamPartState),
+	}
+}
+
+// responsesTextState owns one indexed provider message and its nested
+// content-index frontier. Parts are classified independently, but canonical
+// part ordinals are assigned only while flushing the contiguous wire prefix.
 type responsesTextState struct {
-	envID                  canonical.EnvelopeID
-	ordinal                uint32
-	providerOutputIndex    int
-	hasProviderOutputIndex bool
-	text                   strings.Builder
+	ordinal         uint32
+	parts           map[int]*responsesTextPartState
+	partFrontier    int
+	nextPartOrdinal uint32
 }
 
-func newResponsesTextState(envID canonical.EnvelopeID, ordinal uint32, outputIndex *int) *responsesTextState {
-	state := &responsesTextState{envID: envID, ordinal: ordinal}
-	if outputIndex != nil {
-		state.providerOutputIndex = *outputIndex
-		state.hasProviderOutputIndex = true
-	}
-	return state
+type responsesTextPartState struct {
+	classified bool
+	erased     bool
+	emitted    bool
+	ordinal    uint32
+	text       strings.Builder
+	deltas     []string
 }
 
-func (s *responsesTextState) accepts(outputIndex *int) bool {
-	if outputIndex == nil {
-		return true
-	}
-	return s != nil && s.hasProviderOutputIndex && s.providerOutputIndex == *outputIndex
+func newResponsesTextState(ordinal uint32) *responsesTextState {
+	return &responsesTextState{ordinal: ordinal, parts: make(map[int]*responsesTextPartState)}
 }
 
 func (s *responsesResponseStream) Decisions() []compat.Decision {
@@ -104,11 +153,11 @@ func (s *responsesResponseStream) Decisions() []compat.Decision {
 }
 
 type responsesToolState struct {
-	envID         canonical.EnvelopeID
 	ordinal       uint32
 	toolType      string
 	callID        canonical.ToolCallID
 	tool          canonical.ToolKey
+	input         string
 	argumentsDone bool
 	outputDone    bool
 	closed        bool
@@ -138,7 +187,9 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		}
 		if strings.TrimSpace(event.Data) == "[DONE]" { // swobu:io-string source=boundary
 			if s.started && !s.completed {
-				s.handleStreamDone(ctx)
+				if err := s.handleStreamDone(ctx); err != nil {
+					return canonical.Event{}, err
+				}
 				if len(s.pending) > 0 {
 					out := s.pending[0]
 					s.pending = s.pending[1:]
@@ -177,6 +228,8 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		}
 		frame.RawItem = native.Item
 		frame.RawOutput = native.Response.Output
+		frame.EventIndex = s.frameIndex
+		s.frameIndex++
 		handled, _, nextErr := s.handleFrame(ctx, frame)
 		if nextErr != nil {
 			return canonical.Event{}, nextErr
@@ -218,28 +271,37 @@ func (s *responsesResponseStream) enqueueEnvelopeEnd(id canonical.EnvelopeID, ki
 	s.enqueue(canonical.Event{Kind: canonical.EventEnvelopeEnd, EnvID: id, Payload: canonical.EnvelopeEndPayload{Kind: kind, Status: status}})
 }
 
-func (s *responsesResponseStream) enqueueTextDelta(id canonical.EnvelopeID, ordinal uint32, text string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventTextDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.TextDeltaPayload{Text: text}}})
+func (s *responsesResponseStream) enqueueContentStart(outputIndex *int, ordinal uint32, part uint32) {
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventContentStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal, Part: part}, Payload: canonical.NewMessageContentStart(canonical.PartKindText)}})
 }
 
-func (s *responsesResponseStream) enqueueArgsDelta(id canonical.EnvelopeID, ordinal uint32, args string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ArgsDeltaPayload{Args: args}}})
+func (s *responsesResponseStream) enqueueTextDelta(outputIndex *int, ordinal uint32, part uint32, text string) {
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventTextDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal, Part: part}, Payload: canonical.TextDeltaPayload{Text: text}}})
 }
 
-func (s *responsesResponseStream) enqueueItemStart(id canonical.EnvelopeID, ordinal uint32, start canonical.ItemStartPayload) {
-	s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: start}})
+func (s *responsesResponseStream) enqueueArgsDelta(outputIndex *int, ordinal uint32, args string) {
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventArgsDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ArgsDeltaPayload{Args: args}}})
 }
 
-func (s *responsesResponseStream) enqueueItemCompleted(id canonical.EnvelopeID, ordinal uint32, item canonical.CanonicalItem) {
-	s.enqueue(canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
+func (s *responsesResponseStream) enqueueItemStart(outputIndex *int, ordinal uint32, start canonical.ItemStartPayload) {
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: start}})
+}
+
+func (s *responsesResponseStream) enqueueItemCompleted(outputIndex *int, ordinal uint32, item canonical.CanonicalItem) {
+	if outputIndex != nil && *outputIndex >= 0 {
+		output := s.outputAt(*outputIndex)
+		output.checkpointItems = append(output.checkpointItems, item.Clone())
+	}
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
+	s.completedItems++
 }
 
 func (s *responsesResponseStream) enqueueUsage(usage canonical.TokenUsage) {
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseEnvID, Payload: canonical.UsagePayload{Usage: usage}})
 }
 
-func (s *responsesResponseStream) enqueueFinish(reason string) {
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseEnvID, Payload: canonical.FinishPayload{Reason: reason}})
+func (s *responsesResponseStream) enqueueFinish(completion canonical.Completion) {
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseEnvID, Payload: canonical.FinishPayload{Completion: completion}})
 }
 
 func (s *responsesResponseStream) enqueueError(code string, message string) {
@@ -249,56 +311,67 @@ func (s *responsesResponseStream) enqueueError(code string, message string) {
 func (s *responsesResponseStream) handleUnexpectedEOF(ctx context.Context) {
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
-	s.closeOpenText(canonical.EnvelopeStatusError)
+	s.discardOpenText()
 	s.closeOpenTools(canonical.EnvelopeStatusError)
 	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
 	s.completed = true
 }
 
-func (s *responsesResponseStream) handleStreamDone(ctx context.Context) {
-	s.handleTerminalCompletion(ctx, "completed")
+func (s *responsesResponseStream) handleStreamDone(ctx context.Context) error {
+	return s.handleTerminalCompletion(ctx, "completed")
 }
 
-func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, status string) {
+func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, status string) error {
 	normalizedStatus := strings.TrimSpace(status) // swobu:io-string source=provider-wire
 	if normalizedStatus == "" {
 		normalizedStatus = "completed"
 	}
 	s.completed = true
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
-	s.closeOpenText(canonical.EnvelopeStatusCompleted)
+	if s.hasOpenKnownOutput() {
+		s.discardOpenText()
+		s.closeOpenTools(canonical.EnvelopeStatusError)
+		s.enqueueError("stream_incomplete_output", "responses stream ended with unfinished output")
+		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+		return nil
+	}
+	if s.completedItems == 0 && s.erasedOutput {
+		return canonical.NewBackendError("responses", 0, "responses output has no surviving semantic items", "")
+	}
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)
-	s.enqueueFinish(normalizedStatus)
+	s.enqueueFinish(responsesCompletion(normalizedStatus, normalizedStatus))
 	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+	return nil
 }
 
-func (s *responsesResponseStream) closeOpenText(status canonical.EnvelopeStatus) {
-	state := s.textState
-	if state == nil {
-		return
+func (s *responsesResponseStream) discardOpenText() {
+	for _, output := range s.providerOutputs {
+		output.text = nil
 	}
-	if status == canonical.EnvelopeStatusCompleted {
-		item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(state.text.String())})
-		if err == nil {
-			s.enqueueItemCompleted(state.envID, state.ordinal, item)
+}
+
+func (s *responsesResponseStream) hasOpenKnownOutput() bool {
+	for _, state := range s.providerOutputs {
+		if state.text != nil || state.tool != nil || state.reasoning != nil ||
+			!state.resolved || !state.active || len(state.events) > 0 {
+			return true
 		}
 	}
-	s.textState = nil
+	return false
 }
 
 func (s *responsesResponseStream) closeOpenTools(status canonical.EnvelopeStatus) {
-	for itemID := range s.toolStates {
-		delete(s.toolStates, itemID)
-		delete(s.toolInputs, itemID)
+	for _, output := range s.providerOutputs {
+		output.tool = nil
 	}
 }
 
-func (s *responsesResponseStream) ensureToolState(itemID string, ordinal uint32, toolType string, callID string, name string) (responsesToolState, error) {
-	if state, ok := s.toolStates[itemID]; ok {
+func (s *responsesResponseStream) ensureToolState(outputIndex int, ordinal uint32, toolType string, callID string, name string) (*responsesToolState, error) {
+	output := s.outputAt(outputIndex)
+	if state := output.tool; state != nil {
 		if state.toolType == "" && strings.TrimSpace(toolType) != "" { // swobu:io-string source=domain
 			state.toolType = strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
-			s.toolStates[itemID] = state
 		}
 		return state, nil
 	}
@@ -307,98 +380,94 @@ func (s *responsesResponseStream) ensureToolState(itemID string, ordinal uint32,
 		normalizedType = canonical.ToolTypeFunction
 	}
 	if normalizedType != canonical.ToolTypeFunction && normalizedType != canonical.ToolTypeCustom {
-		return responsesToolState{}, canonical.NotImplemented("Swobu has no canonical projection for this Responses stream tool-call kind")
+		return nil, canonical.InternalError("Responses stream dispatch admitted an unknown canonical tool-call kind")
 	}
 	environment, err := canonical.EffectiveTools(s.request)
 	if err != nil {
-		return responsesToolState{}, canonical.InternalError("responses stream tool environment is ambiguous")
+		return nil, canonical.InternalError("responses stream tool environment is ambiguous")
 	}
 	resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), name, normalizedType)
 	if err != nil {
-		return responsesToolState{}, canonical.InternalError("responses stream tool call references an unknown or ambiguous tool")
+		return nil, canonical.InternalError("responses stream tool call references an unknown or ambiguous tool")
 	}
 	canonicalCallID, err := canonical.NewToolCallID(callID)
 	if err != nil {
-		return responsesToolState{}, canonical.InternalError("responses stream tool call is missing call_id")
+		return nil, canonical.InternalError("responses stream tool call is missing call_id")
 	}
-	envID := canonical.EnvelopeID(fmt.Sprintf("%s:item:%d", s.responseEnvID, ordinal))
-	state := responsesToolState{envID: envID, ordinal: ordinal, toolType: normalizedType, callID: canonicalCallID, tool: resolved.Key()}
-	s.toolStates[itemID] = state
+	state := &responsesToolState{ordinal: ordinal, toolType: normalizedType, callID: canonicalCallID, tool: resolved.Key()}
+	output.tool = state
 	start, err := canonical.NewToolCallStart(canonicalCallID, state.tool)
 	if err != nil {
-		return responsesToolState{}, err
+		return nil, err
 	}
-	s.enqueueItemStart(envID, ordinal, start)
+	s.enqueueItemStart(&outputIndex, ordinal, start)
 	return state, nil
 }
 
-func (s *responsesResponseStream) markToolStateArgumentsDone(itemID string, state responsesToolState) responsesToolState {
+func (s *responsesResponseStream) markToolStateArgumentsDone(state *responsesToolState) {
 	state.argumentsDone = true
-	s.toolStates[itemID] = state
-	return state
 }
 
-func (s *responsesResponseStream) markToolStateOutputDone(itemID string, state responsesToolState) responsesToolState {
+func (s *responsesResponseStream) markToolStateOutputDone(state *responsesToolState) {
 	state.outputDone = true
-	s.toolStates[itemID] = state
-	return state
 }
 
-func (s *responsesResponseStream) enqueueToolArgs(itemID string, args string) {
+func (s *responsesResponseStream) enqueueToolArgs(outputIndex int, args string) {
 	if args == "" { // swobu:io-string source=boundary
 		return
 	}
-	state, ok := s.toolStates[itemID]
-	if !ok {
+	state := s.outputAt(outputIndex).tool
+	if state == nil {
 		return
 	}
-	s.toolInputs[itemID] += args
-	s.enqueueArgsDelta(state.envID, state.ordinal, args)
-}
-
-func fallbackItemID(itemID string, callID string, outputIndex *int) string {
-	if outputIndex != nil {
-		return fmt.Sprintf("tool_%d", *outputIndex)
-	}
-	if strings.TrimSpace(itemID) != "" { // swobu:io-string source=boundary
-		return strings.TrimSpace(itemID) // swobu:io-string source=boundary
-	}
-	if strings.TrimSpace(callID) != "" { // swobu:io-string source=boundary
-		return strings.TrimSpace(callID) // swobu:io-string source=boundary
-	}
-	return "tool_0"
-}
-
-func (s *responsesResponseStream) ordinalFor(itemID string, outputIndex *int) uint32 {
-	if state, ok := s.toolStates[itemID]; ok {
-		return state.ordinal
-	}
-	if outputIndex != nil && *outputIndex >= 0 {
-		adjusted := int64(*outputIndex) + s.ordinalOffset
-		if adjusted < 0 {
-			adjusted = int64(s.nextOrdinal)
-		}
-		ordinal := uint32(adjusted)
-		if ordinal >= s.nextOrdinal {
-			s.nextOrdinal = ordinal + 1
-		}
-		return ordinal
-	}
-	ordinal := s.nextOrdinal
-	s.nextOrdinal++
-	return ordinal
+	state.input += args
+	s.enqueueArgsDelta(&outputIndex, state.ordinal, args)
 }
 
 func (s *responsesResponseStream) omitProviderOutput(outputIndex *int) {
-	if outputIndex == nil || *outputIndex < 0 {
-		return
+	s.dropOutput(outputIndex)
+}
+
+func (s *responsesResponseStream) eraseProviderOutput(frame streamFrame, field string) error {
+	if err := s.classifyErasedProviderOutput(frame, field); err != nil {
+		return err
 	}
-	if s.omittedOutputs == nil {
-		s.omittedOutputs = map[int]struct{}{}
+	s.completeOutput(frame.OutputIndex)
+	return nil
+}
+
+func (s *responsesResponseStream) recordUnknownWebSearchStatus(frame streamFrame) error {
+	if frame.OutputIndex == nil {
+		return canonical.NewBackendError("responses", 0, "responses web-search lifecycle is missing output index", "")
 	}
-	if _, exists := s.omittedOutputs[*outputIndex]; exists {
-		return
+	state := s.outputAt(*frame.OutputIndex)
+	if state.statusDropRecorded {
+		return nil
 	}
-	s.omittedOutputs[*outputIndex] = struct{}{}
-	s.ordinalOffset--
+	state.statusDropRecorded = true
+	return emitResponsesCompatibilityDecision(
+		s.sink,
+		s.exchangeID,
+		compat.ResponseItemsKind,
+		compat.Drop,
+		compat.Subject(fmt.Sprintf("wire:/output/%d/status", *frame.OutputIndex)),
+	)
+}
+
+// classifyErasedProviderOutput records one indexed additive erasure without
+// closing the lifecycle. Unknown fragmented items remain open until their item
+// checkpoint or terminal snapshot arrives.
+func (s *responsesResponseStream) classifyErasedProviderOutput(frame streamFrame, field string) error {
+	s.erasedOutput = true
+	s.omitProviderOutput(frame.OutputIndex)
+	if frame.OutputIndex == nil {
+		return canonical.NewBackendError("responses", 0, "responses output lifecycle is missing output index", "")
+	}
+	state := s.outputAt(*frame.OutputIndex)
+	if state.erasureRecorded {
+		return nil
+	}
+	state.erasureRecorded = true
+	index := *frame.OutputIndex
+	return emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/output/%d/%s", index, field)))
 }
