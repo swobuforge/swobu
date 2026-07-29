@@ -1,53 +1,64 @@
 package responses
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func (s *responsesResponseStream) handleReasoningDelta(frame streamFrame, kind canonical.ReasoningPartKind) error {
-	itemID := fallbackItemID(frame.ItemID, "reasoning", frame.OutputIndex)
-	state := s.reasoningStates[itemID]
+	output := s.outputAt(*frame.OutputIndex)
+	state := output.reasoning
 	if state == nil {
-		state = &responsesReasoningState{id: frame.ItemID}
-		s.reasoningStates[itemID] = state
+		state = newResponsesReasoningState()
+		output.reasoning = state
 	}
-	partIndex := len(state.parts)
-	if frame.SummaryIndex != nil {
-		partIndex = *frame.SummaryIndex
-	} else if frame.ContentIndex != nil {
-		partIndex = *frame.ContentIndex
-	} else if len(state.parts) > 0 {
-		partIndex = len(state.parts) - 1
+	switch kind {
+	case canonical.ReasoningPartSummary:
+		if frame.ContentIndex != nil {
+			return canonical.NewBackendError("responses", 0, "responses reasoning summary delta uses a content index", "")
+		}
+		return appendResponsesReasoningDelta(&state.summaryParts, frame.SummaryIndex, frame.Delta)
+	case canonical.ReasoningPartTrace:
+		if frame.SummaryIndex != nil {
+			return canonical.NewBackendError("responses", 0, "responses reasoning trace delta uses a summary index", "")
+		}
+		return appendResponsesReasoningDelta(&state.traceParts, frame.ContentIndex, frame.Delta)
+	default:
+		return canonical.InternalError("responses reasoning delta kind is invalid")
 	}
-	if partIndex < 0 || partIndex > len(state.parts) {
-		return canonical.InternalError("responses reasoning part index is non-contiguous")
+}
+
+func appendResponsesReasoningDelta(parts *map[int]*responsesReasoningStreamPartState, wireIndex *int, delta string) error {
+	index := 0
+	if wireIndex != nil {
+		index = *wireIndex
+	} else if len(*parts) > 0 {
+		for candidate := range *parts {
+			if candidate > index {
+				index = candidate
+			}
+		}
 	}
-	if partIndex == len(state.parts) {
-		state.parts = append(state.parts, &responsesReasoningStreamPartState{kind: kind})
+	if index < 0 {
+		return canonical.NewBackendError("responses", 0, "responses reasoning part index is negative", "")
 	}
-	part := state.parts[partIndex]
-	if part.kind != kind {
-		return canonical.InternalError("responses reasoning part kind changed during stream")
+	part := (*parts)[index]
+	if part == nil {
+		part = &responsesReasoningStreamPartState{}
+		(*parts)[index] = part
 	}
-	part.text.WriteString(frame.Delta)
+	part.text.WriteString(delta)
 	return nil
 }
 
 func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (bool, error) {
-	itemID := fallbackItemID(frame.Item.ID, "reasoning", frame.OutputIndex)
-	state := s.reasoningStates[itemID]
+	output := s.outputAt(*frame.OutputIndex)
+	state := output.reasoning
 	if state == nil {
-		state = &responsesReasoningState{id: frame.Item.ID, status: frame.Item.Status}
-	}
-	parts := make([]canonical.ReasoningPart, 0, len(state.parts))
-	for _, streamed := range state.parts {
-		part, err := canonical.NewReasoningPart(streamed.kind, streamed.text.String())
-		if err != nil {
-			return false, canonical.InternalError("responses streamed reasoning part is invalid")
-		}
-		parts = append(parts, part)
+		state = newResponsesReasoningState()
 	}
 	var opaque canonical.OpaqueThinking
 	if frame.Item.EncryptedContent != "" {
@@ -57,44 +68,99 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 			return false, canonical.InternalError("responses streamed encrypted reasoning is invalid")
 		}
 	}
-	if len(parts) == 0 && opaque.IsZero() {
-		for _, summary := range frame.Item.Summary {
-			if strings.TrimSpace(summary.Type) != "summary_text" { // swobu:io-string source=provider-wire
-				return false, canonical.InternalError("responses streamed reasoning summary type is invalid")
-			}
-			part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
-			if err != nil {
-				return false, canonical.InternalError("responses streamed reasoning summary is invalid")
-			}
-			parts = append(parts, part)
-		}
-		content, err := decodeResponsesReasoningContent(frame.Item.Content)
-		if err != nil {
+
+	parts := make([]canonical.ReasoningPart, 0, len(frame.Item.Summary)+len(state.traceParts))
+	erasedChild := false
+	for index, summary := range frame.Item.Summary {
+		summaryType := strings.TrimSpace(summary.Type) // swobu:io-string source=provider-wire
+		if err := admitResponsesProviderOutputChild(summaryType); err != nil {
 			return false, err
 		}
-		for _, trace := range content {
-			if strings.TrimSpace(trace.Type) != "reasoning_text" { // swobu:io-string source=provider-wire
-				continue
+		if summaryType != "summary_text" {
+			if state.summaryParts[index] != nil {
+				return false, canonical.NewBackendError("responses", 0, "responses reasoning summary checkpoint changed part kind", "")
 			}
-			part, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, trace.Text)
-			if err != nil {
-				return false, canonical.InternalError("responses streamed reasoning trace is invalid")
+			erasedChild = true
+			if err := emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, responsesReasoningStreamSubject(frame, "summary", index)); err != nil {
+				return false, err
 			}
-			parts = append(parts, part)
+			continue
+		}
+		if progressive := state.summaryParts[index]; progressive != nil {
+			if _, err := responsesTerminalSuffix(progressive.text.String(), summary.Text); err != nil {
+				return false, err
+			}
+		}
+		part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, summary.Text)
+		if err != nil {
+			return false, canonical.InternalError("responses streamed reasoning summary is invalid")
+		}
+		parts = append(parts, part)
+	}
+	for index := range state.summaryParts {
+		if index >= len(frame.Item.Summary) {
+			return false, canonical.NewBackendError("responses", 0, "responses terminal checkpoint is missing streamed reasoning summary", "")
 		}
 	}
+
+	content, err := decodeResponsesReasoningContent(frame.Item.Content)
+	if err != nil {
+		return false, err
+	}
+	for index, trace := range content {
+		traceType := strings.TrimSpace(trace.Type) // swobu:io-string source=provider-wire
+		if err := admitResponsesProviderOutputChild(traceType); err != nil {
+			return false, err
+		}
+		if traceType != "reasoning_text" {
+			if state.traceParts[index] != nil {
+				return false, canonical.NewBackendError("responses", 0, "responses reasoning trace checkpoint changed part kind", "")
+			}
+			erasedChild = true
+			if err := emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, responsesReasoningStreamSubject(frame, "content", index)); err != nil {
+				return false, err
+			}
+			continue
+		}
+		if progressive := state.traceParts[index]; progressive != nil {
+			if _, err := responsesTerminalSuffix(progressive.text.String(), trace.Text); err != nil {
+				return false, err
+			}
+		}
+		part, err := canonical.NewReasoningPart(canonical.ReasoningPartTrace, trace.Text)
+		if err != nil {
+			return false, canonical.InternalError("responses streamed reasoning trace is invalid")
+		}
+		parts = append(parts, part)
+	}
+	for index := range state.traceParts {
+		if index >= len(content) {
+			return false, canonical.NewBackendError("responses", 0, "responses terminal checkpoint is missing streamed reasoning trace", "")
+		}
+	}
+
 	if len(parts) == 0 && opaque.IsZero() {
 		s.omitProviderOutput(frame.OutputIndex)
-		delete(s.reasoningStates, itemID)
+		if erasedChild {
+			s.erasedOutput = true
+		}
+		output.reasoning = nil
 		return true, nil
 	}
 	item, err := canonical.NewReasoningItem(parts, opaque)
 	if err != nil {
 		return false, canonical.InternalError("responses streamed reasoning item is invalid")
 	}
-	ordinal := s.ordinalFor(itemID, frame.OutputIndex)
-	s.enqueueItemCompleted("", ordinal, item)
-	s.emittedOutput = true
-	delete(s.reasoningStates, itemID)
+	ordinal := uint32(0)
+	s.enqueueItemCompleted(frame.OutputIndex, ordinal, item)
+	output.reasoning = nil
 	return true, nil
+}
+
+func responsesReasoningStreamSubject(frame streamFrame, child string, index int) compat.Subject {
+	outputIndex := 0
+	if frame.OutputIndex != nil {
+		outputIndex = *frame.OutputIndex
+	}
+	return compat.Subject(fmt.Sprintf("wire:/output/%d/%s/%d/type", outputIndex, child, index))
 }

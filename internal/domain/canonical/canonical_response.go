@@ -1,93 +1,133 @@
 package canonical
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
 
-// CanonicalResponse is the fully materialized canonical success value.
+// CanonicalResponse is the fully materialized canonical terminal value.
 // Construction rejects request-only item states before checkpointing or encoding.
 type CanonicalResponse struct {
-	response     ResponseRef
-	model        string
-	items        []CanonicalItem
-	finishReason string
-	usage        TokenUsage
+	response   ResponseRef
+	model      string
+	items      []CanonicalItem
+	completion Completion
+	usage      TokenUsage
+}
+
+// CompletionClass is the closed semantic outcome used by canonical lifecycle
+// policy. Provider stop-reason strings remain opaque diagnostics.
+type CompletionClass string
+
+const (
+	CompletionCompleted  CompletionClass = "completed"
+	CompletionIncomplete CompletionClass = "incomplete"
+	CompletionDeclined   CompletionClass = "declined"
+	CompletionFailed     CompletionClass = "failed"
+)
+
+// Completion keeps closed lifecycle policy separate from the original
+// provider reason retained for projection and diagnostics.
+type Completion struct {
+	class  CompletionClass
+	reason string
+}
+
+func Completed(reason string) Completion {
+	return Completion{class: CompletionCompleted, reason: reason}
+}
+
+func Incomplete(reason string) Completion {
+	return Completion{class: CompletionIncomplete, reason: reason}
+}
+
+func Declined(reason string) Completion {
+	return Completion{class: CompletionDeclined, reason: reason}
+}
+
+func Failed(reason string) Completion {
+	return Completion{class: CompletionFailed, reason: reason}
+}
+
+func (c Completion) Class() CompletionClass { return c.class }
+func (c Completion) Reason() string         { return c.reason }
+
+func (c Completion) validate() error {
+	switch c.class {
+	case CompletionCompleted, CompletionIncomplete, CompletionDeclined, CompletionFailed:
+	default:
+		return fmt.Errorf("canonical response completion class is invalid")
+	}
+	if strings.TrimSpace(c.reason) == "" { // swobu:io-string source=domain
+		return fmt.Errorf("canonical response completion reason is required")
+	}
+	return nil
 }
 
 // NewCanonicalResponse constructs the legal model-output subset of canonical
 // items. Assistant messages, reasoning, and tool calls are response-producing branches;
 // tool results and non-assistant messages are request transcript input.
-func NewCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) (CanonicalResponse, error) {
+func NewCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, completion Completion, usage TokenUsage) (CanonicalResponse, error) {
 	if response.SwobuID.IsZero() {
 		return CanonicalResponse{}, fmt.Errorf("canonical response identity is required")
 	}
 	if strings.TrimSpace(model) == "" { // swobu:io-string source=domain
 		return CanonicalResponse{}, fmt.Errorf("canonical response model is required")
 	}
-	if strings.TrimSpace(finishReason) == "" { // swobu:io-string source=domain
-		return CanonicalResponse{}, fmt.Errorf("canonical response completion reason is required")
-	}
-	if err := validateResponseItems(items); err != nil {
+	if err := completion.validate(); err != nil {
 		return CanonicalResponse{}, err
 	}
-	return newCanonicalResponse(response, model, items, finishReason, usage), nil
+	effects, err := validateResponseItems(items)
+	if err != nil {
+		return CanonicalResponse{}, err
+	}
+	if completion.Class() == CompletionCompleted {
+		if err := effects.RequireSettled(); err != nil {
+			return CanonicalResponse{}, err
+		}
+	}
+	return newCanonicalResponse(response, model, items, completion, usage), nil
 }
 
-func validateResponseItems(items []CanonicalItem) error {
-	lifecycle := newResponseToolLifecycleValidator()
+func validateResponseItems(items []CanonicalItem) (responseEffectGuard, error) {
+	var effects responseEffectGuard
 	for index, item := range items {
 		if err := validateResponseItem(index, item); err != nil {
-			return err
+			return responseEffectGuard{}, err
 		}
-		if err := lifecycle.Observe(item); err != nil {
-			return fmt.Errorf("canonical response item %d %w", index, err)
+		if err := effects.Accept(index, item); err != nil {
+			return responseEffectGuard{}, fmt.Errorf("canonical response item %d %w", index, err)
 		}
 	}
-	return nil
+	return effects, nil
 }
 
-// responseToolLifecycleValidator owns correlation among completed response
-// items. Wire streams and materialized responses feed the same transitions.
-type responseToolLifecycleValidator struct {
-	webSearchCalls map[ToolCallID]struct{}
-	discoveryCalls map[ToolCallID]DiscoveryExecutor
+// responseEffectGuard applies the response-specific settlement rule after the
+// canonical matcher has correlated every completed item. Caller-owned effects
+// may remain pending; a successful provider response must settle provider-owned
+// search and discovery effects.
+type responseEffectGuard struct {
+	matcher ToolEffectMatcher
 }
 
-var errWebSearchResultWithoutCall = errors.New("web-search result has no prior call")
-var errDiscoveryResultWithoutCall = errors.New("tool-discovery result has no prior call")
-
-func newResponseToolLifecycleValidator() responseToolLifecycleValidator {
-	return responseToolLifecycleValidator{
-		webSearchCalls: make(map[ToolCallID]struct{}),
-		discoveryCalls: make(map[ToolCallID]DiscoveryExecutor),
-	}
+func (g *responseEffectGuard) Accept(index int, item CanonicalItem) error {
+	_, err := g.matcher.Accept(index, item)
+	return err
 }
 
-func (v *responseToolLifecycleValidator) Observe(item CanonicalItem) error {
-	if call, ok := item.ToolCall(); ok && call.Tool().Kind() == ToolKindWebSearch {
-		v.webSearchCalls[call.CallID()] = struct{}{}
-	}
-	if call, ok := item.ToolCall(); ok && call.Tool().Kind() == ToolKindDiscovery {
-		executor, present := call.DiscoveryExecutor()
-		if !present {
-			return errors.New("tool-discovery call has no execution owner")
-		}
-		v.discoveryCalls[call.CallID()] = executor
-	}
-	if result, ok := item.ToolResult(); ok {
-		if _, found := v.webSearchCalls[result.CallID()]; !found {
-			return errWebSearchResultWithoutCall
-		}
-	}
-	if result, ok := item.ToolDiscoveryResult(); ok {
-		executor, found := v.discoveryCalls[result.CallID()]
-		if !found {
-			return errDiscoveryResultWithoutCall
-		}
-		if executor != result.Executor() {
-			return errors.New("tool-discovery result execution owner differs from its call")
+// RequireSettled rejects successful response truth that still owes a
+// provider-owned effect. Caller-executed function, custom, and discovery calls
+// intentionally remain pending because the response hands them to its caller.
+func (g *responseEffectGuard) RequireSettled() error {
+	for _, pending := range g.matcher.Pending() {
+		switch pending.Kind {
+		case ToolKindWebSearch:
+			return fmt.Errorf("web-search call has no provider result")
+		case ToolKindDiscovery:
+			executor, specified := pending.Executor.Get()
+			if specified && executor == DiscoveryExecutorProvider {
+				return fmt.Errorf("provider-executed tool-discovery call has no provider result")
+			}
 		}
 	}
 	return nil
@@ -127,22 +167,22 @@ func validateResponseItem(index int, item CanonicalItem) error {
 	return nil
 }
 
-func newCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, finishReason string, usage TokenUsage) CanonicalResponse {
-	return CanonicalResponse{response: response.Clone(), model: model, items: cloneCanonicalItems(items), finishReason: finishReason, usage: usage}
+func newCanonicalResponse(response ResponseRef, model string, items []CanonicalItem, completion Completion, usage TokenUsage) CanonicalResponse {
+	return CanonicalResponse{response: response.Clone(), model: model, items: cloneCanonicalItems(items), completion: completion, usage: usage}
 }
 
-func (o CanonicalResponse) Response() ResponseRef    { return o.response.Clone() }
-func (o CanonicalResponse) Model() string            { return o.model }
-func (o CanonicalResponse) CompletionReason() string { return o.finishReason }
-func (o CanonicalResponse) Items() []CanonicalItem   { return cloneCanonicalItems(o.items) }
-func (o CanonicalResponse) Usage() TokenUsage        { return o.usage }
+func (o CanonicalResponse) Response() ResponseRef  { return o.response.Clone() }
+func (o CanonicalResponse) Model() string          { return o.model }
+func (o CanonicalResponse) Completion() Completion { return o.completion }
+func (o CanonicalResponse) Items() []CanonicalItem { return cloneCanonicalItems(o.items) }
+func (o CanonicalResponse) Usage() TokenUsage      { return o.usage }
 
 // Clone returns a deep copy suitable for cross-boundary handoff.
 func (o CanonicalResponse) Clone() CanonicalResponse {
-	return newCanonicalResponse(o.response, o.model, o.items, o.finishReason, o.usage)
+	return newCanonicalResponse(o.response, o.model, o.items, o.completion, o.usage)
 }
 
 // WithUsage returns the same semantic response with exchange-aggregated usage.
 func (o CanonicalResponse) WithUsage(usage TokenUsage) CanonicalResponse {
-	return newCanonicalResponse(o.response, o.model, o.items, o.finishReason, usage)
+	return newCanonicalResponse(o.response, o.model, o.items, o.completion, usage)
 }

@@ -99,7 +99,7 @@ func TestReasoningIsAssistantOwnedAndAtomicInSynthesizedStream(t *testing.T) {
 	if item.Owner() != TurnOwnerAssistant {
 		t.Fatalf("owner = %q", item.Owner())
 	}
-	events := SynthesizeResponseEnvelopeEvents("ex", ResponseRef{SwobuID: "resp"}, "model", []CanonicalItem{item}, "stop", TokenUsage{})
+	events := SynthesizeResponseEnvelopeEvents("ex", ResponseRef{SwobuID: "resp"}, "model", []CanonicalItem{item}, Completed("stop"), TokenUsage{})
 	for _, event := range events {
 		if event.Kind == EventItemStart || event.Kind == EventContentStart || event.Kind == EventTextDelta {
 			t.Fatalf("reasoning emitted progressive event %q", event.Kind)

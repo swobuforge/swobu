@@ -208,7 +208,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 func handoffCompletedProviderResponse(ctx context.Context, call providerCall, response canonical.CanonicalResponse, runner runtimeBundle) (ClientResponse, error) {
 	events := canonical.SynthesizeResponseEnvelopeEvents(
 		call.exchangeID, response.Response(), response.Model(), response.Items(),
-		response.CompletionReason(), response.Usage(),
+		response.Completion(), response.Usage(),
 	)
 	binding := canonical.ResponseBinding{
 		SwobuID: response.Response().SwobuID, TargetID: call.backend.Target.TargetID,

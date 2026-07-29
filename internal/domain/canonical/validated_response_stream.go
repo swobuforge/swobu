@@ -10,17 +10,18 @@ import (
 // ValidatedResponseStream enforces response/item/content lifecycle invariants
 // before each event reaches either client projection or checkpoint commit.
 type ValidatedResponseStream struct {
-	upstream      ResponseStream
-	responseID    EnvelopeID
-	identitySeen  bool
-	itemsSeen     bool
-	finishSeen    bool
-	usageSeen     bool
-	errorSeen     bool
-	assembler     *itemStreamAssembler
-	responseDone  bool
-	lastSequence  int64
-	toolLifecycle responseToolLifecycleValidator
+	upstream     ResponseStream
+	responseID   EnvelopeID
+	identitySeen bool
+	itemsSeen    bool
+	finishSeen   bool
+	completion   Completion
+	usageSeen    bool
+	errorSeen    bool
+	assembler    *itemStreamAssembler
+	responseDone bool
+	lastSequence int64
+	effectGuard  responseEffectGuard
 }
 
 // NewValidatedResponseStream wraps provider-decoded canonical events at the
@@ -91,7 +92,7 @@ func (r *ValidatedResponseStream) applyEnvelopeStart(event Event) error {
 	}
 	r.responseID = event.EnvID
 	r.assembler = newItemStreamAssembler()
-	r.toolLifecycle = newResponseToolLifecycleValidator()
+	r.effectGuard = responseEffectGuard{}
 	return nil
 }
 
@@ -141,8 +142,8 @@ func (r *ValidatedResponseStream) applyItemEvent(event Event) error {
 	}
 	if event.Kind == EventItemCompleted {
 		completed := itemEvent.Payload.(ItemCompletedPayload)
-		if err := r.toolLifecycle.Observe(completed.Item); err != nil {
-			return fmt.Errorf("response web-search result item %d has no prior completed call: %w", itemEvent.Position.Item, err)
+		if err := r.effectGuard.Accept(int(itemEvent.Position.Item), completed.Item); err != nil {
+			return fmt.Errorf("response tool lifecycle at item %d is invalid: %w", itemEvent.Position.Item, err)
 		}
 	}
 	r.itemsSeen = true
@@ -192,10 +193,15 @@ func (r *ValidatedResponseStream) applyFinish(event Event) error {
 	if r.errorSeen {
 		return fmt.Errorf("response finish conflicts with terminal error")
 	}
-	if _, ok := event.Payload.(FinishPayload); !ok {
+	payload, ok := event.Payload.(FinishPayload)
+	if !ok {
 		return fmt.Errorf("finish payload type %T is unsupported", event.Payload)
 	}
+	if err := payload.Completion.validate(); err != nil {
+		return err
+	}
 	r.finishSeen = true
+	r.completion = payload.Completion
 	return nil
 }
 
@@ -246,6 +252,11 @@ func (r *ValidatedResponseStream) validateTerminalStatus(status EnvelopeStatus) 
 		}
 		if !r.finishSeen {
 			return fmt.Errorf("completed response requires finish")
+		}
+		if r.completion.Class() == CompletionCompleted {
+			if err := r.effectGuard.RequireSettled(); err != nil {
+				return fmt.Errorf("completed response has an unresolved provider effect: %w", err)
+			}
 		}
 		return nil
 	case EnvelopeStatusError:

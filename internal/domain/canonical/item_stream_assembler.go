@@ -90,7 +90,9 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 			return fmt.Errorf("item.completed ordinal %d has invalid payload %T", event.Position.Item, event.Payload)
 		}
 		if state == nil {
-			if completed.Item.Kind() != ItemKindToolResult && completed.Item.Kind() != ItemKindReasoning {
+			if completed.Item.Kind() != ItemKindToolResult &&
+				completed.Item.Kind() != ItemKindToolDiscoveryResult &&
+				completed.Item.Kind() != ItemKindReasoning {
 				return fmt.Errorf("item.completed ordinal %d has no start", event.Position.Item)
 			}
 			state = &itemStreamState{}
@@ -127,7 +129,10 @@ func (p *itemStreamPartState) acceptsText() bool {
 }
 
 func validateCompletedItem(state *itemStreamState, item CanonicalItem) error {
-	if (item.Kind() == ItemKindToolResult || item.Kind() == ItemKindReasoning) && state.start.Kind() == "" {
+	if (item.Kind() == ItemKindToolResult ||
+		item.Kind() == ItemKindToolDiscoveryResult ||
+		item.Kind() == ItemKindReasoning) &&
+		state.start.Kind() == "" {
 		return nil
 	}
 	if item.Kind() != state.start.Kind() {

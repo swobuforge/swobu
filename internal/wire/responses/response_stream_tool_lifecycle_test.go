@@ -150,15 +150,30 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
-	resultValue, _ := canonical.NewWebSearchResult(nil)
+	webURL, _ := canonical.NewWebURL("https://example.com/source")
+	source, _ := canonical.NewWebSource(webURL, canonical.Specify("Source"))
+	resultValue, _ := canonical.NewWebSearchResult([]canonical.WebSource{source})
 	result, _ := canonical.NewWebSearchResultItem(callID, resultValue)
-	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("found")})
+	part, _ := canonical.NewCitedTextMessagePart("found", []canonical.WebCitation{{Source: source}})
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{part})
+	inputTokens, outputTokens := 2, 3
+	usage, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{InputTokens: &inputTokens, OutputTokens: &outputTokens})
 	response, _ := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_search")},
-		"model", []canonical.CanonicalItem{call, result, message}, "stop", canonical.NewUnknownTokenUsage(),
+		"model", []canonical.CanonicalItem{call, result, message}, canonical.Completed("stop"), usage,
 	)
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bufferedReader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, buffered.Document.RawBytes(), "buffered", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertResponsesWebSearchSemantics(t, bufferedReader, callID)
+
 	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"exchange", response.Response(), response.Model(), response.Items(), response.CompletionReason(), response.Usage(),
+		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
 	))
 	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
@@ -172,15 +187,24 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 	if !strings.Contains(wire, `"type":"web_search_call"`) || !strings.Contains(wire, `"id":"search_original"`) {
 		t.Fatalf("web-search lifecycle missing: %s", wire)
 	}
-	if !strings.Contains(wire, `"action":{"type":"search","query":"Dmytrii Shchadei","sources":[]}`) {
+	if !strings.Contains(wire, `"action":{"type":"search","query":"Dmytrii Shchadei","sources":[{"type":"url","url":"https://example.com/source","title":"Source"}]}`) {
 		t.Fatalf("completed web-search action missing: %s", wire)
+	}
+	if !strings.Contains(wire, `"annotations":[{"type":"url_citation","url":"https://example.com/source","title":"Source"`) ||
+		!strings.Contains(wire, `"usage":{"input_tokens":2,"output_tokens":3`) {
+		t.Fatalf("stream lost citations or usage: %s", wire)
 	}
 	if strings.Contains(wire, `"type":"function_call"`) || strings.Contains(wire, "function_call_arguments") {
 		t.Fatalf("web search was projected as a function call: %s", wire)
 	}
 
 	decoded := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(wire))}, "replay", nil)
-	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(decoded, canonical.ResponseBinding{SwobuID: "replayed"}), canonical.EnvResponse)
+	assertResponsesWebSearchSemantics(t, decoded, callID)
+}
+
+func assertResponsesWebSearchSemantics(t *testing.T, reader canonical.ResponseStream, callID canonical.ToolCallID) {
+	t.Helper()
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "replayed"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +219,21 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 	replayedCall, _ := items[0].ToolCall()
 	if replayedCall.CallID() != callID || replayedCall.Tool() != canonical.WebSearchToolKey() {
 		t.Fatalf("replayed call = %#v", replayedCall)
+	}
+	replayedResult, _ := items[1].ToolResult()
+	search, _ := replayedResult.WebSearch()
+	if len(search.Sources()) != 1 || search.Sources()[0].URL.String() != "https://example.com/source" {
+		t.Fatalf("replayed sources = %#v", search.Sources())
+	}
+	replayedMessage, _ := items[2].Message()
+	if len(replayedMessage.Content()[0].Citations()) != 1 {
+		t.Fatalf("replayed citations = %#v", replayedMessage.Content()[0].Citations())
+	}
+	if input, ok := replayed.Usage().InputTokens(); !ok || input != 2 {
+		t.Fatalf("replayed input usage = (%d,%t)", input, ok)
+	}
+	if output, ok := replayed.Usage().OutputTokens(); !ok || output != 3 {
+		t.Fatalf("replayed output usage = (%d,%t)", output, ok)
 	}
 }
 

@@ -40,9 +40,9 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 }
 
 func encodeResponsesOutput(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]responsesHistoryItemDTO, string, string, string, error) {
-	state := responsesResponseHistoryState{finishReason: output.CompletionReason()}
+	state := responsesResponseHistoryState{completion: output.Completion()}
 	outputText := ""
-	status, incompleteReason := responsesWireStatusForFinishReason(output.CompletionReason())
+	status, incompleteReason := responsesWireStatusForCompletion(output.Completion())
 	for ordinal, item := range output.Items() {
 		if message, ok := item.Message(); ok {
 			for _, part := range message.Content() {
@@ -61,15 +61,11 @@ func encodeResponsesOutput(request canonical.CanonicalRequest, output canonical.
 	return state.items, outputText, status, incompleteReason, nil
 }
 
-func responsesWireStatusForFinishReason(finishReason string) (string, string) {
-	normalized := normalizedResponseString(finishReason)
-	if normalized == "" || normalized == "completed" || normalized == "incomplete" || normalized == "stop" || normalized == "end_turn" || normalized == "tool_calls" {
+func responsesWireStatusForCompletion(completion canonical.Completion) (string, string) {
+	if completion.Class() == canonical.CompletionCompleted {
 		return "completed", ""
 	}
-	if normalized == "content_filter" || normalized == "max_output_tokens" || normalized == "length" || normalized == "refusal" || normalized == "safety" || normalized == "guardrail_intervened" || normalized == "content_filtered" {
-		return "incomplete", normalized
-	}
-	return "completed", ""
+	return "incomplete", normalizedResponseString(completion.Reason())
 }
 
 func responsesIncompleteDetailsForStatus(status string, incompleteReason string) *responsesIncompleteDetailsDTO {

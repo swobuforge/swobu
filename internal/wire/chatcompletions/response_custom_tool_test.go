@@ -13,7 +13,7 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, decl)}})
 	callID, _ := canonical.NewToolCallID("call_1")
 	call, _ := canonical.NewToolCallItem(callID, decl.Key(), canonical.NewTextToolInput("patch contents"))
-	output := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, "stop")
+	output := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, canonical.Completed("stop"))
 	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, output)
 	if err != nil {
 		t.Fatal(err)

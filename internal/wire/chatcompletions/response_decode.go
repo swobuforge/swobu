@@ -45,15 +45,21 @@ type streamChoiceBody struct {
 }
 
 type streamToolCallBody struct {
-	Index    int                    `json:"index"`
-	ID       string                 `json:"id,omitempty"`
-	Type     string                 `json:"type,omitempty"`
-	Function streamToolFunctionBody `json:"function"`
+	Index    int                     `json:"index"`
+	ID       string                  `json:"id,omitempty"`
+	Type     string                  `json:"type,omitempty"`
+	Function *streamToolFunctionBody `json:"function"`
+	Custom   *streamToolCustomBody   `json:"custom"`
 }
 
 type streamToolFunctionBody struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+type streamToolCustomBody struct {
+	Name  string `json:"name,omitempty"`
+	Input string `json:"input,omitempty"`
 }
 
 var tokenUsagePathSpec = core.TokenUsagePathSpec{
@@ -87,6 +93,19 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
+func chatCompletion(reason string) canonical.Completion {
+	switch strings.ToLower(strings.TrimSpace(reason)) { // swobu:io-string source=provider-wire
+	case "length", "max_tokens", "max_output_tokens":
+		return canonical.Incomplete(reason)
+	case "content_filter", "content_filtered", "refusal", "safety", "guardrail_intervened":
+		return canonical.Declined(reason)
+	case "stop", "tool_calls", "function_call", "completed":
+		return canonical.Completed(reason)
+	default:
+		return canonical.Failed(reason)
+	}
+}
+
 func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
@@ -108,7 +127,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	_, cacheWritePresent := usage.CacheWriteTokens()
 	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
-		items, err := decodeChatChoiceItems(request, choice)
+		items, err := decodeChatChoiceItems(request, choice, sink, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -117,12 +136,15 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			canonical.ResponseRef{},
 			dto.Model,
 			items,
-			choice.FinishReason,
+			chatCompletion(choice.FinishReason),
 			usage,
 		)), nil
 	}
-	items, err := decodeChatChoiceItems(request, choice)
+	items, err := decodeChatChoiceItems(request, choice, sink, exchangeID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateChatResponseResidual(items, choice.FinishReason, choice.Message.Content, len(choice.Message.ToolCalls)); err != nil {
 		return nil, err
 	}
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
@@ -130,7 +152,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		canonical.ResponseRef{},
 		dto.Model,
 		items,
-		choice.FinishReason,
+		chatCompletion(choice.FinishReason),
 		usage,
 	)), nil
 }
@@ -139,40 +161,43 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *chatCompletionsEventReader {
 	recording := &compat.RecordingSink{Delegate: sink}
 	return &chatCompletionsEventReader{
-		exchangeID:  exchangeID,
-		responseID:  canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:        recording,
-		recording:   recording,
-		reader:      core.NewSSEReader(stream.Body),
-		toolCalls:   map[int]streamToolState{},
-		latestUsage: canonical.NewUnknownTokenUsage(),
-		request:     request.Clone(),
+		exchangeID:      exchangeID,
+		responseID:      canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		sink:            recording,
+		recording:       recording,
+		reader:          core.NewSSEReader(stream.Body),
+		toolCalls:       map[int]streamToolState{},
+		toolOccurrences: map[int]streamToolOccurrence{},
+		latestUsage:     canonical.NewUnknownTokenUsage(),
+		request:         request.Clone(),
 	}
 }
 
 type chatCompletionsEventReader struct {
-	exchangeID  string
-	responseID  canonical.EnvelopeID
-	sink        compat.Sink
-	recording   *compat.RecordingSink
-	reader      *core.SSEReaderCloser
-	started     bool
-	resultID    string
-	model       string
-	completed   bool
-	pending     canonical.EventSequence
-	textOpen    bool
-	textEnvID   canonical.EnvelopeID
-	text        strings.Builder
-	toolCalls   map[int]streamToolState
-	latestUsage canonical.TokenUsage
-	seq         int64
-	request     canonical.CanonicalRequest
+	exchangeID      string
+	responseID      canonical.EnvelopeID
+	sink            compat.Sink
+	recording       *compat.RecordingSink
+	reader          *core.SSEReaderCloser
+	started         bool
+	resultID        string
+	model           string
+	completed       bool
+	pending         canonical.EventSequence
+	textOpen        bool
+	textEnvID       canonical.EnvelopeID
+	text            strings.Builder
+	toolCalls       map[int]streamToolState
+	toolOccurrences map[int]streamToolOccurrence
+	sawToolCall     bool
+	latestUsage     canonical.TokenUsage
+	seq             int64
+	request         canonical.CanonicalRequest
 }
 
-func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody) ([]canonical.CanonicalItem, error) {
+func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody, sink compat.Sink, exchangeID string) ([]canonical.CanonicalItem, error) {
 	items := make([]canonical.CanonicalItem, 0, 2+len(choice.Message.ToolCalls))
-	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls)
+	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls, sink, exchangeID)
 	if err != nil {
 		return nil, err
 	}
@@ -192,9 +217,23 @@ type streamToolState struct {
 	Tool        canonical.ToolKey
 	WireCallID  string
 	WireName    string
-	Args        strings.Builder
+	Kind        string
+	Args        string
 	PendingArgs []string
+	ArgDeltas   []string
 	Started     bool
+}
+
+// streamToolOccurrence freezes the discriminator admitted for one provider
+// tool-call index. The corresponding streamToolState freezes each non-empty
+// call ID and tool name instead of treating complete identity as fragments.
+// Erased and completed occurrences cannot be reclassified.
+// Canonical order is assigned only when the terminal provider-index frontier
+// is known; fragment arrival never owns semantic order.
+type streamToolOccurrence struct {
+	Kind      string
+	Erased    bool
+	Completed bool
 }
 
 // ordered state machine over text, tool calls, and terminal frames.
@@ -244,10 +283,11 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
 			return canonical.Event{}, canonical.InternalError("chat completions stream chunk is invalid JSON")
 		}
+		if err := s.admitResponseIdentity(chunk.ID, chunk.Model); err != nil {
+			return canonical.Event{}, err
+		}
 		if !s.started {
 			s.started = true
-			s.resultID = chunk.ID
-			s.model = chunk.Model
 			s.enqueueEnvelopeStart(s.responseID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: chunk.Model})
 			s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{}}})
 		}
@@ -276,9 +316,6 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 
 func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) error {
 	if choice.Delta.Content != "" {
-		if len(s.toolCalls) > 0 {
-			return canonical.InternalError("chat completions text began after tool output")
-		}
 		if !s.textOpen {
 			start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)
 			if err != nil {
@@ -293,6 +330,51 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 		s.enqueueItem(canonical.EventTextDelta, s.textEnvID, s.textOrdinal(), canonical.TextDeltaPayload{Text: choice.Delta.Content})
 	}
 	for _, call := range choice.Delta.ToolCalls {
+		if call.Index < 0 {
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call index is negative", "")
+		}
+		kind, erased, err := admitChatToolCallUnion(call.Type, call.Function != nil, call.Custom != nil, false)
+		if err != nil {
+			return err
+		}
+		occurrence, admitted := s.toolOccurrences[call.Index]
+		if !admitted {
+			occurrence.Kind = kind
+			occurrence.Erased = erased
+			s.toolOccurrences[call.Index] = occurrence
+			if !occurrence.Erased {
+				if err := s.queueToolCallDelta(call); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := emitChatCompletionsCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/delta/tool_calls/%d/type", call.Index))); err != nil {
+				return err
+			}
+			delete(s.toolCalls, call.Index)
+			continue
+		}
+		if occurrence.Completed {
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call index was reused after completion", "")
+		}
+		if kind != "" && occurrence.Kind != "" && kind != occurrence.Kind {
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call changed type after admission", "")
+		}
+		if occurrence.Erased {
+			continue
+		}
+		if occurrence.Kind == "" && kind != "" {
+			occurrence.Kind = kind
+			occurrence.Erased = erased
+			s.toolOccurrences[call.Index] = occurrence
+			if occurrence.Erased {
+				if err := emitChatCompletionsCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/delta/tool_calls/%d/type", call.Index))); err != nil {
+					return err
+				}
+				delete(s.toolCalls, call.Index)
+				continue
+			}
+		}
 		if err := s.queueToolCallDelta(call); err != nil {
 			return err
 		}
@@ -304,7 +386,17 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
 		return nil
 	}
-	if s.textOpen {
+	if err := s.validateToolOccurrenceFrontier(); err != nil {
+		return err
+	}
+	if finishRequiresToolCall(choice.FinishReason) && !s.sawToolCall && len(s.toolCalls) == 0 {
+		return canonical.NewBackendError("", 0, "chat completions finish reason requires a surviving tool call", "")
+	}
+	if s.hasErasedToolOccurrence() && !s.textOpen && !s.sawToolCall && len(s.toolCalls) == 0 {
+		return canonical.NewBackendError("", 0, "chat completions response has no surviving semantic items", "")
+	}
+	textPresent := s.textOpen
+	if textPresent {
 		item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(s.text.String())})
 		if err != nil {
 			return canonical.InternalError("chat completions streamed message is invalid")
@@ -317,28 +409,90 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		indices = append(indices, idx)
 	}
 	sort.Ints(indices)
-	for _, idx := range indices {
+	for position, idx := range indices {
 		state := s.toolCalls[idx]
 		if !state.Started {
-			return canonical.InternalError("chat completions tool call ended before its identity was resolved")
+			return canonical.NewBackendError("", 0, "chat completions tool call ended before its identity was resolved", "")
 		}
-		object, err := canonical.ParseJSONObject([]byte(state.Args.String()))
+		var input canonical.ToolInput
+		switch state.Kind {
+		case canonical.ToolTypeFunction:
+			object, err := canonical.ParseJSONObject([]byte(state.Args))
+			if err != nil {
+				return canonical.NewBackendError("", 0, "chat completions streamed tool arguments are invalid", "")
+			}
+			input = canonical.NewJSONObjectToolInput(object)
+		case canonical.ToolTypeCustom:
+			input = canonical.NewTextToolInput(state.Args)
+		default:
+			return canonical.NewBackendError("", 0, "chat completions streamed tool kind is invalid", "")
+		}
+		item, err := canonical.NewToolCallItem(state.CallID, state.Tool, input)
 		if err != nil {
-			return canonical.InternalError("chat completions streamed tool arguments are invalid")
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call is invalid", "")
 		}
-		item, err := canonical.NewToolCallItem(state.CallID, state.Tool, canonical.NewJSONObjectToolInput(object))
+		ordinal := uint32(position)
+		if textPresent {
+			ordinal++
+		}
+		// Tool lifecycle events commit only after finish reveals the structural
+		// base and provider-index order. Emitting them on first fragment would
+		// make transport timing observable as canonical item order.
+		start, err := canonical.NewToolCallStart(state.CallID, state.Tool)
 		if err != nil {
-			return canonical.InternalError("chat completions streamed tool call is invalid")
+			return err
 		}
-		s.enqueueItem(canonical.EventItemCompleted, state.EnvID, s.toolOrdinal(idx), canonical.ItemCompletedPayload{Item: item})
+		s.enqueueItem(canonical.EventItemStart, state.EnvID, ordinal, start)
+		for _, delta := range state.ArgDeltas {
+			s.enqueueItem(canonical.EventArgsDelta, state.EnvID, ordinal, canonical.ArgsDeltaPayload{Args: delta})
+		}
+		s.enqueueItem(canonical.EventItemCompleted, state.EnvID, ordinal, canonical.ItemCompletedPayload{Item: item})
+		s.sawToolCall = true
 		delete(s.toolCalls, idx)
+		occurrence := s.toolOccurrences[idx]
+		occurrence.Completed = true
+		s.toolOccurrences[idx] = occurrence
+	}
+	for idx, occurrence := range s.toolOccurrences {
+		occurrence.Completed = true
+		s.toolOccurrences[idx] = occurrence
 	}
 	s.completed = true
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 	return nil
+}
+
+func (s *chatCompletionsEventReader) validateToolOccurrenceFrontier() error {
+	if len(s.toolOccurrences) == 0 {
+		return nil
+	}
+	maxIndex := 0
+	for index, occurrence := range s.toolOccurrences {
+		if index > maxIndex {
+			maxIndex = index
+		}
+		if occurrence.Kind == "" && !occurrence.Erased {
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call ended without an inferable variant", "")
+		}
+	}
+	for index := 0; index <= maxIndex; index++ {
+		if _, observed := s.toolOccurrences[index]; !observed {
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call indexes contain an unobserved gap", "")
+		}
+	}
+	return nil
+}
+
+func (s *chatCompletionsEventReader) hasErasedToolOccurrence() bool {
+	for _, occurrence := range s.toolOccurrences {
+		if occurrence.Erased {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Context, choice streamChoiceBody) {
@@ -349,7 +503,7 @@ func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Conte
 	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.closeOpenChildren(canonical.EnvelopeStatusError)
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Reason: choice.FinishReason}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 }
 
@@ -363,19 +517,70 @@ func (s *chatCompletionsEventReader) shiftPending() canonical.Event {
 	return event
 }
 
+func (s *chatCompletionsEventReader) admitResponseIdentity(resultID, model string) error {
+	var err error
+	s.resultID, err = admitChatIdentityField(s.resultID, resultID, "response id")
+	if err != nil {
+		return err
+	}
+	s.model, err = admitChatIdentityField(s.model, model, "model")
+	return err
+}
+
+func admitChatIdentityField(admitted, observed, field string) (string, error) {
+	observed = strings.TrimSpace(observed) // swobu:io-string source=boundary
+	if observed == "" {
+		return admitted, nil
+	}
+	if admitted == "" {
+		return observed, nil
+	}
+	if admitted != observed {
+		return admitted, canonical.NewBackendError("", 0, "chat completions streamed "+field+" changed after admission", "")
+	}
+	return admitted, nil
+}
+
 func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody) error {
 	state := s.toolCalls[call.Index]
+	kind := strings.ToLower(strings.TrimSpace(call.Type))
+	if kind == "" {
+		kind = s.toolOccurrences[call.Index].Kind
+	}
+	if state.Kind == "" {
+		state.Kind = kind
+	}
 	if state.EnvID == "" {
 		state.EnvID = canonical.EnvelopeID(fmt.Sprintf("%s:item:tool_%d", s.responseID, call.Index))
 	}
-	if strings.TrimSpace(call.ID) != "" { // swobu:io-string source=boundary
-		state.WireCallID += strings.TrimSpace(call.ID) // swobu:io-string source=boundary
+	var err error
+	state.WireCallID, err = admitChatIdentityField(state.WireCallID, call.ID, "tool call id")
+	if err != nil {
+		return err
 	}
-	if strings.TrimSpace(call.Function.Name) != "" { // swobu:io-string source=boundary
-		state.WireName += strings.TrimSpace(call.Function.Name) // swobu:io-string source=boundary
-	}
-	if call.Function.Arguments != "" {
-		state.PendingArgs = append(state.PendingArgs, call.Function.Arguments)
+	switch state.Kind {
+	case canonical.ToolTypeFunction:
+		if call.Function != nil {
+			state.WireName, err = admitChatIdentityField(state.WireName, call.Function.Name, "tool name")
+			if err != nil {
+				return err
+			}
+		}
+		if call.Function != nil && call.Function.Arguments != "" {
+			state.PendingArgs = append(state.PendingArgs, call.Function.Arguments)
+			state.ArgDeltas = append(state.ArgDeltas, call.Function.Arguments)
+		}
+	case canonical.ToolTypeCustom:
+		if call.Custom != nil {
+			state.WireName, err = admitChatIdentityField(state.WireName, call.Custom.Name, "tool name")
+			if err != nil {
+				return err
+			}
+		}
+		if call.Custom != nil && call.Custom.Input != "" {
+			state.PendingArgs = append(state.PendingArgs, call.Custom.Input)
+			state.ArgDeltas = append(state.ArgDeltas, call.Custom.Input)
+		}
 	}
 	if !state.Started && (state.WireCallID == "" || state.WireName == "") {
 		s.toolCalls[call.Index] = state
@@ -384,30 +589,49 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 	if !state.Started {
 		callID, err := canonical.NewToolCallID(state.WireCallID)
 		if err != nil {
-			return canonical.InternalError("chat completions streamed tool call id is invalid")
+			return canonical.NewBackendError("", 0, "chat completions streamed tool call id is invalid", "")
 		}
 		environment, err := canonical.EffectiveTools(s.request)
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool environment is ambiguous")
 		}
-		declaration, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), state.WireName, canonical.ToolTypeFunction)
+		declaration, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), state.WireName, state.Kind)
 		if err != nil {
-			return canonical.InternalError("chat completions streamed tool name cannot be resolved against the effective request")
+			return canonical.NewBackendError("", 0, "chat completions streamed tool name cannot be resolved against the effective request", "")
 		}
 		state.CallID = callID
 		state.Tool = declaration.Key()
 		state.Started = true
-		start, err := canonical.NewToolCallStart(state.CallID, state.Tool)
-		if err != nil {
-			return err
-		}
-		s.enqueueItem(canonical.EventItemStart, state.EnvID, s.toolOrdinal(call.Index), start)
 	}
 	for _, delta := range state.PendingArgs {
-		state.Args.WriteString(delta)
-		s.enqueueItem(canonical.EventArgsDelta, state.EnvID, s.toolOrdinal(call.Index), canonical.ArgsDeltaPayload{Args: delta})
+		state.Args += delta
 	}
 	state.PendingArgs = nil
 	s.toolCalls[call.Index] = state
 	return nil
+}
+
+func validateChatResponseResidual(items []canonical.CanonicalItem, finishReason string, content json.RawMessage, wireToolCalls int) error {
+	trimmedContent := strings.TrimSpace(string(content))
+	if len(items) == 0 && (wireToolCalls > 0 || trimmedContent != "" && trimmedContent != "null" && trimmedContent != `""`) {
+		return canonical.NewBackendError("", 0, "chat completions response has no surviving semantic items", "")
+	}
+	if !finishRequiresToolCall(finishReason) {
+		return nil
+	}
+	for _, item := range items {
+		if _, ok := item.ToolCall(); ok {
+			return nil
+		}
+	}
+	return canonical.NewBackendError("", 0, "chat completions finish reason requires a surviving tool call", "")
+}
+
+func finishRequiresToolCall(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "tool_calls", "function_call":
+		return true
+	default:
+		return false
+	}
 }

@@ -98,7 +98,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 	}
 	assembler := newItemStreamAssembler()
 	usage := NewUnknownTokenUsage()
-	finish := ""
+	completion := Completion{}
 	response := ResponseRef{}
 	model := ""
 	for _, event := range e.Events {
@@ -136,7 +136,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 			if !ok {
 				return nil, fmt.Errorf("finish payload type %T is unsupported", event.Payload)
 			}
-			finish = payload.Reason
+			completion = payload.Completion
 		case EventError:
 			payload, ok := event.Payload.(ErrorPayload)
 			if !ok {
@@ -153,7 +153,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := NewCanonicalResponse(response, model, items, finish, usage)
+	output, err := NewCanonicalResponse(response, model, items, completion, usage)
 	if err != nil {
 		return nil, err
 	}

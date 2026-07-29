@@ -40,8 +40,8 @@ type StreamEvent struct {
 	ToolType       string
 	ArgumentsDelta string
 
-	FinishReason string
-	Usage        canonical.TokenUsage
+	Completion canonical.Completion
+	Usage      canonical.TokenUsage
 
 	ErrorCode    string
 	ErrorMessage string

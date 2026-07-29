@@ -86,10 +86,10 @@ func TestWebSearchResultCorrelatesToPriorResponseCall(t *testing.T) {
 	result, _ := NewWebSearchResult([]WebSource{source})
 	resultItem, _ := NewWebSearchResultItem(callID, result)
 	responseID := ResponseRef{SwobuID: NewSwobuResponseID("resp_1")}
-	if _, err := NewCanonicalResponse(responseID, "model", []CanonicalItem{call, resultItem}, "stop", NewUnknownTokenUsage()); err != nil {
+	if _, err := NewCanonicalResponse(responseID, "model", []CanonicalItem{call, resultItem}, Completed("stop"), NewUnknownTokenUsage()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewCanonicalResponse(responseID, "model", []CanonicalItem{resultItem}, "stop", NewUnknownTokenUsage()); err == nil {
+	if _, err := NewCanonicalResponse(responseID, "model", []CanonicalItem{resultItem}, Completed("stop"), NewUnknownTokenUsage()); err == nil {
 		t.Fatal("response accepted web-search result without prior call")
 	}
 }

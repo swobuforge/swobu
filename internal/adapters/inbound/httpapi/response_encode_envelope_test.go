@@ -21,9 +21,9 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 		[]canonical.CanonicalItem{
 			canonicaltest.MustMessage(canonical.MessageRoleAssistant, "hello"),
 		},
-		"completed",
+		canonical.Completed("completed"),
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyResponses).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env", out.Response(), out.Model(), out.Items(), out.Completion(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
@@ -52,9 +52,9 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 		[]canonical.CanonicalItem{
 			canonicaltest.MustMessage(canonical.MessageRoleAssistant, "truth"),
 		},
-		"completed",
+		canonical.Completed("completed"),
 	)
-	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.Response(), out.Model(), out.Items(), out.CompletionReason(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
+	stream, err := testResponseStreamEncoderForFamily(canonical.ClientFamilyChatCompletions).EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("ex_http_env_2", out.Response(), out.Model(), out.Items(), out.Completion(), out.Usage())), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}

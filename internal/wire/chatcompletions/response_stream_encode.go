@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -11,7 +12,11 @@ import (
 )
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
-	return &chatCompletionsEnvelopeStreamEncoder{adapter: sse.NewEnvelopeEventAdapter()}
+	return &chatCompletionsEnvelopeStreamEncoder{
+		adapter:                 sse.NewEnvelopeEventAdapter(),
+		pendingWebSearchCallIDs: map[string]struct{}{},
+		decisions:               &compat.RecordingSink{},
+	}
 }
 
 func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
@@ -20,8 +25,9 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canon
 	encoder := chatCompletionsFingerprintingEncoder(state.EncodeEnvelopeEvent, complete, fail)
 	body := wire.NewEncodedResponseBody(ctx, events, encoder, completion, fail)
 	return wire.ClientByteStreamResult{
-		Stream:     carrier.ByteStream{MediaType: "text/event-stream", Body: body},
-		Completion: completion,
+		Stream:            carrier.ByteStream{MediaType: "text/event-stream", Body: body},
+		TerminalDecisions: state.(*chatCompletionsEnvelopeStreamEncoder).decisions,
+		Completion:        completion,
 	}, nil
 }
 

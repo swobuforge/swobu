@@ -18,7 +18,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 	outputTokens := 2
 	usage := mustTokenUsage(t, nil, &outputTokens, nil, nil)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("Hello world!")})
-	events := canonical.SynthesizeResponseEnvelopeEvents("ex_1", canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}, "m", []canonical.CanonicalItem{message}, "completed", usage)
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex_1", canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}, "m", []canonical.CanonicalItem{message}, canonical.Completed("completed"), usage)
 
 	stream, err := codec.EncodeResponseStream(context.Background(), canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
 	if err != nil {
@@ -82,7 +82,7 @@ func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testi
 		t.Fatalf("message_delta payload shape invalid: %#v", messageDeltaPayload)
 	}
 	if got, _ := messageDelta["stop_reason"].(string); got != "end_turn" {
-		t.Fatalf("message_delta stop_reason = %q, want %q", got, "end_turn")
+		t.Fatalf("message_delta stop_reason = %q, want %q", got, canonical.Completed("end_turn"))
 	}
 	if usagePayload, ok := messageDeltaPayload["usage"].(map[string]any); !ok {
 		t.Fatalf("message_delta usage shape invalid: %#v", messageDeltaPayload["usage"])
