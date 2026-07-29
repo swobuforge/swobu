@@ -393,7 +393,7 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		return canonical.NewBackendError("", 0, "chat completions finish reason requires a surviving tool call", "")
 	}
 	if s.hasErasedToolOccurrence() && !s.textOpen && !s.sawToolCall && len(s.toolCalls) == 0 {
-		return canonical.NewBackendError("", 0, "chat completions response has no surviving semantic items", "")
+		return canonical.NewBackendError("", 0, "backend produced no usable canonical output", "")
 	}
 	textPresent := s.textOpen
 	if textPresent {
@@ -614,7 +614,7 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 func validateChatResponseResidual(items []canonical.CanonicalItem, finishReason string, content json.RawMessage, wireToolCalls int) error {
 	trimmedContent := strings.TrimSpace(string(content))
 	if len(items) == 0 && (wireToolCalls > 0 || trimmedContent != "" && trimmedContent != "null" && trimmedContent != `""`) {
-		return canonical.NewBackendError("", 0, "chat completions response has no surviving semantic items", "")
+		return canonical.NewBackendError("", 0, "backend produced no usable canonical output", "")
 	}
 	if !finishRequiresToolCall(finishReason) {
 		return nil

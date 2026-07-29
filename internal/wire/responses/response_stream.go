@@ -336,7 +336,7 @@ func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, 
 		return nil
 	}
 	if s.completedItems == 0 && s.erasedOutput {
-		return canonical.NewBackendError("responses", 0, "responses output has no surviving semantic items", "")
+		return canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 	}
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)

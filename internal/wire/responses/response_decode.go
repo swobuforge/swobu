@@ -340,7 +340,7 @@ func decodeCompletedResponsesItemSetAtIndexes(
 		output = append(output, message)
 	}
 	if erasedSemantic && len(output) == 0 && !survivingOutput {
-		return nil, canonical.NewBackendError("responses", 0, "responses output has no surviving semantic items", "")
+		return nil, canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 	}
 	return output, nil
 }
