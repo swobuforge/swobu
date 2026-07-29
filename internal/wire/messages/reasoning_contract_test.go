@@ -85,7 +85,7 @@ func TestMessagesOpaqueThinkingReplaysAndDisclosureProjectsWithoutMutation(t *te
 
 	disclosure, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Disclosure: canonical.Specify(canonical.ReasoningDisclosureNone)})
 	clientRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Reasoning: disclosure})
-	response, _ := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp"}, "claude", []canonical.CanonicalItem{item}, "stop", canonical.NewUnknownTokenUsage())
+	response, _ := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp"}, "claude", []canonical.CanonicalItem{item}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(clientRequest, response)
 	if err != nil {
 		t.Fatal(err)

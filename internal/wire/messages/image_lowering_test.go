@@ -1,7 +1,10 @@
 package messages
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -12,6 +15,73 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
+
+func TestMessagesAssistantImageFailsAsClientOutputContract(t *testing.T) {
+	image, _ := canonical.NewURLImage("https://example.test/output.png", canonical.Unspecified[canonical.ImageDetail]())
+	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{
+		canonical.NewImageMessagePart(image),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "response-image"},
+		"model",
+		[]canonical.CanonicalItem{message},
+		canonical.Completed("stop"),
+		canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	var backendErr canonical.BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("image output error = %T %v, want BackendError", err, err)
+	}
+}
+
+func TestMessagesStreamedAssistantImageFailsAsClientOutputContract(t *testing.T) {
+	response := messagesAssistantImageResponse(t)
+	events := canonical.SynthesizeResponseEnvelopeEvents(
+		"exchange-image", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
+	)
+	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(
+		context.Background(),
+		canonical.CanonicalRequest{},
+		canonical.NewSliceEventReader(events),
+		delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err == nil {
+		_, err = io.Copy(io.Discard, encoded.Stream.Body)
+	}
+	var backendErr canonical.BackendError
+	if !errors.As(err, &backendErr) {
+		t.Fatalf("streamed image output error = %T %v, want BackendError", err, err)
+	}
+}
+
+func messagesAssistantImageResponse(t *testing.T) canonical.CanonicalResponse {
+	t.Helper()
+	image, _ := canonical.NewURLImage("https://example.test/output.png", canonical.Unspecified[canonical.ImageDetail]())
+	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{
+		canonical.NewImageMessagePart(image),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "response-image"},
+		"model",
+		[]canonical.CanonicalItem{message},
+		canonical.Completed("stop"),
+		canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
 
 func TestEncodeMessagesImages_PreservesDirectURLAndNestedToolResultImages(t *testing.T) {
 	urlImage, _ := canonical.NewURLImage("https://example.test/direct.png", canonical.Unspecified[canonical.ImageDetail]())

@@ -145,10 +145,11 @@ type chatCompletionsDeltaDTO struct {
 }
 
 type chatCompletionsDeltaToolCallDTO struct {
-	Index    int                             `json:"index"`
-	ID       string                          `json:"id,omitempty"`
-	Type     string                          `json:"type,omitempty"`
-	Function chatCompletionsDeltaFunctionDTO `json:"function"`
+	Index    int                               `json:"index"`
+	ID       string                            `json:"id,omitempty"`
+	Type     string                            `json:"type,omitempty"`
+	Function *chatCompletionsDeltaFunctionDTO  `json:"function,omitempty"`
+	Custom   *chatCompletionsResponseCustomDTO `json:"custom,omitempty"`
 }
 
 type chatCompletionsDeltaFunctionDTO struct {

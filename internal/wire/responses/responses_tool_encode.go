@@ -168,6 +168,9 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclara
 	}
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
+		if len(tools) == 0 {
+			return nil, nil
+		}
 		return "none", nil
 	case canonical.ToolPolicyAuto:
 		return "auto", nil
@@ -206,8 +209,9 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclara
 }
 
 type responsesToolNamespaceContext struct {
-	path  []string
-	index int
+	path          []string
+	subjectPrefix string
+	index         int
 }
 
 func cloneBoolPointer(ptr *bool) *bool {

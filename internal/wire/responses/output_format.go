@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat, error) {
+func decodeResponsesOutputFormat(text *responsesTextDTO, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
 	if text == nil {
 		return canonical.OutputFormat{}, nil
 	}
@@ -22,6 +24,8 @@ func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat
 	switch canonical.OutputFormatKind(formatType) {
 	case canonical.OutputFormatText:
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatText})
+	case canonical.OutputFormatJSONObject:
+		return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONObject})
 	case canonical.OutputFormatJSONSchema:
 		strict := false
 		if text.Format.Strict != nil {
@@ -35,7 +39,7 @@ func decodeResponsesOutputFormat(text *responsesTextDTO) (canonical.OutputFormat
 			Strict:      strict,
 		})
 	default:
-		return canonical.OutputFormat{}, canonical.NotImplemented("Swobu cannot yet project this Responses request text.format type")
+		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Responses", "text.format type "+formatType)
 	}
 }
 
@@ -50,6 +54,10 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 	case canonical.OutputFormatText:
 		return &responsesTextDTO{
 			Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)},
+		}, nil
+	case canonical.OutputFormatJSONObject:
+		return &responsesTextDTO{
+			Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatJSONObject)},
 		}, nil
 	case canonical.OutputFormatJSONSchema:
 		dto := responsesTextFormatDTO{

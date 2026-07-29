@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // ProviderRequestMessage is one lowered Chat Completions message. SourceStart
@@ -83,6 +84,21 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		return ProviderRequestDocument{}, err
 	}
 	tools := environment.Declarations()
+	staticTools, err := wire.PrepareStaticToolSet(items, tools)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	items, tools = staticTools.Items, staticTools.Declarations
+	for range staticTools.RemovedEffects {
+		if err := emitChatImageDecision(sink, exchangeID, compat.RequestItemsKind, compat.Approx); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	for range staticTools.RemovedDeclarations {
+		if err := emitChatImageDecision(sink, exchangeID, compat.RequestToolsKind, compat.Approx); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	conversation := make([]canonical.CanonicalItem, 0, len(items))
 	historyStarted := false
 	for _, item := range items {
@@ -109,9 +125,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	wireTools, err := encodeChatCompletionsTools(tools, sink, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
-	}
-	if d.Mode == delivery.Streaming && hasChatCompletionsCustomTools(tools) {
-		return ProviderRequestDocument{}, provider.NewIncompatibleTarget("Chat Completions streaming cannot represent canonical custom tool declarations")
 	}
 	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
@@ -465,12 +478,17 @@ func encodeChatToolCall(call canonical.ToolCallItem, _ []canonical.ToolDeclarati
 	}
 }
 
-func textOnlyContent(parts []canonical.MessagePart, surface string) (string, error) {
+func chatClientTextContent(parts []canonical.MessagePart, surface string) (string, error) {
 	var text strings.Builder
 	for _, part := range parts {
 		value, ok := part.Text()
 		if !ok {
-			return "", provider.NewIncompatibleTarget(surface + " cannot represent this canonical content kind")
+			return "", canonical.NewBackendError(
+				"chat_completions",
+				0,
+				surface+" cannot represent the backend image response",
+				"",
+			)
 		}
 		text.WriteString(value.Text())
 	}

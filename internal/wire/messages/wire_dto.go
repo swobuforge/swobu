@@ -27,7 +27,13 @@ type messagesThinkingDTO struct {
 }
 
 type messagesOutputConfigDTO struct {
-	Effort string `json:"effort,omitempty"`
+	Effort string                         `json:"effort,omitempty"`
+	Format *messagesNativeOutputFormatDTO `json:"format,omitempty"`
+}
+
+type messagesNativeOutputFormatDTO struct {
+	Type   string          `json:"type"`
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 type messagesMessageDTO struct {
@@ -94,16 +100,17 @@ type messagesCitationDTO struct {
 type messagesStartEventDTO struct {
 	Type    string                  `json:"type"`
 	Message messagesStartMessageDTO `json:"message"`
-	Usage   messagesUsageDTO        `json:"usage"`
 }
 
 type messagesStartMessageDTO struct {
 	ID           string                    `json:"id"`
 	Type         string                    `json:"type"`
 	Role         string                    `json:"role"`
+	Model        string                    `json:"model"`
 	Content      []messagesResponsePartDTO `json:"content"`
 	StopReason   *string                   `json:"stop_reason"`
 	StopSequence *string                   `json:"stop_sequence"`
+	Usage        messagesUsageDTO          `json:"usage"`
 }
 
 type messagesDeltaEventDTO struct {
@@ -118,7 +125,10 @@ type messagesDeltaBodyDTO struct {
 }
 
 type messagesDeltaUsageDTO struct {
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 type messagesContentBlockStartDTO struct {

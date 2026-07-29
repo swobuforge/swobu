@@ -9,6 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -232,13 +233,24 @@ func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, er
 	if err := json.Unmarshal(source, &tools); err != nil {
 		return normalizeResponsesRawJSON(source)
 	}
+	normalized := make([]responsesToolDefinitionDTO, 0, len(tools))
 	for index := range tools {
-		if strings.EqualFold(strings.TrimSpace(tools[index].Type), "mcp") {
-			tools[index].Headers = nil
-			tools[index].Authorization = nil
+		if !strings.EqualFold(strings.TrimSpace(tools[index].Type), "mcp") {
+			normalized = append(normalized, tools[index])
+			continue
 		}
+		projection, err := decodeResponsesMCPNamespace(tools[index], mcp.Access{})
+		if err != nil {
+			return nil, err
+		}
+		if projection.drop {
+			continue
+		}
+		tools[index].Headers = nil
+		tools[index].Authorization = nil
+		normalized = append(normalized, tools[index])
 	}
-	sanitized, err := json.Marshal(tools)
+	sanitized, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +283,7 @@ func normalizeResponsesRawJSON(source json.RawMessage) (json.RawMessage, error) 
 }
 
 func fingerprintResponsesResponse(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
-	state := responsesResponseHistoryState{finishReason: output.CompletionReason()}
+	state := responsesResponseHistoryState{completion: output.Completion()}
 	for ordinal, item := range output.Items() {
 		if err := state.appendItem(request, ordinal, item); err != nil {
 			return historyfingerprint.Response{}, err
@@ -284,8 +296,8 @@ func fingerprintResponsesResponse(request canonical.CanonicalRequest, output can
 // representation. It deliberately models the currently supported output
 // subset; future reasoning items require an explicit grammar extension.
 type responsesResponseHistoryState struct {
-	items        []responsesHistoryItemDTO
-	finishReason string
+	items      []responsesHistoryItemDTO
+	completion canonical.Completion
 }
 
 func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRequest, ordinal int, item canonical.CanonicalItem) error {
@@ -299,7 +311,12 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		for _, part := range message.Content() {
 			text, ok := part.Text()
 			if !ok {
-				return canonical.NotImplemented("Swobu cannot project canonical image output to Responses history")
+				return canonical.NewBackendError(
+					"responses",
+					0,
+					"Responses client output cannot represent the backend image response",
+					"",
+				)
 			}
 			annotations, err := encodeResponsesAnnotations(text.Text(), part.Citations())
 			if err != nil {
@@ -369,7 +386,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			}
 			history.Arguments = json.RawMessage(object.String())
 		default:
-			return canonical.NotImplemented("Swobu cannot project this canonical tool-call kind to Responses history")
+			return canonical.InternalError("Responses history received an unknown canonical tool-call kind")
 		}
 		s.items = append(s.items, history)
 		return nil
@@ -433,12 +450,12 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		s.items = append(s.items, history)
 		return nil
 	default:
-		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Responses history")
+		return canonical.InternalError("Responses history received a request-only canonical item kind")
 	}
 }
 
 func (s *responsesResponseHistoryState) fingerprint() (historyfingerprint.Response, error) {
-	status, _ := responsesWireStatusForFinishReason(s.finishReason)
+	status, _ := responsesWireStatusForCompletion(s.completion)
 	items := append([]responsesHistoryItemDTO(nil), s.items...)
 	for index := range items {
 		if items[index].Status == "" {
@@ -474,7 +491,7 @@ func responsesFingerprintingEncoder(request canonical.CanonicalRequest, encode w
 			}
 		case canonical.EventFinish:
 			if payload, ok := event.Payload.(canonical.FinishPayload); ok {
-				state.finishReason = payload.Reason
+				state.completion = payload.Completion
 			}
 		}
 		status, terminal := responsesFingerprintTerminalStatus(event)

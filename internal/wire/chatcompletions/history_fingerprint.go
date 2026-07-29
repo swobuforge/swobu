@@ -88,8 +88,12 @@ func fingerprintChatCompletionsResponseMessages(messages []chatCompletionsMessag
 }
 
 func fingerprintChatCompletionsResponse(output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
+	return fingerprintChatCompletionsResponseItems(output.Items())
+}
+
+func fingerprintChatCompletionsResponseItems(items []canonical.CanonicalItem) (historyfingerprint.Response, error) {
 	state := chatCompletionsResponseHistoryState{}
-	for _, item := range output.Items() {
+	for _, item := range items {
 		if err := state.appendItem(item); err != nil {
 			return historyfingerprint.Response{}, err
 		}
@@ -112,7 +116,7 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 		if message.Role() != canonical.MessageRoleAssistant {
 			return canonical.InternalError("canonical response contains a non-assistant Chat Completions output message")
 		}
-		content, err := textOnlyContent(message.Content(), "chat completions responses")
+		content, err := chatClientTextContent(message.Content(), "chat completions responses")
 		if err != nil {
 			return err
 		}
@@ -141,7 +145,7 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 		// contract and therefore absent from its reconstructed history value.
 		return nil
 	default:
-		return canonical.NotImplemented("Swobu cannot project this canonical output item kind to Chat Completions response history")
+		return canonical.InternalError("Chat Completions response history received an unprojected canonical item kind")
 	}
 }
 
@@ -180,7 +184,7 @@ func chatCompletionsFingerprintingEncoder(
 	complete func(*historyfingerprint.Response),
 	fail func(error),
 ) wire.ResponseEventEncoder {
-	state := &chatCompletionsResponseHistoryState{}
+	var completedItems []canonical.CanonicalItem
 	return func(event canonical.Event) ([][]byte, error) {
 		encoded, err := encode(event)
 		if err != nil {
@@ -195,10 +199,7 @@ func chatCompletionsFingerprintingEncoder(
 				fail(err)
 				return nil, err
 			}
-			if err := state.appendItem(completed.Item); err != nil {
-				fail(err)
-				return nil, err
-			}
+			completedItems = append(completedItems, completed.Item.Clone())
 		}
 		status, terminal := chatCompletionsResponseTerminalStatus(event)
 		if !terminal {
@@ -208,7 +209,12 @@ func chatCompletionsFingerprintingEncoder(
 			fail(errors.New("chat completions response did not complete successfully"))
 			return encoded, nil
 		}
-		fingerprint, err := state.fingerprint()
+		projected, _, err := projectChatCompletionsWebSearchLifecycles(completedItems)
+		if err != nil {
+			fail(err)
+			return nil, err
+		}
+		fingerprint, err := fingerprintChatCompletionsResponseItems(projected)
 		if err != nil {
 			fail(err)
 			return encoded, nil

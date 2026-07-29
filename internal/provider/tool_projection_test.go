@@ -112,6 +112,46 @@ func TestAttemptToolProjectionAvoidsLiteralAliasCollision(t *testing.T) {
 	}
 }
 
+func TestAttemptToolProjectionAllocatesCollisionSafeNamespaceChildren(t *testing.T) {
+	leftKey, _ := canonical.NewToolKey("mcp/left", canonical.ToolKindFunction, "same")
+	rightKey, _ := canonical.NewToolKey("mcp/right", canonical.ToolKindFunction, "same")
+	object, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	left := canonicaltest.MustFunctionTool(leftKey, "", canonical.NewToolSchemaObject(object), canonical.Unspecified[bool]())
+	right := canonicaltest.MustFunctionTool(rightKey, "", canonical.NewToolSchemaObject(object), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "remote")
+	namespace, err := canonical.NewToolNamespace(namespaceKey, "", []canonical.ToolDeclaration{left, right})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
+	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
+
+	projected, table, _, err := ProjectAttemptTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := canonicaltest.Tools(projected)
+	projectedNamespace, ok := tools[0].Namespace()
+	if !ok || len(projectedNamespace.Tools()) != 2 {
+		t.Fatalf("projected namespace = %#v", tools)
+	}
+	children := projectedNamespace.Tools()
+	if children[0].Key().Name() == children[1].Key().Name() {
+		t.Fatalf("namespace child aliases collided: %#v", children)
+	}
+	for _, original := range []canonical.ToolKey{leftKey, rightKey} {
+		wireName, err := table.WireName(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, ok := table.CanonicalKey(canonical.ToolKindFunction, wireName)
+		if !ok || key != original {
+			t.Fatalf("namespace child %q did not reverse through projection", original)
+		}
+	}
+}
+
 func TestAttemptToolProjectionPrefersUnoccupiedSafeNamespacedLeaf(t *testing.T) {
 	namespaced, _ := canonical.NewToolKey("mcp/filesystem", canonical.ToolKindFunction, "read_file")
 	request := projectionTestRequest(t, namespaced)

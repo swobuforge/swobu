@@ -16,8 +16,8 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestDecodeRequestAcceptsCodexWebSearchDeclaration(t *testing.T) {
-	raw := []byte(`{"model":"default","input":"Hello World","client_metadata":{},"prompt_cache_key":"cache","include":["web_search_call.action.sources"],"tools":[{"type":"web_search","external_web_access":true,"filters":{"allowed_domains":["Example.COM"],"blocked_domains":["blocked.example"]},"user_location":{"type":"approximate","country":"GB"},"search_context_size":"medium"}]}`)
+func TestDecodeRequestApproximatesWebSearchQualityHints(t *testing.T) {
+	raw := []byte(`{"model":"default","input":"Hello World","client_metadata":{},"prompt_cache_key":"cache","include":["web_search_call.action.sources"],"tools":[{"type":"web_search","external_web_access":true,"user_location":{"type":"approximate","country":"GB"},"search_context_size":"medium"}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
@@ -26,21 +26,151 @@ func TestDecodeRequestAcceptsCodexWebSearchDeclaration(t *testing.T) {
 	if len(canonicaltest.Tools(request)) != 1 || canonicaltest.Tools(request)[0].Kind() != canonical.ToolKindWebSearch {
 		t.Fatalf("tools = %#v", canonicaltest.Tools(request))
 	}
-	wantSubjects := map[compat.Subject]bool{
-		"wire:/include/0":                       true,
-		"wire:/tools/0/external_web_access":     true,
-		"wire:/tools/0/filters/allowed_domains": true,
-		"wire:/tools/0/filters/blocked_domains": true,
-		"wire:/tools/0/user_location":           true,
-		"wire:/tools/0/search_context_size":     true,
+	want := map[compat.Subject]compat.Outcome{
+		"wire:/include/0":                   compat.Drop,
+		"wire:/tools/0/external_web_access": compat.Drop,
+		"wire:/tools/0/user_location":       compat.Approx,
+		"wire:/tools/0/search_context_size": compat.Approx,
 	}
-	if len(decoded.Decisions) != len(wantSubjects) {
+	if len(decoded.Decisions) != len(want) {
 		t.Fatalf("decisions = %#v", decoded.Decisions)
 	}
 	for _, decision := range decoded.Decisions {
-		if decision.Feature != compat.RequestTools || decision.Outcome != compat.Drop || !wantSubjects[decision.Subject] {
+		feature := compat.RequestToolsKind
+		if decision.Subject == "wire:/include/0" {
+			feature = compat.RequestTools
+		}
+		if decision.Feature != feature || decision.Outcome != want[decision.Subject] {
 			t.Fatalf("decision = %#v", decision)
 		}
+	}
+}
+
+func TestDecodeRequestClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
+	tests := []struct {
+		name        string
+		tool        string
+		wantTools   int
+		wantOutcome compat.Outcome
+	}{
+		{name: "content discriminator erases operation", tool: `{"type":"web_search","search_content_types":["video"]}`, wantOutcome: compat.Drop},
+		{name: "location discriminator erases operation", tool: `{"type":"web_search","user_location":{"type":"future_location"}}`, wantOutcome: compat.Drop},
+		{name: "context quality hint approximates field", tool: `{"type":"web_search","search_context_size":"ultra"}`, wantTools: 1, wantOutcome: compat.Approx},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"model":"default","input":"search","tools":[` + test.tool + `]}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(canonicaltest.Tools(decoded.Request.Request)); got != test.wantTools {
+				t.Fatalf("tool count = %d, want %d", got, test.wantTools)
+			}
+			if len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != test.wantOutcome {
+				t.Fatalf("decisions = %#v, want one %s", decoded.Decisions, test.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestDropsWebSearchWithUnrepresentedConstraints(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+	}{
+		{name: "allowed domains", tool: `{"type":"web_search","filters":{"allowed_domains":["example.com"]}}`},
+		{name: "blocked domains", tool: `{"type":"web_search","filters":{"blocked_domains":["blocked.example"]}}`},
+		{name: "external access denied", tool: `{"type":"web_search","external_web_access":false}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"model":"default","input":"search","tools":[` + test.tool + `]}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(canonicaltest.Tools(decoded.Request.Request)) != 0 ||
+				len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
+				t.Fatalf("projection = tools %#v decisions %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Decisions)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestDropsUnrepresentedImageSearchOperation(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+	}{
+		{name: "image only", tool: `{"type":"web_search","search_content_types":["image"]}`},
+		{name: "mixed text and image", tool: `{"type":"web_search","search_content_types":["text","image"]}`},
+		{name: "image output format", tool: `{"type":"web_search","output_format":"image"}`},
+		{name: "future image result format", tool: `{"type":"web_search","output_format":"future_image_result"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"model":"default","input":"search","tools":[` + test.tool + `]}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(canonicaltest.Tools(decoded.Request.Request)) != 0 ||
+				len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
+				t.Fatalf("projection = tools %#v decisions %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Decisions)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestPreservesSupportedToolBesideDroppedConstrainedSearch(t *testing.T) {
+	raw := []byte(`{
+		"model":"default",
+		"input":"search",
+		"tools":[
+			{"type":"web_search","filters":{"allowed_domains":["example.com"]}},
+			{"type":"function","name":"lookup","parameters":{"type":"object"}}
+		]
+	}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := canonicaltest.Tools(decoded.Request.Request)
+	if len(tools) != 1 || tools[0].Key().Name() != "lookup" {
+		t.Fatalf("surviving tools = %#v, want lookup", tools)
+	}
+	if len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
+		t.Fatalf("decisions = %#v, want constrained-search Drop", decoded.Decisions)
+	}
+}
+
+func TestDecodeRequestRejectsSpecificSelectionOfDroppedSearch(t *testing.T) {
+	raw := []byte(`{
+		"model":"default",
+		"input":"search",
+		"tools":[{"type":"web_search","filters":{"allowed_domains":["example.com"]}}],
+		"tool_choice":{"type":"web_search"}
+	}`)
+	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %T %v, want residual BAD_REQUEST", err, err)
+	}
+}
+
+func TestDecodeRequestErasesUnknownIncludeEntry(t *testing.T) {
+	raw := []byte(`{"model":"default","input":"hello","include":["future.include","reasoning.encrypted_content"]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Decisions) != 1 || decoded.Decisions[0] != (compat.Decision{
+		Feature: compat.RequestItemsKind,
+		Outcome: compat.Drop,
+		Subject: "wire:/include/0",
+	}) {
+		t.Fatalf("decisions = %#v", decoded.Decisions)
 	}
 }
 
@@ -126,6 +256,49 @@ func TestDecodeStreamingMessageUsesTerminalCitationAnnotations(t *testing.T) {
 	citations := message.Content()[0].Citations()
 	if len(citations) != 1 {
 		t.Fatalf("citations=%d want=1", len(citations))
+	}
+}
+
+func TestEncodeStreamingMessagePreservesTerminalCitationAnnotations(t *testing.T) {
+	webURL, err := canonical.NewWebURL("https://example.com/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := canonical.NewWebSource(webURL, canonical.Specify("Source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewCitedTextMessagePart("£source", []canonical.WebCitation{{Source: source}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{part})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")},
+		"model", []canonical.CanonicalItem{message}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
+	))
+	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(
+		context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(encoded.Stream.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(raw)
+	if !strings.Contains(wire, `"annotations":[{"type":"url_citation","url":"https://example.com/x","title":"Source"`) {
+		t.Fatalf("stream terminal output lost citation annotations: %s", wire)
 	}
 }
 
@@ -252,6 +425,85 @@ func TestDecodeUnresolvedWebSearchWithUndisclosedSourcesRemainsCallOnly(t *testi
 	}
 	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolCall {
 		t.Fatalf("unresolved lifecycle = %#v", items)
+	}
+}
+
+func TestDecodeCompletedResponsesClassifiesMalformedWebSearchProviderDataAsBackend(t *testing.T) {
+	tests := []struct {
+		name string
+		item string
+	}{
+		{
+			name: "missing call id",
+			item: `{"type":"web_search_call","status":"completed","action":{"type":"search","queries":["q"]}}`,
+		},
+		{
+			name: "malformed action",
+			item: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"future_action"}}`,
+		},
+		{
+			name: "invalid action URL",
+			item: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":"not-a-url"}}`,
+		},
+		{
+			name: "malformed sources",
+			item: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["q"],"sources":"bad"}}`,
+		},
+		{
+			name: "invalid source URL",
+			item: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["q"],"sources":[{"type":"url","url":"not-a-url"}]}}`,
+		},
+		{
+			name: "invalid citation URL",
+			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"not-a-url"}]}]}`,
+		},
+		{
+			name: "invalid citation range",
+			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"https://example.com","start_index":4,"end_index":8}]}]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := decodeCompletedResponsesItemSet(
+				context.Background(),
+				canonical.CanonicalRequest{},
+				[]json.RawMessage{json.RawMessage(test.item)},
+				"",
+				"ex",
+				nil,
+			)
+			var backendErr canonical.BackendError
+			if !errors.As(err, &backendErr) {
+				t.Fatalf("error = %T %v, want backend error", err, err)
+			}
+		})
+	}
+}
+
+func TestResponsesWebSearchCallerMalformationRemainsBadRequest(t *testing.T) {
+	_, err := decodeResponsesWebSearchLifecycle(
+		"ws_1",
+		json.RawMessage(`{"type":"open_page","url":"not-a-url"}`),
+		responsesWebSearchSucceeded,
+	)
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %T %v, want BAD_REQUEST", err, err)
+	}
+}
+
+func TestDecodeResponsesStreamClassifiesMalformedWebSearchSourceAsBackend(t *testing.T) {
+	raw := responsesCreatedFrame() +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"q\"],\"sources\":[{\"type\":\"url\",\"url\":\"not-a-url\"}]}}}\n\n"
+	stream := decodeResponseStream(
+		canonical.CanonicalRequest{},
+		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex",
+		nil,
+	)
+	var backendErr canonical.BackendError
+	if err := drainResponsesStream(stream); !errors.As(err, &backendErr) {
+		t.Fatalf("error = %T %v, want backend error", err, err)
 	}
 }
 
@@ -404,20 +656,112 @@ func TestResponsesRequestWebSearchFoldSupportsNonAdjacentResult(t *testing.T) {
 	}
 }
 
-func TestResponsesFailedWebSearchHistoryIsRejectedRatherThanMadePending(t *testing.T) {
+func TestResponsesFailedWebSearchHistoryPreservesTypedFailure(t *testing.T) {
 	requestRaw := []byte(`{"model":"m","input":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`)
-	_, err := (ClientRequestDecoder{}).DecodeClientRequest(
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
 		carrier.NewDocument("", "application/json", nil, requestRaw, carrier.Meta{}),
 	)
-	var clientError canonical.Error
-	if !errors.As(err, &clientError) || clientError.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("failed client history error = %#v, want %s", err, canonical.ErrorCodeBadRequest)
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertResponsesFailedWebSearchItems(t, decoded.Request.Request.Items())
 
 	providerRaw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`)
-	_, err = decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, providerRaw, "ex", nil)
-	var providerError canonical.Error
-	if !errors.As(err, &providerError) || providerError.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("failed provider history error = %#v, want %s", err, canonical.ErrorCodeNotImplemented)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, providerRaw, "ex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := canonical.ReadClosedEnvelope(
+		context.Background(),
+		canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}),
+		canonical.EnvResponse,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertResponsesFailedWebSearchItems(t, response.Items())
+}
+
+func assertResponsesFailedWebSearchItems(t *testing.T, items []canonical.CanonicalItem) {
+	t.Helper()
+	if len(items) != 2 || items[0].Kind() != canonical.ItemKindToolCall {
+		t.Fatalf("failed lifecycle items = %#v", items)
+	}
+	result, ok := items[1].ToolResult()
+	if !ok {
+		t.Fatalf("failed lifecycle result = %#v", items[1])
+	}
+	search, ok := result.WebSearch()
+	failure, failed := search.Failure()
+	if !ok || !failed || failure != "provider reported failed web search" {
+		t.Fatalf("typed failure = (%q,%t,%t)", failure, failed, ok)
+	}
+}
+
+func TestResponsesWebSearchFailedAndIncompleteBufferedStreamParity(t *testing.T) {
+	tests := []struct {
+		name       string
+		buffered   string
+		streamed   string
+		wantItems  int
+		wantFailed bool
+	}{
+		{
+			name: "failed",
+			buffered: `{"id":"resp_1","model":"m","status":"completed","output":[` +
+				`{"type":"web_search_call","id":"ws_1","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`,
+			streamed: "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"failed\",\"action\":{\"type\":\"search\",\"queries\":[\"deadline\"]}}}\n\n" +
+				"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n",
+			wantItems:  2,
+			wantFailed: true,
+		},
+		{
+			name: "incomplete",
+			buffered: `{"id":"resp_1","model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[` +
+				`{"type":"web_search_call","id":"ws_1","status":"incomplete","action":{"type":"search","queries":["deadline"]}}]}`,
+			streamed: "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"incomplete\",\"action\":{\"type\":\"search\",\"queries\":[\"deadline\"]}}}\n\n" +
+				"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"output\":[]}}\n\n",
+			wantItems: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			buffered, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.buffered), "ex_buffered", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			streamed := decodeResponseStream(
+				canonical.CanonicalRequest{},
+				carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(test.streamed))},
+				"ex_streamed", nil,
+			)
+			for name, reader := range map[string]canonical.ResponseStream{"buffered": buffered, "streamed": streamed} {
+				closed, err := canonical.ReadClosedEnvelope(
+					context.Background(),
+					canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_" + name)}),
+					canonical.EnvResponse,
+				)
+				if err != nil {
+					t.Fatalf("%s envelope: %v", name, err)
+				}
+				response, err := closed.ProjectResponse()
+				if err != nil {
+					t.Fatalf("%s response: %v", name, err)
+				}
+				items := response.Items()
+				if len(items) != test.wantItems || items[0].Kind() != canonical.ItemKindToolCall {
+					t.Fatalf("%s items = %#v", name, items)
+				}
+				if test.wantFailed {
+					assertResponsesFailedWebSearchItems(t, items)
+				}
+			}
+		})
 	}
 }

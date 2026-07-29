@@ -2,13 +2,15 @@ package messages
 
 import (
 	"encoding/json"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -110,7 +112,7 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 	}
 }
 
-func TestEncode_RejectsStructuredOutputFormat(t *testing.T) {
+func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:   canonical.OutputFormatJSONSchema,
 		Name:   "reply_shape",
@@ -119,21 +121,120 @@ func TestEncode_RejectsStructuredOutputFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
-	_, err = EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
+	wire, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:        canonical.Specify("claude-3-5"),
 		Items:        []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		OutputFormat: canonical.Specify(format),
 	}), delivery.BufferedDelivery())
-	if err == nil || !strings.Contains(err.Error(), "structured output") {
-		t.Fatalf("EncodeCarrier err=%v, want structured-output rejection", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire.Raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	outputConfig := body["output_config"].(map[string]any)
+	bodyFormat := outputConfig["format"].(map[string]any)
+	if bodyFormat["type"] != "json_schema" {
+		t.Fatalf("output_config.format = %#v", bodyFormat)
 	}
 }
 
-func TestDecodeRequest_RejectsStructuredOutputFormat(t *testing.T) {
+func TestDecodeRequest_PreservesStructuredOutputFormat(t *testing.T) {
 	codec := legacyClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}}`)
-	_, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
-	if err == nil || !strings.Contains(err.Error(), "structured output") {
-		t.Fatalf("DecodeClientRequest err=%v, want structured-output rejection", err)
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format := got.OutputFormat(); format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" {
+		t.Fatalf("output format = %#v", format)
+	}
+}
+
+func TestMessagesJSONObjectIngressRequiresSchemaForProviderProjection(t *testing.T) {
+	decoded, err := decodeMessagesOutputFormat(json.RawMessage(`{"type":"json_object"}`), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != canonical.OutputFormatJSONObject {
+		t.Fatalf("decoded format = %#v", decoded)
+	}
+	if _, err := encodeMessagesOutputFormat(decoded); err == nil {
+		t.Fatal("Messages provider projection accepted schema-free json_object")
+	} else {
+		var incompatible provider.IncompatibleTargetError
+		if !errors.As(err, &incompatible) {
+			t.Fatalf("json_object projection error = %T %v, want target-local incompatibility", err, err)
+		}
+	}
+}
+
+func TestDecodeRequestPreservesNativeMessagesOutputConfigFormat(t *testing.T) {
+	codec := legacyClientRequestDecoder{}
+	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`)
+	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	format := got.OutputFormat()
+	if format.Kind != canonical.OutputFormatJSONSchema || format.Schema.RawObject() != `{"type":"object"}` || !format.Strict {
+		t.Fatalf("native Messages output format = %#v", format)
+	}
+}
+
+func TestMessagesUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
+	sink := &compat.RecordingSink{}
+	_, err := decodeMessagesOutputFormat(json.RawMessage(`{"type":"future_format"}`), sink, "ex")
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %v, want BAD_REQUEST", err)
+	}
+	if len(sink.Decisions()) != 0 {
+		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	}
+}
+
+func TestMessagesUnknownNativeOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
+	sink := &compat.RecordingSink{}
+	_, err := decodeMessagesNativeOutputFormat(&messagesNativeOutputFormatDTO{
+		Type: "future_format",
+	}, sink, "ex")
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %v, want BAD_REQUEST", err)
+	}
+	if len(sink.Decisions()) != 0 {
+		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	}
+}
+
+func TestMessagesMissingOutputFormatDiscriminatorIsBadRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "response format",
+			run: func() error {
+				_, err := decodeMessagesOutputFormat(json.RawMessage(`{}`), nil, "")
+				return err
+			},
+		},
+		{
+			name: "native output config",
+			run: func() error {
+				_, err := decodeMessagesNativeOutputFormat(&messagesNativeOutputFormatDTO{}, nil, "")
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var canonicalErr canonical.Error
+			if err := test.run(); !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+				t.Fatalf("error = %T %v, want BAD_REQUEST", err, err)
+			}
+		})
 	}
 }

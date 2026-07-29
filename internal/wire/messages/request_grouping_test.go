@@ -33,7 +33,7 @@ func TestEncodeItemsGroupsMaximalAssistantOwnedSequence(t *testing.T) {
 			t.Fatalf("assistant block order = %#v", messages[0].Content)
 		}
 		raw, _ := json.Marshal(messages[0].Content)
-		decoded, _, err := decodeMessagesItems(raw, 0, "assistant", []canonical.ToolDeclaration{decl}, nil, shared.ImageDecodeLimitPolicy{})
+		decoded, _, err := decodeMessagesItems(raw, 0, "assistant", []canonical.ToolDeclaration{decl}, nil, shared.ImageDecodeLimitPolicy{}, nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -2,8 +2,10 @@ package responses
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -26,15 +28,13 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	if err != nil {
 		return canonical.GenerationControls{}, err
 	}
-	if len(stopSequences) > 0 {
-		// Responses v0 does not carry stop sequences in canonical form; fail
-		// closed rather than silently dropping supported user intent.
-		return canonical.GenerationControls{}, canonical.NotImplemented("Swobu cannot yet preserve Responses stop sequences")
-	}
 	var effort *canonical.InferenceEffort
 	if dto.Reasoning != nil && strings.TrimSpace(dto.Reasoning.Effort) != "" && strings.TrimSpace(dto.Reasoning.Effort) != "none" { // swobu:io-string source=boundary
-		value := canonical.InferenceEffort(strings.TrimSpace(dto.Reasoning.Effort)) // swobu:io-string source=boundary
-		effort = &value
+		switch raw := strings.TrimSpace(dto.Reasoning.Effort); raw { // swobu:io-string source=boundary
+		case "minimal", "low", "medium", "high", "xhigh", "max":
+			value := canonical.InferenceEffort(raw)
+			effort = &value
+		}
 	}
 	return canonical.NewGenerationControls(canonical.GenerationControlsParams{
 		MaxOutputTokens: maxOutputTokens,
@@ -45,7 +45,7 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	})
 }
 
-func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json.RawMessage) (canonical.ReasoningControls, error) {
+func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.ReasoningControls, error) {
 	params := canonical.ReasoningControlsParams{}
 	if dto != nil {
 		switch value := strings.TrimSpace(dto.Effort); value { // swobu:io-string source=boundary
@@ -55,14 +55,18 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 		case "minimal", "low", "medium", "high", "xhigh", "max":
 			params.Compute = canonical.Specify(canonical.NewAutomaticReasoningCompute())
 		default:
-			return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning effort is invalid")
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestReasoning, compat.Approx, compat.Subject("wire:/reasoning/effort")); err != nil {
+				return canonical.ReasoningControls{}, err
+			}
 		}
 		switch value := strings.TrimSpace(dto.Summary); value { // swobu:io-string source=boundary
 		case "":
 		case "concise", "detailed", "auto":
 			params.Disclosure = canonical.Specify(canonical.ReasoningDisclosureSummary)
 		default:
-			return canonical.ReasoningControls{}, canonical.BadRequest("responses reasoning summary is invalid")
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestReasoning, compat.Approx, compat.Subject("wire:/reasoning/summary")); err != nil {
+				return canonical.ReasoningControls{}, err
+			}
 		}
 		if isRawControlSet(dto.Context) {
 			var rawContext string
@@ -73,7 +77,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 			params.ResponsesContext = canonical.Specify(contextValue)
 		}
 	}
-	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw)
+	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw, sink, exchangeID)
 	if err != nil {
 		return canonical.ReasoningControls{}, err
 	}
@@ -81,7 +85,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 	return canonical.NewReasoningControls(params)
 }
 
-func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
+func decodeResponsesReasoningInclude(raw json.RawMessage, sink compat.Sink, exchangeID string) (bool, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=provider-wire
 	if trimmed == "" || trimmed == "null" {
 		return false, nil
@@ -91,12 +95,15 @@ func decodeResponsesReasoningInclude(raw json.RawMessage) (bool, error) {
 		return false, canonical.BadRequest("responses include is invalid")
 	}
 	includeEncrypted := false
-	for _, value := range values {
+	for index, value := range values {
 		if value == "web_search_call.action.sources" {
 			continue
 		}
 		if value != "reasoning.encrypted_content" {
-			return false, canonical.NotImplemented("Swobu cannot yet project this Responses include entry")
+			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject("wire:/include/"+strconv.Itoa(index))); err != nil {
+				return false, err
+			}
+			continue
 		}
 		includeEncrypted = true
 	}
@@ -149,7 +156,9 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		payload["top_p"] = value
 	}
 	if len(controls.Limits.StopSequences) > 0 {
-		return provider.NewIncompatibleTarget("Responses cannot represent canonical stop sequences")
+		return provider.NewIncompatibleTarget(
+			"Responses target does not declare stop-sequence support",
+		)
 	}
 	return nil
 }

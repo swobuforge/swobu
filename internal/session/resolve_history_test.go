@@ -145,7 +145,7 @@ func TestResumeHistoryRejectsMediaThatDoesNotMatchPredecessorRequest(t *testing.
 
 func responseWithRef(t *testing.T, response canonical.CanonicalResponse, ref canonical.ResponseRef) canonical.CanonicalResponse {
 	t.Helper()
-	bound, err := canonical.NewCanonicalResponse(ref, response.Model(), response.Items(), response.CompletionReason(), response.Usage())
+	bound, err := canonical.NewCanonicalResponse(ref, response.Model(), response.Items(), response.Completion(), response.Usage())
 	if err != nil {
 		t.Fatal(err)
 	}

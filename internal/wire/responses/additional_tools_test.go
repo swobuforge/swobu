@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -78,17 +79,12 @@ func TestAdditionalToolsConflictingRedeclarationReturnsBadRequest(t *testing.T) 
 	assertAdditionalToolsErrorCode(t, raw, canonical.ErrorCodeBadRequest)
 }
 
-func TestAdditionalToolsClassifyValidUnimplementedCarrierSemanticsAsSwobuOwned(t *testing.T) {
+func TestAdditionalToolsMalformedKnownSemanticsRemainBadRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		raw  string
 		code canonical.ErrorCode
 	}{
-		{
-			name: "role",
-			raw:  `{"input":[{"type":"additional_tools","role":"user","tools":[]}]}`,
-			code: canonical.ErrorCodeNotImplemented,
-		},
 		{
 			name: "malformed MCP source",
 			raw:  `{"input":[{"type":"additional_tools","role":"developer","tools":[{"type":"mcp","name":"remote"}]}]}`,
@@ -106,7 +102,7 @@ func TestAdditionalToolsClassifyValidUnimplementedCarrierSemanticsAsSwobuOwned(t
 	}
 }
 
-func TestAdditionalToolsPreservesPositionAndMultiplicity(t *testing.T) {
+func TestAdditionalToolsErasesSemanticallyEmptyOccurrences(t *testing.T) {
 	raw := []byte(`{"input":[
 		{"type":"message","role":"user","content":"hi"},
 		{"type":"additional_tools","role":"developer","tools":[]},
@@ -119,33 +115,35 @@ func TestAdditionalToolsPreservesPositionAndMultiplicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := decoded.Request.Request.Items()
-	if len(items) != 3 || items[0].Kind() != canonical.ItemKindMessage ||
-		items[1].Kind() != canonical.ItemKindToolDeclarations ||
-		items[2].Kind() != canonical.ItemKindToolDeclarations {
-		t.Fatalf("ordered additional_tools = %#v", items)
+	if len(items) != 1 || items[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("empty additional_tools changed canonical items: %#v", items)
 	}
 }
 
-func TestAdditionalToolsUnsupportedKindReportsExactWireLocationAndType(t *testing.T) {
-	raw := []byte(`{
-		"input":[{"type":"additional_tools","role":"developer","tools":[
-			{"type":"function","name":"search","parameters":{"type":"object"}},
-			{"type":"namespace","name":"remote","tools":[
-				{"type":"function","name":"read","parameters":{"type":"object"}},
-				{"type":"mcp","name":"server"}
-			]}
-		]}]
-	}`)
-	_, err := (ClientRequestDecoder{}).DecodeClientRequest(
+func TestAdditionalToolsUnfamiliarCarrierRoleDoesNotReject(t *testing.T) {
+	raw := []byte(`{"input":[
+		{"type":"additional_tools","role":"future_directive","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}]},
+		{"type":"message","role":"user","content":"search"}
+	]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
 		carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}),
 	)
-	if err == nil {
-		t.Fatal("expected unsupported tool kind")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, detail := range []string{"/input/0/tools/1/tools/1/type", `"mcp"`} {
-		if !strings.Contains(err.Error(), detail) {
-			t.Fatalf("error %q does not identify %q", err, detail)
-		}
+	if got := len(canonicaltest.Tools(decoded.Request.Request)); got != 1 {
+		t.Fatalf("canonical tool count = %d, want 1", got)
+	}
+	items := decoded.Request.Request.Items()
+	if len(items) < 1 {
+		t.Fatal("canonical request has no declaration occurrence")
+	}
+	declarations, ok := items[0].ToolDeclarations()
+	if !ok || declarations.Scope() != canonical.ContextScopeHistory {
+		t.Fatalf("additional_tools occurrence = %#v, want history scope", items[0])
+	}
+	if len(decoded.Decisions) != 1 || decoded.Decisions[0].Feature != compat.RequestItemsMessageRole || decoded.Decisions[0].Outcome != compat.Approx || decoded.Decisions[0].Subject != compat.Subject("wire:/input/0/role") {
+		t.Fatalf("compatibility decisions = %#v, want role approximation evidence", decoded.Decisions)
 	}
 }
 

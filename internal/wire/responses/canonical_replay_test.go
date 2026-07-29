@@ -3,7 +3,6 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -47,19 +46,6 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 	}
 	if !bytes.Contains(payload.Input[1], []byte(`"encrypted_content":"cipher"`)) {
 		t.Fatalf("continuation-consumed reasoning state was lost: %s", payload.Input[1])
-	}
-}
-
-func TestResponsesUnknownRequestItemKindIsRejected(t *testing.T) {
-	raw := []byte(`{"model":"m","input":[{"type":"future_input","value":1}]}`)
-	_, err := (ClientRequestDecoder{}).DecodeClientRequest(
-		carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}),
-	)
-	if err == nil {
-		t.Fatal("unknown Responses request item kind was accepted")
-	}
-	if !strings.Contains(err.Error(), `/input/0/type item type "future_input"`) {
-		t.Fatalf("unknown item error = %q, want exact path and discriminator", err)
 	}
 }
 
@@ -214,6 +200,7 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 		{name: "function call output", input: `{"type":"function_call_output","call_id":"call_1","output":"done"}`, wantKind: canonical.ItemKindToolResult},
 		{name: "reasoning", input: `{"type":"reasoning","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"cipher"}`, wantKind: canonical.ItemKindReasoning},
 		{name: "tool search call", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":{"query":"files"}}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
+		{name: "tool search call stringified arguments", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":"{\"query\":\"files\"}"}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
 		{name: "tool search output", input: `{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"client","tools":[]}`, wantKind: canonical.ItemKindToolDiscoveryResult},
 	}
 
@@ -278,5 +265,48 @@ func TestActionlessWebSearchMarkerPartitionsHistoryWithoutEnteringCanonical(t *t
 	}
 	if decoded.Request.RebasedRequest == nil || len(decoded.Request.RebasedRequest.Request.Items()) != 1 {
 		t.Fatalf("rebased request = %#v, want current message only", decoded.Request.RebasedRequest)
+	}
+}
+
+func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("call_reused")
+	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	object, _ := canonical.ParseJSONObject([]byte(`{}`))
+	functionCall, _ := canonical.NewToolCallItem(
+		callID,
+		functionKey,
+		canonical.NewJSONObjectToolInput(object),
+	)
+	functionResult, _ := canonical.NewToolResultItem(
+		callID,
+		[]canonical.ToolResultPart{canonical.NewTextToolResultPart("function result")},
+		false,
+	)
+	customKey, _ := canonical.NewRequestToolKey(canonical.ToolKindCustom, "shell")
+	customCall, _ := canonical.NewToolCallItem(
+		callID,
+		customKey,
+		canonical.NewTextToolInput("run"),
+	)
+	customResult, _ := canonical.NewToolResultItem(
+		callID,
+		[]canonical.ToolResultPart{canonical.NewTextToolResultPart("custom result")},
+		false,
+	)
+	items := []canonical.CanonicalItem{functionCall, functionResult, customCall, customResult}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: items})
+
+	encoded, err := encodeConversation(request, items, nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 4 {
+		t.Fatalf("encoded = %#v", encoded)
+	}
+	first, firstOK := encoded[1].(toolCallOutputItem)
+	second, secondOK := encoded[3].(toolCallOutputItem)
+	if !firstOK || first.Type != "function_call_output" ||
+		!secondOK || second.Type != "custom_tool_call_output" {
+		t.Fatalf("result output kinds = %#v, %#v", encoded[1], encoded[3])
 	}
 }

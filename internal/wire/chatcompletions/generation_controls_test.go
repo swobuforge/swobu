@@ -2,9 +2,11 @@ package chatcompletions
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -207,5 +209,34 @@ func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
 	format := got.OutputFormat()
 	if format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" || format.Description != "structured reply" || format.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !format.Strict {
 		t.Fatalf("output format = %#v, want json schema", format)
+	}
+}
+
+func TestChatCompletionsJSONObjectRoundTrips(t *testing.T) {
+	decoded, err := decodeChatCompletionsOutputFormat(json.RawMessage(`{"type":"json_object"}`), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != canonical.OutputFormatJSONObject {
+		t.Fatalf("decoded format = %#v", decoded)
+	}
+	encoded, err := encodeChatCompletionsOutputFormat(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"type":"json_object"}` {
+		t.Fatalf("encoded format = %s", encoded)
+	}
+}
+
+func TestChatCompletionsUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
+	sink := &compat.RecordingSink{}
+	_, err := decodeChatCompletionsOutputFormat(json.RawMessage(`{"type":"future_format"}`), sink, "ex")
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("error = %v, want BAD_REQUEST", err)
+	}
+	if len(sink.Decisions()) != 0 {
+		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
 	}
 }
