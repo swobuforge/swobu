@@ -12,7 +12,7 @@ import (
 )
 
 func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","unexpected":true}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
@@ -33,7 +33,7 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	wantFormat := `{"type":"grammar", "syntax":"lark", "definition":"start: \"x\" LF\n%import common.LF"}`
 	customTool := canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "edit files", canonical.NewToolFormatObject(canonicaltest.Object(t, wantFormat)))
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","tools":[{"type":"custom","name":"` + customTool.Key().Name() + `","format":` + wantFormat + `}]}`)
@@ -61,7 +61,7 @@ func TestDecodeRequest_PreservesCustomToolFormatField(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesTopLevelInstructions(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","instructions":"Use tools for filesystem work.","input":"inspect files"}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {

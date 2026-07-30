@@ -3,21 +3,20 @@ package responses
 import (
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func TestProviderEncodeDecisionsDescribeActualResponsesProjection(t *testing.T) {
+func TestExactProviderEncodeReturnsNoCompatibilityChanges(t *testing.T) {
 	request := responsesRequestWithStrictToolAndJSONSchema(t)
 	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, feature := range []compat.Feature{compat.RequestToolsSchemaStrict, compat.RequestOutputFormat, compat.RequestOutputFormatSchema, compat.WireJSONMode} {
-		assertResponsesDecision(t, result.Decisions, feature, compat.Exact)
+	if len(result.Changes) != 0 {
+		t.Fatalf("changes = %#v, want exact-as-empty", result.Changes)
 	}
 }
 
@@ -37,14 +36,4 @@ func responsesRequestWithStrictToolAndJSONSchema(t *testing.T) canonical.Canonic
 		t.Fatal(err)
 	}
 	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools.Declarations()...), canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, OutputFormat: canonical.Specify(format)})
-}
-
-func assertResponsesDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {
-	t.Helper()
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
-			return
-		}
-	}
-	t.Fatalf("decisions = %#v, want %s/%s", decisions, feature, outcome)
 }

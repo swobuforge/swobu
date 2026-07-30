@@ -13,7 +13,7 @@ import (
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	items := output.Items()
-	content, decisions, err := messagesResponseContent(request, output)
+	content, changes, err := messagesResponseContent(request, output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
@@ -36,13 +36,13 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 	logMessagesEgressBuffered(raw)
 	return wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}),
-		Decisions:           decisions,
+		Changes:             changes,
 		ResponseFingerprint: &responseFingerprint,
 	}, nil
 }
 
-func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Decision, error) {
-	items, webDecisions, err := projectMessagesWebSearchLifecycles(output.Items(), compat.ResponseItemsKind)
+func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Change, error) {
+	items, webDecisions, err := projectMessagesWebSearchLifecycles(output.Items(), canonical.ResponseItemsKind)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -156,15 +156,15 @@ func TestAttemptToolProjectionPrefersUnoccupiedSafeNamespacedLeaf(t *testing.T) 
 	namespaced, _ := canonical.NewToolKey("mcp/filesystem", canonical.ToolKindFunction, "read_file")
 	request := projectionTestRequest(t, namespaced)
 
-	_, table, decisions, err := ProjectAttemptTools(request)
+	_, table, changes, err := ProjectAttemptTools(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if wire, _ := table.WireName(namespaced); wire != "read_file" {
 		t.Fatalf("safe namespaced leaf = %q, want read_file", wire)
 	}
-	if len(decisions) != 0 {
-		t.Fatalf("safe unoccupied leaf emitted compatibility decisions: %#v", decisions)
+	if len(changes) != 0 {
+		t.Fatalf("safe unoccupied leaf emitted compatibility changes: %#v", changes)
 	}
 }
 

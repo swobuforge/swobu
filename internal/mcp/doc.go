@@ -10,14 +10,14 @@
 // the exchange command boundary. Canonical owns only durable namespace meaning
 // and declaration ownership; exchange owns only orchestration consequences.
 //
-// Responses admission currently requires explicit require_approval:"never".
-// Authorization and Authorization: Bearer ingress become transient Access and
-// never enter canonical history. Object and array allowed-tool selections both
+// The local runtime claims only URL sources with require_approval:"never" and
+// no caller restriction. Deferred loading uses eager discovery with explicit
+// approximation evidence. Authorization, Authorization: Bearer, and arbitrary
+// headers become transient Access, are confined to the exact source origin,
+// and never enter canonical history. Object and array allowed-tool selections
 // become the same canonical selection.
 //
-// This package does not implement provider-executed Responses mcp_call
-// lifecycles, managed connectors, tunnels, approval workflows, arbitrary
-// headers, caller restrictions, or deferred loading. Those known semantics
-// reject explicitly at the wire boundary; they are never erased into
-// ordinary-tool success.
+// Managed connectors, tunnels, approval workflows, and caller restrictions
+// remain canonical for native target projection; this package never erases or
+// weakens them into local ordinary-tool success.
 package mcp

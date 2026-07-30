@@ -45,7 +45,7 @@ func TestEncode_DoesNotEmbedProviderCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude","prompt_cache_key":"repo","messages":[{"role":"user","content":"hi"}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
@@ -57,7 +57,7 @@ func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Read"), "read files", canonicaltest.Schema(t, `{"type":"object","properties":{"path":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	wireToolName := providertest.ProjectedToolName(t, tool)
 	req := []byte(`{"model":"claude","tools":[{"name":"` + wireToolName + `","description":"read files","input_schema":{"type":"object","properties":{"path":{"type":"string"}}},"cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
@@ -77,7 +77,7 @@ func TestDecodeRequest_IgnoresAnthropicCacheMarkers(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresBedrockCachePointParts(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"cachePoint":{"type":"default","ttl":"5m"}}]}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {

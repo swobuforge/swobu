@@ -14,7 +14,7 @@ import (
 func TestMessagesStreamEncoder_EmitsSingleTextDeltaAndSingleMessageStop(t *testing.T) {
 	t.Parallel()
 
-	codec := legacyResponseStreamEncoder{}
+	codec := testResponseStreamEncoder{}
 	outputTokens := 2
 	usage := mustTokenUsage(t, nil, &outputTokens, nil, nil)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("Hello world!")})

@@ -14,7 +14,7 @@ import (
 // Attempt preparation has already projected every provider-facing key.
 func responsesToolWireName(tool canonical.ToolDeclaration) (string, error) {
 	if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
-		return "", provider.NewIncompatibleTarget("Responses cannot represent this canonical tool declaration type")
+		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
 	}
 	trimmedName := strings.TrimSpace(tool.Key().Name()) // swobu:io-string source=boundary
 	if trimmedName == "" {
@@ -43,7 +43,7 @@ func responsesFlatToolIdentityFromWire(name string, kind canonical.ToolKind, fie
 // Raw names match plain tools by visible name. Projected names still round-trip
 // namespace-bearing tools through the exact canonical ID, but only when reverse
 // projection can prove the token.
-func responsesResolveToolChoiceByWireName(tools []canonical.ToolDeclaration, name, specificType, fieldPath string, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, string, error) {
+func responsesResolveToolChoiceByWireName(tools []canonical.ToolDeclaration, name, specificType, fieldPath string, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, string, error) {
 	trimmed := strings.TrimSpace(name) // swobu:io-string source=boundary
 	if trimmed == "" {
 		return canonical.ToolDeclaration{}, "", canonical.BadRequest("responses request tool_choice specific requires a tool name")

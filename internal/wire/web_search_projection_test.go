@@ -36,12 +36,14 @@ func TestResponsesUnrepresentableLifecycleProjectsAtomicallyToMessages(t *testin
 			if !bytes.Contains(output, []byte(`"text":"answer"`)) || !bytes.Contains(output, []byte(`"url":"https://example.com/source#section"`)) {
 				t.Fatalf("text or citation was lost: %s", output)
 			}
-			if len(encoded.Decisions) != 1 || encoded.Decisions[0] != (compat.Decision{
-				Feature: compat.ResponseItemsKind,
-				Outcome: compat.Drop,
-				Subject: "web_search:ws_original",
-			}) {
-				t.Fatalf("decisions = %#v", encoded.Decisions)
+			if len(encoded.Changes) != 1 ||
+				encoded.Changes[0].Capability != canonical.ResponseItemsKind ||
+				encoded.Changes[0].Kind != compat.Omission {
+				t.Fatalf("changes = %#v", encoded.Changes)
+			}
+			call, ok := encoded.Changes[0].Occurrence.Call()
+			if !ok || call.String() != "ws_original" {
+				t.Fatalf("change occurrence = %#v, want call ws_original", encoded.Changes[0].Occurrence)
 			}
 		})
 	}

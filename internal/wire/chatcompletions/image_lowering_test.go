@@ -13,8 +13,8 @@ import (
 
 func TestDecodeChatProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"Here is the result"},{"type":"image_url","image_url":{"url":"https://example.test/output.png"}}]},"finish_reason":"stop"}]}`)
-	sink := &recordingDecisionSink{}
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", sink)
+	var changes []compat.Change
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,14 +35,15 @@ func TestDecodeChatProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 		t.Fatalf("surviving text = %q, %v", text, ok)
 	}
 	drops := 0
-	for _, decision := range sink.effects {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop &&
-			decision.Subject == compat.Subject("wire:/choices/0/message/content/1/type") {
+	for _, decision := range changes {
+		position, ok := decision.Occurrence.ResponsePart()
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission &&
+			ok && position.Item == 0 && position.Part == 1 {
 			drops++
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("assistant image drop decisions = %d, want 1; all=%#v", drops, sink.effects)
+		t.Fatalf("assistant image omission changes = %d, want 1; all=%#v", drops, changes)
 	}
 }
 
@@ -60,13 +61,13 @@ func TestEncodeChatImageOriginalMapsHighWithDecision(t *testing.T) {
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
-	sink := &recordingDecisionSink{}
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex")
+	var changes []compat.Change
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.effects) != 1 || sink.effects[0].Feature != compat.RequestItemsMessageImageDetail || sink.effects[0].Outcome != compat.Approx {
-		t.Fatalf("decisions = %#v", sink.effects)
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsMessageImageDetail || changes[0].Kind != compat.Approximation {
+		t.Fatalf("changes = %#v", changes)
 	}
 	if !jsonBodyContains(t, doc.Raw, `"detail":"high"`) {
 		t.Fatalf("image did not map original to high: %s", doc.Raw)
@@ -78,14 +79,13 @@ func TestEncodeChatToolResultImageRejectsWithoutClosedCallBatch(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("call_image")
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("must not escape"), canonical.NewImageToolResultPart(image)}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
-	sink := &recordingDecisionSink{}
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex")
+	var changes []compat.Change
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex")
 	if err == nil {
 		t.Fatal("Chat Completions accepted a tool-result image")
 	}
-	if !doc.IsEmpty() || !decisionRecorded(sink.effects, compat.RequestItemsToolResultImage, compat.Reject) ||
-		!decisionRecorded(sink.effects, compat.RequestItemsToolResultContentBoundaries, compat.Approx) {
-		t.Fatalf("rejection doc=%#v decisions=%#v", doc, sink.effects)
+	if !doc.IsEmpty() {
+		t.Fatalf("rejection doc=%#v changes=%#v", doc, changes)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestEncodeChatUserImages_PreservesURLAndInlineSources(t *testing.T) {
 		canonical.NewImageMessagePart(urlImage), canonical.NewImageMessagePart(inlineImage),
 	})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

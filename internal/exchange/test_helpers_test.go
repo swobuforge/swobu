@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -61,14 +60,14 @@ func testDecodedRequest(request canonical.CanonicalRequest) wire.ClientRequestRe
 	}
 }
 
-func ClientTransportForTest(response ClientResponse) transportpkg.Response {
+func ClientTransportForTest(response ClientResponse) carrier.Response {
 	switch response := response.(type) {
 	case BufferedResponse:
 		return response.Response
 	case StreamingResponse:
 		return response.Response
 	}
-	return transportpkg.Response{}
+	return carrier.Response{}
 }
 
 func ClientResponseStreamingForTest(response ClientResponse) bool {
@@ -80,11 +79,11 @@ func ClientResponseStreamingForTest(response ClientResponse) bool {
 	}
 }
 
-func ClientMessageTransportForTest(response ClientResponse) transportpkg.MessageResponse {
+func ClientMessageTransportForTest(response ClientResponse) carrier.MessageTransportResponse {
 	if response, ok := response.(MessageStreamingResponse); ok {
 		return response.Response
 	}
-	return transportpkg.MessageResponse{}
+	return carrier.MessageTransportResponse{}
 }
 
 type deterministicResponseIDGenerator struct{}
@@ -116,19 +115,16 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Full.Clone(),
 		advance: &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
 	}
-	document, decisions, err := backend.Codec.Encode(request)
+	document, _, err := backend.Codec.Encode(request)
 	call.document = document
-	commitDecisionsBestEffort(ctx, runner.DecisionSink, in.ExchangeID, decisions)
 	if err != nil {
 		return nil, err
 	}
 	ingress, err := backend.Transport.Send(ctx, document)
 	if err != nil {
-		recordExchangeEvidenceBestEffort(ctx, runner.DecisionSink, in.ExchangeID, exchangeEvidence{decisions: backendErrorShapeDecisions(call, err)})
 		return nil, err
 	}
-	response, _, decisionsEffects, err := completeProviderCall(ctx, call, ingress, responseID, runner)
-	commitDecisionsBestEffort(ctx, runner.DecisionSink, in.ExchangeID, decisionsEffects)
+	response, _, _, err := completeProviderCall(ctx, call, ingress, responseID, runner)
 	return response, err
 }
 
@@ -136,15 +132,6 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 // Production code has no provider-only execution entrypoint.
 func RunPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
 	return runPreparedProviderForTest(ctx, runner, in)
-}
-
-type recordingDecisionSink struct {
-	effects []compat.Decision
-}
-
-func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
-	s.effects = append(s.effects, effects...)
-	return nil
 }
 
 func bufferedProviderTransport(raw []byte) testProviderTransport {
@@ -166,7 +153,7 @@ func streamingProviderTransport(stream io.ReadCloser) testProviderTransport {
 	}
 }
 
-func newTransportRequestWithTurn(method, url string, turn string, body map[string]any) transportpkg.TransportRequest {
+func newTransportRequestWithTurn(method, url string, turn string, body map[string]any) carrier.TransportRequest {
 	if body == nil {
 		body = make(map[string]any)
 	}
@@ -255,9 +242,9 @@ func (t testProviderTransport) Send(ctx context.Context, target provider.TargetS
 
 type testBackendCodec struct{}
 
-func (testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+func (testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	result, err := (testProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: req.Canonical}, req.Delivery, "")
-	return result.Document, result.Decisions, err
+	return result.Document, result.Changes, err
 }
 
 func (testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
@@ -265,10 +252,10 @@ func (testBackendCodec) Decode(ctx context.Context, request provider.Request, in
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		result, err := (testProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	case provider.DocumentIngress:
 		result, err := (testProviderDocumentDecoder{}).DecodeProviderDocument(ctx, in.Document, exchangeID)
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
 	}
@@ -362,7 +349,7 @@ func (testClientCodec) EncodeResponseStream(ctx context.Context, _ canonical.Can
 	body := wire.NewEncodedResponseBody(ctx, events, func(event canonical.Event) ([][]byte, error) {
 		if status, terminal := responseTerminalStatus(event); terminal {
 			if status == canonical.EnvelopeStatusCompleted {
-				complete(testHistoryResponse([]byte("ok")))
+				complete(testHistoryResponse([]byte("ok")), nil)
 				return [][]byte{[]byte("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n")}, nil
 			} else {
 				fail(errors.New("terminal response failed"))
@@ -377,7 +364,7 @@ func (testClientCodec) EncodeResponseMessages(_ context.Context, _ canonical.Can
 	completion, complete, fail := wire.NewResponseCompletion()
 	messages := wire.NewEncodedResponseMessages(events, func(event canonical.Event) ([][]byte, error) {
 		if status, terminal := responseTerminalStatus(event); terminal && status == canonical.EnvelopeStatusCompleted {
-			complete(testHistoryResponse([]byte("ok")))
+			complete(testHistoryResponse([]byte("ok")), nil)
 		}
 		return [][]byte{[]byte(`{"type":"test.event"}`)}, nil
 	}, completion, fail)

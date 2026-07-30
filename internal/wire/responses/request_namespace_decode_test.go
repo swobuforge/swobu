@@ -42,7 +42,7 @@ func TestDecodeRequest_PreservesNamespaceToolsAndResolvesLiteralToolChoice(t *te
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
+	got, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -118,7 +118,7 @@ func TestDecodeRequest_RejectsNestedWebSearchBecauseBuiltInCannotBeRenamed(t *te
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
+	_, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -153,7 +153,7 @@ func TestDecodeRequest_DecodesUnnamespacedFlatFunctionToolName(t *testing.T) {
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
+	got, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -191,7 +191,7 @@ func TestDecodeRequest_DecodesLeadingUnderscorePlainFunctionToolNameRaw(t *testi
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
+	got, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})
@@ -241,7 +241,7 @@ func TestDecodeRequest_DecodesProjectedLookingFlatFunctionToolNameAsRaw(t *testi
 		]
 	}`)
 
-	got, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
+	got, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 		Family: protocolkind.Responses,
 		Raw:    raw,
 	})

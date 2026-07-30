@@ -2,39 +2,43 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/net/websocket"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/routing"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 const websocketRequestTypeResponseCreate = "response.create"
 
+var errResponsesWebsocketForbidden = errors.New("responses websocket access is forbidden")
+
 type streamDrainCounters struct {
-	EventCount  int
-	FrameCount  int
-	FrameBytes  int
-	FrameSHA256 string
+	EventCount int
+	FrameCount int
+	FrameBytes int
 }
 
 func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
 	server := websocket.Server{
-		Handshake: nil,
+		Handshake: func(_ *websocket.Config, request *http.Request) error {
+			return validateResponsesWebsocketAccess(request)
+		},
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
 			defer func() {
 				_ = conn.Close()
@@ -43,6 +47,102 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 		}),
 	}
 	server.ServeHTTP(w, r)
+}
+
+func validateResponsesWebsocketAccess(request *http.Request) error {
+	peerHost, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr)) // swobu:io-string source=boundary
+	if err != nil {
+		return errResponsesWebsocketForbidden
+	}
+	peer, err := netip.ParseAddr(peerHost)
+	if err != nil || !peer.IsLoopback() {
+		return errResponsesWebsocketForbidden
+	}
+
+	scheme := "http"
+	if request.TLS != nil {
+		scheme = "https"
+	}
+	requestAuthority, ok := normalizedLoopbackAuthority(request.Host, scheme)
+	if !ok {
+		return errResponsesWebsocketForbidden
+	}
+
+	origins := request.Header.Values("Origin")
+	if len(origins) == 0 {
+		return nil
+	}
+	if len(origins) != 1 {
+		return errResponsesWebsocketForbidden
+	}
+	rawOrigin := strings.TrimSpace(origins[0]) // swobu:io-string source=boundary
+	if rawOrigin == "" || strings.EqualFold(rawOrigin, "null") {
+		return errResponsesWebsocketForbidden
+	}
+	origin, err := url.Parse(rawOrigin)
+	if err != nil ||
+		!strings.EqualFold(origin.Scheme, scheme) ||
+		origin.Host == "" ||
+		origin.User != nil ||
+		origin.Opaque != "" ||
+		origin.Path != "" ||
+		origin.RawPath != "" ||
+		origin.RawQuery != "" ||
+		origin.ForceQuery ||
+		origin.Fragment != "" {
+		return errResponsesWebsocketForbidden
+	}
+	originAuthority, ok := normalizedLoopbackAuthority(origin.Host, scheme)
+	if !ok || originAuthority != requestAuthority {
+		return errResponsesWebsocketForbidden
+	}
+	return nil
+}
+
+func normalizedLoopbackAuthority(authority string, scheme string) (string, bool) {
+	raw := strings.TrimSpace(authority) // swobu:io-string source=boundary
+	if raw == "" || strings.Contains(raw, "%") {
+		return "", false
+	}
+	parsed, err := url.Parse("//" + raw)
+	if err != nil ||
+		parsed.Host == "" ||
+		parsed.User != nil ||
+		parsed.Path != "" ||
+		parsed.RawQuery != "" ||
+		parsed.Fragment != "" ||
+		strings.HasSuffix(parsed.Host, ":") {
+		return "", false
+	}
+
+	host := parsed.Hostname()
+	switch {
+	case strings.EqualFold(host, "localhost"):
+		host = "localhost"
+	default:
+		address, parseErr := netip.ParseAddr(host)
+		if parseErr != nil || !address.IsLoopback() {
+			return "", false
+		}
+		host = address.String()
+	}
+
+	port := parsed.Port()
+	if port == "" {
+		switch strings.ToLower(scheme) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return "", false
+		}
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", false
+	}
+	return net.JoinHostPort(host, strconv.Itoa(portNumber)), true
 }
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
@@ -150,7 +250,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	})
 	if err != nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
-		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, transportpkg.DeliveryResult{Kind: transportpkg.DeliveryExchangeFailed, Err: err})
+		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err})
 		return err
 	}
 	result := writeResponsesWebsocketSuccess(r.Context(), conn, requestID, out.Response, &timing)
@@ -158,21 +258,21 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	return result.Err
 }
 
-func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *trafficevidence.Timing) transportpkg.DeliveryResult {
+func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *trafficevidence.Timing) delivery.Result {
 	streaming, ok := response.(exchange.MessageStreamingResponse)
 	if !ok {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("websocket response is not message-oriented streaming output")}
+		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("websocket response is not message-oriented streaming output")}
 	}
 	transportResponse := streaming.Response
 	if transportResponse.Header.Get("Content-Type") != "application/json" {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("websocket response does not use websocket framing")}
+		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("websocket response does not use websocket framing")}
 	}
 	if transportResponse.Messages == nil {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing message stream")}
+		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing message stream")}
 	}
 	err := writeResponsesWebsocketStream(ctx, conn, requestID, transportResponse, timing)
 	if err == nil {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
+		return delivery.Result{Kind: delivery.Succeeded}
 	}
 	var writeErr websocketFrameWriteError
 	if errors.As(err, &writeErr) {
@@ -181,7 +281,7 @@ func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, r
 	return classifyDeliveryFailure(ctx, nil, err, nil)
 }
 
-func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response transportpkg.MessageResponse, timing *trafficevidence.Timing) error {
+func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response carrier.MessageTransportResponse, timing *trafficevidence.Timing) error {
 	stats, err := drainWebsocketMessagesWithStats(ctx, response.Messages, &websocketFrameSink{conn: conn, timing: timing})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -196,7 +296,6 @@ func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, re
 		"event_count", stats.EventCount,
 		"frame_count", stats.FrameCount,
 		"frame_bytes", stats.FrameBytes,
-		"frame_sha256", stats.FrameSHA256,
 	)
 	return nil
 }
@@ -205,24 +304,21 @@ type websocketFrameWriter interface {
 	WriteFrame([]byte) error
 }
 
-func drainWebsocketMessagesWithStats(ctx context.Context, messages transportpkg.MessageStream, sink websocketFrameWriter) (streamDrainCounters, error) {
+func drainWebsocketMessagesWithStats(ctx context.Context, messages carrier.MessageStream, sink websocketFrameWriter) (streamDrainCounters, error) {
 	defer func() { _ = messages.Close(ctx) }()
 	stats := streamDrainCounters{}
-	hash := sha256.New()
 	for {
 		message, err := messages.Next(ctx)
 		if len(message) > 0 {
 			if writeErr := sink.WriteFrame(message); writeErr != nil {
 				return stats, websocketFrameWriteError{err: writeErr}
 			}
-			_, _ = hash.Write(message)
 			stats.EventCount++
 			stats.FrameCount++
 			stats.FrameBytes += len(message)
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				stats.FrameSHA256 = hex.EncodeToString(hash.Sum(nil))
 				return stats, nil
 			}
 			return stats, err

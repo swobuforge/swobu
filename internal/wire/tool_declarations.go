@@ -25,26 +25,34 @@ func PrepareFlatToolSet(
 ) (FlatToolSet, error) {
 	var flattened []canonical.ToolDeclaration
 	flattenedNamespaces := 0
-	var appendDeclaration func(canonical.ToolDeclaration)
-	appendDeclaration = func(declaration canonical.ToolDeclaration) {
+	var appendDeclaration func(canonical.ToolDeclaration) error
+	appendDeclaration = func(declaration canonical.ToolDeclaration) error {
 		namespace, ok := declaration.Namespace()
 		if !ok {
 			flattened = append(flattened, declaration.Clone())
-			return
+			return nil
+		}
+		if _, isMCP := namespace.MCPSource(); isMCP {
+			return provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.Occurrence{}, "flat provider protocols cannot represent native MCP declarations")
 		}
 		flattenedNamespaces++
 		for _, child := range namespace.Tools() {
-			appendDeclaration(child)
+			if err := appendDeclaration(child); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
 	for _, declaration := range declarations {
-		appendDeclaration(declaration)
+		if err := appendDeclaration(declaration); err != nil {
+			return FlatToolSet{}, err
+		}
 	}
 	seen := make(map[string]struct{}, len(flattened))
 	for _, declaration := range flattened {
 		wireIdentity := strings.TrimSpace(targetName(declaration))
 		if _, duplicate := seen[wireIdentity]; duplicate {
-			return FlatToolSet{}, provider.NewIncompatibleTarget("flat provider tool declarations require unique target identities")
+			return FlatToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsName, canonical.Occurrence{}, "flat provider tool declarations require unique target identities")
 		}
 		seen[wireIdentity] = struct{}{}
 	}

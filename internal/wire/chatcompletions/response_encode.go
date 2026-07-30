@@ -12,7 +12,7 @@ import (
 )
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
-	items, decisions, err := projectChatCompletionsWebSearchLifecycles(output.Items())
+	items, changes, err := projectChatCompletionsWebSearchLifecycles(output.Items())
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
@@ -25,9 +25,9 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 		message.Content != "" || len(message.ToolCalls) > 0,
 		output.Completion().Reason(),
 	)
-	decisions = append(decisions, projectionDecisions...)
+	changes = append(changes, projectionDecisions...)
 	if err != nil {
-		return wire.ClientDocumentResult{Decisions: decisions}, err
+		return wire.ClientDocumentResult{Changes: changes}, err
 	}
 	responseFingerprint, err := fingerprintChatCompletionsResponseItems(items)
 	if err != nil {
@@ -49,7 +49,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 	}
 	result := wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{}),
-		Decisions:           decisions,
+		Changes:             changes,
 		ResponseFingerprint: &responseFingerprint,
 	}
 	return result, nil
@@ -67,19 +67,18 @@ func chatItemsContainReasoning(items []canonical.CanonicalItem) bool {
 // finalizeChatClientProjection is the delivery-independent residual-validity
 // rule for standard Chat output. Both encoders supply facts from their native
 // traversal, receive the same loss decision, and reject empty success.
-func finalizeChatClientProjection(sawReasoning, sawVisible bool, finishReason string) ([]compat.Decision, error) {
-	var decisions []compat.Decision
+func finalizeChatClientProjection(sawReasoning, sawVisible bool, finishReason string) ([]compat.Change, error) {
+	var changes []compat.Change
 	if sawReasoning {
-		decisions = append(decisions, compat.Decision{
-			Feature: compat.ResponseItemsReasoning,
-			Outcome: compat.Drop,
-			Subject: "client:chat_completions/response",
+		changes = append(changes, compat.Change{
+			Capability: canonical.ResponseItemsReasoning,
+			Kind:       compat.Omission,
 		})
 	}
 	// content_filter is itself an explicit client-visible non-answer terminal;
 	// an empty stop remains fabricated success.
 	if !sawVisible && finishReason != "content_filter" {
-		return decisions, canonical.NewBackendError("", 0, "backend response has no Chat Completions semantics after client projection", "")
+		return changes, canonical.NewBackendError("", 0, "backend response has no Chat Completions semantics after client projection", "")
 	}
-	return decisions, nil
+	return changes, nil
 }

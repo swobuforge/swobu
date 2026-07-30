@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transport"
 )
 
 // Route identifies the chosen execution destination in traffic-evidence form.
@@ -166,7 +166,7 @@ type TrafficEvent struct {
 	adaptationChain           []string
 	result                    ResultClass
 	statusCode                int
-	deliveryKind              transport.DeliveryResultKind
+	deliveryKind              delivery.ResultKind
 	canonicalErrorCode        canonical.ErrorCode
 	timing                    Timing
 	attemptCount              int
@@ -273,7 +273,7 @@ func cloneStageReports(src []StageReport) []StageReport {
 type TerminalOutcome struct {
 	Result             ResultClass
 	StatusCode         int
-	DeliveryKind       transport.DeliveryResultKind
+	DeliveryKind       delivery.ResultKind
 	CanonicalErrorCode canonical.ErrorCode
 	AttemptCount       int
 	FallbackRecovered  bool
@@ -311,7 +311,7 @@ func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (T
 	if _, ok := profile.ParseProviderID(string(normalized.ProviderSpec)); !ok {
 		return TrafficEvent{}, fmt.Errorf("terminal traffic event provider %q is not a catalog id", normalized.ProviderSpec)
 	}
-	if !transport.ValidDeliveryResultKind(outcome.DeliveryKind) {
+	if !delivery.ValidResultKind(outcome.DeliveryKind) {
 		return TrafficEvent{}, fmt.Errorf("terminal traffic event delivery kind %q is not recognized", outcome.DeliveryKind)
 	}
 	if outcome.CanonicalErrorCode != "" && !canonical.ValidErrorCode(outcome.CanonicalErrorCode) {
@@ -461,34 +461,34 @@ func normalizeTrafficEventUniqueStrings(src []string) []string {
 	return unique
 }
 
-func (e TrafficEvent) RequestID() RequestID                       { return e.requestID }
-func (e TrafficEvent) EventKind() EventKind                       { return e.eventKind }
-func (e TrafficEvent) Workspace() string                          { return e.workspace }
-func (e TrafficEvent) ClientProtocol() ClientProtocol             { return e.clientProtocol }
-func (e TrafficEvent) RequestPath() canonical.NormalizedPath      { return e.requestPath }
-func (e TrafficEvent) ClientHandler() ClientHandler               { return e.clientHandler }
-func (e TrafficEvent) ClientFamily() ClientFamily                 { return e.clientFamily }
-func (e TrafficEvent) NormalizedOp() NormalizedOp                 { return e.normalizedOp }
-func (e TrafficEvent) Route() Route                               { return e.route }
-func (e TrafficEvent) BridgeID() string                           { return e.bridgeID }
-func (e TrafficEvent) DecisionReason() string                     { return e.decisionReason }
-func (e TrafficEvent) AdaptationChain() []string                  { return slices.Clone(e.adaptationChain) }
-func (e TrafficEvent) Result() ResultClass                        { return e.result }
-func (e TrafficEvent) StatusCode() int                            { return e.statusCode }
-func (e TrafficEvent) DeliveryKind() transport.DeliveryResultKind { return e.deliveryKind }
-func (e TrafficEvent) CanonicalErrorCode() canonical.ErrorCode    { return e.canonicalErrorCode }
-func (e TrafficEvent) Timing() Timing                             { return e.timing }
-func (e TrafficEvent) AttemptCount() int                          { return e.attemptCount }
-func (e TrafficEvent) FallbackRecovered() bool                    { return e.fallbackRecovered }
-func (e TrafficEvent) ContinuityRecovered() bool                  { return e.continuityRecovered }
-func (e TrafficEvent) ContinuityRecoveryTrigger() string          { return e.continuityRecoveryTrigger }
-func (e TrafficEvent) ModelResolutionMode() string                { return e.modelResolutionMode }
-func (e TrafficEvent) ModelRequested() string                     { return e.modelRequested }
-func (e TrafficEvent) ModelResolved() string                      { return e.modelResolved }
-func (e TrafficEvent) WorkspaceRouteModelID() string              { return e.workspaceRouteModelID }
-func (e TrafficEvent) ProviderSpec() profile.ProviderID           { return e.providerSpec }
-func (e TrafficEvent) ProviderModel() string                      { return e.providerModel }
-func (e TrafficEvent) TokenUsage() TokenUsage                     { return e.tokenUsage }
+func (e TrafficEvent) RequestID() RequestID                    { return e.requestID }
+func (e TrafficEvent) EventKind() EventKind                    { return e.eventKind }
+func (e TrafficEvent) Workspace() string                       { return e.workspace }
+func (e TrafficEvent) ClientProtocol() ClientProtocol          { return e.clientProtocol }
+func (e TrafficEvent) RequestPath() canonical.NormalizedPath   { return e.requestPath }
+func (e TrafficEvent) ClientHandler() ClientHandler            { return e.clientHandler }
+func (e TrafficEvent) ClientFamily() ClientFamily              { return e.clientFamily }
+func (e TrafficEvent) NormalizedOp() NormalizedOp              { return e.normalizedOp }
+func (e TrafficEvent) Route() Route                            { return e.route }
+func (e TrafficEvent) BridgeID() string                        { return e.bridgeID }
+func (e TrafficEvent) DecisionReason() string                  { return e.decisionReason }
+func (e TrafficEvent) AdaptationChain() []string               { return slices.Clone(e.adaptationChain) }
+func (e TrafficEvent) Result() ResultClass                     { return e.result }
+func (e TrafficEvent) StatusCode() int                         { return e.statusCode }
+func (e TrafficEvent) DeliveryKind() delivery.ResultKind       { return e.deliveryKind }
+func (e TrafficEvent) CanonicalErrorCode() canonical.ErrorCode { return e.canonicalErrorCode }
+func (e TrafficEvent) Timing() Timing                          { return e.timing }
+func (e TrafficEvent) AttemptCount() int                       { return e.attemptCount }
+func (e TrafficEvent) FallbackRecovered() bool                 { return e.fallbackRecovered }
+func (e TrafficEvent) ContinuityRecovered() bool               { return e.continuityRecovered }
+func (e TrafficEvent) ContinuityRecoveryTrigger() string       { return e.continuityRecoveryTrigger }
+func (e TrafficEvent) ModelResolutionMode() string             { return e.modelResolutionMode }
+func (e TrafficEvent) ModelRequested() string                  { return e.modelRequested }
+func (e TrafficEvent) ModelResolved() string                   { return e.modelResolved }
+func (e TrafficEvent) WorkspaceRouteModelID() string           { return e.workspaceRouteModelID }
+func (e TrafficEvent) ProviderSpec() profile.ProviderID        { return e.providerSpec }
+func (e TrafficEvent) ProviderModel() string                   { return e.providerModel }
+func (e TrafficEvent) TokenUsage() TokenUsage                  { return e.tokenUsage }
 func (e TrafficEvent) Mutations() []Mutation {
 	return cloneMutations(e.wireMutations)
 }

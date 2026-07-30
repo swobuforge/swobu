@@ -25,14 +25,7 @@ func (testCredentialResolver) ResolveCredential(context.Context, string, string)
 	return "token_test", nil
 }
 
-type recordingDecisionSink struct {
-	effects []compat.Decision
-}
-
-func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
-	s.effects = append(s.effects, effects...)
-	return nil
-}
+type recordingChanges = []compat.Change
 
 func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
@@ -44,19 +37,19 @@ func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 }
 
 type testProviderRequest struct {
-	Request      canonical.CanonicalRequest
-	Contract     exchange.ExecutionContract
-	Target       provider.TargetSnapshot
-	ExchangeID   string
-	DecisionSink compat.Sink
+	Request    canonical.CanonicalRequest
+	Contract   exchange.ExecutionContract
+	Target     provider.TargetSnapshot
+	ExchangeID string
+	Changes    *[]compat.Change
 }
 
-func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
-	var sink compat.Sink
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...*[]compat.Change) testProviderRequest {
+	var sink *[]compat.Change
 	if len(sinks) > 0 {
 		sink = sinks[0]
 	}
-	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, Changes: sink}
 }
 
 func mustProviderRequestWithDocument(t *testing.T, request canonical.CanonicalRequest, contract exchange.ExecutionContract, target provider.TargetSnapshot) testProviderRequest {
@@ -71,13 +64,9 @@ func executeProviderRequest(registry ProviderRegistry, ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	doc, decisions, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
-	if req.DecisionSink != nil && len(decisions) > 0 {
-		effects := make([]compat.Decision, 0, len(decisions))
-		for _, decision := range decisions {
-			effects = append(effects, compat.Decision{Feature: decision.Feature, Outcome: decision.Outcome, Subject: decision.Subject})
-		}
-		_ = req.DecisionSink.Commit(ctx, req.ExchangeID, effects)
+	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	if req.Changes != nil && len(changes) > 0 {
+		*req.Changes = append(*req.Changes, compat.CloneChanges(changes)...)
 	}
 	if err != nil {
 		return nil, err
@@ -219,13 +208,13 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.DecisionSink = sink
+	req.Changes = sink
 	req.ExchangeID = "ex-cache-intent-openai"
 
 	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
@@ -242,8 +231,8 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 	if _, ok := body["prompt_cache_retention"]; ok {
 		t.Fatalf("prompt_cache_retention must be omitted")
 	}
-	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
+	if len(*sink) != 0 {
+		t.Fatalf("compatibility changes len=%d want 0", len(*sink))
 	}
 }
 
@@ -268,13 +257,13 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.DecisionSink = sink
+	req.Changes = sink
 	req.ExchangeID = "ex-cache-intent-ollama"
 
 	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
@@ -291,8 +280,8 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 	if _, ok := body["prompt_cache_retention"]; ok {
 		t.Fatalf("prompt_cache_retention must be omitted on ollama")
 	}
-	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
+	if len(*sink) != 0 {
+		t.Fatalf("compatibility changes len=%d want 0", len(*sink))
 	}
 }
 
@@ -329,21 +318,22 @@ func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T
 		OutputFormat: canonical.Specify(outputFormat),
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
 	)
-	req.DecisionSink = sink
+	req.Changes = sink
 	req.ExchangeID = "ex-structured-output"
 
 	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
 	}
 
-	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Exact)
-	assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Exact)
+	if len(*sink) != 0 {
+		t.Fatalf("exact structured-output lowering changes = %#v", *sink)
+	}
 }
 
 func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
@@ -368,20 +358,20 @@ func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *tes
 		},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-bedrock", "bedrock", upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages"),
 	)
-	req.DecisionSink = sink
+	req.Changes = sink
 	req.ExchangeID = "ex-bedrock-strict-drop"
 
 	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("bedrock execution failed: %v", err)
 	}
 
-	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Drop)
+	assertProviderDecision(t, *sink, canonical.RequestToolsSchemaStrict, compat.Omission)
 }
 
 func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
@@ -406,20 +396,20 @@ func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *t
 		},
 	})
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
 		provider.NewTargetSnapshot("backend-anthropic", "anthropic", upstream.URL+"/v1", "credential-ref", protocolkind.Messages, "", "messages"),
 	)
-	req.DecisionSink = sink
+	req.Changes = sink
 	req.ExchangeID = "ex-anthropic-strict-drop"
 
 	if _, err := executeProviderRequest(composition, context.Background(), req); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 
-	assertProviderDecision(t, sink.effects, compat.RequestToolsSchemaStrict, compat.Drop)
+	assertProviderDecision(t, *sink, canonical.RequestToolsSchemaStrict, compat.Omission)
 }
 
 func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t *testing.T) {
@@ -487,8 +477,8 @@ func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 				provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "", "messages"),
 			)
 			req.ExchangeID = "ex-structured-output"
-			sink := &recordingDecisionSink{}
-			req.DecisionSink = sink
+			sink := &recordingChanges{}
+			req.Changes = sink
 
 			if _, err = executeProviderRequest(composition, context.Background(), req); err != nil {
 				t.Fatal(err)
@@ -502,17 +492,17 @@ func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 			if !ok || format["type"] != "json_schema" {
 				t.Fatalf("output_config.format = %#v", outputConfig["format"])
 			}
-			assertProviderDecision(t, sink.effects, compat.RequestOutputFormat, compat.Approx)
+			assertProviderDecision(t, *sink, canonical.RequestOutputFormat, compat.Approximation)
 		})
 	}
 }
 
-func assertProviderDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {
+func assertProviderDecision(t *testing.T, changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) {
 	t.Helper()
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
+	for _, decision := range changes {
+		if decision.Capability == feature && decision.Kind == outcome {
 			return
 		}
 	}
-	t.Fatalf("provider decisions = %#v, want %s/%s", decisions, feature, outcome)
+	t.Fatalf("provider changes = %#v, want %s/%v", changes, feature, outcome)
 }

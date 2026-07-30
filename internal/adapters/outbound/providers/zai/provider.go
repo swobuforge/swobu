@@ -54,18 +54,18 @@ type webSearchOptions struct {
 	Enable bool `json:"enable"`
 }
 
-func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
-	document, decisions, err := protocolcodec.LowerChatCompletionsRequest(req)
+func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
+	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 
 	if err := rewriteWebSearch(&document); err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, decisions, err
+	return encoded, changes, err
 }
 
 func rewriteWebSearch(document *chatcompletions.ProviderRequestDocument) error {
@@ -75,7 +75,7 @@ func rewriteWebSearch(document *chatcompletions.ProviderRequestDocument) error {
 	}
 	options, ok := raw.(map[string]any)
 	if !ok || len(options) != 0 {
-		return provider.NewIncompatibleTarget("Z.AI target cannot represent the requested canonical web-search options")
+		return provider.IncompatibleCapability(canonical.RequestTools, canonical.Occurrence{}, "Z.AI target cannot represent the requested canonical web-search options")
 	}
 	delete(document.Payload, "web_search_options")
 	tools := make([]requestTool, 0, len(document.Tools)+1)

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -19,7 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 const (
@@ -34,7 +33,6 @@ type RequestIngress struct {
 
 type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
-	DecisionSink     compat.Sink
 	CheckpointStore  session.Store
 	ResponseIDs      ResponseIDGenerator
 	ImageFetcher     provider.ImageFetcher
@@ -97,19 +95,10 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	if policyResolver == nil {
 		policyResolver = StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()}
 	}
-	sink := policies.DecisionSink
-	if sink == nil {
-		if policies.ObservationStore != nil {
-			sink = compatibilityObservationSink{store: policies.ObservationStore}
-		} else {
-			sink = compat.NoopSink{}
-		}
-	}
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
 			Runtime:         runtime,
-			DecisionSink:    sink,
 			CheckpointStore: policies.CheckpointStore,
 			ResponseIDs:     policies.ResponseIDs,
 			ImageFetcher:    policies.ImageFetcher,
@@ -120,7 +109,7 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 
 type RequestInput struct {
 	Workspace       routing.WorkspaceSlug
-	Request         transportpkg.TransportRequest
+	Request         carrier.TransportRequest
 	ClientHandler   trafficevidence.ClientHandler
 	ClientFamily    canonical.ClientFamily
 	ResponseFraming delivery.Framing
@@ -134,6 +123,7 @@ type RequestOutput struct {
 	Response        ClientResponse
 	Target          provider.TargetSnapshot
 	TrafficEvidence *TrafficEvidenceInput
+	Compatibility   *wire.ResponseCompletion
 }
 
 // TrafficEvidenceInput is the immutable exchange fact set completed by the
@@ -216,7 +206,6 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return RequestOutput{}, err
 	}
 	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
-	commitDecisionsBestEffort(ctx, h.runner.DecisionSink, exchangeID, decodeResult.Decisions)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -229,14 +218,14 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	// The normalized path is threaded into the exchange input so terminal evidence
 	// is complete on both success and failure — an exchange error finalizes the
 	// evidence inside runExchange, where it already holds the path.
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, workspace, in.Timing, normalizedPath)
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath)
 	if err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportpkg.DeliveryResult, timing trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
+func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.Result, timing trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
 	if evidence == nil {
 		return trafficevidence.TrafficEvent{}, errors.New("traffic evidence input is absent")
 	}
@@ -252,6 +241,10 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 		return trafficevidence.TrafficEvent{}, routeErr
 	}
 	resultClass, statusCode := requestOutcomeEvidence(result, evidence.response)
+	diagnostics := requestOutcomeDiagnostics(result.Err)
+	if evidence.routing.possibleDuplicateExecution {
+		diagnostics = append(diagnostics, "possible_duplicate_provider_execution_and_cost")
+	}
 	base := trafficevidence.TrafficEventInput{
 		RequestID:             requestID,
 		Workspace:             evidence.workspace.Slug().String(),
@@ -265,7 +258,7 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 		WorkspaceRouteModelID: evidence.routeName.String(),
 		ProviderSpec:          profile.ProviderID(evidence.target.ProviderSpec),
 		ProviderModel:         evidence.target.Model,
-		ExchangeDiagnostics:   requestOutcomeDiagnostics(result.Err),
+		ExchangeDiagnostics:   diagnostics,
 	}
 	outcome := trafficevidence.TerminalOutcome{
 		Result:             resultClass,
@@ -278,12 +271,12 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result transportp
 	return trafficevidence.NewTerminalTrafficEvent(base, outcome)
 }
 
-func requestOutcomeEvidence(deliveryResult transportpkg.DeliveryResult, response ClientResponse) (trafficevidence.ResultClass, int) {
-	if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+func requestOutcomeEvidence(deliveryResult delivery.Result, response ClientResponse) (trafficevidence.ResultClass, int) {
+	if deliveryResult.Kind == delivery.ClientCancelled {
 		return trafficevidence.ResultClassCancelled, 499
 	}
 	err := deliveryResult.Err
-	if deliveryResult.Kind == transportpkg.DeliverySucceeded && err == nil {
+	if deliveryResult.Kind == delivery.Succeeded && err == nil {
 		statusCode := clientResponseStatus(response)
 		if statusCode <= 0 {
 			statusCode = http.StatusOK
@@ -378,7 +371,7 @@ func requestOutcomeDiagnostics(err error) []string {
 	return []string{strings.TrimSpace(err.Error())} // swobu:io-string source=boundary
 }
 
-func newClientRequestDocument(family canonical.ClientFamily, req transportpkg.TransportRequest, maxBytes int64, exchangeID string) (carrier.Document, error) {
+func newClientRequestDocument(family canonical.ClientFamily, req carrier.TransportRequest, maxBytes int64, exchangeID string) (carrier.Document, error) {
 	body, err := readTransportRequestBody(req.Body, maxBytes)
 	if err != nil {
 		return carrier.Document{}, canonical.BadRequest("request body could not be read")
@@ -414,8 +407,8 @@ func readTransportRequestBody(body io.ReadCloser, maxBytes int64) ([]byte, error
 	return raw, nil
 }
 
-func NewTransportRequest(method string, url string, header http.Header, body []byte) transportpkg.TransportRequest {
-	return transportpkg.TransportRequest{
+func NewTransportRequest(method string, url string, header http.Header, body []byte) carrier.TransportRequest {
+	return carrier.TransportRequest{
 		Method: method,
 		URL:    url,
 		Header: cloneHeader(header),

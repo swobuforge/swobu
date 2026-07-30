@@ -111,11 +111,8 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 	committer := &checkpointCommitter{
 		exchangeID: "next", workspaceSlug: "dev", store: store,
 		request: prepared.Full, resolvedMedia: prepared.ResolvedMedia,
-		capture: &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
-			state: checkpointCaptureCompleted, response: nextResponse,
-		}},
 	}
-	if err := committer.commitDocument(context.Background(), nil); err != nil {
+	if err := committer.commitDocument(context.Background(), nextResponse, nil); err != nil {
 		t.Fatal(err)
 	}
 	nextCheckpoint, found, err := store.Get(context.Background(), "dev", "resp_next")
@@ -296,7 +293,7 @@ func TestExplicitCrossSchemePredecessorStoresNoFalseFingerprintRoot(t *testing.T
 	}
 }
 
-func TestBufferedCheckpointCommitsOnlyAfterClientEncoding(t *testing.T) {
+func TestBufferedCheckpointCommitsBeforeBodyPublication(t *testing.T) {
 	store := session.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -326,7 +323,7 @@ func TestBufferedCheckpointCommitsOnlyAfterClientEncoding(t *testing.T) {
 	}
 }
 
-func TestStreamingCheckpointCommitsOnlyAfterTerminalClientEncoding(t *testing.T) {
+func TestStreamingCheckpointCommitsBeforeTerminalSuccessPublication(t *testing.T) {
 	store := session.NewMemoryStore()
 	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader("ignored")))).WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -351,7 +348,7 @@ func TestStreamingCheckpointCommitsOnlyAfterTerminalClientEncoding(t *testing.T)
 	}
 }
 
-func TestMessageCheckpointCommitsOnlyAfterTerminalClientEncoding(t *testing.T) {
+func TestMessageCheckpointCommitsBeforeTerminalSuccessPublication(t *testing.T) {
 	store := session.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -422,9 +419,8 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 	committer := &checkpointCommitter{
 		exchangeID: "no_history", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"), advance: &historyAdvance{Request: testHistoryRequest([]byte("request"))},
-		capture: capture,
 	}
-	if err := committer.commitDocument(context.Background(), nil); err != nil {
+	if err := committer.commitDocument(context.Background(), capture.snapshot().response, nil); err != nil {
 		t.Fatal(err)
 	}
 	record, found, err := store.Get(context.Background(), "alpha", "swobu_no_history")
@@ -451,15 +447,12 @@ func TestHistoryComposeFailureUsesOptionalIndexDiagnosticAndStillCommits(t *test
 		exchangeID: "compose_failure", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"),
 		advance: &historyAdvance{Previous: &base, Request: testHistoryRequest([]byte("request"))},
-		capture: &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
-			state: checkpointCaptureCompleted, response: response,
-		}},
 	}
 	var logs bytes.Buffer
 	previousLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	defer slog.SetDefault(previousLogger)
-	if err := committer.commitDocument(context.Background(), testHistoryResponse([]byte("response"))); err != nil {
+	if err := committer.commitDocument(context.Background(), response, testHistoryResponse([]byte("response"))); err != nil {
 		t.Fatal(err)
 	}
 	record, found, err := store.Get(context.Background(), "alpha", "swobu_compose_failure")

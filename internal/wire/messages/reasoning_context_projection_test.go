@@ -12,12 +12,12 @@ import (
 
 func TestMessagesResponsesReasoningContextIsTargetLocalCompatibility(t *testing.T) {
 	request := messagesRequestWithResponsesReasoningContext(t)
-	sink := &compat.RecordingSink{}
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange")
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertMessagesReasoningContextDecision(t, sink.Decisions(), compat.Drop)
+	assertMessagesReasoningContextDecision(t, changes, compat.Omission)
 	if strings.Contains(string(document.RawBytes()), "all_turns") {
 		t.Fatalf("Messages request leaked Responses context: %s", document.RawBytes())
 	}
@@ -36,12 +36,12 @@ func messagesRequestWithResponsesReasoningContext(t *testing.T) canonical.Canoni
 	})
 }
 
-func assertMessagesReasoningContextDecision(t *testing.T, decisions []compat.Decision, outcome compat.Outcome) {
+func assertMessagesReasoningContextDecision(t *testing.T, changes []compat.Change, outcome compat.Kind) {
 	t.Helper()
-	for _, decision := range decisions {
-		if decision.Feature == compat.RequestReasoningContextResponses && decision.Outcome == outcome {
+	for _, decision := range changes {
+		if decision.Capability == canonical.RequestReasoningContextResponses && decision.Kind == outcome {
 			return
 		}
 	}
-	t.Fatalf("decisions = %#v, want %s/%s", decisions, compat.RequestReasoningContextResponses, outcome)
+	t.Fatalf("changes = %#v, want %s/%v", changes, canonical.RequestReasoningContextResponses, outcome)
 }

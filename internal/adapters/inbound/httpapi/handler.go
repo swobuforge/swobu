@@ -9,10 +9,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -20,7 +20,6 @@ import (
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/platform/httpcontent"
 	"github.com/swobuforge/swobu/internal/routing"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 const (
@@ -125,7 +124,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, err)
 		deliveryResult := exchangeFailureDeliveryResult(err)
-		if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
 		}
@@ -137,9 +136,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, nil)
 
 	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
-	if deliveryResult.Kind != transportpkg.DeliverySucceeded {
+	if deliveryResult.Kind != delivery.Succeeded {
 		err := deliveryResult.Err
-		if deliveryResult.Kind == transportpkg.DeliveryClientCancelled {
+		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
 		}
@@ -163,12 +162,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 }
 
-func exchangeFailureDeliveryResult(err error) transportpkg.DeliveryResult {
-	kind := transportpkg.DeliveryExchangeFailed
+func exchangeFailureDeliveryResult(err error) delivery.Result {
+	kind := delivery.ExchangeFailed
 	if errors.Is(err, context.Canceled) {
-		kind = transportpkg.DeliveryClientCancelled
+		kind = delivery.ClientCancelled
 	}
-	return transportpkg.DeliveryResult{Kind: kind, Err: err}
+	return delivery.Result{Kind: kind, Err: err}
 }
 
 func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, workspace routing.WorkspaceSlug) {
@@ -239,8 +238,8 @@ func decodeRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	return decoded, nil
 }
 
-func newTransportRequest(method string, url string, header http.Header, body []byte) transportpkg.TransportRequest {
-	return transportpkg.TransportRequest{
+func newTransportRequest(method string, url string, header http.Header, body []byte) carrier.TransportRequest {
+	return carrier.TransportRequest{
 		Method: method,
 		URL:    url,
 		Header: header.Clone(),
@@ -278,10 +277,8 @@ func logRequestOutcome(
 	// RequestOutput is authoritative after selection. A backend error can fill
 	// target identity only when orchestration returned no terminal snapshot.
 	targetID = strings.TrimSpace(targetID) // swobu:io-string source=boundary
-	errorMessage := ""
 	errorCode := ""
 	if err != nil {
-		errorMessage = err.Error()
 		result = "swobu_error"
 		errorOrigin = string(canonical.ErrorOriginSwobu)
 		if errors.Is(err, context.Canceled) {
@@ -318,28 +315,8 @@ func logRequestOutcome(
 		"error_origin", errorOrigin,
 		"target_id", targetID,
 	}
-	if errorMessage != "" {
-		attrs = append(attrs, "error_message", errorMessage)
-	}
 	if errorCode != "" {
 		attrs = append(attrs, "error_code", errorCode)
-	}
-	if err != nil {
-		var swobuErr canonical.Error
-		if errors.As(err, &swobuErr) && len(swobuErr.Details) > 0 {
-			keys := make([]string, 0, len(swobuErr.Details))
-			for key := range swobuErr.Details {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				value := strings.TrimSpace(swobuErr.Details[key]) // swobu:io-string source=boundary
-				if value == "" {
-					continue
-				}
-				attrs = append(attrs, "error_detail_"+key, value)
-			}
-		}
 	}
 	slog.Debug("protocol request outcome", attrs...)
 }
@@ -421,7 +398,7 @@ func (w *committingResponseWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-func (h Handler) finalizeTrafficEvidence(ctx context.Context, requestID string, endpoint string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, out exchange.RequestOutput, timing *trafficevidence.Timing, result transportpkg.DeliveryResult) {
+func (h Handler) finalizeTrafficEvidence(ctx context.Context, requestID string, endpoint string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, out exchange.RequestOutput, timing *trafficevidence.Timing, result delivery.Result) {
 	if timing != nil {
 		timing.MarkEnded(time.Now())
 	}

@@ -26,7 +26,7 @@ func TestChatResponseProjectsCompletedWebSearchToCitedFinalText(t *testing.T) {
 			t.Fatalf("Chat response leaked unrepresentable %q semantics: %s", forbidden, raw)
 		}
 	}
-	assertChatWebSearchProjectionDecisions(t, encoded.Decisions)
+	assertChatWebSearchProjectionDecisions(t, encoded.Changes)
 }
 
 func TestChatStreamingResponseProjectsCompletedWebSearchToCitedFinalText(t *testing.T) {
@@ -52,22 +52,22 @@ func TestChatStreamingResponseProjectsCompletedWebSearchToCitedFinalText(t *test
 			t.Fatalf("Chat stream leaked unrepresentable %q semantics: %s", forbidden, raw)
 		}
 	}
-	assertChatWebSearchProjectionDecisions(t, encoded.TerminalDecisions.Decisions())
+	assertChatWebSearchProjectionDecisions(t, encoded.Completion.Snapshot().Changes)
 }
 
 func TestChatResponseProjectsReusedWebSearchIDByOccurrence(t *testing.T) {
 	response := chatWebSearchResponse(t)
 	items := response.Items()
 	reused := append([]canonical.CanonicalItem{items[0], items[1], items[0], items[1]}, items[2])
-	projected, decisions, err := projectChatCompletionsWebSearchLifecycles(reused)
+	projected, changes, err := projectChatCompletionsWebSearchLifecycles(reused)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
 		t.Fatalf("projected items = %#v, want only message", projected)
 	}
-	if len(decisions) != 3 {
-		t.Fatalf("decisions = %#v, want two lifecycle drops and one citation drop", decisions)
+	if len(changes) != 3 {
+		t.Fatalf("changes = %#v, want two lifecycle drops and one citation drop", changes)
 	}
 }
 
@@ -122,18 +122,17 @@ func chatWebSearchResponse(t *testing.T) canonical.CanonicalResponse {
 	return response
 }
 
-func assertChatWebSearchProjectionDecisions(t *testing.T, decisions []compat.Decision) {
+func assertChatWebSearchProjectionDecisions(t *testing.T, changes []compat.Change) {
 	t.Helper()
-	want := map[compat.Feature]compat.Subject{
-		compat.ResponseItemsKind:             "web_search:search_1",
-		compat.ResponseItemsMessageCitations: "citation:2:0",
+	if len(changes) != 2 {
+		t.Fatalf("changes = %#v", changes)
 	}
-	if len(decisions) != len(want) {
-		t.Fatalf("decisions = %#v", decisions)
-	}
-	for _, decision := range decisions {
-		if decision.Outcome != compat.Drop || want[decision.Feature] != decision.Subject {
-			t.Fatalf("decision = %#v", decision)
-		}
+	callID, callOK := changes[0].Occurrence.Call()
+	position, partOK := changes[1].Occurrence.ResponsePart()
+	if changes[0].Capability != canonical.ResponseItemsKind || changes[0].Kind != compat.Omission ||
+		!callOK || callID.String() != "search_1" ||
+		changes[1].Capability != canonical.ResponseItemsMessageCitations || changes[1].Kind != compat.Omission ||
+		!partOK || position.Item != 2 || position.Part != 0 {
+		t.Fatalf("changes = %#v", changes)
 	}
 }

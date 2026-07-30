@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
 func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
@@ -27,10 +27,10 @@ func TestWriteSuccessResponse_StreamingFromEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream)}
+	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream, nil)}
 
 	rr := httptest.NewRecorder()
-	if result := writeSuccessResponse(context.Background(), rr, "req_test_1", canonical.ClientFamilyResponses, resp); result.Kind != transportpkg.DeliverySucceeded {
+	if result := writeSuccessResponse(context.Background(), rr, "req_test_1", canonical.ClientFamilyResponses, resp); result.Kind != delivery.Succeeded {
 		t.Fatalf("delivery result: %#v", result)
 	}
 	if rr.Code != http.StatusOK {
@@ -58,10 +58,10 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 	if err != nil {
 		t.Fatalf("EncodeResponseStream error: %v", err)
 	}
-	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream)}
+	resp := exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream, nil)}
 
 	rr := httptest.NewRecorder()
-	if result := writeSuccessResponse(context.Background(), rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); result.Kind != transportpkg.DeliverySucceeded {
+	if result := writeSuccessResponse(context.Background(), rr, "req_test_2", canonical.ClientFamilyChatCompletions, resp); result.Kind != delivery.Succeeded {
 		t.Fatalf("delivery result: %#v", result)
 	}
 	if rr.Code != http.StatusOK {
@@ -75,7 +75,7 @@ func TestWriteSuccessResponse_StreamingEnvelopePreferredOverLegacyStream(t *test
 
 func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testing.T) {
 	resp := exchange.RequestOutput{
-		Response: exchange.StreamingResponse{Response: transportpkg.Response{
+		Response: exchange.StreamingResponse{Response: carrier.Response{
 			Status: http.StatusOK,
 			Header: http.Header{
 				"Content-Type": []string{"text/event-stream"},
@@ -86,7 +86,7 @@ func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testin
 
 	writer := &writeHeaderCountingResponseWriter{}
 	result := writeSuccessResponse(context.Background(), writer, "req_test_3", canonical.ClientFamilyResponses, resp)
-	if result.Kind != transportpkg.DeliveryProviderStreamFailed || result.Err == nil {
+	if result.Kind != delivery.ProviderStreamFailed || result.Err == nil {
 		t.Fatalf("delivery result = %#v, want provider stream failure", result)
 	}
 	if !strings.Contains(result.Err.Error(), "stream body failed") {
@@ -99,8 +99,8 @@ func TestWriteSuccessResponse_StreamingReadFailureDoesNotCommitHeaders(t *testin
 
 func TestClassifyDeliveryFailurePreservesCheckpointCommitKind(t *testing.T) {
 	result := classifyDeliveryFailure(context.Background(), nil, exchange.CheckpointCommitError{}, nil)
-	if result.Kind != transportpkg.DeliveryCheckpointCommitFailed {
-		t.Fatalf("delivery kind = %q, want %q", result.Kind, transportpkg.DeliveryCheckpointCommitFailed)
+	if result.Kind != delivery.CheckpointCommitFailed {
+		t.Fatalf("delivery kind = %q, want %q", result.Kind, delivery.CheckpointCommitFailed)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 	defer cancel()
 
 	resp := exchange.RequestOutput{
-		Response: exchange.StreamingResponse{Response: transportpkg.Response{
+		Response: exchange.StreamingResponse{Response: carrier.Response{
 			Status: http.StatusOK,
 			Header: http.Header{
 				"Content-Type": []string{"text/event-stream"},
@@ -123,7 +123,7 @@ func TestWriteSuccessResponse_StreamingDisconnectAfterCommitIsGraceful(t *testin
 		cancel:                cancel,
 	}
 	result := writeSuccessResponse(ctx, writer, "req_test_4", canonical.ClientFamilyResponses, resp)
-	if result.Kind != transportpkg.DeliveryClientCancelled {
+	if result.Kind != delivery.ClientCancelled {
 		t.Fatalf("delivery result = %#v, want client cancellation", result)
 	}
 	if writer.writeHeaderCount != 1 {

@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transport"
 )
 
 // currentGoldenReport is the deterministic report produced by the real Go encoder
@@ -31,7 +31,7 @@ func currentGoldenReport() productReport {
 				RequestPath:        canonical.NormalizedPathResponses,
 				Provider:           profile.ProviderSpecOpenAI,
 				StatusCode:         200,
-				DeliveryKind:       transport.DeliverySucceeded,
+				DeliveryKind:       delivery.Succeeded,
 				CanonicalErrorCode: "",
 				AttemptCount:       1,
 				FallbackRecovered:  false,
@@ -44,7 +44,7 @@ func currentGoldenReport() productReport {
 				RequestPath:        canonical.NormalizedPathMessages,
 				Provider:           profile.ProviderSpecAnthropic,
 				StatusCode:         503,
-				DeliveryKind:       transport.DeliveryExchangeFailed,
+				DeliveryKind:       delivery.ExchangeFailed,
 				CanonicalErrorCode: canonical.ErrorCodeBadEndpoint,
 				AttemptCount:       2,
 				FallbackRecovered:  true,

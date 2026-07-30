@@ -20,11 +20,12 @@
 // derived global lookup and declaration-ownership validator.
 // RewriteToolContributions owns the closed grammar of declaration-bearing
 // items so consumers transform contributions without duplicating item traversal.
-// Function and custom tools are caller-resolved. An MCP source refines its one ToolNamespace
-// authority with endpoint and selection meaning; discovered children remain
+// Function and custom tools are caller-resolved. An MCP source refines its one
+// ToolNamespace authority with a URL, connector, or tunnel source plus
+// selection, approval, loading, and caller meaning; discovered children remain
 // ordinary FunctionTool declarations with no execution field. Canonical never
-// decides which runtime executes a callable. Credentials and
-// live sessions never enter canonical state. Web
+// decides which runtime executes a callable. Credentials, headers, and live
+// sessions never enter canonical state. Web
 // search is a stateless marker for provider-hosted
 // search availability; source-protocol preferences and provider dialects stay
 // outside canonical. Observed web-search lifecycles retain their original call

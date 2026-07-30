@@ -1,9 +1,7 @@
 package chatcompletions
 
 import (
-	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -21,8 +19,9 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "chat completions request"); err != nil {
 		return wire.ClientDecodeResult{}, err
 	}
-	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+	var changes []compat.Change
+	value, err := func(changeLog *[]compat.Change) (wire.ClientRequestResult, error) {
+		request, delivery, err := decoder.decodeClientRequestDTOWithChanges(dto, doc.RawBytes(), changeLog, "")
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
@@ -47,35 +46,35 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
-			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			rebased, _, err := decoder.decodeClientRequestDTOWithChanges(rebasedDTO, raw, nil, "")
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
 			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
 		}
 		return result, nil
-	})
-	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
+	}(&changes)
+	return wire.ClientDecodeResult{Request: value, Changes: changes}, err
 }
 
-func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestWithChanges(doc carrier.Document, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto chatCompletionsRequestDTO
 	if err := shared.DecodeExtensibleRequestObject(raw, &dto, "chat completions request"); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+	return decoder.decodeClientRequestDTOWithChanges(dto, raw, changeLog, exchangeID)
 }
 
-func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chatCompletionsRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto chatCompletionsRequestDTO, raw []byte, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("chat completions request is missing required fields")
 	}
-	tools, err := decodeChatCompletionsTools(dto.Tools, sink, exchangeID)
+	tools, err := decodeChatCompletionsTools(dto.Tools, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	toolPolicy, err := decodeChatCompletionsToolChoice(dto.ToolChoice, tools, sink, exchangeID)
+	toolPolicy, err := decodeChatCompletionsToolChoice(dto.ToolChoice, tools, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -87,7 +86,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	items, instructions, err := decodeChatConversation(dto.Messages, tools, sink, exchangeID, decoder.ImageLimits)
+	items, instructions, err := decodeChatConversation(dto.Messages, tools, changeLog, exchangeID, decoder.ImageLimits)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -95,7 +94,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	outputFormat, err := decodeChatCompletionsOutputFormat(dto.ResponseFormat, sink, exchangeID)
+	outputFormat, err := decodeChatCompletionsOutputFormat(dto.ResponseFormat, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -143,7 +142,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto chat
 	return newChatCanonicalRequest(params, resolvedDelivery, decoder.ImageLimits)
 }
 
-func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.CanonicalItem, error) {
+func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.CanonicalItem, error) {
 	items := make([]canonical.CanonicalItem, 0, len(messages))
 	instructions := make([]canonical.CanonicalItem, 0, 2)
 	leadingInstructions := true
@@ -155,9 +154,9 @@ func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canoni
 				author = canonical.MessageRoleDeveloper
 			}
 			textItems, err := openaiwire.DecodeTextContentItems(msg.Content, "chat completions", author, imageLimits, func(partIndex int, _ string) error {
-				return emitChatCompletionsCompatibilityDecision(
-					sink, exchangeID, compat.RequestItemsKind, compat.Drop,
-					compat.Subject("wire:/messages/"+strconv.Itoa(idx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+				return appendChatOccurrenceChange(
+					changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission,
+					canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(idx), Part: uint32(partIndex)}),
 				)
 			})
 			if err != nil {
@@ -171,7 +170,7 @@ func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canoni
 			continue
 		}
 		leadingInstructions = false
-		decoded, err := decodeChatCompletionsItems(sink, exchangeID, tools, msg.Role, msg.Content, msg.ToolCalls, msg.ToolCallID, idx, imageLimits)
+		decoded, err := decodeChatCompletionsItems(changeLog, exchangeID, tools, msg.Role, msg.Content, msg.ToolCalls, msg.ToolCallID, idx, imageLimits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -191,7 +190,7 @@ func newChatCanonicalRequest(params canonical.RequestParams, resolvedDelivery de
 // swobu:lint ignore string-switch because=protocol boundary decodes wire tool-call kinds.
 // swobu:lint ignore function-complexity because=chat completions item decoding keeps all wire item variants at one boundary seam.
 func decodeChatCompletionsItems(
-	sink compat.Sink,
+	changeLog *[]compat.Change,
 	exchangeID string,
 	tools []canonical.ToolDeclaration, role string,
 	content json.RawMessage,
@@ -203,16 +202,16 @@ func decodeChatCompletionsItems(
 	role = strings.TrimSpace(role) // swobu:io-string source=boundary
 	if role == "tool" {
 		if strings.TrimSpace(toolCallID) == "" { // swobu:io-string source=boundary
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
+			if err := appendChatOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, chatCompletionsToolSubject(msgIdx, 0, "tool_call_id")); err != nil {
 				return nil, err
 			}
 			return nil, canonical.BadRequest("chat completions tool messages require tool_call_id")
 		}
 		callID, _ := canonical.NewToolCallID(toolCallID)
 		parts, err := decodeChatCompletionsTextParts(content, imageLimits, func(partIndex int, _ string) error {
-			return emitChatCompletionsCompatibilityDecision(
-				sink, exchangeID, compat.RequestItemsKind, compat.Drop,
-				compat.Subject("wire:/messages/"+strconv.Itoa(msgIdx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+			return appendChatOccurrenceChange(
+				changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission,
+				canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIndex)}),
 			)
 		})
 		if err != nil {
@@ -231,9 +230,9 @@ func decodeChatCompletionsItems(
 		author = canonical.MessageRoleDeveloper
 	}
 	textItems, err := openaiwire.DecodeTextContentItems(content, "chat completions", author, imageLimits, func(partIndex int, _ string) error {
-		return emitChatCompletionsCompatibilityDecision(
-			sink, exchangeID, compat.RequestItemsKind, compat.Drop,
-			compat.Subject("wire:/messages/"+strconv.Itoa(msgIdx)+"/content/"+strconv.Itoa(partIndex)+"/type"),
+		return appendChatOccurrenceChange(
+			changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission,
+			canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIndex)}),
 		)
 	})
 	if err != nil {
@@ -243,14 +242,14 @@ func decodeChatCompletionsItems(
 	for idx, call := range toolCalls {
 		callType := strings.ToLower(strings.TrimSpace(call.Type)) // swobu:io-string source=domain
 		if callType != "" && callType != canonical.ToolTypeFunction && callType != canonical.ToolTypeCustom {
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallTool, compat.Drop, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
+			if err := appendChatOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallTool, compat.Omission, chatCompletionsToolSubject(msgIdx, idx, "type")); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		id := strings.TrimSpace(call.ID) // swobu:io-string source=boundary
 		if id == "" {
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
+			if err := appendChatOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, chatCompletionsToolSubject(msgIdx, idx, "id")); err != nil {
 				return nil, err
 			}
 			id = openaiwire.GeneratedToolUseID(msgIdx, idx)
@@ -258,9 +257,6 @@ func decodeChatCompletionsItems(
 		switch callType {
 		case "", "function":
 			if call.Function == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
-					return nil, err
-				}
 				return nil, canonical.BadRequest("chat completions tool calls require a function body")
 			}
 			if strings.TrimSpace(call.Function.Name) == "" { // swobu:io-string source=boundary
@@ -268,9 +264,6 @@ func decodeChatCompletionsItems(
 			}
 			input, err := decodeChatCompletionsFunctionArguments(call.Function.Arguments)
 			if err != nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "function/arguments")); err != nil {
-					return nil, err
-				}
 				return nil, err
 			}
 			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, call.Function.Name, canonical.ToolKindFunction)
@@ -285,9 +278,6 @@ func decodeChatCompletionsItems(
 			items = append(items, item)
 		case "custom":
 			if call.Custom == nil {
-				if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallInput, compat.Reject, chatCompletionsToolSubject(msgIdx, idx, "custom/input")); err != nil {
-					return nil, err
-				}
 				return nil, canonical.BadRequest("chat completions custom tool calls require a custom body")
 			}
 			if strings.TrimSpace(call.Custom.Name) == "" { // swobu:io-string source=boundary
@@ -328,31 +318,20 @@ func decodeChatCompletionsFunctionArguments(raw json.RawMessage) (canonical.JSON
 	return input, nil
 }
 
-func emitChatCompletionsCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
-	if sink == nil {
+func appendChatOccurrenceChange(changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, outcome compat.Kind, occurrence canonical.Occurrence) error {
+	if changeLog == nil {
 		return nil
 	}
-	if subject == "" {
-		return nil
+	change := compat.Change{Capability: feature, Occurrence: occurrence, Kind: outcome}
+	if outcome == compat.Approximation {
+		change.Preserved = feature
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{
-		compat.Decision{
-			Feature: feature,
-			Outcome: outcome,
-			Subject: subject,
-		},
-	}); err != nil {
-		return canonical.InternalError("compatibility decision sink commit failed")
-	}
+	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
 
-func chatCompletionsToolSubject(msgIdx int, toolIdx int, field string) compat.Subject {
-	field = strings.TrimSpace(field) // swobu:io-string source=boundary
-	if field == "" {
-		return ""
-	}
-	return compat.Subject("wire:/messages/" + strconv.Itoa(msgIdx) + "/tool_calls/" + strconv.Itoa(toolIdx) + "/" + field)
+func chatCompletionsToolSubject(msgIdx int, _ int, _ string) canonical.Occurrence {
+	return canonical.RequestItemOccurrence(uint32(msgIdx))
 }
 
 func joinItemText(items []canonical.CanonicalItem) string {

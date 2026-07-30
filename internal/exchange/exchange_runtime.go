@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -15,7 +14,6 @@ import (
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
 	Runtime         ExecutionRuntime
-	DecisionSink    compat.Sink
 	CheckpointStore session.Store
 	ResponseIDs     ResponseIDGenerator
 	Policy          WorkspacePolicy
@@ -56,31 +54,20 @@ func validateCheckpointInput(r runtimeBundle, workspaceSlug string) error {
 
 // ---- helpers used by provider-round execution ----
 
-func encodeClientOutput(ctx context.Context, call providerCall, envelope canonical.ResponseStream, incremental bool, sink compat.Sink, committer *checkpointCommitter) (ClientResponse, error) {
-	commitDecisionsBestEffort(ctx, sink, call.exchangeID, deliveryCompatibilityDecisions(call, incremental))
-
+func encodeClientOutput(ctx context.Context, call providerCall, envelope canonical.ResponseStream, incremental bool) (ClientResponse, error) {
 	if call.clientDelivery.Mode == delivery.Streaming {
 		if call.clientDelivery.Framing == delivery.FramingWebSocket {
 			messageResult, err := call.clientCodec.EncodeResponseMessages(ctx, call.fullRequest, envelope, call.clientDelivery)
-			commitDecisionsBestEffort(ctx, sink, call.exchangeID, messageResult.Decisions)
 			if err != nil {
 				return nil, err
 			}
-			messageResult.Response.Messages = &checkpointingMessageStream{
-				inner: messageResult.Response.Messages, committer: committer, completion: messageResult.Completion,
-			}
-			return NewMessageStreamingResponse(messageResult.Response), nil
+			return NewMessageStreamingResponse(messageResult.Response, messageResult.Completion), nil
 		}
 		streamResult, err := call.clientCodec.EncodeResponseStream(ctx, call.fullRequest, envelope, call.clientDelivery)
-		commitDecisionsBestEffort(ctx, sink, call.exchangeID, streamResult.Decisions)
 		if err != nil {
 			return nil, err
 		}
-		streamResult.Stream.Body = &checkpointingReadCloser{
-			ctx: ctx, inner: streamResult.Stream.Body, committer: committer, completion: streamResult.Completion,
-			sink: sink, exchangeID: call.exchangeID, decisions: streamResult.TerminalDecisions,
-		}
-		return NewStreamingResponse(streamResult.Stream), nil
+		return NewStreamingResponse(streamResult.Stream, streamResult.Completion), nil
 	}
-	return newBufferedClientResponse(newBufferedClientBody(ctx, call, envelope, sink, committer)), nil
+	return newBufferedClientResponse(newBufferedClientBody(ctx, call, envelope)), nil
 }

@@ -86,29 +86,22 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-type recordingDecisionSink struct {
-	effects []compat.Decision
-}
-
-func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
-	s.effects = append(s.effects, effects...)
-	return nil
-}
+type recordingChanges = []compat.Change
 
 type testProviderRequest struct {
-	Request      canonical.CanonicalRequest
-	Contract     exchange.ExecutionContract
-	Target       provider.TargetSnapshot
-	ExchangeID   string
-	DecisionSink compat.Sink
+	Request    canonical.CanonicalRequest
+	Contract   exchange.ExecutionContract
+	Target     provider.TargetSnapshot
+	ExchangeID string
+	Changes    *[]compat.Change
 }
 
-func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
-	var sink compat.Sink
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...*[]compat.Change) testProviderRequest {
+	var sink *[]compat.Change
 	if len(sinks) > 0 {
 		sink = sinks[0]
 	}
-	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, Changes: sink}
 }
 
 func executeTestProviderRequest(ctx context.Context, exec BackendAdapter, req testProviderRequest) (provider.Ingress, error) {
@@ -347,7 +340,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 
 	rt := &captureRoundTripper{}
 	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := newTestProviderRequest("test-ex", protocolkind.Responses,
 		canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("gpt-5.4-mini"),
@@ -387,8 +380,8 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	if _, ok := body["prompt_cache_retention"]; ok {
 		t.Fatalf("prompt_cache_retention must be omitted")
 	}
-	if len(sink.effects) != 0 {
-		t.Fatalf("compatibility decisions len=%d want 0", len(sink.effects))
+	if len(*sink) != 0 {
+		t.Fatalf("compatibility changes len=%d want 0", len(*sink))
 	}
 }
 

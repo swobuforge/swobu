@@ -6,6 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
@@ -18,7 +19,9 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, request
 	state := e.newStreamState(request)
 	completion, complete, fail := wire.NewResponseCompletion()
 	mediaType := "text/event-stream"
-	encoder := responsesFingerprintingEncoder(request, state.EncodeEnvelopeEvent, complete, fail)
+	encoder := responsesFingerprintingEncoder(request, state.EncodeEnvelopeEvent, func(fingerprint *historyfingerprint.Response) {
+		complete(fingerprint, nil)
+	}, fail)
 	body := wire.NewEncodedResponseBody(ctx, events, encoder, completion, fail)
 	// Stage marks the carrier boundary for this streamed response leg; the
 	// exchange graph owns path selection above the adapter edge.
@@ -30,7 +33,9 @@ func (e ResponseStreamEncoder) EncodeResponseMessages(ctx context.Context, reque
 		return wire.ClientMessageResult{}, canonical.InternalError("Responses message encoder requires websocket delivery")
 	}
 	completion, complete, fail := wire.NewResponseCompletion()
-	encoder := responsesFingerprintingEncoder(request, NewJSONEnvelopeStreamEncoder(request).EncodeEnvelopeEvent, complete, fail)
+	encoder := responsesFingerprintingEncoder(request, NewJSONEnvelopeStreamEncoder(request).EncodeEnvelopeEvent, func(fingerprint *historyfingerprint.Response) {
+		complete(fingerprint, nil)
+	}, fail)
 	stream := wire.NewEncodedResponseMessages(events, encoder, completion, fail)
 	return wire.ClientMessageResult{Response: carrier.MessageResponse{MediaType: "application/json", Messages: stream}, Completion: completion}, nil
 }

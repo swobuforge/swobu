@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -81,7 +80,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 				return false, canonical.NewBackendError("responses", 0, "responses reasoning summary checkpoint changed part kind", "")
 			}
 			erasedChild = true
-			if err := emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, responsesReasoningStreamSubject(frame, "summary", index)); err != nil {
+			if err := appendResponsesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, responsesReasoningStreamSubject(frame, "summary", index)); err != nil {
 				return false, err
 			}
 			continue
@@ -117,7 +116,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 				return false, canonical.NewBackendError("responses", 0, "responses reasoning trace checkpoint changed part kind", "")
 			}
 			erasedChild = true
-			if err := emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, responsesReasoningStreamSubject(frame, "content", index)); err != nil {
+			if err := appendResponsesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, responsesReasoningStreamSubject(frame, "content", index)); err != nil {
 				return false, err
 			}
 			continue
@@ -157,10 +156,10 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	return true, nil
 }
 
-func responsesReasoningStreamSubject(frame streamFrame, child string, index int) compat.Subject {
+func responsesReasoningStreamSubject(frame streamFrame, _ string, _ int) canonical.Occurrence {
 	outputIndex := 0
 	if frame.OutputIndex != nil {
 		outputIndex = *frame.OutputIndex
 	}
-	return compat.Subject(fmt.Sprintf("wire:/output/%d/%s/%d/type", outputIndex, child, index))
+	return canonical.ResponseItemOccurrence(uint32(outputIndex))
 }

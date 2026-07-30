@@ -37,7 +37,7 @@ func PrepareStaticToolSet(
 		}
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
-			return StaticToolSet{}, provider.NewIncompatibleTarget(err.Error())
+			return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestTools, canonical.Occurrence{}, err.Error())
 		}
 		if completed == nil {
 			continue
@@ -62,24 +62,24 @@ func PrepareStaticToolSet(
 					continue
 				}
 				if contribution.Scope() != canonical.ContextScopeHistory {
-					return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot remove a request-scoped canonical discovery capability")
+					return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.RequestItemOccurrence(uint32(index)), "static target cannot remove a request-scoped canonical discovery capability")
 				}
 				discoverySources = append(discoverySources, index)
 			}
 		}
 		if call, ok := item.ToolCall(); ok && call.Tool().Kind() == canonical.ToolKindDiscovery {
 			if _, completed := completedIndexes[index]; !completed {
-				return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot represent an unresolved canonical discovery call")
+				return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.RequestItemOccurrence(uint32(index)), "static target cannot represent an unresolved canonical discovery call")
 			}
 		}
 		if result, ok := item.ToolDiscoveryResult(); ok {
 			if _, completed := completedIndexes[index]; !completed {
-				return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot represent an orphan canonical discovery result")
+				return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.RequestItemOccurrence(uint32(index)), "static target cannot represent an orphan canonical discovery result")
 			}
 			for _, loaded := range result.Tools().Declarations() {
 				declaration, present := materialized[loaded.Key()]
 				if !present || !declaration.Equivalent(loaded) {
-					return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot omit discovery before its returned declarations are materialized")
+					return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestTools, canonical.RequestItemOccurrence(uint32(index)), "static target cannot omit discovery before its returned declarations are materialized")
 				}
 				if loaded.Kind() == canonical.ToolKindDiscovery {
 					discoverySources = append(discoverySources, index)
@@ -89,7 +89,7 @@ func PrepareStaticToolSet(
 	}
 	if hasDiscoveryDeclaration {
 		if len(discoverySources) == 0 {
-			return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot prove the source of a canonical discovery capability")
+			return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestTools, canonical.Occurrence{}, "static target cannot prove the source of a canonical discovery capability")
 		}
 		for _, sourceIndex := range discoverySources {
 			consumed := false
@@ -100,7 +100,7 @@ func PrepareStaticToolSet(
 				}
 			}
 			if !consumed {
-				return StaticToolSet{}, provider.NewIncompatibleTarget("static target cannot represent a live canonical discovery capability")
+				return StaticToolSet{}, provider.IncompatibleCapability(canonical.RequestTools, canonical.RequestItemOccurrence(uint32(sourceIndex)), "static target cannot represent a live canonical discovery capability")
 			}
 		}
 	}

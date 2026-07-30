@@ -28,10 +28,10 @@ type sourceResolution struct {
 	session      *session
 	catalog      canonical.ToolNamespace
 	catalogBytes int
-	decisions    []compat.Decision
+	changes      []compat.Change
 }
 
-type sourceResolver func(context.Context, canonical.ToolNamespace, string) (sourceResolution, error)
+type sourceResolver func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error)
 
 // Run is one exchange's fully opened MCP aggregate. It privately owns source
 // availability, SDK sessions, execution bindings, the attempt transformation, and
@@ -40,6 +40,7 @@ type Run struct {
 	sessions         map[canonical.ToolKey]*session
 	bindings         map[canonical.ToolKey]binding
 	attemptTools     map[canonical.ToolKey][]canonical.ToolDeclaration
+	localSources     map[canonical.ToolKey]struct{}
 	callCount        int
 	roundCount       int
 	firstUnavailable error
@@ -52,7 +53,7 @@ func Open(
 	ctx context.Context,
 	request canonical.CanonicalRequest,
 	access Access,
-) (canonical.CanonicalRequest, *Run, []compat.Decision, error) {
+) (canonical.CanonicalRequest, *Run, []compat.Change, error) {
 	return openWith(ctx, request, access, resolveRemoteSource)
 }
 
@@ -61,7 +62,7 @@ func openWith(
 	request canonical.CanonicalRequest,
 	access Access,
 	resolve sourceResolver,
-) (canonical.CanonicalRequest, *Run, []compat.Decision, error) {
+) (canonical.CanonicalRequest, *Run, []compat.Change, error) {
 	if resolve == nil {
 		return canonical.CanonicalRequest{}, nil, nil, canonical.InternalError("MCP source resolver is nil")
 	}
@@ -71,7 +72,7 @@ func openWith(
 	if err != nil {
 		return canonical.CanonicalRequest{}, nil, nil, err
 	}
-	sources := mcpSources(environment)
+	sources := localMCPSources(environment)
 	if len(sources) == 0 {
 		return request.Clone(), nil, nil, nil
 	}
@@ -96,27 +97,29 @@ func openWith(
 		sessions:     make(map[canonical.ToolKey]*session),
 		bindings:     make(map[canonical.ToolKey]binding),
 		attemptTools: make(map[canonical.ToolKey][]canonical.ToolDeclaration),
+		localSources: make(map[canonical.ToolKey]struct{}, len(sources)),
 	}
 	catalogs := make(map[canonical.ToolKey]canonical.ToolNamespace, len(sources))
-	var decisions []compat.Decision
+	var changes []compat.Change
 	catalogBytes := 0
 	for _, source := range sources {
 		key := source.Key()
+		run.localSources[key] = struct{}{}
 		remote, _ := source.MCPSource()
 		allowed, selected := remote.AllowedTools().Get()
 		if policy.Mode == canonical.ToolPolicyNone || (selected && len(allowed) == 0) {
 			continue
 		}
-		resolved, resolveErr := resolve(ctx, source, access.bearer(key))
+		resolved, resolveErr := resolve(ctx, source, access.ForSource(key))
 		if resolveErr != nil {
 			if sourceFailureIsInvariant(resolveErr) || requestRequiresSource(request, environment, source) {
 				_ = run.Close()
-				return canonical.CanonicalRequest{}, nil, decisions, resolveErr
+				return canonical.CanonicalRequest{}, nil, changes, resolveErr
 			}
 			if run.firstUnavailable == nil {
 				run.firstUnavailable = resolveErr
 			}
-			decisions = append(decisions, droppedSourceDecision(key))
+			changes = append(changes, droppedSourceDecision(key))
 			continue
 		}
 		if resolved.catalogBytes == 0 {
@@ -130,12 +133,12 @@ func openWith(
 			)
 			if requestRequiresSource(request, environment, source) {
 				_ = run.Close()
-				return canonical.CanonicalRequest{}, nil, decisions, dependency
+				return canonical.CanonicalRequest{}, nil, changes, dependency
 			}
 			if run.firstUnavailable == nil {
 				run.firstUnavailable = dependency
 			}
-			decisions = append(decisions, droppedSourceDecision(key))
+			changes = append(changes, droppedSourceDecision(key))
 			continue
 		}
 		catalogBytes += resolved.catalogBytes
@@ -148,12 +151,12 @@ func openWith(
 			dependency := dependencyError(source, bindingErr)
 			if requestRequiresSource(request, environment, source) {
 				_ = run.Close()
-				return canonical.CanonicalRequest{}, nil, decisions, dependency
+				return canonical.CanonicalRequest{}, nil, changes, dependency
 			}
 			if run.firstUnavailable == nil {
 				run.firstUnavailable = dependency
 			}
-			decisions = append(decisions, droppedSourceDecision(key))
+			changes = append(changes, droppedSourceDecision(key))
 			delete(catalogs, key)
 			continue
 		}
@@ -161,40 +164,48 @@ func openWith(
 			run.bindings[tool] = toolBinding
 		}
 		run.attemptTools[key] = attemptTools
-		decisions = append(decisions, resolved.decisions...)
-		decisions = append(decisions, bindingDecisions...)
+		changes = append(changes, resolved.changes...)
+		changes = append(changes, bindingDecisions...)
+		if remote.Loading() == canonical.MCPLoadingDeferred {
+			changes = append(changes, compat.Change{
+				Capability: canonical.RequestTools,
+				Kind:       compat.Approximation,
+				Occurrence: canonical.ToolOccurrence(key),
+				Preserved:  canonical.RequestTools,
+			})
+		}
 	}
 
 	prepared, err := applyCatalogs(request, catalogs)
 	if err != nil {
 		_ = run.Close()
-		return canonical.CanonicalRequest{}, nil, decisions, err
+		return canonical.CanonicalRequest{}, nil, changes, err
 	}
 	attempt, err := run.rewriteAttempt(prepared)
 	if err != nil {
 		_ = run.Close()
-		return canonical.CanonicalRequest{}, nil, decisions, err
+		return canonical.CanonicalRequest{}, nil, changes, err
 	}
 	if err := run.validateAttemptPolicy(attempt); err != nil {
 		_ = run.Close()
-		return canonical.CanonicalRequest{}, nil, decisions, err
+		return canonical.CanonicalRequest{}, nil, changes, err
 	}
-	return prepared, run, decisions, nil
+	return prepared, run, changes, nil
 }
 
 func resolveRemoteSource(
 	ctx context.Context,
 	source canonical.ToolNamespace,
-	bearer string,
+	access SourceAccess,
 ) (sourceResolution, error) {
-	opened, err := openSession(ctx, source, bearer)
+	opened, err := openSession(ctx, source, access)
 	if err != nil {
 		return sourceResolution{}, sourceError(source, err)
 	}
 	children := source.Tools()
-	var decisions []compat.Decision
+	var changes []compat.Change
 	if len(children) == 0 {
-		children, decisions, err = opened.listTools(ctx)
+		children, changes, err = opened.listTools(ctx)
 		if err != nil {
 			_ = opened.close()
 			return sourceResolution{}, dependencyError(source, err)
@@ -211,11 +222,11 @@ func resolveRemoteSource(
 	return sourceResolution{
 		session: opened, catalog: catalog,
 		catalogBytes: retainedCatalogBytes(catalog),
-		decisions:    decisions,
+		changes:      changes,
 	}, nil
 }
 
-func mcpSources(environment canonical.ToolEnvironment) []canonical.ToolNamespace {
+func localMCPSources(environment canonical.ToolEnvironment) []canonical.ToolNamespace {
 	var sources []canonical.ToolNamespace
 	seen := make(map[canonical.ToolKey]struct{})
 	for _, declaration := range environment.Declarations() {
@@ -223,7 +234,12 @@ func mcpSources(environment canonical.ToolEnvironment) []canonical.ToolNamespace
 		if !ok {
 			continue
 		}
-		if _, ok := namespace.MCPSource(); !ok {
+		source, ok := namespace.MCPSource()
+		if !ok || source.Kind() != canonical.MCPSourceURL ||
+			source.Approval().Kind() != canonical.MCPApprovalNever {
+			continue
+		}
+		if _, restricted := source.AllowedCallers().Get(); restricted {
 			continue
 		}
 		if _, duplicate := seen[namespace.Key()]; duplicate {
@@ -254,7 +270,7 @@ func requiredSourcesFirst(
 func bindingsForCatalog(catalog canonical.ToolNamespace) (
 	map[canonical.ToolKey]binding,
 	[]canonical.ToolDeclaration,
-	[]compat.Decision,
+	[]compat.Change,
 	error,
 ) {
 	bindings := make(map[canonical.ToolKey]binding)
@@ -284,15 +300,16 @@ func bindingsForCatalog(catalog canonical.ToolNamespace) (
 		}
 		attemptTools = append(attemptTools, attemptDeclaration)
 	}
-	var decisions []compat.Decision
+	var changes []compat.Change
 	if strings.TrimSpace(catalog.Description()) != "" && len(bindings) > 0 {
-		decisions = append(decisions, compat.Decision{
-			Feature: compat.RequestTools,
-			Outcome: compat.Approx,
-			Subject: compat.Subject(catalog.Key().String()),
+		changes = append(changes, compat.Change{
+			Capability: canonical.RequestTools,
+			Kind:       compat.Approximation,
+			Occurrence: canonical.ToolOccurrence(catalog.Key()),
+			Preserved:  canonical.RequestTools,
 		})
 	}
-	return bindings, attemptTools, decisions, nil
+	return bindings, attemptTools, changes, nil
 }
 
 // Calls purely classifies one completed assistant round. Budget reservation is
@@ -386,6 +403,10 @@ func (r *Run) rewriteAttempt(request canonical.CanonicalRequest) (canonical.Cano
 				continue
 			}
 			if _, isMCP := namespace.MCPSource(); !isMCP {
+				projected = append(projected, declaration.Clone())
+				continue
+			}
+			if _, local := r.localSources[namespace.Key()]; !local {
 				projected = append(projected, declaration.Clone())
 				continue
 			}
@@ -540,11 +561,11 @@ func retainedCatalogBytes(catalog canonical.ToolNamespace) int {
 	return total
 }
 
-func droppedSourceDecision(key canonical.ToolKey) compat.Decision {
-	return compat.Decision{
-		Feature: compat.RequestTools,
-		Outcome: compat.Drop,
-		Subject: compat.Subject(key.String()),
+func droppedSourceDecision(key canonical.ToolKey) compat.Change {
+	return compat.Change{
+		Capability: canonical.RequestTools,
+		Kind:       compat.Omission,
+		Occurrence: canonical.ToolOccurrence(key),
 	}
 }
 

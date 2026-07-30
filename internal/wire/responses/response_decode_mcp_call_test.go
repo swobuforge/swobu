@@ -38,7 +38,7 @@ func TestDecodeResponseStreamIgnoresUnknownOutputWithoutLosingKnownOutput(t *tes
 		"ex", nil,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamAllUnknownMessageContentRejectsEmptyResidual(t *testing.T) {
@@ -53,7 +53,7 @@ func TestDecodeResponseStreamAllUnknownMessageContentRejectsEmptyResidual(t *tes
 	if err := drainResponsesStream(stream); err == nil {
 		t.Fatal("all-erased streamed message was reported as successful output")
 	}
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/content/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamUsesTerminalFallbackWhenNoOutputLifecycleWasObserved(t *testing.T) {
@@ -77,7 +77,7 @@ func TestDecodeResponseStreamIgnoredOutputDoesNotSuppressTerminalFallback(t *tes
 		"ex", nil,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamUnknownLifecyclePreservesTerminalOutputText(t *testing.T) {
@@ -110,7 +110,7 @@ func TestDecodeResponseStreamUnknownLifecyclePreservesTerminalOutputText(t *test
 	if text.Text() != "visible answer" {
 		t.Fatalf("output_text message = %q, want visible answer", text.Text())
 	}
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamCompletedMessageDoesNotDuplicateTerminalOutputText(t *testing.T) {
@@ -179,16 +179,8 @@ func TestDecodeResponseStreamDeduplicatesUnknownEventsByTypeAndItem(t *testing.T
 		"ex", nil,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	count := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind &&
-			decision.Outcome == compat.Drop &&
-			strings.HasPrefix(string(decision.Subject), "wire:/events/") {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("unknown-event decisions = %d, want 1; all decisions = %#v", count, stream.Decisions())
+	if len(stream.Changes()) != 0 {
+		t.Fatalf("wire-only events created semantic changes: %#v", stream.Changes())
 	}
 }
 
@@ -248,17 +240,16 @@ func drainResponsesStream(stream canonical.ResponseStream) error {
 	}
 }
 
-func assertResponsesStreamDrop(t *testing.T, stream *responsesResponseStream, subject string, want int) {
+func assertResponsesStreamDrop(t *testing.T, stream *responsesResponseStream, want int) {
 	t.Helper()
 	count := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind &&
-			decision.Outcome == compat.Drop &&
-			decision.Subject == compat.Subject(subject) {
+	for _, decision := range stream.Changes() {
+		if decision.Capability == canonical.ResponseItemsKind &&
+			decision.Kind == compat.Omission {
 			count++
 		}
 	}
 	if count != want {
-		t.Fatalf("drop decisions for %s = %d, want %d; all decisions = %#v", subject, count, want, stream.Decisions())
+		t.Fatalf("omission changes = %d, want %d; all changes = %#v", count, want, stream.Changes())
 	}
 }

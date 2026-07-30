@@ -23,7 +23,7 @@ func TestPath_EmptyAssertionUsesDefault(t *testing.T) {
 }
 
 func TestCompareSnapshot_UsesSharedUpdateEnv(t *testing.T) {
-	t.Setenv(UpdateEnv, fixturePromotionAck)
+	t.Setenv(UpdateEnv, PromotionAcknowledgment)
 	cfg := ConfigForIn(t.TempDir(), "screen", "default")
 	report := CompareSnapshot("fresh\n", cfg)
 	if report.Err != nil {
@@ -35,7 +35,7 @@ func TestCompareSnapshot_UsesSharedUpdateEnv(t *testing.T) {
 }
 
 func TestCompareSnapshot_RejectsCasualPromotionValues(t *testing.T) {
-	for _, bad := range []string{"1", "true", "yes", "on", "please", "i-have-reviewed", fixturePromotionAck[:20]} {
+	for _, bad := range []string{"1", "true", "yes", "on", "please", "i-have-reviewed", PromotionAcknowledgment[:20]} {
 		t.Run(bad, func(t *testing.T) {
 			t.Setenv(UpdateEnv, bad)
 			cfg := ConfigForIn(t.TempDir(), "screen", "default")

@@ -1,34 +1,36 @@
 package responses
 
-import "testing"
+import (
+	"bytes"
+	"log/slog"
+	"strings"
+	"testing"
+)
 
-func TestCompactAndTruncateJSONCompacts(t *testing.T) {
-	got, truncated := compactAndTruncateJSON([]byte("{\n  \"a\": 1,\n  \"b\": \"x\"\n}\n"), 1024)
-	if truncated {
-		t.Fatalf("truncated = true, want false")
-	}
-	want := "{\"a\":1,\"b\":\"x\"}"
-	if got != want {
-		t.Fatalf("compactAndTruncateJSON = %q, want %q", got, want)
-	}
-}
+func TestResponsesEgressDebugLogsStructureWithoutContent(t *testing.T) {
+	const canary = "SWOBU_PRIVATE_RESPONSE_CANARY"
 
-func TestCompactAndTruncateJSONTruncates(t *testing.T) {
-	got, truncated := compactAndTruncateJSON([]byte("{\"a\":\"1234567890\"}"), 8)
-	if !truncated {
-		t.Fatalf("truncated = false, want true")
-	}
-	if len(got) != 8 {
-		t.Fatalf("len(got) = %d, want 8", len(got))
-	}
-}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 
-func TestCompactAndTruncateJSONEmptyAsNull(t *testing.T) {
-	got, truncated := compactAndTruncateJSON([]byte(" \n\t "), 16)
-	if truncated {
-		t.Fatalf("truncated = true, want false")
+	logResponsesEgressBuffered([]byte(`{"output_text":"` + canary + `"}`))
+	logResponsesEgressStreamFrame([]byte(`{"type":"response.output_text.delta","delta":"` + canary + `"}`))
+	logResponsesEgressStreamFrame([]byte(`{"type":"` + canary))
+
+	got := logs.String()
+	if strings.Contains(got, canary) {
+		t.Fatalf("Responses output content reached logs: %s", got)
 	}
-	if got != "null" {
-		t.Fatalf("compactAndTruncateJSON = %q, want null", got)
+	for _, structural := range []string{
+		"event=responses_buffered_egress",
+		"payload_bytes=",
+		"event=responses_stream_egress_frame",
+		"frame_bytes=",
+	} {
+		if !strings.Contains(got, structural) {
+			t.Fatalf("logs missing structural field %q: %s", structural, got)
+		}
 	}
 }

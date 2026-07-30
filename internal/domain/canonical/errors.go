@@ -131,7 +131,10 @@ type BackendError struct {
 
 type BackendErrorClass string
 
-const BackendErrorClassToolChoiceUnsupported BackendErrorClass = "tool_choice_unsupported"
+const (
+	BackendErrorClassToolChoiceUnsupported        BackendErrorClass = "tool_choice_unsupported"
+	BackendErrorClassContinuationReferenceInvalid BackendErrorClass = "continuation_reference_invalid"
+)
 
 // ClassifiedBackendError preserves backend-origin error truth while carrying a
 // provider-edge capability classification derived from raw backend envelopes.

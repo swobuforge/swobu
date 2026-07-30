@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -22,12 +23,16 @@ func runExchange(
 	clientFamily canonical.ClientFamily,
 	clientDelivery delivery.Delivery,
 	decoded wire.ClientRequestResult,
+	ingressChanges []compat.Change,
 	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 	requestPath canonical.NormalizedPath,
 ) (RequestOutput, error) {
 	if err := validateCheckpointRuntime(runner); err != nil {
 		return RequestOutput{}, err
+	}
+	if err := compat.ValidateChanges(ingressChanges); err != nil {
+		return RequestOutput{}, canonical.InternalError(err.Error())
 	}
 	responseID, err := allocateResponseID(ctx, exchangeID, runner.ResponseIDs)
 	if err != nil {
@@ -50,8 +55,9 @@ func runExchange(
 			workspace:          workspace, timing: timing,
 			requestPath: requestPath,
 		},
-		swobuResponseID: responseID,
-		phase:           startingPhase{},
+		swobuResponseID:  responseID,
+		phase:            startingPhase{},
+		effectiveChanges: compat.CloneChanges(ingressChanges),
 	}
 	defer func() {
 		if s.mcp != nil {
@@ -64,7 +70,6 @@ func runExchange(
 		if reduceErr != nil {
 			return RequestOutput{}, canonical.InternalError(reduceErr.Error())
 		}
-		recordExchangeEvidenceBestEffort(ctx, runner.DecisionSink, exchangeID, tr.evidence)
 		s = tr.nextState
 		switch p := s.phase.(type) {
 		case completedPhase:
@@ -104,21 +109,25 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 			preparationCtx, cancel = context.WithTimeout(ctx, timeout)
 		}
 		defer cancel()
-		request, fetchCache, usedMedia, decisions, err := materializeRequestImages(preparationCtx, c.request, c.policy, c.limits, c.fetcher, c.fetchCache, c.historical)
+		request, fetchCache, usedMedia, err := materializeRequestImages(preparationCtx, c.request, c.policy, c.limits, c.fetcher, c.fetchCache, c.historical)
 		if err == nil {
 			usedMedia, err = rebaseAttemptMedia(session.ResolvedRequest{Full: c.semantic}, c.request, usedMedia)
 			if err != nil {
 				err = canonical.InternalError("materialized media coordinates do not match the semantic request: " + err.Error())
 			}
 		}
-		return attemptImagesMaterialized{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, decisions: decisions, err: err}
+		return attemptImagesMaterialized{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, err: err}
 	case prepareMCPCommand:
-		full, run, decisions, err := mcp.Open(ctx, c.full, c.access)
-		return mcpPrepared{full: full, run: run, decisions: decisions, err: err}
+		full, run, changes, err := mcp.Open(ctx, c.full, c.access)
+		return mcpPrepared{full: full, run: run, changes: changes, err: err}
 	case callProviderCommand:
 		ingress, err := c.backend.Transport.Send(ctx, c.document)
 		if err != nil {
-			return providerCallFailed{attemptID: c.attemptID, err: err}
+			failure, ok := provider.AsAttemptFailure(err)
+			if !ok {
+				panic(fmt.Sprintf("exchange invariant: bound provider transport returned %T without attempt facts", err))
+			}
+			return providerCallFailed{attemptID: c.attemptID, failure: failure}
 		}
 		return providerIngressReceived{attemptID: c.attemptID, ingress: ingress}
 	case callMCPCommand:
@@ -137,8 +146,9 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 // fallback recovered the request; it is not retained (the terminal event needs
 // the recovery fact, not the candidate tally).
 type terminalRoutingEvidence struct {
-	providerCallCount int
-	fallbackRecovered bool
+	providerCallCount          int
+	fallbackRecovered          bool
+	possibleDuplicateExecution bool
 }
 
 // summarizeRoutingEvidence derives the recovery fact from the contiguous route
@@ -149,6 +159,13 @@ func summarizeRoutingEvidence(attempts []providerCallAttempt, candidateCount int
 		providerCallCount: len(attempts),
 	}
 	summary.fallbackRecovered = completed && candidateCount > 1
+	for index, attempt := range attempts {
+		if index+1 < len(attempts) && attempt.failure != nil &&
+			attempt.failure.Attempt.Execution() == provider.ExecutionMayHaveOccurred {
+			summary.possibleDuplicateExecution = true
+			break
+		}
+	}
 	return summary
 }
 
@@ -157,5 +174,5 @@ func terminalRequestOutput(input exchangeInput, response ClientResponse, target 
 	if target.TargetID != "" {
 		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing}
 	}
-	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence}
+	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response)}
 }

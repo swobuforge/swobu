@@ -78,10 +78,10 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 // Send performs ChatGPT Codex HTTP transport over a final Responses document.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 	if _, err := resolveChatGPTDelivery(target.ProviderProtocol); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 	if doc.IsEmpty() {
-		return nil, canonical.InternalError("chatgpt provider request document is required")
+		return nil, provider.AttemptNotDispatched(canonical.InternalError("chatgpt provider request document is required"))
 	}
 	baseURL := resolveChatGPTExecuteBaseURL(target.BaseURL)
 	bodyBytes := doc.RawBytes()
@@ -102,11 +102,11 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	token, err := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, false)
 	if err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 	httpReq, err := newRequest(token)
 	if err != nil {
-		return nil, canonical.BadEndpoint("chatgpt provider request could not be built")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("chatgpt provider request could not be built"))
 	}
 
 	resp, err := e.client.Do(httpReq)
@@ -116,18 +116,21 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() { _ = resp.Body.Close() }()
-		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
+		// A 401 is a positive pre-execution authentication rejection. Refreshing
+		// the credential and rebuilding this exact request is the sole
+		// transport-owned POST replay; it cannot duplicate provider work.
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
 		_ = resp.Body.Close()
 		recoveredToken, refreshErr := e.resolveAccessToken(ctx, target.ProviderID(), target.CredentialRef, true)
 		if refreshErr != nil || strings.TrimSpace(recoveredToken) == "" { // swobu:io-string source=boundary
-			return nil, backendErr
+			return nil, provider.AttemptRejectedBeforeExecution(backendErr)
 		}
 		retryReq, buildErr := newRequest(recoveredToken)
 		if buildErr != nil {
-			return nil, canonical.BadEndpoint("chatgpt provider request could not be built")
+			return nil, provider.AttemptRejectedBeforeExecution(canonical.BadEndpoint("chatgpt provider request could not be rebuilt after authentication rejection"))
 		}
 		retryResp, retryErr := e.client.Do(retryReq)
 		if retryErr != nil {
@@ -136,17 +139,17 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		retryResp, retryErr = httpedge.DecodeHTTPResponseContentEncoding(retryResp)
 		if retryErr != nil {
 			defer func() { _ = retryResp.Body.Close() }()
-			return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+			return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 		}
 		resp = retryResp
 	}
 	rawContentType := strings.TrimSpace(resp.Header.Get("Content-Type")) // swobu:io-string source=boundary
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
-		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
+		return nil, provider.AttemptMayHaveExecuted(httpedge.ReadBackendHTTPError(resp, target.TargetID))
 	}
 	if rawContentType != "" && !httpedge.IsEventStreamContentType(rawContentType) {
-		return nil, httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID)
+		return nil, provider.AttemptMayHaveExecuted(httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID))
 	}
 	// ChatGPT's SSE-only Codex endpoint can omit Content-Type on a successful
 	// stream. Normalize only absence at this exact-provider edge; an explicit

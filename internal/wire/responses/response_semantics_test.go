@@ -263,40 +263,6 @@ func TestResponsesProviderDiscoveryValidationErrorsRemainBackendOrigin(t *testin
 	}
 }
 
-type responsesFailingDecisionSink struct {
-	err error
-}
-
-func (s responsesFailingDecisionSink) Commit(context.Context, string, []compat.Decision) error {
-	return s.err
-}
-
-func TestResponsesProviderDiscoveryPreservesDecisionSinkFailure(t *testing.T) {
-	sentinel := errors.New("decision sink unavailable")
-	raw := []json.RawMessage{json.RawMessage(`{
-		"type":"tool_search_output",
-		"call_id":"search_1",
-		"status":"completed",
-		"execution":"server",
-		"tools":[
-			{"type":"future_tool"},
-			{"type":"function","name":"kept","parameters":{}}
-		]
-	}`)}
-	_, err := decodeCompletedResponsesItemSet(
-		context.Background(),
-		responsesDiscoveryRequest(t),
-		raw,
-		"",
-		"ex",
-		responsesFailingDecisionSink{err: sentinel},
-	)
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeInternal {
-		t.Fatalf("provider discovery sink error = %v, want preserved internal classification", err)
-	}
-}
-
 func TestResponsesDiscoveryResultUsesProviderItemCompatibilityFeature(t *testing.T) {
 	raw := []json.RawMessage{json.RawMessage(`{
 		"type":"tool_search_output",
@@ -307,20 +273,23 @@ func TestResponsesDiscoveryResultUsesProviderItemCompatibilityFeature(t *testing
 			{"type":"function","name":"kept","parameters":{"type":"object"}}
 		]
 	}`)}
-	sink := &compat.RecordingSink{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+	changeLog := &recordingChanges{}
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolDiscoveryResult {
 		t.Fatalf("canonical items = %#v, want one discovery result", items)
 	}
-	decisions := sink.Decisions()
-	if len(decisions) != 1 ||
-		decisions[0].Feature != compat.ResponseItemsKind ||
-		decisions[0].Outcome != compat.Drop ||
-		decisions[0].Subject != compat.Subject("wire:/output/0/tools/0/type") {
-		t.Fatalf("compatibility decisions = %#v, want provider discovery-result evidence", decisions)
+	changes := *changeLog
+	if len(changes) != 1 {
+		t.Fatalf("compatibility changes = %#v, want provider discovery-result evidence", changes)
+	}
+	item, occurrenceOK := changes[0].Occurrence.ToolIndex()
+	if changes[0].Capability != canonical.ResponseItemsKind ||
+		changes[0].Kind != compat.Omission ||
+		!occurrenceOK || item != 0 {
+		t.Fatalf("compatibility changes = %#v, want provider discovery-result evidence", changes)
 	}
 }
 
@@ -333,20 +302,23 @@ func TestResponsesDiscoveryWebSearchFieldsUseProviderItemCompatibilityFeature(t 
 			{"type":"web_search","search_context_size":"high"}
 		]
 	}`)}
-	sink := &compat.RecordingSink{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+	changeLog := &recordingChanges{}
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolDiscoveryResult {
 		t.Fatalf("canonical items = %#v, want one discovery result", items)
 	}
-	decisions := sink.Decisions()
-	if len(decisions) != 1 ||
-		decisions[0].Feature != compat.ResponseItemsKind ||
-		decisions[0].Outcome != compat.Approx ||
-		decisions[0].Subject != compat.Subject("wire:/output/0/tools/0/search_context_size") {
-		t.Fatalf("compatibility decisions = %#v, want provider web-search declaration evidence", decisions)
+	changes := *changeLog
+	if len(changes) != 1 {
+		t.Fatalf("compatibility changes = %#v, want provider web-search declaration evidence", changes)
+	}
+	item, occurrenceOK := changes[0].Occurrence.ToolIndex()
+	if changes[0].Capability != canonical.ResponseItemsKind ||
+		changes[0].Kind != compat.Approximation ||
+		!occurrenceOK || item != 0 {
+		t.Fatalf("compatibility changes = %#v, want provider web-search declaration evidence", changes)
 	}
 }
 
@@ -355,11 +327,11 @@ func TestResponsesDiscoveryClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 		name        string
 		tool        string
 		wantError   bool
-		wantOutcome compat.Outcome
+		wantOutcome compat.Kind
 	}{
-		{name: "content type", tool: `{"type":"web_search","search_content_types":["video"]}`, wantError: true, wantOutcome: compat.Drop},
-		{name: "location type", tool: `{"type":"web_search","user_location":{"type":"future_location"}}`, wantError: true, wantOutcome: compat.Drop},
-		{name: "context size", tool: `{"type":"web_search","search_context_size":"ultra"}`, wantOutcome: compat.Approx},
+		{name: "content type", tool: `{"type":"web_search","search_content_types":["video"]}`, wantError: true, wantOutcome: compat.Omission},
+		{name: "location type", tool: `{"type":"web_search","user_location":{"type":"future_location"}}`, wantError: true, wantOutcome: compat.Omission},
+		{name: "context size", tool: `{"type":"web_search","search_context_size":"ultra"}`, wantOutcome: compat.Approximation},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -369,8 +341,8 @@ func TestResponsesDiscoveryClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 				"execution":"server",
 				"tools":[` + test.tool + `]
 			}`)}
-			sink := &compat.RecordingSink{}
-			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+			changeLog := &recordingChanges{}
+			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 			var backendErr canonical.BackendError
 			if test.wantError && !errors.As(err, &backendErr) {
 				t.Fatalf("error = %T %v, want backend error", err, err)
@@ -378,8 +350,8 @@ func TestResponsesDiscoveryClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 			if !test.wantError && err != nil {
 				t.Fatal(err)
 			}
-			if len(sink.Decisions()) != 1 || sink.Decisions()[0].Outcome != test.wantOutcome {
-				t.Fatalf("decisions = %#v, want one %s", sink.Decisions(), test.wantOutcome)
+			if len(*changeLog) != 1 || (*changeLog)[0].Kind != test.wantOutcome {
+				t.Fatalf("changes = %#v, want one %v", *changeLog, test.wantOutcome)
 			}
 		})
 	}
@@ -403,14 +375,14 @@ func TestResponsesDiscoveryDropsUnrepresentedImageSearchOperation(t *testing.T) 
 				"execution":"server",
 				"tools":[` + test.tool + `]
 			}`)}
-			sink := &compat.RecordingSink{}
-			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+			changeLog := &recordingChanges{}
+			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 			var backendErr canonical.BackendError
 			if !errors.As(err, &backendErr) {
 				t.Fatalf("error = %v, want all-erased discovery backend error", err)
 			}
-			if len(sink.Decisions()) != 1 || sink.Decisions()[0].Outcome != compat.Drop {
-				t.Fatalf("decisions = %#v, want operation Drop", sink.Decisions())
+			if len(*changeLog) != 1 || (*changeLog)[0].Kind != compat.Omission {
+				t.Fatalf("changes = %#v, want operation Drop", *changeLog)
 			}
 		})
 	}
@@ -421,8 +393,8 @@ func TestResponsesDocumentPreservesWebSearchCallWhenStatusIsUnknown(t *testing.T
 		json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"future_status","action":{"type":"search","queries":["q"]}}`),
 		json.RawMessage(`{"type":"message","status":"completed","content":[{"type":"output_text","text":"kept"}]}`),
 	}
-	sink := &compat.RecordingSink{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+	changeLog := &recordingChanges{}
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,10 +413,12 @@ func TestResponsesDocumentPreservesWebSearchCallWhenStatusIsUnknown(t *testing.T
 			t.Fatalf("unknown lifecycle status manufactured result: %#v", item)
 		}
 	}
-	if len(sink.Decisions()) != 1 ||
-		sink.Decisions()[0].Outcome != compat.Drop ||
-		sink.Decisions()[0].Subject != compat.Subject("wire:/output/0/status") {
-		t.Fatalf("decisions = %#v, want occurrence-local status Drop", sink.Decisions())
+	if len(*changeLog) != 1 {
+		t.Fatalf("changes = %#v, want occurrence-local status omission", *changeLog)
+	}
+	item, occurrenceOK := (*changeLog)[0].Occurrence.ResponseItem()
+	if (*changeLog)[0].Kind != compat.Omission || !occurrenceOK || item != 0 {
+		t.Fatalf("changes = %#v, want occurrence-local status Drop", *changeLog)
 	}
 }
 
@@ -452,8 +426,8 @@ func TestResponsesDocumentUnknownWebSearchStatusDefersFailureToSettlement(t *tes
 	raw := []json.RawMessage{
 		json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"future_status","action":{"type":"search","queries":["q"]}}`),
 	}
-	sink := &compat.RecordingSink{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", sink)
+	changeLog := &recordingChanges{}
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,9 +443,11 @@ func TestResponsesDocumentUnknownWebSearchStatusDefersFailureToSettlement(t *tes
 	); err == nil {
 		t.Fatal("completed canonical response accepted an unsettled web-search call")
 	}
-	if len(sink.Decisions()) != 1 ||
-		sink.Decisions()[0].Outcome != compat.Drop ||
-		sink.Decisions()[0].Subject != compat.Subject("wire:/output/0/status") {
-		t.Fatalf("decisions = %#v, want occurrence-local status Drop", sink.Decisions())
+	if len(*changeLog) != 1 {
+		t.Fatalf("changes = %#v, want occurrence-local status omission", *changeLog)
+	}
+	item, occurrenceOK := (*changeLog)[0].Occurrence.ResponseItem()
+	if (*changeLog)[0].Kind != compat.Omission || !occurrenceOK || item != 0 {
+		t.Fatalf("changes = %#v, want occurrence-local status Drop", *changeLog)
 	}
 }

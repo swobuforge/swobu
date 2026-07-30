@@ -13,7 +13,7 @@ func TestFlattenInstructionsForResponsesPreservesWhitespaceAndReportsBlockLoss(t
 		canonicaltest.MustInstruction(canonical.MessageRoleSystem, "second\n"),
 	}
 	lowered := flattenInstructionsForResponses(items)
-	if lowered.Text != " first \n\nsecond\n" || lowered.Exact || len(lowered.Decisions) != 1 {
+	if lowered.Text != " first \n\nsecond\n" || lowered.Exact || len(lowered.Changes) != 1 {
 		t.Fatalf("lowered = %#v", lowered)
 	}
 }

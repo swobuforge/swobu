@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -75,22 +76,22 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 // It cannot observe canonical request state or exchange orchestration.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("provider endpoint base URL is required")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("provider endpoint base URL is required"))
 	}
 	if requiresExplicitCredentialRef(target.ProviderID(), target.BaseURL, target.CredentialRef) {
-		return nil, canonical.BadEndpoint(providerCredentialRequiredMessage(target.ProviderID()))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint(providerCredentialRequiredMessage(target.ProviderID())))
 	}
 
 	if parsed, ok := profile.ParseProviderID(strings.TrimSpace(target.ProviderID())); !ok || parsed != e.profile.ProviderID() { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("provider policy is unsupported for HTTP adapter runtime")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("provider policy is unsupported for HTTP adapter runtime"))
 	}
 	wireReqCarrier := doc
 	if wireReqCarrier.IsEmpty() {
-		return nil, canonical.InternalError("provider request document is required")
+		return nil, provider.AttemptNotDispatched(canonical.InternalError("provider request document is required"))
 	}
 	path, err := profile.ProviderRequestPath(target.ProviderID(), target.ProtocolKind)
 	if err != nil {
-		return nil, provider.NewIncompatibleTarget(err.Error())
+		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget(err.Error()))
 	}
 	wireReqBody := wireReqCarrier.RawBytes()
 	requestStreaming := requestsStreamingResponse(wireReqBody)
@@ -106,7 +107,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		badEndpoint.Details = map[string]string{
 			"request_build_error": detailErrorMessage(err), // swobu:io-string source=boundary
 		}
-		return nil, badEndpoint
+		return nil, provider.AttemptNotDispatched(badEndpoint)
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -115,7 +116,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
 	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 
 	resp, err := e.client.Do(httpReq)
@@ -126,14 +127,14 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		badEndpoint.Details = map[string]string{
 			"request_transport_error": detailErrorMessage(err), // swobu:io-string source=boundary
 		}
-		return nil, provider.TransportFailure(ctx, badEndpoint)
+		return nil, provider.TransportFailure(ctx, fmt.Errorf("%w: %w", badEndpoint, err))
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 	}
 	if resp.StatusCode >= 400 {
 		defer func() {
@@ -142,13 +143,16 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
 		classifiedErr := classifyBackendError(backendErr)
 		if canonical.IsBackendErrorClass(classifiedErr, canonical.BackendErrorClassToolChoiceUnsupported) {
-			return nil, provider.IncompatibleTarget(classifiedErr)
+			return nil, provider.AttemptRejectedBeforeExecution(provider.IncompatibleTarget(classifiedErr))
 		}
-		return nil, classifiedErr
+		if canonical.IsBackendErrorClass(classifiedErr, canonical.BackendErrorClassContinuationReferenceInvalid) {
+			return nil, provider.AttemptRejectedBeforeExecution(provider.Rejected(classifiedErr))
+		}
+		return nil, provider.AttemptMayHaveExecuted(classifiedErr)
 	}
 	isEventStream := httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type"))
 	if requestStreaming && !isEventStream {
-		return nil, httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID)
+		return nil, provider.AttemptMayHaveExecuted(httpedge.ReadUnexpectedStreamingResponse(resp, target.TargetID))
 	}
 	if isEventStream {
 		return provider.StreamIngress{Stream: carrier.ByteStream{
@@ -160,7 +164,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	raw, readErr := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if readErr != nil {
-		return nil, canonical.InternalError("backend success response could not be read")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend success response could not be read"))
 	}
 	return provider.DocumentIngress{Document: carrier.NewDocument(
 		target.ProtocolKind,
@@ -230,7 +234,6 @@ func detailErrorMessage(err error) string {
 }
 
 func logOpenAIFamilyOutboundRequest(providerSpec string, providerProtocol string, path string, body []byte) {
-	normalized, truncated := compactAndTruncateJSON(redactProviderRequestInput(body), 4096)
 	slog.Debug("openaifamily outbound request",
 		"component", "provider",
 		"event", "outbound_request_shape",
@@ -238,38 +241,5 @@ func logOpenAIFamilyOutboundRequest(providerSpec string, providerProtocol string
 		"provider_protocol", strings.TrimSpace(providerProtocol), // swobu:io-string source=boundary
 		"path", strings.TrimSpace(path), // swobu:io-string source=boundary
 		"body_bytes", len(body),
-		"body_truncated", truncated,
-		"body_json", normalized,
 	)
-}
-
-func redactProviderRequestInput(body []byte) []byte {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return []byte(`{"request":"[REDACTED]"}`)
-	}
-	if _, present := payload["input"]; present {
-		payload["input"] = json.RawMessage(`"[REDACTED]"`)
-	}
-	redacted, err := json.Marshal(payload)
-	if err != nil {
-		return []byte(`{"request":"[REDACTED]"}`)
-	}
-	return redacted
-}
-
-func compactAndTruncateJSON(raw []byte, maxBytes int) (string, bool) {
-	text := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
-	if text == "" {
-		return "null", false
-	}
-	normalized := text
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, []byte(text)); err == nil {
-		normalized = compact.String()
-	}
-	if maxBytes <= 0 || len(normalized) <= maxBytes {
-		return normalized, false
-	}
-	return normalized[:maxBytes], true
 }

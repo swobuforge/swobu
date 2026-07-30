@@ -10,9 +10,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func decisionRecorded(decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) bool {
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
+func decisionRecorded(changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) bool {
+	for _, decision := range changes {
+		if decision.Capability == feature && decision.Kind == outcome {
 			return true
 		}
 	}
@@ -27,11 +27,11 @@ func TestChatCompatibilityRehomesClosedBatchToolResultImage(t *testing.T) {
 		canonical.NewImageToolResultPart(image),
 		canonical.NewTextToolResultPart("after"),
 	)
-	sink := &recordingDecisionSink{}
-	document, err := EncodeCarrierWithDecisions(canonical.NewCanonicalRequest(canonical.RequestParams{
+	changeLog := &recordingChanges{}
+	document, err := EncodeCarrierWithChanges(canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{call, result},
-	}), delivery.BufferedDelivery(), sink, "exchange_1")
+	}), delivery.BufferedDelivery(), changeLog, "exchange_1")
 	if err != nil {
 		t.Fatalf("closed compatibility projection rejected: %v", err)
 	}
@@ -65,8 +65,8 @@ func TestChatCompatibilityRehomesClosedBatchToolResultImage(t *testing.T) {
 	if len(synthetic) != 2 || synthetic[0]["type"] != "text" || synthetic[1]["type"] != "image_url" {
 		t.Fatalf("synthetic image content = %#v", synthetic)
 	}
-	if !decisionRecorded(sink.effects, compat.RequestItemsToolResultImage, compat.Approx) {
-		t.Fatalf("compatibility decisions = %#v", sink.effects)
+	if !decisionRecorded(*changeLog, canonical.RequestItemsToolResultImage, compat.Approximation) {
+		t.Fatalf("compatibility changes = %#v", *changeLog)
 	}
 }
 
@@ -83,13 +83,13 @@ func TestChatToolResultImageProjectionRequiresClosedActiveBatch(t *testing.T) {
 		{name: "partial parallel batch", items: []canonical.CanonicalItem{callA, callB, resultA}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sink := &recordingDecisionSink{}
-			_, err := EncodeCarrierWithDecisions(
+			var changes []compat.Change
+			_, err := EncodeCarrierWithChanges(
 				canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: tc.items}),
-				delivery.BufferedDelivery(), sink, "exchange_reject",
+				delivery.BufferedDelivery(), &changes, "exchange_reject",
 			)
-			if err == nil || !decisionRecorded(sink.effects, compat.RequestItemsToolResultImage, compat.Reject) {
-				t.Fatalf("error = %v decisions = %#v", err, sink.effects)
+			if err == nil {
+				t.Fatalf("error = %v changes = %#v", err, changes)
 			}
 		})
 	}
@@ -109,11 +109,11 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 		canonical.NewImageToolResultPart(url),
 	)
 	resultB := mustChatProjectionResult(t, "call_b", canonical.NewTextToolResultPart("done"))
-	sink := &recordingDecisionSink{}
+	changeLog := &recordingChanges{}
 	document, err := LowerProviderRequestDocument(canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{callA, callB, resultA, resultB},
-	}), delivery.BufferedDelivery(), sink, "exchange_parallel")
+	}), delivery.BufferedDelivery(), changeLog, "exchange_parallel")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +129,9 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 	if !ok || len(synthetic) != 4 {
 		t.Fatalf("synthetic content = %#v", document.Messages[3].Content)
 	}
-	if !decisionRecorded(sink.effects, compat.RequestItemsToolResultImage, compat.Approx) ||
-		!decisionRecorded(sink.effects, compat.RequestItemsToolResultImageDetail, compat.Approx) {
-		t.Fatalf("compatibility decisions = %#v", sink.effects)
+	if !decisionRecorded(*changeLog, canonical.RequestItemsToolResultImage, compat.Approximation) ||
+		!decisionRecorded(*changeLog, canonical.RequestItemsToolResultImageDetail, compat.Approximation) {
+		t.Fatalf("compatibility changes = %#v", *changeLog)
 	}
 }
 

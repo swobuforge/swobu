@@ -1,10 +1,12 @@
 package openaifamily
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -141,7 +143,7 @@ func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestOpenRouterBackendRejectsUnprovenReasoningTokenCeiling(t *testing.T) {
+func TestOpenRouterTransportKernelProjectsStandardReasoningBudget(t *testing.T) {
 	compute, err := canonical.NewBudgetReasoningCompute(2048)
 	if err != nil {
 		t.Fatal(err)
@@ -161,8 +163,21 @@ func TestOpenRouterBackendRejectsUnprovenReasoningTokenCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()}); err == nil {
-		t.Fatal("OpenRouter backend accepted a hard ceiling without target proof")
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["reasoning_effort"] != "low" {
+		t.Fatalf("reasoning_effort = %#v, want low", payload["reasoning_effort"])
+	}
+	if len(changes) != 1 ||
+		changes[0].Capability != canonical.RequestReasoning ||
+		changes[0].Preserved != canonical.RequestControlsEffort {
+		t.Fatalf("changes = %#v, want one reasoning-to-effort approximation", changes)
 	}
 }
 
@@ -264,11 +279,32 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 	}
 }
 
-func TestOutboundRequestDebugRedactsStatelessResponsesInput(t *testing.T) {
-	raw := []byte(`{"model":"gpt","input":[{"type":"reasoning","encrypted_content":"ciphertext"},{"type":"program","code":"secret program"}],"stream":true}`)
-	redacted := string(redactProviderRequestInput(raw))
-	if strings.Contains(redacted, "ciphertext") || strings.Contains(redacted, "secret program") || !strings.Contains(redacted, `"input":"[REDACTED]"`) {
-		t.Fatalf("redacted request = %s", redacted)
+func TestOutboundRequestDebugLogsStructureWithoutContent(t *testing.T) {
+	const canary = "SWOBU_PRIVATE_REQUEST_CANARY"
+	requests := [][]byte{
+		[]byte(`{"model":"gpt","messages":[{"role":"user","content":"` + canary + `"}],"tools":[{"function":{"description":"` + canary + `"}}]}`),
+		[]byte(`{"model":"claude","system":"` + canary + `","messages":[{"role":"user","content":"` + canary + `"}]}`),
+		[]byte(`{"model":"gpt","instructions":"` + canary + `","input":[{"type":"reasoning","encrypted_content":"` + canary + `"}]}`),
+		[]byte(`{"malformed":"` + canary),
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	for _, request := range requests {
+		logOpenAIFamilyOutboundRequest("openai", "responses", "/v1/responses", request)
+	}
+
+	got := logs.String()
+	if strings.Contains(got, canary) {
+		t.Fatalf("outbound request content reached logs: %s", got)
+	}
+	for _, structural := range []string{"provider_spec=openai", "provider_protocol=responses", "path=/v1/responses", "body_bytes="} {
+		if !strings.Contains(got, structural) {
+			t.Fatalf("logs missing structural field %q: %s", structural, got)
+		}
 	}
 }
 
@@ -322,6 +358,10 @@ func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("error type = %T, want provider.UnavailableError", err)
 	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok || failure.Execution() != provider.ExecutionMayHaveOccurred {
+		t.Fatalf("attempt failure = %#v, %t", failure, ok)
+	}
 
 	var swErr canonical.Error
 	if !errors.As(err, &swErr) {
@@ -332,6 +372,41 @@ func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
 	}
 	if got := swErr.Details["request_transport_error"]; got != transportErr.Error() {
 		t.Fatalf("transport detail = %q, want %q", got, transportErr.Error())
+	}
+}
+
+func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
+	exec := NewExecutor(
+		&http.Client{Transport: failingRoundTripper{err: context.Canceled}},
+		nil,
+		NewOllamaPolicy(),
+	)
+	doc := carrier.NewDocument(
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		[]byte(`{"model":"gpt-4o-mini","input":"hello"}`),
+		carrier.Meta{},
+	)
+	target := provider.NewTargetSnapshot(
+		"backend-a",
+		string(profile.ProviderSpecOllama),
+		"http://127.0.0.1:11434/v1",
+		"",
+		protocolkind.Responses,
+		"",
+		"",
+	)
+	target.Model = "gpt-4o-mini"
+
+	_, err := exec.Send(context.Background(), target, doc)
+	var cancelled provider.CancelledError
+	if !errors.As(err, &cancelled) {
+		t.Fatalf("error type = %T, want provider.CancelledError", err)
+	}
+	var swErr canonical.Error
+	if !errors.As(err, &swErr) || swErr.Code != canonical.ErrorCodeBadEndpoint {
+		t.Fatalf("diagnostic error = %#v, want BAD_ENDPOINT", err)
 	}
 }
 
@@ -349,6 +424,37 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	var unsupported provider.IncompatibleTargetError
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("error = %T, want provider.IncompatibleTargetError", err)
+	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok || failure.Execution() != provider.ExecutionRejectedBeforeExecution {
+		t.Fatalf("attempt failure = %#v, %t", failure, ok)
+	}
+}
+
+func TestSendProviderRequest_MarksPreDispatchValidation(t *testing.T) {
+	exec := NewExecutor(nil, nil, NewOllamaPolicy())
+	target := provider.NewTargetSnapshot(
+		"backend-a",
+		string(profile.ProviderSpecOllama),
+		"",
+		"",
+		protocolkind.Responses,
+		"",
+		"",
+	)
+	target.Model = "gpt-4o-mini"
+	doc := carrier.NewDocument(
+		protocolkind.Responses,
+		"application/json",
+		nil,
+		[]byte(`{"model":"gpt-4o-mini","input":"hello"}`),
+		carrier.Meta{},
+	)
+
+	_, err := exec.Send(context.Background(), target, doc)
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok || failure.Execution() != provider.ExecutionNotDispatched {
+		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 }
 

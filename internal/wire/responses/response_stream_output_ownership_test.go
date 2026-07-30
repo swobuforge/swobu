@@ -84,7 +84,7 @@ func TestDecodeResponseStreamFreezesErasedOutputLifecycle(t *testing.T) {
 			responsesCompletedFrame("[]", "")
 		stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 		assertResponsesProviderOutputItems(t, stream, 1)
-		assertResponsesStreamDrop(t, stream, "wire:/output/0/type", 1)
+		assertResponsesStreamDrop(t, stream, 1)
 	})
 
 	t.Run("resolved erasure cannot change span or emit", func(t *testing.T) {
@@ -205,6 +205,5 @@ func TestDecodeResponseStreamRecordsErasurePerOutputIndex(t *testing.T) {
 			break
 		}
 	}
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/type", 1)
-	assertResponsesStreamDrop(t, stream, "wire:/output/1/type", 1)
+	assertResponsesStreamDrop(t, stream, 2)
 }

@@ -74,7 +74,7 @@ func TestEncode_PreservesInstructionsAsTopLevelSystem(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","system":"Use native tools for filesystem work.","messages":[{"role":"user","content":"inspect files"}]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestDecodeRequest_PreservesTopLevelSystemAsInstructions(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"max_tokens":88,"temperature":0.3,"top_p":0.75,"stop_sequences":["END"]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
@@ -141,7 +141,7 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesStructuredOutputFormat(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
@@ -171,7 +171,7 @@ func TestMessagesJSONObjectIngressRequiresSchemaForProviderProjection(t *testing
 }
 
 func TestDecodeRequestPreservesNativeMessagesOutputConfigFormat(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: req})
 	if err != nil {
@@ -184,28 +184,28 @@ func TestDecodeRequestPreservesNativeMessagesOutputConfigFormat(t *testing.T) {
 }
 
 func TestMessagesUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
-	sink := &compat.RecordingSink{}
-	_, err := decodeMessagesOutputFormat(json.RawMessage(`{"type":"future_format"}`), sink, "ex")
+	var changes []compat.Change
+	_, err := decodeMessagesOutputFormat(json.RawMessage(`{"type":"future_format"}`), &changes, "ex")
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error = %v, want BAD_REQUEST", err)
 	}
-	if len(sink.Decisions()) != 0 {
-		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want no omission", changes)
 	}
 }
 
 func TestMessagesUnknownNativeOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
-	sink := &compat.RecordingSink{}
+	var changes []compat.Change
 	_, err := decodeMessagesNativeOutputFormat(&messagesNativeOutputFormatDTO{
 		Type: "future_format",
-	}, sink, "ex")
+	}, &changes, "ex")
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error = %v, want BAD_REQUEST", err)
 	}
-	if len(sink.Decisions()) != 0 {
-		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want no omission", changes)
 	}
 }
 

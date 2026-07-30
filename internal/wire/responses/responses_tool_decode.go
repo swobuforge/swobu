@@ -9,14 +9,14 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix string, feature compat.Feature, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix string, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
 	seen := map[string]struct{}{}
 	for idx, tool := range tools {
-		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: idx}, feature, sink, exchangeID)
+		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: idx}, feature, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -33,9 +33,9 @@ func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix stri
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Responses tool variants.
-func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature compat.Feature, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
-	if feature == compat.ResponseItemsKind {
+	if feature == canonical.ResponseItemsKind {
 		if err := admitResponsesProviderOutputChild(kind); err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 	}
 	switch kind {
 	case "namespace":
-		return decodeResponsesNamespaceTool(tool, ctx, feature, sink, exchangeID)
+		return decodeResponsesNamespaceTool(tool, ctx, feature, changeLog, exchangeID)
 	case "function":
 		if len(ctx.path) > 0 {
 			decl, err := decodeResponsesNestedFunctionTool(tool, ctx)
@@ -61,7 +61,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			}
 			return []canonical.ToolDeclaration{decl}, nil
 		}
-		decl, err := decodeResponsesFlatFunctionTool(tool, ctx, sink, exchangeID)
+		decl, err := decodeResponsesFlatFunctionTool(tool, ctx, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +74,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 			}
 			return []canonical.ToolDeclaration{decl}, nil
 		}
-		decl, err := decodeResponsesFlatCustomTool(tool, ctx, sink, exchangeID)
+		decl, err := decodeResponsesFlatCustomTool(tool, ctx, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +104,7 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 		if len(ctx.path) > 0 {
 			return nil, canonical.BadRequest("responses web-search tool cannot be nested or renamed")
 		}
-		decl, present, err := decodeResponsesWebSearchTool(tool, ctx, feature, sink, exchangeID)
+		decl, present, err := decodeResponsesWebSearchTool(tool, ctx, feature, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -113,14 +113,14 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 		}
 		return []canonical.ToolDeclaration{decl}, nil
 	default:
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, responsesToolNodeSubject(ctx)); err != nil {
+		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, responsesToolNodeSubject(ctx)); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
 }
 
-func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature compat.Feature, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, bool, error) {
+func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
 	if strings.TrimSpace(tool.Name) != "" || len(tool.Tools) > 0 || len(tool.Parameters) > 0 || len(tool.Format) > 0 { // swobu:io-string source=boundary
 		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search tool has invalid declaration fields")
 	}
@@ -129,18 +129,18 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responses
 			switch strings.TrimSpace(contentType) {
 			case "text":
 			default:
-				return dropResponsesWebSearchOperation(ctx, feature, sink, exchangeID)
+				return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 			}
 		}
 	}
 	if strings.TrimSpace(tool.OutputFormat) != "" { // swobu:io-string source=boundary
-		return dropResponsesWebSearchOperation(ctx, feature, sink, exchangeID)
+		return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 	}
 	if tool.ExternalWebAccess != nil {
 		if !*tool.ExternalWebAccess {
-			return dropResponsesWebSearchOperation(ctx, feature, sink, exchangeID)
+			return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 		}
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, responsesToolFieldSubject(ctx, "external_web_access")); err != nil {
+		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, responsesToolFieldSubject(ctx, "external_web_access")); err != nil {
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
@@ -152,34 +152,34 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responses
 				}
 			}
 			if len(values) > 0 {
-				return dropResponsesWebSearchOperation(ctx, feature, sink, exchangeID)
+				return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 			}
 		}
 	}
 	if tool.UserLocation != nil {
 		if kind := strings.TrimSpace(tool.UserLocation.Type); kind != "approximate" { // swobu:io-string source=boundary
-			return dropResponsesWebSearchOperation(ctx, feature, sink, exchangeID)
+			return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 		}
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Approx, responsesToolFieldSubject(ctx, "user_location")); err != nil {
+		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Approximation, responsesToolFieldSubject(ctx, "user_location")); err != nil {
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
 	if raw := strings.TrimSpace(tool.SearchContextSize); raw != "" { // swobu:io-string source=boundary
-		if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Approx, responsesToolFieldSubject(ctx, "search_context_size")); err != nil {
+		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Approximation, responsesToolFieldSubject(ctx, "search_context_size")); err != nil {
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
 	return canonical.NewWebSearchDeclaration(), true, nil
 }
 
-func dropResponsesWebSearchOperation(ctx responsesToolNamespaceContext, feature compat.Feature, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, bool, error) {
-	if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, responsesToolNodeSubject(ctx)); err != nil {
+func dropResponsesWebSearchOperation(ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
+	if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, responsesToolNodeSubject(ctx)); err != nil {
 		return canonical.ToolDeclaration{}, false, err
 	}
 	return canonical.ToolDeclaration{}, false, nil
 }
 
-func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature compat.Feature, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return nil, canonical.BadRequest("responses request tool namespace declarations require a name")
@@ -193,7 +193,7 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tool.Tools))
 	for idx, child := range tool.Tools {
-		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, subjectPrefix: nextCtx.subjectPrefix, index: idx}, feature, sink, exchangeID)
+		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, subjectPrefix: nextCtx.subjectPrefix, index: idx}, feature, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -213,15 +213,15 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 	return []canonical.ToolDeclaration{namespace}, nil
 }
 
-func responsesToolNodeSubject(ctx responsesToolNamespaceContext) compat.Subject {
-	return compat.Subject(ctx.subjectPrefix + "/" + strconv.Itoa(ctx.index) + "/type")
+func responsesToolNodeSubject(ctx responsesToolNamespaceContext) canonical.Occurrence {
+	return canonical.ToolIndexOccurrence(uint32(ctx.index))
 }
 
-func responsesToolFieldSubject(ctx responsesToolNamespaceContext, field string) compat.Subject {
-	return compat.Subject(ctx.subjectPrefix + "/" + strconv.Itoa(ctx.index) + "/" + field)
+func responsesToolFieldSubject(ctx responsesToolNamespaceContext, _ string) canonical.Occurrence {
+	return canonical.ToolIndexOccurrence(uint32(ctx.index))
 }
 
-func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
+func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, error) {
 	schema, err := responsesToolParametersFromWire(tool.Parameters)
 	if err != nil {
 		return canonical.ToolDeclaration{}, err
@@ -262,7 +262,7 @@ func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx resp
 	return canonical.NewFunctionTool(key, tool.Description, schema, strict)
 }
 
-func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
+func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, error) {
 	format, err := responsesToolFormatFromWire(tool.Format)
 	if err != nil {
 		return canonical.ToolDeclaration{}, err

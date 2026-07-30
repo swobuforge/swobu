@@ -23,7 +23,7 @@ type chatCompletionsJSONSchemaFormatDTO struct {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes response_format variants.
-func decodeChatCompletionsOutputFormat(raw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
+func decodeChatCompletionsOutputFormat(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {
 		return canonical.OutputFormat{}, nil
@@ -71,7 +71,7 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 		return json.RawMessage(`{"type":"json_object"}`), nil
 	}
 	if format.Kind != canonical.OutputFormatJSONSchema {
-		return nil, provider.NewIncompatibleTarget("Chat Completions cannot represent the canonical output format")
+		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Chat Completions cannot represent the canonical output format")
 	}
 	dto := chatCompletionsResponseFormatDTO{
 		Type: string(canonical.OutputFormatJSONSchema),

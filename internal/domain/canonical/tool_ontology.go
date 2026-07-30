@@ -256,6 +256,9 @@ func callableToolDeclarations(tools []ToolDeclaration) []ToolDeclaration {
 	var out []ToolDeclaration
 	for _, tool := range tools {
 		if namespace, ok := tool.Namespace(); ok {
+			if _, isMCP := namespace.MCPSource(); isMCP {
+				out = append(out, tool)
+			}
 			out = append(out, callableToolDeclarations(namespace.Tools())...)
 			continue
 		}

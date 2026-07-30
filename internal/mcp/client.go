@@ -39,18 +39,22 @@ type session struct {
 	authStatus *authenticationStatus
 }
 
-func openSession(ctx context.Context, source canonical.ToolNamespace, bearer string) (*session, error) {
+func openSession(ctx context.Context, source canonical.ToolNamespace, access SourceAccess) (*session, error) {
 	remote, ok := source.MCPSource()
 	if !ok {
 		return nil, canonical.InternalError("MCP client requires a remote namespace")
 	}
-	httpClient, authStatus, err := safeHTTPClient(source, bearer)
+	httpClient, authStatus, err := safeHTTPClient(source, access)
 	if err != nil {
 		return nil, err
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "swobu", Version: "v0"}, nil)
+	endpoint, ok := remote.URL()
+	if !ok {
+		return nil, canonical.InternalError("local MCP client requires a URL source")
+	}
 	transport := &mcp.StreamableClientTransport{
-		Endpoint: remote.Endpoint(), HTTPClient: httpClient,
+		Endpoint: endpoint, HTTPClient: httpClient,
 		DisableStandaloneSSE: true, MaxRetries: -1,
 	}
 	sdkSession, err := client.Connect(ctx, transport, nil)
@@ -63,13 +67,13 @@ func openSession(ctx context.Context, source canonical.ToolNamespace, bearer str
 	return &session{source: source.Clone(), sdk: sdkSession, authStatus: authStatus}, nil
 }
 
-func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, []compat.Decision, error) {
+func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, []compat.Change, error) {
 	ctx, cancel := context.WithTimeout(ctx, DiscoveryTimeout)
 	defer cancel()
 	var declarations []canonical.ToolDeclaration
-	var decisions []compat.Decision
+	var changes []compat.Change
 	discovered := make(map[string]canonical.ToolDeclaration)
-	discoveredDecisions := make(map[string][]compat.Decision)
+	discoveredDecisions := make(map[string][]compat.Change)
 	discoveredOrder := make([]string, 0)
 	cursor := ""
 	bounds := toolListBounds{
@@ -122,15 +126,15 @@ func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, [
 				return nil, nil, fmt.Errorf("MCP source %q did not declare selected tool %q", s.source.Key().Name(), name)
 			}
 			declarations = append(declarations, declaration)
-			decisions = append(decisions, discoveredDecisions[name]...)
+			changes = append(changes, discoveredDecisions[name]...)
 		}
 	} else {
 		for _, name := range discoveredOrder {
 			declarations = append(declarations, discovered[name])
-			decisions = append(decisions, discoveredDecisions[name]...)
+			changes = append(changes, discoveredDecisions[name]...)
 		}
 	}
-	return declarations, decisions, nil
+	return declarations, changes, nil
 }
 
 func sdkToolRetainedBytes(sourceDescription string, tool *mcp.Tool) (int, error) {
@@ -156,7 +160,7 @@ func sdkToolRetainedBytes(sourceDescription string, tool *mcp.Tool) (int, error)
 		len(expandedDescription), nil
 }
 
-func declarationFromSDKTool(source canonical.ToolNamespace, tool *mcp.Tool) (canonical.ToolDeclaration, []compat.Decision, error) {
+func declarationFromSDKTool(source canonical.ToolNamespace, tool *mcp.Tool) (canonical.ToolDeclaration, []compat.Change, error) {
 	input, err := schemaFromSDK(tool.InputSchema)
 	if err != nil {
 		return canonical.ToolDeclaration{}, nil, fmt.Errorf("MCP tool %q input schema: %w", tool.Name, err)
@@ -172,15 +176,16 @@ func declarationFromSDKTool(source canonical.ToolNamespace, tool *mcp.Tool) (can
 	if err != nil {
 		return canonical.ToolDeclaration{}, nil, err
 	}
-	var decisions []compat.Decision
+	var changes []compat.Change
 	if tool.OutputSchema != nil {
-		decisions = append(decisions, compat.Decision{
-			Feature: compat.RequestTools,
-			Outcome: compat.Approx,
-			Subject: compat.Subject(key.String()),
+		changes = append(changes, compat.Change{
+			Capability: canonical.RequestTools,
+			Kind:       compat.Approximation,
+			Occurrence: canonical.ToolOccurrence(key),
+			Preserved:  canonical.RequestTools,
 		})
 	}
-	return declaration, decisions, nil
+	return declaration, changes, nil
 }
 
 type toolListBounds struct {
@@ -286,12 +291,16 @@ func schemaFromSDK(value any) (canonical.ToolSchema, error) {
 	return canonical.NewToolSchemaObject(object), nil
 }
 
-func safeHTTPClient(source canonical.ToolNamespace, bearer string) (*http.Client, *authenticationStatus, error) {
+func safeHTTPClient(source canonical.ToolNamespace, access SourceAccess) (*http.Client, *authenticationStatus, error) {
 	remote, ok := source.MCPSource()
 	if !ok {
 		return nil, nil, canonical.InternalError("MCP client requires a remote namespace")
 	}
-	endpoint, err := url.Parse(remote.Endpoint())
+	rawEndpoint, isURL := remote.URL()
+	if !isURL {
+		return nil, nil, canonical.InternalError("MCP client requires a URL source")
+	}
+	endpoint, err := url.Parse(rawEndpoint)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" ||
 		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
 		return nil, nil, canonical.BadRequest("MCP endpoint must be an absolute HTTPS URL without userinfo, query, or fragment")
@@ -331,8 +340,11 @@ func safeHTTPClient(source canonical.ToolNamespace, bearer string) (*http.Client
 		},
 	}
 	var roundTripper http.RoundTripper = responseLimitTransport{next: transport}
-	if bearer != "" {
-		roundTripper = bearerTransport{next: roundTripper, origin: endpointOrigin(endpoint), bearer: bearer}
+	if len(access.Headers) > 0 {
+		roundTripper = headerTransport{next: roundTripper, origin: endpointOrigin(endpoint), headers: access.Headers}
+	}
+	if access.Authorization != "" {
+		roundTripper = bearerTransport{next: roundTripper, origin: endpointOrigin(endpoint), bearer: access.Authorization}
 	}
 	authStatus := &authenticationStatus{}
 	roundTripper = authenticationStatusTransport{next: roundTripper, status: authStatus}
@@ -361,6 +373,23 @@ type bearerTransport struct {
 	next   http.RoundTripper
 	origin string
 	bearer string
+}
+
+type headerTransport struct {
+	next    http.RoundTripper
+	origin  string
+	headers map[string]string
+}
+
+func (t headerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	cloned := request.Clone(request.Context())
+	cloned.Header = request.Header.Clone()
+	if endpointOrigin(cloned.URL) == t.origin {
+		for name, value := range t.headers {
+			cloned.Header.Set(name, value)
+		}
+	}
+	return t.next.RoundTrip(cloned)
 }
 
 func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {

@@ -3,7 +3,6 @@ package exchange
 import (
 	"fmt"
 
-	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/session"
 )
 
@@ -25,17 +24,16 @@ func reducePreparingMCP(s exchangeState, event exchangeEvent, runner runtimeBund
 	if !ok {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: preparing MCP received %T", event)
 	}
-	s.input.mcpAccess = mcp.Access{}
 	if prepared.err != nil {
 		s.phase = failedPhase{problem: prepared.err}
-		return reducerOutcome{nextState: s, evidence: exchangeEvidence{decisions: prepared.decisions}}, nil
+		return reducerOutcome{nextState: s}, nil
 	}
 	s.prepared = &session.ResolvedRequest{
 		Full: prepared.full, Delta: s.prepared.Delta.Clone(),
 		ResolvedMedia: s.prepared.ResolvedMedia.Clone(),
 	}
 	s.mcp = prepared.run
+	s.effectiveChanges = append(s.effectiveChanges, prepared.changes...)
 	outcome, err := advanceProviderExecution(s, runner)
-	outcome.evidence = exchangeEvidence{decisions: prepared.decisions}.append(outcome.evidence)
 	return outcome, err
 }

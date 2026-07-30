@@ -30,7 +30,7 @@ func TestResponsesReasoningContextDecodesAndEncodesExactly(t *testing.T) {
 			if !present || got != value {
 				t.Fatalf("decoded context = (%q,%t), want (%q,true)", got, present, value)
 			}
-			document, err := EncodeCarrierWithDecisions(EncodeInput{Request: decoded.Request.Request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+			document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +45,9 @@ func TestResponsesReasoningContextDecodesAndEncodesExactly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertResponsesDecision(t, result.Decisions, compat.RequestReasoningContextResponses, compat.Exact)
+			if len(result.Changes) != 0 {
+				t.Fatalf("exact reasoning context changes = %#v", result.Changes)
+			}
 		})
 	}
 }
@@ -100,7 +102,7 @@ func TestResponsesReasoningRequestNormalizesToMinimalControls(t *testing.T) {
 	if !ok || compute.Kind() != canonical.ReasoningAutomatic {
 		t.Fatalf("compute = %#v", compute)
 	}
-	document, err := EncodeCarrierWithDecisions(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,11 +121,11 @@ func TestResponsesFutureReasoningQualityHintsApproximateToOmission(t *testing.T)
 		decoded.Request.Request.Reasoning().DisclosureField().IsSpecified() {
 		t.Fatalf("future reasoning hints survived canonically: %#v", decoded.Request.Request.Reasoning())
 	}
-	if len(decoded.Decisions) != 2 {
-		t.Fatalf("decisions = %#v, want two approximations", decoded.Decisions)
+	if len(decoded.Changes) != 1 {
+		t.Fatalf("changes = %#v, want one deduplicated approximation", decoded.Changes)
 	}
-	for _, decision := range decoded.Decisions {
-		if decision.Feature != compat.RequestReasoning || decision.Outcome != compat.Approx {
+	for _, decision := range decoded.Changes {
+		if decision.Capability != canonical.RequestReasoning || decision.Kind != compat.Approximation {
 			t.Fatalf("decision = %#v, want request.reasoning Approx", decision)
 		}
 	}
@@ -211,7 +213,7 @@ func TestResponsesContinuationUsesProviderHandle(t *testing.T) {
 			SwobuID: "resp", Responses: &canonical.ResponsesContinuation{ProviderResponseID: "provider_resp", TargetID: "target", TargetVersion: 1},
 		},
 	})
-	document, err := EncodeCarrierWithDecisions(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,26 @@ func classifyBackendError(err canonical.BackendError) error {
 	if isStrictToolModeUnsupported(err.Message) {
 		return canonical.NewClassifiedBackendError(canonical.BackendErrorClassToolChoiceUnsupported, err)
 	}
+	if isContinuationReferenceInvalid(err) {
+		return canonical.NewClassifiedBackendError(canonical.BackendErrorClassContinuationReferenceInvalid, err)
+	}
 	return err
+}
+
+func isContinuationReferenceInvalid(err canonical.BackendError) bool {
+	if err.StatusCode != 400 && err.StatusCode != 404 {
+		return false
+	}
+	fields, ok := decodeBackendErrorFields(err.Message)
+	if !ok || fields.param != "previous_response_id" {
+		return false
+	}
+	switch strings.TrimSpace(fields.code) {
+	case "invalid_value", "not_found", "previous_response_not_found":
+		return true
+	default:
+		return strings.Contains(strings.ToLower(fields.message), "previous_response")
+	}
 }
 
 func isStrictToolModeUnsupported(raw string) bool {

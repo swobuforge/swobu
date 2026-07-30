@@ -9,9 +9,8 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/custom"
-	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/ollama"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
+	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
@@ -41,8 +40,8 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		azure.NewRuntime(client, credentials),
 		openrouter.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
-		ollama.NewRuntime(client, credentials),
-		custom.NewRuntime(client, credentials),
+		openaifamily.NewRuntime(client, credentials, openaifamily.NewOllamaPolicy()),
+		openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy()),
 	})
 }
 
@@ -189,4 +188,3 @@ func cloneBackendRegistry(src map[profile.ProviderID]provider.BackendResolver) m
 
 var _ provider.BackendResolver = ProviderRegistry{}
 var _ provider.Discovery = ProviderRegistry{}
-var _ providersruntime.Registry = ProviderRegistry{}

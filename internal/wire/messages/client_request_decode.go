@@ -1,7 +1,6 @@
 package messages
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -28,8 +27,9 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "messages request"); err != nil {
 		return wire.ClientDecodeResult{}, err
 	}
-	value, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (wire.ClientRequestResult, error) {
-		request, delivery, err := decoder.decodeClientRequestDTOWithDecisions(dto, doc.RawBytes(), sink, "")
+	var changes []compat.Change
+	value, err := func(changeLog *[]compat.Change) (wire.ClientRequestResult, error) {
+		request, delivery, err := decoder.decodeClientRequestDTOWithChanges(dto, doc.RawBytes(), changeLog, "")
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
@@ -52,27 +52,27 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
-			rebased, _, err := decoder.decodeClientRequestDTOWithDecisions(rebasedDTO, raw, nil, "")
+			rebased, _, err := decoder.decodeClientRequestDTOWithChanges(rebasedDTO, raw, nil, "")
 			if err != nil {
 				return wire.ClientRequestResult{}, err
 			}
 			result.RebasedRequest = &wire.RebasedRequest{Previous: *history.previous, Request: rebased}
 		}
 		return result, nil
-	})
-	return wire.ClientDecodeResult{Request: value, Decisions: decisions}, err
+	}(&changes)
+	return wire.ClientDecodeResult{Request: value, Changes: changes}, err
 }
 
-func (decoder ClientRequestDecoder) decodeClientRequestWithDecisions(doc carrier.Document, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestWithChanges(doc carrier.Document, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	raw := doc.RawBytes()
 	var dto messagesRequestDTO
 	if err := shared.DecodeExtensibleRequestObject(raw, &dto, "messages request"); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	return decoder.decodeClientRequestDTOWithDecisions(dto, raw, sink, exchangeID)
+	return decoder.decodeClientRequestDTOWithChanges(dto, raw, changeLog, exchangeID)
 }
 
-func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto messagesRequestDTO, raw []byte, sink compat.Sink, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
+func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto messagesRequestDTO, raw []byte, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {
 	if len(dto.Messages) == 0 {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages request is missing required fields")
 	}
@@ -80,11 +80,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	tools, err := decodeMessagesTools(dto.Tools, sink, exchangeID)
+	tools, err := decodeMessagesTools(dto.Tools, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	outputFormat, err := decodeMessagesOutputFormat(dto.ResponseFormat, sink, exchangeID)
+	outputFormat, err := decodeMessagesOutputFormat(dto.ResponseFormat, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -93,7 +93,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 			return nil
 		}
 		return dto.OutputConfig.Format
-	}(), sink, exchangeID)
+	}(), changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -103,7 +103,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 	if nativeOutputFormat.Kind != canonical.OutputFormatUnspecified {
 		outputFormat = nativeOutputFormat
 	}
-	toolPolicy, err := decodeMessagesToolChoice(dto.ToolChoice, tools, sink, exchangeID)
+	toolPolicy, err := decodeMessagesToolChoice(dto.ToolChoice, tools, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -118,7 +118,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithDecisions(dto mess
 	items := make([]canonical.CanonicalItem, 0, len(dto.Messages))
 	pendingToolUseIDs := make([]string, 0, len(dto.Messages))
 	for idx, msg := range dto.Messages {
-		decoded, nextPending, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role), tools, pendingToolUseIDs, decoder.ImageLimits, sink, exchangeID) // swobu:io-string source=boundary
+		decoded, nextPending, err := decodeMessagesItems(msg.Content, idx, strings.TrimSpace(msg.Role), tools, pendingToolUseIDs, decoder.ImageLimits, changeLog, exchangeID) // swobu:io-string source=boundary
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
@@ -217,7 +217,7 @@ func joinMessagesText(items []canonical.CanonicalItem) string {
 }
 
 // swobu:lint ignore function-complexity because=Messages item decoding keeps all content-block variants at one boundary seam.
-func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []canonical.ToolDeclaration, pendingToolUseIDs []string, imageLimits shared.ImageDecodeLimitPolicy, sink compat.Sink, exchangeID string) ([]canonical.CanonicalItem, []string, error) {
+func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []canonical.ToolDeclaration, pendingToolUseIDs []string, imageLimits shared.ImageDecodeLimitPolicy, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, []string, error) {
 	if role == "" {
 		role = "user"
 	}
@@ -258,8 +258,8 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				}
 			}
 			messagePart, err := decodeMessagesCitedText(part.Text, citations, messagesProjectionEvidence{
-				feature: compat.RequestItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/messages/%d/content/%d/citations", msgIdx, partIdx),
+				feature: canonical.RequestItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}),
 			})
 			if err != nil {
 				return canonical.BadRequest("messages request text citations are invalid")
@@ -303,7 +303,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			decoded = append(decoded, item)
 		case "server_tool_use":
 			if strings.TrimSpace(part.Name) != "web_search" { // swobu:io-string source=boundary
-				return emitMessagesWireDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/messages/%d/content/%d/name", msgIdx, partIdx)))
+				return appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}))
 			}
 			if author != canonical.MessageRoleAssistant {
 				return canonical.BadRequest("messages server_tool_use blocks require assistant role")
@@ -316,8 +316,8 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				return canonical.BadRequest("messages server_tool_use parts require an id")
 			}
 			item, err := decodeMessagesWebSearchCall(toolUseID, part.Input, messagesProjectionEvidence{
-				feature: compat.RequestItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/messages/%d/content/%d/input", msgIdx, partIdx),
+				feature: canonical.RequestItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}),
 			})
 			if err != nil {
 				return canonical.BadRequest("messages server_tool_use is invalid")
@@ -332,7 +332,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			if toolUseID == "" {
 				return canonical.BadRequest("messages request tool_result parts require tool_use_id")
 			}
-			content, err := decodeToolResultContent(part.Content, imageLimits, fmt.Sprintf("wire:/messages/%d/content/%d/content", msgIdx, partIdx), sink, exchangeID)
+			content, err := decodeToolResultContent(part.Content, imageLimits, msgIdx, changeLog, exchangeID)
 			if err != nil {
 				return err
 			}
@@ -352,8 +352,8 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				return canonical.BadRequest("messages web_search_tool_result requires tool_use_id")
 			}
 			item, err := decodeMessagesWebSearchResult(toolUseID, part.Content, part.IsError, messagesProjectionEvidence{
-				feature: compat.RequestItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/messages/%d/content/%d/content", msgIdx, partIdx),
+				feature: canonical.RequestItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}),
 			})
 			if err != nil {
 				return canonical.BadRequest("messages web_search_tool_result is invalid")
@@ -418,7 +418,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			}
 			return canonical.BadRequest("messages request content contains an unsupported part type")
 		default:
-			return emitMessagesWireDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/messages/%d/content/%d/type", msgIdx, partIdx)))
+			return appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}))
 		}
 		return nil
 	})
@@ -431,7 +431,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 	return decoded, pending, nil
 }
 
-func decodeToolResultContent(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy, subjectPrefix string, sink compat.Sink, exchangeID string) ([]canonical.ToolResultPart, error) {
+func decodeToolResultContent(raw json.RawMessage, imageLimits shared.ImageDecodeLimitPolicy, itemIndex int, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolResultPart, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "messages request tool_result content is invalid")
 	if err != nil {
 		return nil, err
@@ -452,7 +452,7 @@ func decodeToolResultContent(raw json.RawMessage, imageLimits shared.ImageDecode
 			}
 			content = append(content, canonical.NewImageToolResultPart(image))
 		default:
-			return emitMessagesWireDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", subjectPrefix, index)))
+			return appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(itemIndex), Part: uint32(index)}))
 		}
 		return nil
 	})
@@ -493,14 +493,14 @@ func decodeMessagesImageSource(raw json.RawMessage, limits shared.ImageDecodeLim
 	}
 }
 
-func decodeMessagesTools(tools []ProviderRequestTool, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeMessagesTools(tools []ProviderRequestTool, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
 	for index, tool := range tools {
 		if strings.HasPrefix(strings.TrimSpace(tool.Type), "web_search_") { // swobu:io-string source=boundary
-			declaration, err := decodeMessagesWebSearchTool(tool, index, sink, exchangeID)
+			declaration, err := decodeMessagesWebSearchTool(tool)
 			if err != nil {
 				return nil, err
 			}
@@ -508,7 +508,7 @@ func decodeMessagesTools(tools []ProviderRequestTool, sink compat.Sink, exchange
 			continue
 		}
 		if kind := strings.TrimSpace(tool.Type); kind != "" && kind != "custom" { // swobu:io-string source=boundary
-			if err := emitMessagesWireDecision(sink, exchangeID, compat.RequestToolsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/type", index))); err != nil {
+			if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission, canonical.ToolIndexOccurrence(uint32(index))); err != nil {
 				return nil, err
 			}
 			continue
@@ -534,7 +534,7 @@ func decodeMessagesTools(tools []ProviderRequestTool, sink compat.Sink, exchange
 	return out, nil
 }
 
-func decodeMessagesWebSearchTool(tool ProviderRequestTool, index int, sink compat.Sink, exchangeID string) (canonical.ToolDeclaration, error) {
+func decodeMessagesWebSearchTool(tool ProviderRequestTool) (canonical.ToolDeclaration, error) {
 	if strings.TrimSpace(tool.Type) == "web_search_" { // swobu:io-string source=boundary
 		return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search version is invalid")
 	}
@@ -546,22 +546,14 @@ func decodeMessagesWebSearchTool(tool ProviderRequestTool, index int, sink compa
 		}
 		return nil
 	}
-	for field, values := range map[string][]string{"allowed_domains": tool.AllowedDomains, "blocked_domains": tool.BlockedDomains, "allowed_callers": tool.AllowedCallers} {
+	for _, values := range [][]string{tool.AllowedDomains, tool.BlockedDomains, tool.AllowedCallers} {
 		if err := validateStrings(values); err != nil {
 			return canonical.ToolDeclaration{}, err
-		}
-		if len(values) > 0 {
-			if err := emitMessagesWireDrop(sink, exchangeID, index, field); err != nil {
-				return canonical.ToolDeclaration{}, err
-			}
 		}
 	}
 	if tool.MaxUses != nil {
 		if *tool.MaxUses <= 0 {
 			return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search max_uses must be positive")
-		}
-		if err := emitMessagesWireDrop(sink, exchangeID, index, "max_uses"); err != nil {
-			return canonical.ToolDeclaration{}, err
 		}
 	}
 	if len(tool.UserLocation) > 0 && string(tool.UserLocation) != "null" {
@@ -569,33 +561,23 @@ func decodeMessagesWebSearchTool(tool ProviderRequestTool, index int, sink compa
 		if err := json.Unmarshal(tool.UserLocation, &raw); err != nil {
 			return canonical.ToolDeclaration{}, canonical.BadRequest("messages web-search user_location is invalid")
 		}
-		if err := emitMessagesWireDrop(sink, exchangeID, index, "user_location"); err != nil {
-			return canonical.ToolDeclaration{}, err
-		}
-	}
-	if tool.ResponseInclusion != "" {
-		if err := emitMessagesWireDrop(sink, exchangeID, index, "response_inclusion"); err != nil {
-			return canonical.ToolDeclaration{}, err
-		}
 	}
 	return canonical.NewWebSearchDeclaration(), nil
 }
 
-func emitMessagesWireDrop(sink compat.Sink, exchangeID string, toolIndex int, field string) error {
-	return emitMessagesWireDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/tools/%d/%s", toolIndex, field)))
-}
-
-func emitMessagesWireDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
-	if sink == nil {
+func appendMessagesOccurrenceChange(changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, outcome compat.Kind, occurrence canonical.Occurrence) error {
+	if changeLog == nil {
 		return nil
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{{
-		Feature: feature,
-		Outcome: outcome,
-		Subject: subject,
-	}}); err != nil {
-		return canonical.InternalError("compatibility decision sink commit failed")
+	change := compat.Change{
+		Capability: feature,
+		Occurrence: occurrence,
+		Kind:       outcome,
 	}
+	if outcome == compat.Approximation {
+		change.Preserved = feature
+	}
+	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
 

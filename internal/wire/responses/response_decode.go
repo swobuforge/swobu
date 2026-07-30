@@ -72,7 +72,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto responseEnvelope
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("responses output is invalid JSON")
@@ -81,16 +81,6 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		return nil, canonical.InternalError("responses output is missing id")
 	}
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
-	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-	_, reasoningPresent := usage.ReasoningTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
-	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if terminalReason, promptBlocked := responsesTerminalReason("", dto.Status, "", dto.ContentFilters, responseIncompleteReason(dto.IncompleteDetails)); promptBlocked {
 		message := responsesContentFilterMessage(responsesBlockedContentFilterSource(dto.ContentFilters))
 		return nil, canonical.NewBackendError("responses", http.StatusForbidden, message, "")
@@ -99,11 +89,10 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		if err := admitResponsesProjectableResponseStatus(responseStatus); err != nil {
 			return nil, err
 		}
-		items, err := decodeOutputItemsForResponse(ctx, request, dto.Output, dto.OutputText, responseStatus, exchangeID, sink)
+		items, err := decodeOutputItemsForResponse(ctx, request, dto.Output, dto.OutputText, responseStatus, exchangeID, changeLog)
 		if err != nil {
 			return nil, err
 		}
-		emitNativeResponseIDCaptured(ctx, sink, exchangeID, dto.ID)
 		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			exchangeID,
 			canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(dto.ID)}},
@@ -124,31 +113,20 @@ func admitResponsesProjectableResponseStatus(status string) error {
 	}
 }
 
-func emitNativeResponseIDCaptured(ctx context.Context, sink compat.Sink, exchangeID string, providerResponseID string) {
-	if sink == nil || strings.TrimSpace(providerResponseID) == "" { // swobu:io-string source=provider-wire
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, []compat.Decision{{
-		Feature: compat.ResponseIDResponses,
-		Outcome: compat.Exact,
-		Subject: compat.Subject("wire:/id"),
-	}})
+func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, changeLog)
 }
 
-func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, sink)
+func decodeOutputItemsForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, responseStatus, exchangeID, changeLog)
 }
 
-func decodeOutputItemsForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, responseStatus, exchangeID, sink)
+func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, changeLog)
 }
 
-func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, sink)
-}
-
-func decodeCompletedResponsesItemSetForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, sink compat.Sink) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetAtIndexes(ctx, request, wireItems, outputText, nil, false, responseStatus, exchangeID, sink)
+func decodeCompletedResponsesItemSetForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetAtIndexes(ctx, request, wireItems, outputText, nil, false, responseStatus, exchangeID, changeLog)
 }
 
 func decodeCompletedResponsesItemSetAtIndexes(
@@ -160,7 +138,7 @@ func decodeCompletedResponsesItemSetAtIndexes(
 	survivingOutput bool,
 	responseStatus string,
 	exchangeID string,
-	sink compat.Sink,
+	changeLog *[]compat.Change,
 ) ([]canonical.CanonicalItem, error) {
 	items, err := rawResponsesOutputItems(wireItems)
 	if err != nil {
@@ -192,14 +170,14 @@ func decodeCompletedResponsesItemSetAtIndexes(
 		itemType := admission.itemType
 		if admission.disposition == responsesOutputErase {
 			erasedSemantic = true
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/output/%d/%s", index, admission.eraseField))); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		switch itemType {
 		case "message":
-			message, present, err := decodeResponsesMessageOutputItem(item, sink, exchangeID, fmt.Sprintf("wire:/output/%d/content", index))
+			message, present, err := decodeResponsesMessageOutputItem(item, changeLog, exchangeID, canonical.ResponseItemOccurrence(uint32(index)))
 			if err != nil {
 				return nil, err
 			}
@@ -259,7 +237,7 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output is missing call_id")
 			}
-			projected, err := decodeResponsesProviderAdditionalTools(item.Tools, fmt.Sprintf("wire:/output/%d/tools", index), sink, exchangeID)
+			projected, err := decodeResponsesProviderAdditionalTools(item.Tools, fmt.Sprintf("wire:/output/%d/tools", index), changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -302,24 +280,24 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			}
 			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
 			if err != nil {
-				if err := emitResponsesCompatibilityDecision(
-					sink,
+				if err := appendResponsesOccurrenceChange(
+					changeLog,
 					exchangeID,
-					compat.ResponseItemsKind,
-					compat.Drop,
-					compat.Subject(fmt.Sprintf("wire:/output/%d/status", index)),
+					canonical.ResponseItemsKind,
+					compat.Omission,
+					canonical.ResponseItemOccurrence(uint32(index)),
 				); err != nil {
 					return nil, err
 				}
 				state = responsesWebSearchUnknown
 			}
-			lifecycle, err := decodeResponsesWebSearchLifecycleWithDecisions(item.ID, item.Action, state, sink, exchangeID, fmt.Sprintf("wire:/output/%d/action/sources", index), true)
+			lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(item.ID, item.Action, state, changeLog, exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true)
 			if err != nil {
 				return nil, err
 			}
 			output = append(output, lifecycle...)
 		case "reasoning":
-			reasoning, present, err := decodeResponsesReasoningItem(item, sink, exchangeID, compat.ResponseItemsKind, fmt.Sprintf("wire:/output/%d", index), true)
+			reasoning, present, err := decodeResponsesReasoningItem(item, changeLog, exchangeID, canonical.ResponseItemsKind, canonical.ResponseItemOccurrence(uint32(index)), true)
 			if err != nil {
 				return nil, err
 			}
@@ -413,8 +391,8 @@ func admitCompletedResponsesOutputItem(item responsesWireOutputItemDTO, response
 	return responsesOutputAdmission{}, canonical.NewBackendError("responses", 0, "responses output item status is inconsistent with its semantic kind and response", "")
 }
 
-func decodeResponsesProviderAdditionalTools(raw json.RawMessage, subjectPrefix string, sink compat.Sink, exchangeID string) (responsesAdditionalToolsProjection, error) {
-	projected, err := decodeResponsesAdditionalTools(raw, subjectPrefix, compat.ResponseItemsKind, sink, exchangeID)
+func decodeResponsesProviderAdditionalTools(raw json.RawMessage, subjectPrefix string, changeLog *[]compat.Change, exchangeID string) (responsesAdditionalToolsProjection, error) {
+	projected, err := decodeResponsesAdditionalTools(raw, subjectPrefix, canonical.ResponseItemsKind, changeLog, exchangeID)
 	if err == nil {
 		return projected, nil
 	}
@@ -452,7 +430,7 @@ func rawResponsesOutputItems(items any) ([]json.RawMessage, error) {
 	}
 }
 
-func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, sink compat.Sink, exchangeID string, subjectPrefix string) (canonical.CanonicalItem, bool, error) {
+func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, changeLog *[]compat.Change, exchangeID string, occurrence canonical.Occurrence) (canonical.CanonicalItem, bool, error) {
 	parts, err := openaiwire.DecodeContentParts(item.Content, "responses message content is invalid")
 	if err != nil {
 		return canonical.CanonicalItem{}, false, canonical.InternalError("responses message content is invalid")
@@ -465,7 +443,7 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, sink comp
 		}
 		switch partType {
 		case "text", "output_text", "input_text":
-			citations, err := decodeResponsesAnnotations(part.Text, part.Annotations, sink, exchangeID, fmt.Sprintf("%s/%d/annotations", subjectPrefix, index))
+			citations, err := decodeResponsesAnnotations(part.Text, part.Annotations, changeLog, exchangeID, occurrence)
 			if err != nil {
 				return err
 			}
@@ -475,7 +453,7 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, sink comp
 			}
 			content = append(content, messagePart)
 		default:
-			return emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", subjectPrefix, index)))
+			return appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, occurrence)
 		}
 		return nil
 	})
@@ -493,13 +471,13 @@ func decodeResponsesMessageOutputItem(item responsesWireOutputItemDTO, sink comp
 }
 
 // swobu:lint ignore string-switch because=Responses provider-wire summary types select canonical reasoning part kinds.
-func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, sink compat.Sink, exchangeID string, feature compat.Feature, subjectPrefix string, providerOutput bool) (canonical.CanonicalItem, bool, error) {
+func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, occurrence canonical.Occurrence, providerOutput bool) (canonical.CanonicalItem, bool, error) {
 	content, err := decodeResponsesReasoningContent(item.Content)
 	if err != nil {
 		return canonical.CanonicalItem{}, false, err
 	}
 	parts := make([]canonical.ReasoningPart, 0, len(item.Summary)+len(content))
-	for index, summary := range item.Summary {
+	for _, summary := range item.Summary {
 		summaryType := strings.TrimSpace(summary.Type) // swobu:io-string source=provider-wire
 		if providerOutput {
 			if err := admitResponsesProviderOutputChild(summaryType); err != nil {
@@ -507,7 +485,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, sink compat.S
 			}
 		}
 		if summaryType != "summary_text" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/summary/%d/type", subjectPrefix, index))); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, occurrence); err != nil {
 				return canonical.CanonicalItem{}, false, err
 			}
 			continue
@@ -518,7 +496,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, sink compat.S
 		}
 		parts = append(parts, part)
 	}
-	for index, trace := range content {
+	for _, trace := range content {
 		traceType := strings.TrimSpace(trace.Type) // swobu:io-string source=provider-wire
 		if providerOutput {
 			if err := admitResponsesProviderOutputChild(traceType); err != nil {
@@ -526,7 +504,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, sink compat.S
 			}
 		}
 		if traceType != "reasoning_text" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/content/%d/type", subjectPrefix, index))); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, occurrence); err != nil {
 				return canonical.CanonicalItem{}, false, err
 			}
 			continue

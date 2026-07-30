@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
 	"github.com/swobuforge/swobu/internal/wire/responses"
-	"github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 // Codec lowers canonical semantics through one standard protocol family.
@@ -25,21 +24,21 @@ type Codec struct {
 }
 
 // Encode implements provider.Codec.
-func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
-	var decisions []compat.Decision
+func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
+	var changes []compat.Change
 	var err error
 	if c.Protocol != protocolkind.ChatCompletions {
 		err = ValidateEncodeRequest(req)
 	}
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, MCPAccess: req.MCPAccess}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		var document chatcompletions.ProviderRequestDocument
-		document, result.Decisions, err = LowerChatCompletionsRequest(req)
+		document, result.Changes, err = LowerChatCompletionsRequest(req)
 		if err == nil {
 			result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
 		}
@@ -48,19 +47,20 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Decision
 	case protocolkind.Messages:
 		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	default:
-		return carrier.Document{}, decisions, provider.NewIncompatibleTarget("selected provider protocol has no request codec")
+		return carrier.Document{}, changes, provider.NewIncompatibleTarget("selected provider protocol has no request codec")
 	}
-	decisions = append(decisions, result.Decisions...)
-	return result.Document, decisions, err
+	changes = append(changes, result.Changes...)
+	return result.Document, changes, err
 }
 
 // LowerChatCompletionsRequest owns the single standard typed lowering sequence
 // used by both the protocol codec and exact-provider dialect decorators.
-func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.ProviderRequestDocument, []compat.Decision, error) {
+func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.ProviderRequestDocument, []compat.Change, error) {
 	if err := ValidateEncodeRequest(req); err != nil {
 		return chatcompletions.ProviderRequestDocument{}, nil, err
 	}
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
+	var changes []compat.Change
+	document, err := func(sink *[]compat.Change) (chatcompletions.ProviderRequestDocument, error) {
 		document, err := chatcompletions.LowerProviderRequestDocument(
 			req.Canonical,
 			req.Delivery,
@@ -74,8 +74,8 @@ func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.Provider
 			return chatcompletions.ProviderRequestDocument{}, err
 		}
 		return document, nil
-	})
-	return document, decisions, err
+	}(&changes)
+	return document, changes, err
 }
 
 // ValidateEncodeRequest enforces transport-independent protocol codec input
@@ -103,8 +103,8 @@ func (c Codec) Decode(ctx context.Context, request provider.Request, ingress pro
 		return provider.DecodedResponse{}, fmt.Errorf("provider ingress %T is unsupported", ingress)
 	}
 	decoded := provider.DecodedResponse{
-		Stream: result.Stream, Decisions: result.Decisions,
-		TerminalDecisions: result.TerminalDecisions,
+		Stream: result.Stream, Changes: result.Changes,
+		ProgressiveChanges: result.ProgressiveChanges,
 	}
 	return decoded, err
 }

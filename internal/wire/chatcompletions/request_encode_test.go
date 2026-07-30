@@ -11,7 +11,7 @@ import (
 )
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	return EncodeCarrierWithDecisions(req, d, nil, "")
+	return EncodeCarrierWithChanges(req, d, nil, "")
 }
 
 func TestEncodeCarrier_LowersInstructionsToLeadingSystemMessage(t *testing.T) {

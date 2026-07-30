@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -17,28 +16,28 @@ import (
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
 // exact backend and lowers one final wire document without external I/O.
-func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle, preparedOverride *attemptImagesMaterialized) (providerCall, provider.TargetSnapshot, exchangeEvidence, command, error) {
+func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle, preparedOverride *attemptImagesMaterialized) (providerCall, provider.TargetSnapshot, []compat.Change, command, error) {
 	target, ok := s.route.at(selection.candidateIndex)
 	if !ok {
-		return providerCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, nil, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
+		return providerCall{}, provider.TargetSnapshot{}, nil, nil, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
 	}
 	path, err := resolveProviderPath(target)
 	if err != nil {
-		return providerCall{}, provider.TargetSnapshot{}, exchangeEvidence{}, nil, err
+		return providerCall{}, provider.TargetSnapshot{}, nil, nil, err
 	}
 	backend, err := runner.Runtime.ResolveBackend(path.target)
 	if err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, err
+		return providerCall{}, path.target, nil, nil, err
 	}
 	if err := backend.Validate(); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("required provider backend is incomplete")
+		return providerCall{}, path.target, nil, nil, canonical.InternalError("required provider backend is incomplete")
 	}
 	if !backend.Target.Equal(path.target) {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("resolved provider backend changed target execution projection")
+		return providerCall{}, path.target, nil, nil, canonical.InternalError("resolved provider backend changed target execution projection")
 	}
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.InternalError("required client codec not resolved")
+		return providerCall{}, path.target, nil, nil, canonical.InternalError("required client codec not resolved")
 	}
 	resolved := *s.prepared
 	var canonicalRequest canonical.CanonicalRequest
@@ -48,7 +47,7 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	case providerRequestFullHistory:
 		canonicalRequest = resolved.Full.Clone()
 	default:
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
+		return providerCall{}, path.target, nil, nil, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
 	usedMedia := session.ResolvedMedia{}
 	if preparedOverride != nil {
@@ -61,58 +60,61 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 			policy: runner.Policy.ImageFetch, limits: runner.Policy.Limits.Media,
 			fetcher: runner.ImageFetcher, fetchCache: cloneMediaFetchCache(s.mediaFetchCache), historical: historicalMedia,
 		}
-		return providerCall{}, path.target, exchangeEvidence{}, command, nil
+		return providerCall{}, path.target, nil, command, nil
 	}
 	projectionFull := resolved.Full.Clone()
 	projectionRequest := canonicalRequest.Clone()
 	if s.mcp != nil {
 		projectionFull, err = s.mcp.AttemptRequest(projectionFull)
 		if err != nil {
-			return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("MCP provider full attempt view: %w", err)
+			return providerCall{}, path.target, nil, nil, fmt.Errorf("MCP provider full attempt view: %w", err)
 		}
 		projectionRequest, err = s.mcp.AttemptRequest(projectionRequest)
 		if err != nil {
-			return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("MCP provider attempt view: %w", err)
+			return providerCall{}, path.target, nil, nil, fmt.Errorf("MCP provider attempt view: %w", err)
 		}
 	}
 	projection, err := provider.BuildToolProjection(projectionFull)
 	if err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("provider tool projection: %w", err)
+		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider tool projection: %w", err)
 	}
 	attemptRequest, projectionDecisions, err := projection.Rewrite(projectionRequest)
 	if err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("provider attempt tool projection: %w", err)
+		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider attempt tool projection: %w", err)
 	}
 	projectedDecodeContext, _, err := projection.Rewrite(projectionFull)
 	if err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, fmt.Errorf("provider decode-context tool projection: %w", err)
+		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider decode-context tool projection: %w", err)
 	}
 	toolProjection := projection.Table()
+	replaySafety, err := providerReplaySafetyFor(attemptRequest)
+	if err != nil {
+		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider attempt replay safety: %w", err)
+	}
 	providerRequest := provider.Request{
 		ExchangeID:     s.input.exchangeID,
 		Canonical:      bindRequestToTarget(attemptRequest, path.target.Model),
 		Delivery:       path.delivery,
 		ToolProjection: toolProjection,
+		MCPAccess:      s.input.mcpAccess,
 	}
-	evidence := exchangeEvidence{}
-	evidence.decisions = append(evidence.decisions, projectionDecisions...)
+	requestChanges := compat.CloneChanges(projectionDecisions)
 	workspaceSlug := s.input.workspace.Slug().String()
 	if err := validateCheckpointInput(runner, workspaceSlug); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, err
+		return providerCall{}, path.target, nil, nil, err
 	}
 	contract := NewExecutionContract(s.input.clientDelivery).WithProviderDelivery(path.delivery)
 	if err := contract.Validate(); err != nil {
-		return providerCall{}, path.target, exchangeEvidence{}, nil, canonical.BadRequest("execution contract is invalid: " + err.Error())
+		return providerCall{}, path.target, nil, nil, canonical.BadRequest("execution contract is invalid: " + err.Error())
 	}
-	doc, decisions, err := backend.Codec.Encode(providerRequest)
-	decisions = attributeCanonicalDecisionsToRoute(decisions, path.target)
-	evidence.decisions = append(evidence.decisions, decisions...)
+	doc, changes, err := backend.Codec.Encode(providerRequest)
+	requestChanges = append(requestChanges, changes...)
 	if err != nil {
-		return providerCall{}, path.target, evidence, nil, fmt.Errorf("provider request encoding: %w", err)
+		return providerCall{}, path.target, requestChanges, nil, fmt.Errorf("provider request encoding: %w", err)
 	}
 	resolvedMedia, err := s.prepared.ResolvedMedia.Merge(usedMedia)
 	if err != nil {
-		return providerCall{}, path.target, evidence, nil, fmt.Errorf("resolved media provenance: %w", err)
+		return providerCall{}, path.target, requestChanges, nil, fmt.Errorf("resolved media provenance: %w", err)
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
@@ -122,25 +124,13 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		resolvedMedia:      resolvedMedia,
 		advance:            s.advance,
 		delayClientHandoff: delayClientHandoffFor(s.mcp),
-	}, path.target, evidence, nil, nil
+		providerRound:      len(s.providerUsage),
+		replaySafety:       replaySafety,
+	}, path.target, requestChanges, nil, nil
 }
 
 func delayClientHandoffFor(run *mcp.Run) bool {
 	return run != nil && run.CanExecute()
-}
-
-func attributeCanonicalDecisionsToRoute(decisions []compat.Decision, target provider.TargetSnapshot) []compat.Decision {
-	subject := routeDecisionSubject(target.ProviderID(), string(target.ProtocolKind))
-	if subject == "" {
-		return decisions
-	}
-	attributed := append([]compat.Decision(nil), decisions...)
-	for index := range attributed {
-		if strings.HasPrefix(string(attributed[index].Subject), "canonical:") {
-			attributed[index].Subject = subject
-		}
-	}
-	return attributed
 }
 
 // rebaseAttemptMedia converts positions in the attempted request into the
@@ -171,16 +161,31 @@ func historicalMediaForAttempt(request canonical.CanonicalRequest, media session
 
 // completeProviderCall is a reducer-owned response edge. It validates and
 // decodes provider ingress before deciding the final client handoff.
-func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, *canonical.CanonicalResponse, []compat.Decision, error) {
+type providerCompatibility struct {
+	initial     []compat.Change
+	progressive func() []compat.Change
+}
+
+func (c providerCompatibility) completedChanges() []compat.Change {
+	changes := compat.CloneChanges(c.initial)
+	if c.progressive != nil {
+		changes = append(changes, c.progressive()...)
+	}
+	return changes
+}
+
+func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, *canonical.CanonicalResponse, providerCompatibility, error) {
 	if err := provider.ValidateIngress(ingress); err != nil {
-		return nil, nil, nil, canonical.InternalError("provider ingress shape is invalid")
+		return nil, nil, providerCompatibility{}, canonical.InternalError("provider ingress shape is invalid")
 	}
 	decoded, incremental, err := decodeProviderIngress(ctx, call, ingress, call.backend)
+	compatibility := providerCompatibility{
+		initial: compat.CloneChanges(decoded.Changes), progressive: decoded.ProgressiveChanges,
+	}
 	if err != nil {
-		return nil, nil, decoded.Decisions, err
+		return nil, nil, compatibility, err
 	}
 	var events canonical.ResponseStream = newCanonicalToolProjectionStream(decoded.Stream, call.request.ToolProjection)
-	events = newTerminalCompatibilityStream(events, decoded.TerminalDecisions, runner.DecisionSink, call.exchangeID)
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
@@ -191,18 +196,20 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 			if err == io.EOF {
 				err = canonical.InternalError("provider response ended before a complete tool round")
 			}
-			return nil, nil, decoded.Decisions, err
+			return nil, nil, compatibility, err
 		}
 		response, err := envelope.ProjectResponse()
 		if err != nil {
-			return nil, nil, decoded.Decisions, err
+			return nil, nil, compatibility, err
 		}
 		cloned := response.Clone()
-		return nil, &cloned, decoded.Decisions, nil
+		compatibility.initial = compatibility.completedChanges()
+		compatibility.progressive = nil
+		return nil, &cloned, compatibility, nil
 	}
 	events = newTerminalResponseStream(events)
 	response, err := handoffResponseStream(ctx, call, events, binding, incremental, runner)
-	return response, nil, decoded.Decisions, err
+	return response, nil, compatibility, err
 }
 
 func handoffCompletedProviderResponse(ctx context.Context, call providerCall, response canonical.CanonicalResponse, runner runtimeBundle) (ClientResponse, error) {
@@ -222,9 +229,10 @@ func handoffResponseStream(ctx context.Context, call providerCall, stream canoni
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
 		store: runner.CheckpointStore, request: call.fullRequest.Clone(),
-		resolvedMedia: call.resolvedMedia.Clone(), advance: call.advance, capture: capture,
+		resolvedMedia: call.resolvedMedia.Clone(), advance: call.advance,
 	}
-	return encodeClientOutput(ctx, call, capture, incremental, runner.DecisionSink, committer)
+	gated := newCheckpointTerminalGate(capture, call.clientCodec, call.fullRequest, committer)
+	return encodeClientOutput(ctx, call, gated, incremental)
 }
 
 func cloneSwobuResponseID(id *canonical.SwobuResponseID) *canonical.SwobuResponseID {
@@ -255,8 +263,4 @@ func decodeProviderIngress(ctx context.Context, call providerCall, ingress provi
 		return provider.DecodedResponse{}, false, canonical.InternalError("provider ingress carrier is unsupported")
 	}
 	return decoded, deliveryIsIncremental(call.clientDelivery, call.request.Delivery), err
-}
-
-func recordExchangeEvidenceBestEffort(ctx context.Context, sink compat.Sink, exchangeID string, evidence exchangeEvidence) {
-	commitDecisionsBestEffort(ctx, sink, exchangeID, evidence.decisions)
 }

@@ -69,7 +69,7 @@ func TestEncode_RejectsStopSequencesWithoutTargetExtension(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","max_output_tokens":64,"temperature":0.2,"top_p":0.8}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
@@ -87,7 +87,7 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 }
 
 func TestDecodeRequest_PreservesStopSequences(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","stop":["END"]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
@@ -182,21 +182,21 @@ func TestResponsesJSONObjectRoundTrips(t *testing.T) {
 }
 
 func TestResponsesUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
-	sink := &compat.RecordingSink{}
+	var changes []compat.Change
 	_, err := decodeResponsesOutputFormat(&responsesTextDTO{
 		Format: responsesTextFormatDTO{Type: "future_format"},
-	}, sink, "ex")
+	}, &changes, "ex")
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error = %v, want BAD_REQUEST", err)
 	}
-	if len(sink.Decisions()) != 0 {
-		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want no successful changes", changes)
 	}
 }
 
 func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4o-mini","input":"hi","text":{"format":{"type":"json_schema","name":"reply_shape","description":"structured reply","schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false},"strict":true}}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {

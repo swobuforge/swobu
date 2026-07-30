@@ -16,8 +16,8 @@ func TestProviderEncodeDecisionsDescribeActualMessagesProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDecision(t, result.Decisions, compat.RequestToolsSchemaStrict, compat.Drop)
-	assertDecision(t, result.Decisions, compat.RequestOutputFormat, compat.Approx)
+	assertDecision(t, result.Changes, canonical.RequestToolsSchemaStrict, compat.Omission)
+	assertDecision(t, result.Changes, canonical.RequestOutputFormat, compat.Approximation)
 }
 
 func requestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalRequest {
@@ -46,12 +46,12 @@ func requestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalRequest
 	})
 }
 
-func assertDecision(t *testing.T, decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) {
+func assertDecision(t *testing.T, changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) {
 	t.Helper()
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
+	for _, decision := range changes {
+		if decision.Capability == feature && decision.Kind == outcome {
 			return
 		}
 	}
-	t.Fatalf("decisions = %#v, want %s/%s", decisions, feature, outcome)
+	t.Fatalf("changes = %#v, want %s/%v", changes, feature, outcome)
 }

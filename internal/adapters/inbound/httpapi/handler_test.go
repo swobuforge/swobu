@@ -23,7 +23,6 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
@@ -137,18 +136,20 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 		"result=backend_error",
 		"error_origin=backend",
 		"target_id=openai",
-		"error_message=\"backend error from openai (502): {\\\"error\\\":\\\"provider failed\\\"}\"",
 		"status_code=502",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "provider failed") {
+		t.Fatalf("backend response content reached logs:\n%s", out)
+	}
 }
 
 func TestExchangeFailureDeliveryResult_PreservesClientCancellation(t *testing.T) {
 	result := exchangeFailureDeliveryResult(provider.Cancelled(context.Canceled))
-	if result.Kind != transportpkg.DeliveryClientCancelled {
+	if result.Kind != delivery.ClientCancelled {
 		t.Fatalf("delivery kind = %q, want client cancellation", result.Kind)
 	}
 	if got := statusCodeForExchangeError(result.Err); got != clientClosedRequestStatus {
@@ -203,12 +204,14 @@ func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
 		"error_origin=swobu",
 		"target_id=selected-chat",
 		"error_code=UNSUPPORTED_OPERATION",
-		"error_message=\"UNSUPPORTED_OPERATION: chat completions endpoint does not support namespace tool declarations. Change the tool declaration to function or custom and retry\"",
 		"status_code=400",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "namespace tool declarations") {
+		t.Fatalf("public error message reached logs:\n%s", out)
 	}
 }
 
@@ -246,15 +249,14 @@ func TestHandler_LogsResponsesToolReferenceDetailsOnFailure(t *testing.T) {
 		"result=swobu_error",
 		"error_origin=swobu",
 		"error_code=BAD_REQUEST",
-		`error_message="BAD_REQUEST: responses request tools[].name (function) name \"exec_command__bogus\" is invalid: canonical request tool references are undeclared tool"`,
-		"error_detail_request_field=tools[].name",
-		"error_detail_tool_kind=function",
-		"error_detail_tool_name=exec_command__bogus",
 		"status_code=400",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "exec_command__bogus") || strings.Contains(out, "tools[].name") {
+		t.Fatalf("request-derived error detail reached logs:\n%s", out)
 	}
 }
 
@@ -809,7 +811,7 @@ func TestHandler_DoesNotLogAfterCommitOnStreamingDisconnect(t *testing.T) {
 
 	handler := newTestHandler(staticRequestIngress{
 		out: exchange.RequestOutput{
-			Response: exchange.StreamingResponse{Response: transportpkg.Response{
+			Response: exchange.StreamingResponse{Response: carrier.Response{
 				Status: http.StatusOK,
 				Header: http.Header{
 					"Content-Type": []string{"text/event-stream"},
@@ -843,7 +845,7 @@ func assertNoExchangeErrorAfterStreamingCommit(t *testing.T) {
 
 	handler := newTestHandler(staticRequestIngress{
 		out: exchange.RequestOutput{
-			Response: exchange.StreamingResponse{Response: transportpkg.Response{
+			Response: exchange.StreamingResponse{Response: carrier.Response{
 				Status: http.StatusOK,
 				Header: http.Header{
 					"Content-Type": []string{"text/event-stream"},
@@ -927,7 +929,7 @@ type timingCaptureIngress struct {
 func (h *timingCaptureIngress) HandleRequest(_ context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
 	h.got = in
 	return exchange.RequestOutput{
-		Response: exchange.BufferedResponse{Response: transportpkg.Response{
+		Response: exchange.BufferedResponse{Response: carrier.Response{
 			Status: http.StatusOK,
 			Header: http.Header{
 				"Content-Type": []string{"application/json"},
@@ -1057,13 +1059,13 @@ func synthesizeRequestOutputFromEnvelope(ctx context.Context, in exchange.Reques
 			if err != nil {
 				return exchange.RequestOutput{}, err
 			}
-			return exchange.RequestOutput{Response: exchange.NewMessageStreamingResponse(result.Response)}, nil
+			return exchange.RequestOutput{Response: exchange.NewMessageStreamingResponse(result.Response, result.Completion)}, nil
 		}
 		stream, err := testResponseStreamEncoderForFamily(clientFamily).EncodeResponseStream(ctx, envelope, clientDelivery)
 		if err != nil {
 			return exchange.RequestOutput{}, err
 		}
-		return exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream)}, nil
+		return exchange.RequestOutput{Response: exchange.NewStreamingResponse(stream, nil)}, nil
 	}
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), envelope, canonical.EnvResponse)
 	if err != nil {

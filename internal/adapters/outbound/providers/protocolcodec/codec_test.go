@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -71,6 +72,90 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	}
 }
 
+func TestNativeMCPProjectsOnlyToResponsesAndPreservesTransientAccess(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	source, _ := canonical.NewMCPConnectorSource(
+		"connector_gmail", canonical.Specify([]string{"search", "send"}),
+		canonical.NewMCPApprovalNever(), canonical.MCPLoadingDeferred,
+		canonical.Specify([]string{"direct"}),
+	)
+	declaration, _ := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
+	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			item, canonicaltest.Message(t, canonical.MessageRoleUser, "search mail"),
+		},
+	})
+	access, err := (mcp.Access{}).WithBearer(key, "oauth-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err = access.WithHeaders(key, map[string]string{"X-Tenant": "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerRequest := provider.Request{
+		Canonical: request, Delivery: delivery.BufferedDelivery(), MCPAccess: access,
+	}
+
+	document, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(providerRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(document.RawBytes())
+	for _, want := range []string{
+		`"type":"mcp"`, `"connector_id":"connector_gmail"`,
+		`"allowed_tools":["search","send"]`, `"allowed_callers":["direct"]`,
+		`"require_approval":"never"`,
+		`"authorization":"oauth-token"`, `"headers":{"X-Tenant":"tenant-a"}`,
+		`"defer_loading":true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Responses MCP projection missing %s in %s", want, body)
+		}
+	}
+
+	for _, protocol := range []protocolkind.ProtocolKind{
+		protocolkind.ChatCompletions, protocolkind.Messages,
+	} {
+		_, _, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
+		var incompatible provider.IncompatibleTargetError
+		if !errors.As(encodeErr, &incompatible) {
+			t.Fatalf("%s error = %T %v, want target incompatibility", protocol, encodeErr, encodeErr)
+		}
+	}
+}
+
+func TestResponsesApprovalPolicyFailsCandidateBeforeTransportUntilLifecycleExists(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	filter, _ := canonical.NewMCPToolFilter(
+		canonical.Specify([]string{"send"}), canonical.Unspecified[bool](),
+	)
+	approval, _ := canonical.NewMCPApprovalFilter(&filter, nil)
+	source, _ := canonical.NewMCPConnectorSource(
+		"connector_gmail", canonical.Unspecified[[]string](), approval,
+		canonical.MCPLoadingEager, canonical.Unspecified[[]string](),
+	)
+	declaration, _ := canonical.NewMCPToolNamespace(key, "", source, nil)
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
+	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			item, canonicaltest.Message(t, canonical.MessageRoleUser, "send"),
+		},
+	})
+	_, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+		Canonical: request, Delivery: delivery.BufferedDelivery(),
+	})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("approval error = %T %v, want target incompatibility", err, err)
+	}
+}
+
 func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := provider.Request{
@@ -100,7 +185,7 @@ func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 		t.Fatalf("shared typed lowering = %s, codec = %s", fromTyped.RawBytes(), fromCodec.RawBytes())
 	}
 	if !reflect.DeepEqual(typedDecisions, codecDecisions) {
-		t.Fatalf("shared decisions = %#v, codec decisions = %#v", typedDecisions, codecDecisions)
+		t.Fatalf("shared changes = %#v, codec changes = %#v", typedDecisions, codecDecisions)
 	}
 }
 

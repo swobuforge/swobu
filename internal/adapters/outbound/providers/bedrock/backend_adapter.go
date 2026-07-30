@@ -63,14 +63,14 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 // Send performs Bedrock Mantle transport over a final provider document.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("bedrock provider base URL is required"))
 	}
 	if err := validateBedrockMantleEndpoint(target.BaseURL); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 	path, err := profile.ProviderRequestPath(target.ProviderID(), target.ProtocolKind)
 	if err != nil {
-		return nil, provider.NewIncompatibleTarget(err.Error())
+		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget(err.Error()))
 	}
 	requestURL := httpedge.JoinBaseURLAndPath(target.BaseURL, path)
 	if target.ProtocolKind == protocolkind.Messages {
@@ -82,7 +82,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	wireReqCarrier := doc
 	if wireReqCarrier.IsEmpty() {
-		return nil, canonical.InternalError("provider request document is required")
+		return nil, provider.AttemptNotDispatched(canonical.InternalError("provider request document is required"))
 	}
 	wireReqBody := wireReqCarrier.RawBytes()
 	httpReq, err := http.NewRequestWithContext(
@@ -92,7 +92,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		bytes.NewReader(wireReqBody),
 	)
 	if err != nil {
-		return nil, canonical.BadEndpoint("bedrock provider request could not be built")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("bedrock provider request could not be built"))
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -103,7 +103,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
 	if err := applyBedrockAuth(ctx, e.credentials, target.CredentialRef, httpReq, wireReqBody); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 
 	resp, err := e.client.Do(httpReq)
@@ -113,14 +113,14 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
 		defer func() { _ = resp.Body.Close() }()
-		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 	}
 	resp = decodedResp
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
-		logBedrockBackendDiagnostic("execute", target, path, wireReqBody, backendErr)
-		return nil, backendErr
+		logBedrockBackendDiagnostic("execute", target, path, backendErr)
+		return nil, provider.AttemptMayHaveExecuted(backendErr)
 	}
 	if httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
 		return provider.StreamIngress{Stream: carrier.ByteStream{
@@ -132,7 +132,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	raw, readErr := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if readErr != nil {
-		return nil, canonical.InternalError("backend success response could not be read")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend success response could not be read"))
 	}
 	return provider.DocumentIngress{Document: carrier.NewDocument(
 		target.ProtocolKind,
@@ -184,7 +184,7 @@ func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target prov
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
-		logBedrockBackendDiagnostic("list_models", target, "/models", nil, backendErr)
+		logBedrockBackendDiagnostic("list_models", target, "/models", backendErr)
 		return nil, backendErr
 	}
 	models, err := modelcatalogopenai.DecodeModelIDs(resp.Body)

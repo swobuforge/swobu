@@ -13,9 +13,10 @@
 // known call survives without a synthesized result, and provider completion
 // remains subject to canonical settlement.
 //
-// Supported URL MCP declarations retain selection and transient bearer access.
-// A well-formed declaration with unsupported authority or effect controls
-// erases as one occurrence; siblings survive and materialized-request
-// validation decides residual tool-policy viability. Malformed MCP syntax and
-// unsolicited provider-owned MCP effects still fail.
+// Known MCP declarations retain typed URL, connector, tunnel, selection,
+// approval, loading, and caller semantics. Authorization and headers remain
+// transient. Approval-free native declarations lower exactly; approval-bearing
+// attempts reject as target-incompatible until the canonical approval
+// request/response lifecycle exists. Malformed MCP syntax and unsolicited
+// provider-owned MCP effects still fail.
 package responses

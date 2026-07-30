@@ -2,9 +2,16 @@ package canonical
 
 import "testing"
 
+func newCanonicalTestMCPURL(endpoint string, allowed Specified[[]string]) (MCPSource, error) {
+	return NewMCPURLSource(
+		endpoint, allowed, NewMCPApprovalNever(), MCPLoadingEager,
+		Unspecified[[]string](),
+	)
+}
+
 func TestMCPNamespaceOwnsSourceCatalogScopeAndDerivedLookup(t *testing.T) {
 	sourceKey, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
-	source, err := NewMCPSource("https://mcp.example.test/rpc", Specify([]string{"search"}))
+	source, err := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Specify([]string{"search"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +44,7 @@ func TestMCPNamespaceOwnsSourceCatalogScopeAndDerivedLookup(t *testing.T) {
 
 func TestRequestScopedRemoteMCPNamespaceExpiresAtomically(t *testing.T) {
 	key, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
-	source, _ := NewMCPSource("https://mcp.example.test/rpc", Unspecified[[]string]())
+	source, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Unspecified[[]string]())
 	namespace, _ := NewMCPToolNamespace(key, "", source, nil)
 	set, _ := NewToolSet([]ToolDeclaration{namespace})
 	item, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
@@ -47,9 +54,9 @@ func TestRequestScopedRemoteMCPNamespaceExpiresAtomically(t *testing.T) {
 }
 
 func TestRemoteMCPSourceEquivalenceIncludesSelection(t *testing.T) {
-	left, _ := NewMCPSource("https://mcp.example.test/rpc", Specify([]string{"search"}))
-	same, _ := NewMCPSource("https://mcp.example.test/rpc", Specify([]string{"search"}))
-	different, _ := NewMCPSource("https://mcp.example.test/rpc", Specify([]string{"fetch"}))
+	left, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Specify([]string{"search"}))
+	same, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Specify([]string{"search"}))
+	different, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Specify([]string{"fetch"}))
 	if !left.Equivalent(same) {
 		t.Fatal("equivalent MCP sources differ")
 	}
@@ -58,9 +65,48 @@ func TestRemoteMCPSourceEquivalenceIncludesSelection(t *testing.T) {
 	}
 }
 
+func TestMCPSourceEquivalenceIncludesKnownAuthorityRefinements(t *testing.T) {
+	always, _ := NewMCPToolFilter(Specify([]string{"write"}), Unspecified[bool]())
+	never, _ := NewMCPToolFilter(Unspecified[[]string](), Specify(true))
+	approval, _ := NewMCPApprovalFilter(&always, &never)
+	source, err := NewMCPConnectorSource(
+		"connector_gmail", Specify([]string{"search"}), approval,
+		MCPLoadingDeferred, Specify([]string{"direct"}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !source.Equivalent(source.Clone()) {
+		t.Fatal("MCP source clone lost a known refinement")
+	}
+	if source.Kind() != MCPSourceConnectorID ||
+		source.Approval().Kind() != MCPApprovalFilter ||
+		source.Loading() != MCPLoadingDeferred {
+		t.Fatalf("source = %#v", source)
+	}
+	callers, callersSet := source.AllowedCallers().Get()
+	if !callersSet || len(callers) != 1 || callers[0] != "direct" {
+		t.Fatalf("allowed callers = %#v specified=%t", callers, callersSet)
+	}
+	if _, ok := source.Approval().AlwaysFilter(); !ok {
+		t.Fatal("always approval filter was lost")
+	}
+	if _, ok := source.Approval().NeverFilter(); !ok {
+		t.Fatal("never approval filter was lost")
+	}
+
+	tunnel, _ := NewMCPTunnelSource(
+		"tunnel_1", Unspecified[[]string](), NewMCPApprovalNever(),
+		MCPLoadingEager, Unspecified[[]string](),
+	)
+	if source.Equivalent(tunnel) {
+		t.Fatal("distinct MCP source authority was treated as equivalent")
+	}
+}
+
 func TestRemoteNamespaceCannotBeNested(t *testing.T) {
 	childKey, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
-	source, _ := NewMCPSource("https://mcp.example.test/rpc", Unspecified[[]string]())
+	source, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Unspecified[[]string]())
 	child, err := NewMCPToolNamespace(childKey, "", source, nil)
 	if err != nil {
 		t.Fatal(err)

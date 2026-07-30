@@ -153,12 +153,12 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBackend returned error: %v", err)
 	}
-	doc, decisions, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
-	if len(decisions) != 0 {
-		t.Fatalf("Encode decisions = %#v, want none for exact tool lowering", decisions)
+	if len(changes) != 0 {
+		t.Fatalf("Encode changes = %#v, want none for exact tool lowering", changes)
 	}
 	ingress, err := backend.Transport.Send(context.Background(), doc)
 	if err != nil {

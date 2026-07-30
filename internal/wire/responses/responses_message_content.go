@@ -1,9 +1,7 @@
 package responses
 
 import (
-	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -15,7 +13,7 @@ import (
 // decodeResponsesMessageContent preserves the scalar-input acceptance surface:
 // an explicit empty input_text is the appendable history form of input: "".
 // Other OpenAI-family codecs retain their own empty-part validity rules.
-func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy, sink compat.Sink, exchangeID string, itemIndex int) ([]canonical.CanonicalItem, error) {
+func decodeResponsesMessageContent(raw json.RawMessage, author canonical.MessageRole, imageLimits shared.ImageDecodeLimitPolicy, changeLog *[]compat.Change, exchangeID string, itemIndex int) ([]canonical.CanonicalItem, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "responses message content is invalid")
 	if err != nil {
 		return nil, err
@@ -49,7 +47,7 @@ func decodeResponsesMessageContent(raw json.RawMessage, author canonical.Message
 			}
 			content = append(content, canonical.NewImageMessagePart(image))
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject("wire:/input/"+strconv.Itoa(itemIndex)+"/content/"+strconv.Itoa(partIndex)+"/type")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(itemIndex), Part: uint32(partIndex)})); err != nil {
 				return nil, err
 			}
 		}
@@ -85,32 +83,27 @@ func decodeResponsesFunctionCallArguments(raw json.RawMessage) (canonical.JSONOb
 	return input, nil
 }
 
-func emitResponsesCompatibilityDecision(sink compat.Sink, exchangeID string, feature compat.Feature, outcome compat.Outcome, subject compat.Subject) error {
-	if sink == nil {
+func appendResponsesOccurrenceChange(changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, outcome compat.Kind, occurrence canonical.Occurrence) error {
+	if changeLog == nil {
 		return nil
 	}
-	if subject == "" {
-		return nil
+	change := compat.Change{
+		Capability: feature,
+		Occurrence: occurrence,
+		Kind:       outcome,
 	}
-	if err := sink.Commit(context.Background(), exchangeID, []compat.Decision{{
-		Feature: feature,
-		Outcome: outcome,
-		Subject: subject,
-	}}); err != nil {
-		return canonical.InternalError("compatibility decision sink commit failed")
+	if outcome == compat.Approximation {
+		change.Preserved = feature
 	}
+	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
 
-func responsesInputSubject(index int, field string) compat.Subject {
-	field = strings.TrimSpace(field) // swobu:io-string source=boundary
-	if field == "" {
-		return ""
-	}
-	return compat.Subject("wire:/input/" + strconv.Itoa(index) + "/" + field)
+func responsesInputSubject(index int, _ string) canonical.Occurrence {
+	return canonical.RequestItemOccurrence(uint32(index))
 }
 
-func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits shared.ImageDecodeLimitPolicy, sink compat.Sink, exchangeID string, itemIndex int) ([]canonical.ToolResultPart, error) {
+func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits shared.ImageDecodeLimitPolicy, changeLog *[]compat.Change, exchangeID string, itemIndex int) ([]canonical.ToolResultPart, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return []canonical.ToolResultPart{canonical.NewTextToolResultPart(text)}, nil
@@ -144,7 +137,7 @@ func decodeResponseOutputParts(raw json.RawMessage, itemType string, imageLimits
 		case "input_file", "file":
 			return nil, canonical.BadRequest("responses request " + itemType + " file content is not portable")
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultContent, compat.Drop, compat.Subject("wire:/input/"+strconv.Itoa(itemIndex)+"/output/"+strconv.Itoa(partIndex)+"/type")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolResultContent, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(itemIndex), Part: uint32(partIndex)})); err != nil {
 				return nil, err
 			}
 		}

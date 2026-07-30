@@ -100,9 +100,11 @@ func TestResponsesRequestPreservesWebSearchCallWhenStatusIsUnknown(t *testing.T)
 			t.Fatalf("unknown lifecycle status manufactured result: %#v", item)
 		}
 	}
-	if len(decoded.Decisions) != 1 ||
-		decoded.Decisions[0].Outcome != compat.Drop ||
-		decoded.Decisions[0].Subject != compat.Subject("wire:/input/0/status") {
-		t.Fatalf("decisions = %#v, want occurrence-local status Drop", decoded.Decisions)
+	if len(decoded.Changes) != 1 {
+		t.Fatalf("changes = %#v, want occurrence-local status omission", decoded.Changes)
+	}
+	item, occurrenceOK := decoded.Changes[0].Occurrence.RequestItem()
+	if decoded.Changes[0].Kind != compat.Omission || !occurrenceOK || item != 0 {
+		t.Fatalf("changes = %#v, want occurrence-local status Drop", decoded.Changes)
 	}
 }

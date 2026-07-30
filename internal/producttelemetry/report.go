@@ -1,9 +1,9 @@
 package producttelemetry
 
 import (
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transport"
 )
 
 const (
@@ -87,7 +87,7 @@ type reportRuntime struct {
 // each sum to Count (every request lands in exactly one bucket; the last bucket
 // holds requests with no recorded timing). The dimension fields carry owned domain
 // types — canonical.NormalizedPath, profile.ProviderID,
-// transport.DeliveryResultKind, canonical.ErrorCode — end to end; the
+// delivery.ResultKind, canonical.ErrorCode — end to end; the
 // terminal-event constructor validates each against its vocabulary
 // (NewTerminalTrafficEvent), so a non-canonical value is rejected at the source
 // rather than carried to the report. They serialize to JSON strings at the marshal
@@ -95,15 +95,15 @@ type reportRuntime struct {
 // the analytical failure taxonomy (and the coarse success/cancelled/failure
 // outcome) is derived downstream, never on the client. See product-telemetry.md.
 type reportTrafficRow struct {
-	UserAgentProduct   string                       `json:"user_agent_product"`
-	RequestPath        canonical.NormalizedPath     `json:"request_path"`
-	Provider           profile.ProviderID           `json:"provider"`
-	StatusCode         int                          `json:"status_code"`
-	DeliveryKind       transport.DeliveryResultKind `json:"delivery_kind"`
-	CanonicalErrorCode canonical.ErrorCode          `json:"canonical_error_code"`
-	AttemptCount       int                          `json:"attempt_count"`
-	FallbackRecovered  bool                         `json:"fallback_recovered"`
-	Count              int                          `json:"count"`
-	DurationMS         [6]int                       `json:"duration_ms"`
-	TTFBMS             [6]int                       `json:"ttfb_ms"`
+	UserAgentProduct   string                   `json:"user_agent_product"`
+	RequestPath        canonical.NormalizedPath `json:"request_path"`
+	Provider           profile.ProviderID       `json:"provider"`
+	StatusCode         int                      `json:"status_code"`
+	DeliveryKind       delivery.ResultKind      `json:"delivery_kind"`
+	CanonicalErrorCode canonical.ErrorCode      `json:"canonical_error_code"`
+	AttemptCount       int                      `json:"attempt_count"`
+	FallbackRecovered  bool                     `json:"fallback_recovered"`
+	Count              int                      `json:"count"`
+	DurationMS         [6]int                   `json:"duration_ms"`
+	TTFBMS             [6]int                   `json:"ttfb_ms"`
 }

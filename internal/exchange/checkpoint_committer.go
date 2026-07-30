@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/session"
-	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // checkpointCommitter joins canonical capture with the optional codec history
@@ -29,7 +27,6 @@ type checkpointCommitter struct {
 	request       canonical.CanonicalRequest
 	resolvedMedia session.ResolvedMedia
 	advance       *historyAdvance
-	capture       *checkpointCaptureResponseStream
 }
 
 // CheckpointCommitError identifies failure to make a client-visible response
@@ -51,38 +48,17 @@ func checkpointCommitError(err error) error {
 	return CheckpointCommitError{err: err}
 }
 
-func (c *checkpointCommitter) commitDocument(ctx context.Context, response *historyfingerprint.Response) error {
-	return c.commit(ctx, wire.ResponseCompletionSnapshot{State: wire.CompletionCompleted, ResponseFingerprint: response})
-}
-
-func (c *checkpointCommitter) commitIfReady(ctx context.Context, completion *wire.ResponseCompletion) error {
-	if completion == nil {
+func (c *checkpointCommitter) commitDocument(ctx context.Context, response canonical.CanonicalResponse, fingerprint *historyfingerprint.Response) error {
+	if c == nil {
 		return nil
-	}
-	return c.commit(ctx, completion.Snapshot())
-}
-
-func (c *checkpointCommitter) commit(ctx context.Context, completion wire.ResponseCompletionSnapshot) error {
-	if c == nil || completion.State != wire.CompletionCompleted {
-		return nil
-	}
-	if c.capture == nil {
-		return checkpointCommitError(errors.New("checkpoint commit is missing canonical response capture"))
-	}
-	captured := c.capture.snapshot()
-	if captured.state != checkpointCaptureCompleted {
-		if captured.err != nil {
-			return checkpointCommitError(fmt.Errorf("checkpoint capture failed: %w", captured.err))
-		}
-		return checkpointCommitError(errors.New("checkpoint response capture did not complete"))
 	}
 	c.once.Do(func() {
 		record := session.Checkpoint{
-			Request: c.request.Clone(), Response: captured.response,
+			Request: c.request.Clone(), Response: response.Clone(),
 			ResolvedMedia: c.resolvedMedia.Clone(), CreatedAt: time.Now().UTC(),
 		}
-		if c.advance != nil && completion.ResponseFingerprint != nil {
-			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *completion.ResponseFingerprint)
+		if c.advance != nil && fingerprint != nil {
+			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *fingerprint)
 			if err != nil {
 				c.logHistoryComposeFailure(err)
 			} else {

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
@@ -43,9 +42,8 @@ func materializeRequestImages(
 	fetcher provider.ImageFetcher,
 	fetchCache mediaFetchCache,
 	historical session.ResolvedMedia,
-) (canonical.CanonicalRequest, mediaFetchCache, session.ResolvedMedia, []compat.Decision, error) {
+) (canonical.CanonicalRequest, mediaFetchCache, session.ResolvedMedia, error) {
 	state := mediaMaterializationState{fetchCache: cloneMediaFetchCache(fetchCache)}
-	decisions := make([]compat.Decision, 0)
 	prepared, err := canonical.RewriteRequestImages(request, func(position canonical.RequestPartRef, placement canonical.ImagePlacement, image canonical.ImagePart) (canonical.ImagePart, error) {
 		state.count++
 		if limits.MaxImages > 0 && state.count > limits.MaxImages {
@@ -82,7 +80,7 @@ func materializeRequestImages(
 		// A durable occurrence binding is historical invocation truth and must
 		// prevent a mutable URL from being fetched again.
 		if asset, exists := historical.Resolve(position, urlImage.String()); exists {
-			return bindPreparedAsset(&state, position, urlImage.String(), image, asset, limits, &decisions, placement)
+			return bindPreparedAsset(&state, position, urlImage.String(), image, asset, limits)
 		}
 		network, materializationEnabled := policy.NetworkPolicy()
 		if !materializationEnabled {
@@ -123,9 +121,9 @@ func materializeRequestImages(
 			}
 			state.fetchCache[urlImage.String()] = cloneInspectedImage(inspected)
 		}
-		return bindPreparedImage(&state, position, urlImage.String(), image, inspected, limits, &decisions, placement)
+		return bindPreparedImage(&state, position, urlImage.String(), image, inspected, limits)
 	})
-	return prepared, state.fetchCache, state.used, decisions, err
+	return prepared, state.fetchCache, state.used, err
 }
 
 // logImageFetchFailure retains enough internal failure shape to diagnose media
@@ -159,7 +157,7 @@ func imageFetchFailureCategory(err error) string {
 	return "fetch"
 }
 
-func bindPreparedAsset(state *mediaMaterializationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, asset session.ResolvedMediaAsset, limits provider.MediaLimits, decisions *[]compat.Decision, placement canonical.ImagePlacement) (canonical.ImagePart, error) {
+func bindPreparedAsset(state *mediaMaterializationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, asset session.ResolvedMediaAsset, limits provider.MediaLimits) (canonical.ImagePart, error) {
 	inspected, err := provider.InspectImage(asset.MediaType(), asset.Bytes(), limits)
 	if err != nil {
 		return canonical.ImagePart{}, imageMaterializationError(
@@ -167,10 +165,10 @@ func bindPreparedAsset(state *mediaMaterializationState, position canonical.Requ
 			canonical.InternalError("resolved checkpoint media is corrupt: "+err.Error()),
 		)
 	}
-	return bindPreparedImage(state, position, sourceURL, original, inspected, limits, decisions, placement)
+	return bindPreparedImage(state, position, sourceURL, original, inspected, limits)
 }
 
-func bindPreparedImage(state *mediaMaterializationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, inspected provider.InspectedImage, limits provider.MediaLimits, decisions *[]compat.Decision, placement canonical.ImagePlacement) (canonical.ImagePart, error) {
+func bindPreparedImage(state *mediaMaterializationState, position canonical.RequestPartRef, sourceURL string, original canonical.ImagePart, inspected provider.InspectedImage, limits provider.MediaLimits) (canonical.ImagePart, error) {
 	if err := accountPreparedBytes(state, int64(len(inspected.Bytes)), limits); err != nil {
 		return canonical.ImagePart{}, err
 	}
@@ -182,11 +180,6 @@ func bindPreparedImage(state *mediaMaterializationState, position canonical.Requ
 		)
 	}
 	state.used = used
-	feature := compat.RequestItemsMessageImageSourceURL
-	if placement == canonical.ImageInToolResult {
-		feature = compat.RequestItemsToolResultImageSourceURL
-	}
-	*decisions = append(*decisions, compat.Decision{Feature: feature, Outcome: compat.Exact, Subject: mediaSubject(position)})
 	materialized, err := canonical.NewInlineImage(inspected.MediaType, inspected.Bytes, original.Detail())
 	if err != nil {
 		return canonical.ImagePart{}, imageMaterializationError(
@@ -212,10 +205,6 @@ func imageMaterializationError(position canonical.RequestPartRef, err error) err
 		position.Part,
 		err,
 	)
-}
-
-func mediaSubject(position canonical.RequestPartRef) compat.Subject {
-	return compat.Subject(fmt.Sprintf("request.items[%d].content[%d]", position.Item, position.Part))
 }
 
 func cloneMediaFetchCache(values mediaFetchCache) mediaFetchCache {

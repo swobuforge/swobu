@@ -9,7 +9,7 @@ import (
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Messages tool_choice variants.
-func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -66,7 +66,7 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclara
 	}
 }
 
-func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (any, error) {
+func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}

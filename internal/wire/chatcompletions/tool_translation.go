@@ -3,7 +3,6 @@ package chatcompletions
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -14,7 +13,7 @@ import (
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
-func decodeChatCompletionsTools(tools []ProviderRequestTool, sink compat.Sink, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeChatCompletionsTools(tools []ProviderRequestTool, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -69,7 +68,7 @@ func decodeChatCompletionsTools(tools []ProviderRequestTool, sink compat.Sink, e
 			}
 			out = append(out, decl)
 		default:
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.RequestToolsKind, compat.Drop, compat.Subject("wire:/tools/"+strconv.Itoa(index)+"/type")); err != nil {
+			if err := appendChatOccurrenceChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission, canonical.ToolIndexOccurrence(uint32(index))); err != nil {
 				return nil, err
 			}
 		}
@@ -89,7 +88,7 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 	return canonical.NewToolSchemaObject(object), nil
 }
 
-func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
+func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
 		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
 	})
@@ -97,23 +96,13 @@ func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, sink compat.S
 		return nil, err
 	}
 	for range flattened.RemovedNamespaces {
-		if err := emitChatImageDecision(sink, exchangeID, compat.RequestTools, compat.Approx); err != nil {
+		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
 			return nil, err
 		}
 	}
 	tools = flattened.Declarations
 	if len(tools) == 0 {
 		return nil, nil
-	}
-	for _, tool := range tools {
-		if decl, ok := tool.Function(); ok {
-			if strict, specified := decl.Strict().Get(); specified && strict {
-				if err := emitChatImageDecision(sink, exchangeID, compat.RequestToolsSchemaStrict, compat.Exact); err != nil {
-					return nil, err
-				}
-				break
-			}
-		}
 	}
 	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
@@ -139,7 +128,7 @@ func encodeChatCompletionsTool(tool canonical.ToolDeclaration) (ProviderRequestT
 	if decl, ok := tool.Custom(); ok {
 		return encodeChatCompletionsCustomTool(tool, decl)
 	}
-	return ProviderRequestTool{}, provider.NewIncompatibleTarget("Chat Completions cannot represent canonical tool declaration kind " + chatCompletionsUnsupportedToolKind(tool))
+	return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Chat Completions cannot represent canonical tool declaration kind "+chatCompletionsUnsupportedToolKind(tool))
 }
 
 func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
@@ -236,7 +225,7 @@ func chatCompletionsUnsupportedToolKind(tool canonical.ToolDeclaration) string {
 }
 
 // swobu:lint ignore function-complexity because=chat completions tool-choice decoding keeps all protocol variants in one boundary helper.
-func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func decodeChatCompletionsToolChoice(raw json.RawMessage, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (canonical.ToolPolicy, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=domain
 	if trimmed == "" || trimmed == "null" {
 		if len(tools) > 0 {
@@ -315,7 +304,7 @@ func cloneBoolPointer(ptr *bool) *bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
-func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (any, error) {
+func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -369,7 +358,7 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 				"type": canonical.ToolTypeWebSearch,
 			}, nil
 		default:
-			return nil, provider.NewIncompatibleTarget("Chat Completions cannot represent this canonical specific tool choice")
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "Chat Completions cannot represent this canonical specific tool choice")
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -49,11 +48,11 @@ func TestMaterializeRequestImagesReusesResolvedBytesAcrossCandidates(t *testing.
 	var data bytes.Buffer
 	_ = png.Encode(&data, image.NewNRGBA(image.Rect(0, 0, 1, 1)))
 	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{Bytes: data.Bytes(), DeclaredMediaType: canonical.ImageMediaPNG}}
-	_, cache, _, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
+	_, cache, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, err = materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, cache, session.ResolvedMedia{})
+	_, _, _, err = materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, cache, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +67,7 @@ func TestMaterializeRequestImagesReturnsTypedBadRequestForFetchFailure(t *testin
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{message}})
 	restore, logs := captureMaterializationDebugLogs()
 	defer restore()
-	_, _, _, _, err := materializeRequestImages(
+	_, _, _, err := materializeRequestImages(
 		context.Background(),
 		request,
 		provider.DefaultImageFetchPolicy(),
@@ -91,7 +90,7 @@ func TestMaterializeRequestImagesReturnsTypedBadRequestForFetchFailure(t *testin
 
 func TestMaterializeRequestImagesPreservesCancellation(t *testing.T) {
 	request, _ := testURLImageRequest(t, "https://example.test/image.png")
-	_, _, _, _, err := materializeRequestImages(
+	_, _, _, err := materializeRequestImages(
 		context.Background(),
 		request,
 		provider.DefaultImageFetchPolicy(),
@@ -116,7 +115,7 @@ func TestMaterializeRequestImagesClassifiesCorruptStoredMediaAsInternal(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, err = materializeRequestImages(
+	_, _, _, err = materializeRequestImages(
 		context.Background(),
 		request,
 		provider.DefaultImageFetchPolicy(),
@@ -143,7 +142,7 @@ func TestMaterializeRequestImagesClassifiesPolicyRuntimeAndContentFailures(t *te
 		"invalid bytes":   {policy: provider.DefaultImageFetchPolicy(), fetcher: invalidFetcher},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, _, _, err := materializeRequestImages(context.Background(), request, test.policy, provider.DefaultMediaLimits(), test.fetcher, nil, session.ResolvedMedia{})
+			_, _, _, err := materializeRequestImages(context.Background(), request, test.policy, provider.DefaultMediaLimits(), test.fetcher, nil, session.ResolvedMedia{})
 			var typed canonical.Error
 			if !errors.As(err, &typed) {
 				t.Fatalf("materialization error = %T %v, want canonical error", err, err)
@@ -168,7 +167,7 @@ func TestMaterializeRequestImagesHistoricalBindingPreventsURLRefetch(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, _, _, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, historical)
+	prepared, _, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), failingImageFetcher{err: context.DeadlineExceeded}, nil, historical)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +194,7 @@ func TestMaterializeRequestImagesSameURLAtNewOccurrenceFetchesCurrentAsset(t *te
 		t.Fatal(err)
 	}
 	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{DeclaredMediaType: canonical.ImageMediaPNG, Bytes: bytesB.Bytes()}}
-	prepared, _, used, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, historical)
+	prepared, _, used, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, historical)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +334,7 @@ func TestWinningAttemptReusesAndBindsPreviouslyFetchedAsset(t *testing.T) {
 		t.Fatal(err)
 	}
 	loserCache := mediaFetchCache{"https://example.test/winner.png": asset}
-	prepared, _, used, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, loserCache, session.ResolvedMedia{})
+	prepared, _, used, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, loserCache, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +370,7 @@ func TestMaterializeRequestImagesRejectsInvalidInlineBytesAsBadRequest(t *testin
 	inline, _ := canonical.NewInlineImage(canonical.ImageMediaPNG, []byte("not-a-png"), canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(inline)})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{message}})
-	_, _, _, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, session.ResolvedMedia{})
+	_, _, _, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), nil, nil, session.ResolvedMedia{})
 	var typed canonical.Error
 	if !errors.As(err, &typed) || typed.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("inline error = %T %v, want typed bad request", err, err)
@@ -394,15 +393,12 @@ func TestMaterializeRequestImagesKeepsSourceRequestAndProducesInlineCarrier(t *t
 	}
 	fetcher := &fixedImageFetcher{fetched: provider.FetchedImageResult{DeclaredMediaType: canonical.ImageMediaPNG, Bytes: imageBytes.Bytes()}}
 
-	prepared, _, resolved, decisions, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
+	prepared, _, resolved, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fetcher.calls != 1 {
 		t.Fatalf("fetch calls = %d, want 1", fetcher.calls)
-	}
-	if len(decisions) != 1 || decisions[0].Feature != compat.RequestItemsMessageImageSourceURL || decisions[0].Outcome != compat.Exact {
-		t.Fatalf("decisions = %#v", decisions)
 	}
 	originalImage, _ := request.Items()[0].Message()
 	if _, ok := originalImage.Content()[0].Image(); !ok {
@@ -421,7 +417,7 @@ func TestMaterializeRequestImagesKeepsSourceRequestAndProducesInlineCarrier(t *t
 	if resolved.BindingCount() != 1 || resolved.AssetCount() != 1 {
 		t.Fatalf("resolved media = %#v", resolved)
 	}
-	document, err := messages.EncodeCarrierWithDecisions(prepared, delivery.BufferedDelivery(), nil, "")
+	document, err := messages.EncodeCarrierWithChanges(prepared, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatalf("Bedrock-compatible Messages encoding rejected prepared URL image: %v", err)
 	}
@@ -453,7 +449,7 @@ func TestMaterializeRequestImagesPreservesToolResultImagePlacementWithoutProtoco
 		DeclaredMediaType: canonical.ImageMediaPNG,
 		Bytes:             imageBytes.Bytes(),
 	}}
-	materialized, _, resolved, decisions, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
+	materialized, _, resolved, err := materializeRequestImages(context.Background(), request, provider.DefaultImageFetchPolicy(), provider.DefaultMediaLimits(), fetcher, nil, session.ResolvedMedia{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,9 +459,8 @@ func TestMaterializeRequestImagesPreservesToolResultImagePlacementWithoutProtoco
 	if !ok || !imageOK || !inlineOK || !bytes.Equal(inline.Data(), imageBytes.Bytes()) {
 		t.Fatalf("materialized item = %#v, want tool-result image", materialized.Items()[0])
 	}
-	if fetcher.calls != 1 || resolved.BindingCount() != 1 ||
-		len(decisions) != 1 || decisions[0].Feature != compat.RequestItemsToolResultImageSourceURL {
-		t.Fatalf("materialization provenance = fetches %d resolved %#v decisions %#v", fetcher.calls, resolved, decisions)
+	if fetcher.calls != 1 || resolved.BindingCount() != 1 {
+		t.Fatalf("materialization provenance = fetches %d resolved %#v", fetcher.calls, resolved)
 	}
 	if _, exists := resolved.Resolve(canonical.RequestPartRef{Item: 0, Part: 0}, "https://example.test/tool.png"); !exists {
 		t.Fatal("durable binding lost the canonical tool-result coordinate")

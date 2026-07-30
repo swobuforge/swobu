@@ -1,10 +1,6 @@
 package profile
 
-import (
-	"strings"
-
-	"github.com/swobuforge/swobu/internal/compat"
-)
+import "strings"
 
 // ProviderDeploymentResolution interprets one deployment record against the
 // provider spec that surfaced it. It keeps discovery facts separate from
@@ -71,22 +67,4 @@ func (r ProviderDeploymentResolution) SupportsProtocol(protocol string) bool {
 		}
 	}
 	return false
-}
-
-// CapabilitySupport returns the explicit support observation for one feature.
-// Missing facts remain unknown so optional behavior fails closed.
-func (r ProviderDeploymentResolution) CapabilitySupport(feature compat.Feature) compat.Support {
-	for _, capability := range r.deployment.Capabilities {
-		if capability.Feature != feature {
-			continue
-		}
-		support := strings.TrimSpace(string(capability.Support)) // swobu:io-string source=boundary
-		switch compat.Support(support) {
-		case compat.Supported, compat.Unsupported, compat.Partial, compat.Unknown:
-			return compat.Support(support)
-		default:
-			return compat.Unknown
-		}
-	}
-	return compat.Unknown
 }

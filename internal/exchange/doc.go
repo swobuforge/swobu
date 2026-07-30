@@ -12,16 +12,22 @@
 //   - Explicit workspace-slug partitioning for the daemon-global checkpoint store
 //   - Explicit-ID versus exact client-history predecessor selection, atomic
 //     rebased-request handling, history composition, canonical response capture,
-//     and post-client-encode commit
+//     and pre-terminal-publication checkpoint commit
 //   - Lazy, attempt-scoped Responses ancestry loading only when a selected
 //     Responses attempt cannot use exact native delta continuation
 //   - Delivery conversion contract and exact-backend orchestration
 //   - The client codec bridge surface; provider codecs live behind provider.Backend
-//   - Opening one fully initialized request-scoped MCP runtime before candidate
-//     selection
+//   - Opening one fully initialized request-scoped MCP runtime for locally
+//     executable URL declarations before candidate selection while preserving
+//     native declarations for target projection
 //   - Delayed handoff, provider re-entry, usage accumulation, and fallback
 //     closure as consequences of runtime-owned MCP calls
-//   - Monotonic closure of provider fallback before the first MCP side effect
+//   - Truthful issued-call execution possibility and final-attempt replay safety
+//   - One bounded same-target transient retry derived from immutable attempt
+//     history before ordered candidate fallback
+//   - Monotonic closure of provider recovery before the first MCP side effect
+//   - Ingress and winning-attempt compatibility changes, finalized with client
+//     projection in the existing response completion
 //
 // It does NOT own:
 //   - Routing policy (internal/routing)
@@ -38,12 +44,14 @@
 // Remote MCP enters as concrete runtime-open, batch-reservation, and call
 // commands/events.
 // Exchange stores one runtime pointer and no SDK sessions, bearer maps, catalog
-// indexes, executor interfaces, registries, pools, or provider-native MCP path.
+// indexes, executor interfaces, registries, or pools. Native MCP declarations
+// remain canonical until the selected provider codec projects or rejects them.
 // New provider representations add explicit transient request choices and
-// closed transitions only when an implemented alternative exists. Attempt
-// requirements record issued-call facts; generic provider errors never infer
-// which feature caused a failure. Alternatives do not add nested retry loops,
-// synchronized route cursors, or phase booleans. Request-image materialization
+// closed transitions only when an implemented alternative exists. Generic
+// provider errors never infer which canonical capability caused a failure.
+// Availability never stands in for delivery or
+// replay safety. Alternatives do not add nested retry loops, synchronized route
+// cursors, or phase booleans. Request-image materialization
 // is protocol-independent and malformed or unavailable client media fails the
 // exchange. A later typed backend-local codec rejection may advance routing.
 package exchange

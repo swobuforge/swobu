@@ -14,7 +14,7 @@ import (
 )
 
 // swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
-func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, lite bool, sink compat.Sink, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy, access *mcp.Access) ([]canonical.CanonicalItem, error) {
+func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, lite bool, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy, access *mcp.Access) ([]canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -35,7 +35,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Approx, responsesInputSubject(idx, "type")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Approximation, responsesInputSubject(idx, "type")); err != nil {
 				return nil, err
 			}
 			itemType = "message"
@@ -43,7 +43,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		switch itemType {
 		case "additional_tools":
 			if role := strings.TrimSpace(item.Role); role != "" && role != "developer" { // swobu:io-string source=boundary
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsMessageRole, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsMessageRole, compat.Approximation, responsesInputSubject(idx, "role")); err != nil {
 					return nil, err
 				}
 			}
@@ -55,7 +55,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if lite && idx == 0 {
 				scope = canonical.ContextScopeRequest
 			}
-			occurrences, embeddedTools, updatedAccess, err := decodeResponsesToolOccurrences(wireTools, scope, fmt.Sprintf("wire:/input/%d/tools", idx), sink, exchangeID, *access)
+			occurrences, embeddedTools, updatedAccess, err := decodeResponsesToolOccurrences(wireTools, scope, fmt.Sprintf("wire:/input/%d/tools", idx), changeLog, exchangeID, *access)
 			if err != nil {
 				return nil, err
 			}
@@ -68,7 +68,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		case "message":
 			role := strings.TrimSpace(item.Role) // swobu:io-string source=boundary
 			if role == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsMessageRole, compat.Approx, responsesInputSubject(idx, "role")); err != nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsMessageRole, compat.Approximation, responsesInputSubject(idx, "role")); err != nil {
 					return nil, err
 				}
 				role = "user"
@@ -79,7 +79,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			} else if role == "developer" {
 				author = canonical.MessageRoleDeveloper
 			}
-			parts, err := decodeResponsesMessageContent(item.Content, author, imageLimits, sink, exchangeID, idx)
+			parts, err := decodeResponsesMessageContent(item.Content, author, imageLimits, changeLog, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -104,12 +104,12 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				callID = strings.TrimSpace(item.ID) // swobu:io-string source=boundary
 			}
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, responsesInputSubject(idx, "call_id")); err != nil {
 					return nil, err
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
 			} else if strings.TrimSpace(item.CallID) == "" { // swobu:io-string source=boundary
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, responsesInputSubject(idx, "call_id")); err != nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, responsesInputSubject(idx, "call_id")); err != nil {
 					return nil, err
 				}
 			}
@@ -159,12 +159,9 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		case "function_call_output":
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			if callID == "" {
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolResultCallID, compat.Reject, responsesInputSubject(idx, "call_id")); err != nil {
-					return nil, err
-				}
 				return nil, canonical.BadRequest("responses request function_call_output items require call_id")
 			}
-			output, err := decodeResponseOutputParts(item.Output, "function_call_output", imageLimits, sink, exchangeID, idx)
+			output, err := decodeResponseOutputParts(item.Output, "function_call_output", imageLimits, changeLog, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -183,7 +180,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if len(rawOutput) == 0 || bytes.Equal(rawOutput, []byte("null")) {
 				return nil, canonical.BadRequest("responses request custom_tool_call_output items require output")
 			}
-			output, err := decodeResponseOutputParts(item.Output, "custom_tool_call_output", imageLimits, sink, exchangeID, idx)
+			output, err := decodeResponseOutputParts(item.Output, "custom_tool_call_output", imageLimits, changeLog, exchangeID, idx)
 			if err != nil {
 				return nil, err
 			}
@@ -223,7 +220,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output requires call_id")
 			}
-			projected, err := decodeResponsesAdditionalTools(item.Tools, fmt.Sprintf("wire:/input/%d/tools", idx), compat.RequestToolsKind, sink, exchangeID)
+			projected, err := decodeResponsesAdditionalTools(item.Tools, fmt.Sprintf("wire:/input/%d/tools", idx), canonical.RequestToolsKind, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -246,11 +243,11 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		case "web_search_call":
 			state, err := decodeResponsesWebSearchLifecycleState(item.Status)
 			if err != nil {
-				if err := emitResponsesCompatibilityDecision(
-					sink,
+				if err := appendResponsesOccurrenceChange(
+					changeLog,
 					exchangeID,
-					compat.RequestItemsKind,
-					compat.Drop,
+					canonical.RequestItemsKind,
+					compat.Omission,
 					responsesInputSubject(idx, "status"),
 				); err != nil {
 					return nil, err
@@ -272,7 +269,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				// Codex durable rollouts omit provider presentation IDs when they
 				// replay completed search items after a client or daemon restart.
 				// Canonical pairing still needs a request-local stable identity.
-				if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsToolCallCallID, compat.Approx, responsesInputSubject(idx, "id")); err != nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, responsesInputSubject(idx, "id")); err != nil {
 					return nil, err
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
@@ -285,7 +282,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		case "reasoning":
 			reasoning, present, err := decodeResponsesReasoningItem(responsesWireOutputItemDTO{
 				Type: item.Type, ID: item.ID, Status: item.Status, Summary: item.Summary, Content: item.Content, EncryptedContent: item.EncryptedContent,
-			}, sink, exchangeID, compat.RequestItemsKind, fmt.Sprintf("wire:/input/%d", idx), false)
+			}, changeLog, exchangeID, canonical.RequestItemsKind, canonical.RequestItemOccurrence(uint32(idx)), false)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request reasoning item is invalid")
 			}
@@ -293,7 +290,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				decoded = append(decoded, reasoning)
 			}
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, responsesInputSubject(idx, "type")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, responsesInputSubject(idx, "type")); err != nil {
 				return nil, err
 			}
 		}
@@ -342,7 +339,7 @@ func (p responsesAdditionalToolsProjection) allErased() bool {
 	return p.wireCount > 0 && len(p.declarations) == 0
 }
 
-func decodeResponsesAdditionalTools(raw json.RawMessage, subjectPrefix string, feature compat.Feature, sink compat.Sink, exchangeID string) (responsesAdditionalToolsProjection, error) {
+func decodeResponsesAdditionalTools(raw json.RawMessage, subjectPrefix string, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (responsesAdditionalToolsProjection, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] != '[' {
 		return responsesAdditionalToolsProjection{}, canonical.BadRequest("responses request additional_tools tools must be an array")
@@ -351,7 +348,7 @@ func decodeResponsesAdditionalTools(raw json.RawMessage, subjectPrefix string, f
 	if err := json.Unmarshal(trimmed, &wireTools); err != nil {
 		return responsesAdditionalToolsProjection{}, canonical.BadRequest("responses request additional_tools tools are invalid")
 	}
-	decoded, err := decodeResponsesTools(wireTools, subjectPrefix, feature, sink, exchangeID)
+	decoded, err := decodeResponsesTools(wireTools, subjectPrefix, feature, changeLog, exchangeID)
 	if err != nil {
 		return responsesAdditionalToolsProjection{}, err
 	}

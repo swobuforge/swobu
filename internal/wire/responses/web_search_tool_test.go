@@ -26,21 +26,13 @@ func TestDecodeRequestApproximatesWebSearchQualityHints(t *testing.T) {
 	if len(canonicaltest.Tools(request)) != 1 || canonicaltest.Tools(request)[0].Kind() != canonical.ToolKindWebSearch {
 		t.Fatalf("tools = %#v", canonicaltest.Tools(request))
 	}
-	want := map[compat.Subject]compat.Outcome{
-		"wire:/include/0":                   compat.Drop,
-		"wire:/tools/0/external_web_access": compat.Drop,
-		"wire:/tools/0/user_location":       compat.Approx,
-		"wire:/tools/0/search_context_size": compat.Approx,
+	want := []compat.Kind{compat.Omission, compat.Approximation}
+	if len(decoded.Changes) != len(want) {
+		t.Fatalf("changes = %#v", decoded.Changes)
 	}
-	if len(decoded.Decisions) != len(want) {
-		t.Fatalf("decisions = %#v", decoded.Decisions)
-	}
-	for _, decision := range decoded.Decisions {
-		feature := compat.RequestToolsKind
-		if decision.Subject == "wire:/include/0" {
-			feature = compat.RequestTools
-		}
-		if decision.Feature != feature || decision.Outcome != want[decision.Subject] {
+	for index, decision := range decoded.Changes {
+		toolIndex, occurrenceOK := decision.Occurrence.ToolIndex()
+		if decision.Capability != canonical.RequestToolsKind || decision.Kind != want[index] || !occurrenceOK || toolIndex != 0 {
 			t.Fatalf("decision = %#v", decision)
 		}
 	}
@@ -51,11 +43,11 @@ func TestDecodeRequestClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 		name        string
 		tool        string
 		wantTools   int
-		wantOutcome compat.Outcome
+		wantOutcome compat.Kind
 	}{
-		{name: "content discriminator erases operation", tool: `{"type":"web_search","search_content_types":["video"]}`, wantOutcome: compat.Drop},
-		{name: "location discriminator erases operation", tool: `{"type":"web_search","user_location":{"type":"future_location"}}`, wantOutcome: compat.Drop},
-		{name: "context quality hint approximates field", tool: `{"type":"web_search","search_context_size":"ultra"}`, wantTools: 1, wantOutcome: compat.Approx},
+		{name: "content discriminator erases operation", tool: `{"type":"web_search","search_content_types":["video"]}`, wantOutcome: compat.Omission},
+		{name: "location discriminator erases operation", tool: `{"type":"web_search","user_location":{"type":"future_location"}}`, wantOutcome: compat.Omission},
+		{name: "context quality hint approximates field", tool: `{"type":"web_search","search_context_size":"ultra"}`, wantTools: 1, wantOutcome: compat.Approximation},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -67,8 +59,8 @@ func TestDecodeRequestClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 			if got := len(canonicaltest.Tools(decoded.Request.Request)); got != test.wantTools {
 				t.Fatalf("tool count = %d, want %d", got, test.wantTools)
 			}
-			if len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != test.wantOutcome {
-				t.Fatalf("decisions = %#v, want one %s", decoded.Decisions, test.wantOutcome)
+			if len(decoded.Changes) != 1 || decoded.Changes[0].Kind != test.wantOutcome {
+				t.Fatalf("changes = %#v, want one %v", decoded.Changes, test.wantOutcome)
 			}
 		})
 	}
@@ -91,8 +83,8 @@ func TestDecodeRequestDropsWebSearchWithUnrepresentedConstraints(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(canonicaltest.Tools(decoded.Request.Request)) != 0 ||
-				len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
-				t.Fatalf("projection = tools %#v decisions %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Decisions)
+				len(decoded.Changes) != 1 || decoded.Changes[0].Kind != compat.Omission {
+				t.Fatalf("projection = tools %#v changes %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Changes)
 			}
 		})
 	}
@@ -116,8 +108,8 @@ func TestDecodeRequestDropsUnrepresentedImageSearchOperation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(canonicaltest.Tools(decoded.Request.Request)) != 0 ||
-				len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
-				t.Fatalf("projection = tools %#v decisions %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Decisions)
+				len(decoded.Changes) != 1 || decoded.Changes[0].Kind != compat.Omission {
+				t.Fatalf("projection = tools %#v changes %#v", canonicaltest.Tools(decoded.Request.Request), decoded.Changes)
 			}
 		})
 	}
@@ -140,8 +132,8 @@ func TestDecodeRequestPreservesSupportedToolBesideDroppedConstrainedSearch(t *te
 	if len(tools) != 1 || tools[0].Key().Name() != "lookup" {
 		t.Fatalf("surviving tools = %#v, want lookup", tools)
 	}
-	if len(decoded.Decisions) != 1 || decoded.Decisions[0].Outcome != compat.Drop {
-		t.Fatalf("decisions = %#v, want constrained-search Drop", decoded.Decisions)
+	if len(decoded.Changes) != 1 || decoded.Changes[0].Kind != compat.Omission {
+		t.Fatalf("changes = %#v, want constrained-search Drop", decoded.Changes)
 	}
 }
 
@@ -159,18 +151,14 @@ func TestDecodeRequestRejectsSpecificSelectionOfDroppedSearch(t *testing.T) {
 	}
 }
 
-func TestDecodeRequestErasesUnknownIncludeEntry(t *testing.T) {
+func TestDecodeRequestIgnoresUnknownIncludeEntry(t *testing.T) {
 	raw := []byte(`{"model":"default","input":"hello","include":["future.include","reasoning.encrypted_content"]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded.Decisions) != 1 || decoded.Decisions[0] != (compat.Decision{
-		Feature: compat.RequestItemsKind,
-		Outcome: compat.Drop,
-		Subject: "wire:/include/0",
-	}) {
-		t.Fatalf("decisions = %#v", decoded.Decisions)
+	if len(decoded.Changes) != 0 {
+		t.Fatalf("wire-only include created semantic changes: %#v", decoded.Changes)
 	}
 }
 
@@ -339,7 +327,7 @@ func TestEncodeRequestLowersStableWebSearchTool(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
-	doc, err := EncodeCarrierWithDecisions(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +563,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 				}
 			}
 
-			document, err := EncodeCarrierWithDecisions(
+			document, err := EncodeCarrierWithChanges(
 				EncodeInput{Request: decoded.Request.Request},
 				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
@@ -636,7 +624,7 @@ func TestResponsesRequestWebSearchFoldSupportsNonAdjacentResult(t *testing.T) {
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{lifecycle[0], message, lifecycle[1]},
 	})
-	document, err := EncodeCarrierWithDecisions(
+	document, err := EncodeCarrierWithChanges(
 		EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {

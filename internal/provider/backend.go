@@ -10,25 +10,21 @@ import (
 )
 
 // Codec owns final canonical/provider-wire conversion for one exact backend.
-// Compatibility decisions are processing results; persisting them as evidence
+// Compatibility changes are processing results; persisting them as evidence
 // is outside this interface and cannot alter the codec result.
 type Codec interface {
-	Encode(Request) (carrier.Document, []compat.Decision, error)
+	Encode(Request) (carrier.Document, []compat.Change, error)
 	Decode(context.Context, Request, Ingress) (DecodedResponse, error)
-}
-
-// DecisionSource exposes compatibility decisions discovered only while a
-// progressive provider response is consumed.
-type DecisionSource interface {
-	Decisions() []compat.Decision
 }
 
 // DecodedResponse is one invocation-bound provider decode result. All durable
 // response semantics enter the canonical stream.
 type DecodedResponse struct {
-	Stream            canonical.ResponseStream
-	Decisions         []compat.Decision
-	TerminalDecisions DecisionSource
+	Stream canonical.ResponseStream
+	// Changes contains facts known when decoding begins. ProgressiveChanges
+	// returns the immutable facts accumulated once Stream reaches terminal.
+	Changes            []compat.Change
+	ProgressiveChanges func() []compat.Change
 }
 
 // Transport performs external I/O over a final provider wire document. It has
@@ -50,7 +46,13 @@ func BindTransport(target TargetSnapshot, send func(context.Context, TargetSnaps
 	bound := target.Clone()
 	return TransportFunc(func(ctx context.Context, document carrier.Document) (Ingress, error) {
 		ingress, err := send(ctx, bound, document)
-		return ingress, NormalizeFailure(err)
+		if err == nil {
+			return ingress, nil
+		}
+		if failure, ok := AsAttemptFailure(err); ok {
+			return ingress, failure
+		}
+		return ingress, AttemptMayHaveExecuted(err)
 	})
 }
 

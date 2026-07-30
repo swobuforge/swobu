@@ -5,7 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
@@ -70,5 +74,44 @@ func TestRewriteWebSearchTranslatesOnlyEmptyStandardOptions(t *testing.T) {
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("non-empty options error = %T %v, want candidate incompatibility", err, err)
+	}
+}
+
+func TestCodecInheritsStandardReasoningBudgetProjection(t *testing.T) {
+	budget, err := canonical.NewBudgetReasoningCompute(10_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(budget),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     canonical.Specify("glm"),
+		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Reasoning: reasoning,
+	})
+
+	document, changes, err := (codec{}).Encode(provider.Request{
+		Canonical: request,
+		Delivery:  delivery.BufferedDelivery(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["reasoning_effort"] != "medium" {
+		t.Fatalf("reasoning_effort = %#v, want medium", payload["reasoning_effort"])
+	}
+	if len(changes) != 1 ||
+		changes[0].Capability != canonical.RequestReasoning ||
+		changes[0].Kind != compat.Approximation ||
+		changes[0].Preserved != canonical.RequestControlsEffort {
+		t.Fatalf("changes = %#v, want one reasoning-to-effort approximation", changes)
 	}
 }
