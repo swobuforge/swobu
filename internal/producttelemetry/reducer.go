@@ -3,10 +3,10 @@ package producttelemetry
 import (
 	"sort"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transport"
 )
 
 // Duration-histogram bucket indices (fixed six buckets). Every observed request
@@ -40,7 +40,7 @@ type trafficRowKey struct {
 	requestPath        canonical.NormalizedPath
 	provider           profile.ProviderID
 	statusCode         int
-	deliveryKind       transport.DeliveryResultKind
+	deliveryKind       delivery.ResultKind
 	canonicalErrorCode canonical.ErrorCode
 	attemptCount       int
 	fallbackRecovered  bool

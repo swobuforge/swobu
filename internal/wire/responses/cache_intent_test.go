@@ -55,7 +55,7 @@ func TestEncode_PreservesToolsAndOmitsProviderCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","name":"` + functionTool.Key().Name() + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","input":"hi"}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})

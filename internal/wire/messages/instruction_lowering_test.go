@@ -13,7 +13,7 @@ func TestFlattenInstructionsForMessagesPreservesWhitespaceAndReportsRoleLoss(t *
 		canonicaltest.MustInstruction(canonical.MessageRoleDeveloper, " developer\n"),
 	}
 	lowered := flattenInstructionsForMessages(items)
-	if lowered.Text != "  system  \n\n developer\n" || lowered.Exact || len(lowered.Decisions) != 1 {
+	if lowered.Text != "  system  \n\n developer\n" || lowered.Exact || len(lowered.Changes) != 1 {
 		t.Fatalf("lowered = %#v", lowered)
 	}
 }

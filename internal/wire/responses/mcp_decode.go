@@ -3,7 +3,7 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"net/textproto"
 	"net/url"
 	"strings"
 
@@ -15,7 +15,6 @@ import (
 type responsesMCPProjection struct {
 	declaration canonical.ToolDeclaration
 	access      mcp.Access
-	drop        bool
 }
 
 func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Access) (responsesMCPProjection, error) {
@@ -54,84 +53,48 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 		return fail(canonical.BadRequest("responses MCP tunnel_id must be non-empty"))
 	}
 
-	parsed, err := url.Parse(strings.TrimSpace(tool.ServerURL))
+	endpoint := strings.TrimSpace(tool.ServerURL)
 	if tool.ConnectorID == nil && tool.TunnelID == nil {
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		parsed, parseErr := url.Parse(endpoint)
+		if parseErr != nil || parsed.Scheme != "https" || parsed.Host == "" {
 			return fail(canonical.BadRequest("responses MCP server_url must be an absolute HTTPS URL"))
 		}
 		if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return fail(canonical.BadRequest("responses MCP server_url must not contain userinfo, query, or fragment"))
 		}
+		endpoint = parsed.String()
 	}
 
-	unsupported := tool.ConnectorID != nil || tool.TunnelID != nil ||
-		(tool.DeferLoading != nil && *tool.DeferLoading)
-	if raw := bytes.TrimSpace(tool.AllowedCallers); len(raw) > 0 &&
-		!bytes.Equal(raw, []byte("null")) {
-		var callers []string
-		if err := json.Unmarshal(raw, &callers); err != nil || callers == nil {
-			return fail(canonical.BadRequest("responses MCP allowed_callers is invalid"))
-		}
-		unsupported = true
-	}
-	headerBearer, customHeaders, err := responsesMCPHeaderBearer(tool.Headers)
+	allowed, err := decodeResponsesMCPNames(tool.AllowedTools, true, "allowed_tools")
 	if err != nil {
 		return fail(err)
 	}
-	if tool.Authorization != nil && headerBearer != "" {
-		return fail(canonical.BadRequest("responses MCP authorization and Authorization header cannot both be set"))
+	callers, err := decodeResponsesMCPNames(tool.AllowedCallers, false, "allowed_callers")
+	if err != nil {
+		return fail(err)
 	}
-	if tool.Authorization != nil && strings.TrimSpace(*tool.Authorization) == "" {
-		return fail(canonical.BadRequest("responses MCP authorization must be non-empty"))
+	approval, err := decodeResponsesMCPApproval(tool.RequireApproval)
+	if err != nil {
+		return fail(err)
 	}
-	unsupported = unsupported || customHeaders
-
-	allowed := canonical.Unspecified[[]string]()
-	if raw := bytes.TrimSpace(tool.AllowedTools); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
-		var names []string
-		if err := json.Unmarshal(raw, &names); err != nil {
-			var selector struct {
-				ToolNames []string `json:"tool_names"`
-			}
-			if objectErr := json.Unmarshal(raw, &selector); objectErr != nil || selector.ToolNames == nil {
-				return fail(canonical.BadRequest("responses MCP allowed_tools is invalid"))
-			}
-			names = selector.ToolNames
-		}
-		allowed = canonical.Specify(names)
+	loading := canonical.MCPLoadingEager
+	if tool.DeferLoading != nil && *tool.DeferLoading {
+		loading = canonical.MCPLoadingDeferred
 	}
 
-	rawApproval := bytes.TrimSpace(tool.RequireApproval)
+	var source canonical.MCPSource
 	switch {
-	case len(rawApproval) == 0 || bytes.Equal(rawApproval, []byte("null")):
-		unsupported = true
+	case tool.ConnectorID != nil:
+		source, err = canonical.NewMCPConnectorSource(
+			strings.TrimSpace(*tool.ConnectorID), allowed, approval, loading, callers,
+		)
+	case tool.TunnelID != nil:
+		source, err = canonical.NewMCPTunnelSource(
+			strings.TrimSpace(*tool.TunnelID), allowed, approval, loading, callers,
+		)
 	default:
-		var approval string
-		if err := json.Unmarshal(rawApproval, &approval); err == nil {
-			switch approval {
-			case "never":
-			case "always":
-				unsupported = true
-			default:
-				return fail(canonical.BadRequest("responses MCP require_approval is invalid"))
-			}
-			break
-		}
-		var approvalPolicy map[string]any
-		if err := json.Unmarshal(rawApproval, &approvalPolicy); err != nil || len(approvalPolicy) == 0 {
-			return fail(canonical.BadRequest("responses MCP require_approval is invalid"))
-		}
-		unsupported = true
+		source, err = canonical.NewMCPURLSource(endpoint, allowed, approval, loading, callers)
 	}
-
-	// Unsupported authority is inseparable from the MCP declaration. Erasing
-	// the whole occurrence preserves independent siblings without inventing a
-	// weaker remote execution contract.
-	if unsupported {
-		return responsesMCPProjection{access: access, drop: true}, nil
-	}
-
-	source, err := canonical.NewMCPSource(parsed.String(), allowed)
 	if err != nil {
 		return fail(err)
 	}
@@ -139,12 +102,25 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 	if err != nil {
 		return fail(err)
 	}
-	bearer := headerBearer
-	if tool.Authorization != nil {
-		bearer = *tool.Authorization
+
+	headers, headerBearer, err := decodeResponsesMCPHeaders(tool.Headers)
+	if err != nil {
+		return fail(err)
 	}
-	if bearer != "" {
-		access, err = access.WithBearer(key, bearer)
+	if tool.Authorization != nil && headerBearer != "" {
+		return fail(canonical.BadRequest("responses MCP authorization and Authorization header cannot both be set"))
+	}
+	if tool.Authorization != nil {
+		if strings.TrimSpace(*tool.Authorization) == "" {
+			return fail(canonical.BadRequest("responses MCP authorization must be non-empty"))
+		}
+		access, err = access.WithBearer(key, *tool.Authorization)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if len(headers) > 0 {
+		access, err = access.WithHeaders(key, headers)
 		if err != nil {
 			return fail(err)
 		}
@@ -152,36 +128,131 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 	return responsesMCPProjection{declaration: namespace, access: access}, nil
 }
 
-func responsesMCPHeaderBearer(raw json.RawMessage) (string, bool, error) {
+func decodeResponsesMCPNames(raw json.RawMessage, objectAllowed bool, field string) (canonical.Specified[[]string], error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return "", false, nil
+		return canonical.Unspecified[[]string](), nil
 	}
-	var headers map[string]string
-	if err := json.Unmarshal(raw, &headers); err != nil {
-		return "", false, canonical.BadRequest("responses MCP headers are invalid")
+	var names []string
+	if err := json.Unmarshal(raw, &names); err == nil && names != nil {
+		return canonical.Specify(names), nil
 	}
-	var bearer string
-	custom := false
-	for name, value := range headers {
-		if !strings.EqualFold(strings.TrimSpace(name), "Authorization") {
-			custom = true
-			continue
+	if objectAllowed {
+		var selector struct {
+			ToolNames []string `json:"tool_names"`
 		}
-		value = strings.TrimSpace(value)
-		if len(value) < len("Bearer ") || !strings.EqualFold(value[:len("Bearer ")], "Bearer ") ||
-			strings.TrimSpace(value[len("Bearer "):]) == "" {
-			return "", false, canonical.BadRequest("responses MCP Authorization header must use Bearer authentication")
+		if err := json.Unmarshal(raw, &selector); err == nil && selector.ToolNames != nil {
+			return canonical.Specify(selector.ToolNames), nil
 		}
-		if bearer != "" {
-			return "", false, canonical.BadRequest("responses MCP Authorization header is duplicated")
-		}
-		bearer = strings.TrimSpace(value[len("Bearer "):])
 	}
-	return bearer, custom, nil
+	return canonical.Unspecified[[]string](), canonical.BadRequest("responses MCP " + field + " is invalid")
 }
 
-func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope canonical.ContextScope, subjectPrefix string, sink compat.Sink, exchangeID string, access mcp.Access) ([]canonical.CanonicalItem, []canonical.ToolDeclaration, mcp.Access, error) {
+func decodeResponsesMCPApproval(raw json.RawMessage) (canonical.MCPApproval, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return canonical.NewMCPApprovalAlways(), nil
+	}
+	var policy string
+	if err := json.Unmarshal(raw, &policy); err == nil {
+		switch policy {
+		case "never":
+			return canonical.NewMCPApprovalNever(), nil
+		case "always":
+			return canonical.NewMCPApprovalAlways(), nil
+		default:
+			return canonical.MCPApproval{}, canonical.BadRequest("responses MCP require_approval is invalid")
+		}
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil || len(object) == 0 {
+		return canonical.MCPApproval{}, canonical.BadRequest("responses MCP require_approval is invalid")
+	}
+	for name := range object {
+		if name != "always" && name != "never" {
+			return canonical.MCPApproval{}, canonical.BadRequest("responses MCP require_approval is invalid")
+		}
+	}
+	always, err := decodeResponsesMCPToolFilter(object["always"])
+	if err != nil {
+		return canonical.MCPApproval{}, err
+	}
+	never, err := decodeResponsesMCPToolFilter(object["never"])
+	if err != nil {
+		return canonical.MCPApproval{}, err
+	}
+	return canonical.NewMCPApprovalFilter(always, never)
+}
+
+func decodeResponsesMCPToolFilter(raw json.RawMessage) (*canonical.MCPToolFilter, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+		return nil, canonical.BadRequest("responses MCP approval filter is invalid")
+	}
+	for name := range object {
+		if name != "tool_names" && name != "read_only" {
+			return nil, canonical.BadRequest("responses MCP approval filter is invalid")
+		}
+	}
+	names := canonical.Unspecified[[]string]()
+	if value, ok := object["tool_names"]; ok {
+		var decoded []string
+		if err := json.Unmarshal(value, &decoded); err != nil || decoded == nil {
+			return nil, canonical.BadRequest("responses MCP approval filter tool_names is invalid")
+		}
+		names = canonical.Specify(decoded)
+	}
+	readOnly := canonical.Unspecified[bool]()
+	if value, ok := object["read_only"]; ok {
+		var decoded bool
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			return nil, canonical.BadRequest("responses MCP approval filter read_only is invalid")
+		}
+		readOnly = canonical.Specify(decoded)
+	}
+	filter, err := canonical.NewMCPToolFilter(names, readOnly)
+	if err != nil {
+		return nil, err
+	}
+	return &filter, nil
+}
+
+func decodeResponsesMCPHeaders(raw json.RawMessage) (map[string]string, string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, "", nil
+	}
+	var headers map[string]string
+	if err := json.Unmarshal(raw, &headers); err != nil || headers == nil {
+		return nil, "", canonical.BadRequest("responses MCP headers are invalid")
+	}
+	var bearer string
+	for name, value := range headers {
+		if textproto.CanonicalMIMEHeaderKey(name) == "" ||
+			strings.ContainsAny(value, "\r\n") {
+			return nil, "", canonical.BadRequest("responses MCP headers are invalid")
+		}
+		if !strings.EqualFold(strings.TrimSpace(name), "Authorization") {
+			continue
+		}
+		trimmed := strings.TrimSpace(value)
+		if len(trimmed) < len("Bearer ") ||
+			!strings.EqualFold(trimmed[:len("Bearer ")], "Bearer ") ||
+			strings.TrimSpace(trimmed[len("Bearer "):]) == "" {
+			return nil, "", canonical.BadRequest("responses MCP Authorization header must use Bearer authentication")
+		}
+		if bearer != "" {
+			return nil, "", canonical.BadRequest("responses MCP Authorization header is duplicated")
+		}
+		bearer = strings.TrimSpace(trimmed[len("Bearer "):])
+	}
+	return headers, bearer, nil
+}
+
+func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope canonical.ContextScope, subjectPrefix string, changeLog *[]compat.Change, exchangeID string, access mcp.Access) ([]canonical.CanonicalItem, []canonical.ToolDeclaration, mcp.Access, error) {
 	declarations := make([]canonical.ToolDeclaration, 0, len(tools))
 	ordinary := make([]canonical.ToolDeclaration, 0, len(tools))
 	for index, tool := range tools {
@@ -190,23 +261,11 @@ func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope ca
 			if err != nil {
 				return nil, nil, access, err
 			}
-			if projection.drop {
-				if err := emitResponsesCompatibilityDecision(
-					sink,
-					exchangeID,
-					compat.RequestTools,
-					compat.Drop,
-					compat.Subject(fmt.Sprintf("%s/%d", subjectPrefix, index)),
-				); err != nil {
-					return nil, nil, access, err
-				}
-				continue
-			}
 			access = projection.access
 			declarations = append(declarations, projection.declaration)
 			continue
 		}
-		decoded, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: index}, compat.RequestToolsKind, sink, exchangeID)
+		decoded, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: index}, canonical.RequestToolsKind, changeLog, exchangeID)
 		if err != nil {
 			return nil, nil, access, err
 		}

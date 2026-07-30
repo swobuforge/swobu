@@ -18,13 +18,11 @@ type mantleMessagesCodec struct {
 	provider.Codec
 }
 
-func (c mantleMessagesCodec) Encode(request provider.Request) (carrier.Document, []compat.Decision, error) {
+func (c mantleMessagesCodec) Encode(request provider.Request) (carrier.Document, []compat.Change, error) {
 	if request.Canonical.OutputFormatSpecified() {
 		format := request.Canonical.OutputFormat()
 		if !format.IsZero() && format.Kind != canonical.OutputFormatText {
-			return carrier.Document{}, nil, provider.NewIncompatibleTarget(
-				"Bedrock Mantle Messages cannot represent native structured output",
-			)
+			return carrier.Document{}, nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Bedrock Mantle Messages cannot represent native structured output")
 		}
 	}
 	return c.Codec.Encode(request)

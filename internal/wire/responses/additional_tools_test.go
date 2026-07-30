@@ -142,8 +142,12 @@ func TestAdditionalToolsUnfamiliarCarrierRoleDoesNotReject(t *testing.T) {
 	if !ok || declarations.Scope() != canonical.ContextScopeHistory {
 		t.Fatalf("additional_tools occurrence = %#v, want history scope", items[0])
 	}
-	if len(decoded.Decisions) != 1 || decoded.Decisions[0].Feature != compat.RequestItemsMessageRole || decoded.Decisions[0].Outcome != compat.Approx || decoded.Decisions[0].Subject != compat.Subject("wire:/input/0/role") {
-		t.Fatalf("compatibility decisions = %#v, want role approximation evidence", decoded.Decisions)
+	if len(decoded.Changes) != 1 {
+		t.Fatalf("compatibility changes = %#v, want role approximation evidence", decoded.Changes)
+	}
+	item, occurrenceOK := decoded.Changes[0].Occurrence.RequestItem()
+	if decoded.Changes[0].Capability != canonical.RequestItemsMessageRole || decoded.Changes[0].Kind != compat.Approximation || !occurrenceOK || item != 0 {
+		t.Fatalf("compatibility changes = %#v, want role approximation evidence", decoded.Changes)
 	}
 }
 

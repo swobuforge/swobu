@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -192,27 +194,37 @@ func TestResponsesWebsocket_ProcessesQueuedCreatesSerially(t *testing.T) {
 	}
 }
 
-func TestResponsesWebsocket_AcceptsArbitraryOrigin(t *testing.T) {
-	handler := newTestHandler(staticRequestIngress{
-		envelope: testProviderIngressFromOutput(canonicaltest.Response(t,
-			"chatcmpl_1",
-			"model",
-			[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
-			canonical.Completed("stop"),
-		)),
-	})
+func TestResponsesWebsocket_RejectsCrossOriginBeforeIngress(t *testing.T) {
+	ingress := &recordingWebsocketIngress{}
+	handler := newTestHandler(ingress)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
-	conn, err := websocket.Dial(wsURL, "", "http://evil.example")
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/c/alpha/responses", nil)
 	if err != nil {
-		t.Fatalf("websocket dial failed: %v", err)
+		t.Fatal(err)
 	}
-	defer func() { _ = conn.Close() }()
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	request.Header.Set("Origin", "http://evil.example")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusForbidden)
+	}
+	ingress.mu.Lock()
+	defer ingress.mu.Unlock()
+	if len(ingress.ids) != 0 {
+		t.Fatalf("exchange calls = %d, want zero", len(ingress.ids))
+	}
 }
 
-func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
+func TestResponsesWebsocket_AcceptsExactLoopbackOrigin(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testProviderIngressFromOutput(canonicaltest.Response(t,
 			"chatcmpl_1",
@@ -225,7 +237,7 @@ func TestResponsesWebsocket_AcceptsLocalOrigin(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
-	conn, err := websocket.Dial(wsURL, "", "http://localhost")
+	conn, err := websocket.Dial(wsURL, "", server.URL)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
@@ -247,7 +259,7 @@ func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
-	conn, err := websocket.Dial(wsURL, "", "http://localhost")
+	conn, err := websocket.Dial(wsURL, "", server.URL)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
@@ -267,5 +279,57 @@ func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	}
 	if !strings.Contains(msg, "BAD_REQUEST") {
 		t.Fatalf("message = %q, want BAD_REQUEST", msg)
+	}
+}
+
+func TestValidateResponsesWebsocketAccess(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		host       string
+		origins    []string
+		tls        bool
+		wantOK     bool
+	}{
+		{name: "native without origin", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", wantOK: true},
+		{name: "localhost exact", remoteAddr: "127.0.0.1:5000", host: "localhost:7926", origins: []string{"http://localhost:7926"}, wantOK: true},
+		{name: "ipv4 exact", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://127.0.0.1:7926"}, wantOK: true},
+		{name: "ipv6 exact", remoteAddr: "[::1]:5000", host: "[::1]:7926", origins: []string{"http://[::1]:7926"}, wantOK: true},
+		{name: "default secure port", remoteAddr: "[::1]:5000", host: "[::1]", origins: []string{"https://[::1]:443"}, tls: true, wantOK: true},
+		{name: "remote peer", remoteAddr: "192.0.2.4:5000", host: "127.0.0.1:7926"},
+		{name: "missing peer", host: "127.0.0.1:7926"},
+		{name: "remote origin", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://evil.example"}},
+		{name: "null origin", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"null"}},
+		{name: "different port", remoteAddr: "127.0.0.1:5000", host: "localhost:7926", origins: []string{"http://localhost:7927"}},
+		{name: "localhost versus ipv4", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://localhost:7926"}},
+		{name: "non loopback host", remoteAddr: "127.0.0.1:5000", host: "192.0.2.10:7926", origins: []string{"http://192.0.2.10:7926"}},
+		{name: "rebound hostname", remoteAddr: "127.0.0.1:5000", host: "attacker.example:7926", origins: []string{"http://attacker.example:7926"}},
+		{name: "origin path", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://127.0.0.1:7926/path"}},
+		{name: "origin query", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://127.0.0.1:7926?x=1"}},
+		{name: "wrong secure scheme", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:443", origins: []string{"http://127.0.0.1:443"}, tls: true},
+		{name: "multiple origins", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"http://127.0.0.1:7926", "http://127.0.0.1:7926"}},
+		{name: "malformed origin", remoteAddr: "127.0.0.1:5000", host: "127.0.0.1:7926", origins: []string{"://"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/c/alpha/responses", nil)
+			request.RemoteAddr = test.remoteAddr
+			request.Host = test.host
+			request.Header.Del("Origin")
+			for _, origin := range test.origins {
+				request.Header.Add("Origin", origin)
+			}
+			if test.tls {
+				request.TLS = &tls.ConnectionState{}
+			}
+			err := validateResponsesWebsocketAccess(request)
+			if test.wantOK && err != nil {
+				t.Fatalf("validateResponsesWebsocketAccess() error = %v", err)
+			}
+			if !test.wantOK && err == nil {
+				t.Fatal("validateResponsesWebsocketAccess() succeeded, want rejection")
+			}
+		})
 	}
 }

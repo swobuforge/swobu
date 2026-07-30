@@ -124,20 +124,53 @@ func TestBearerTransportConfinesAuthorizationToExactOrigin(t *testing.T) {
 	}
 }
 
+func TestHeaderTransportForwardsArbitraryHeadersOnlyToExactOrigin(t *testing.T) {
+	var captured []http.Header
+	next := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		captured = append(captured, request.Header.Clone())
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Header:     make(http.Header),
+		}, nil
+	})
+	transport := headerTransport{
+		next: next, origin: "https://mcp.example.test",
+		headers: map[string]string{"X-Tenant": "restricted", "X-Trace": "request"},
+	}
+	for _, raw := range []string{
+		"https://mcp.example.test/rpc",
+		"https://other.example.test/rpc",
+	} {
+		endpoint, _ := url.Parse(raw)
+		request := &http.Request{Method: http.MethodPost, URL: endpoint, Header: make(http.Header)}
+		if _, err := transport.RoundTrip(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(captured) != 2 ||
+		captured[0].Get("X-Tenant") != "restricted" ||
+		captured[0].Get("X-Trace") != "request" ||
+		captured[1].Get("X-Tenant") != "" ||
+		captured[1].Get("X-Trace") != "" {
+		t.Fatalf("forwarded headers = %#v", captured)
+	}
+}
+
 func TestMCPToolOutputSchemaIsApproximationEvidence(t *testing.T) {
 	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
-	remote, _ := canonical.NewMCPSource("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
+	remote, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
 	sourceDeclaration, _ := canonical.NewMCPToolNamespace(sourceKey, "", remote, nil)
 	source, _ := sourceDeclaration.Namespace()
-	declaration, decisions, err := declarationFromSDKTool(source, &mcp.Tool{
+	declaration, changes, err := declarationFromSDKTool(source, &mcp.Tool{
 		Name: "structured", InputSchema: map[string]any{"type": "object"},
 		OutputSchema: map[string]any{"type": "object"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := declaration.Function(); !ok || len(decisions) != 1 {
-		t.Fatalf("output-schema approximation = %#v / %#v", declaration, decisions)
+	if _, ok := declaration.Function(); !ok || len(changes) != 1 {
+		t.Fatalf("output-schema approximation = %#v / %#v", declaration, changes)
 	}
 }
 
@@ -194,7 +227,7 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
-	remote, _ := canonical.NewMCPSource(
+	remote, _ := newTestMCPURL(
 		"https://mcp.example.test/rpc", canonical.Specify([]string{"fetch", "search"}),
 	)
 	sourceDeclaration, _ := canonical.NewMCPToolNamespace(sourceKey, "", remote, nil)
@@ -202,12 +235,12 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	activeSession := &session{source: source, sdk: sdkSession}
 	defer activeSession.close()
 
-	declarations, decisions, err := activeSession.listTools(ctx)
+	declarations, changes, err := activeSession.listTools(ctx)
 	if err != nil || len(declarations) != 2 {
 		t.Fatalf("declarations = %#v, %v", declarations, err)
 	}
-	if len(decisions) != 1 || decisions[0].Outcome != compat.Approx {
-		t.Fatalf("output-schema decisions = %#v", decisions)
+	if len(changes) != 1 || changes[0].Kind != compat.Approximation {
+		t.Fatalf("output-schema changes = %#v", changes)
 	}
 	first, _ := declarations[0].Function()
 	if first.Key().Name() != "fetch" {

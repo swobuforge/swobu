@@ -31,6 +31,10 @@ const (
 	DefaultAssertion = "default"
 	DefaultMinCols   = 60
 	DefaultMinRows   = 18
+
+	// PromotionAcknowledgment is the exact deliberate-review statement required
+	// before a test may replace a visual fixture.
+	PromotionAcknowledgment = "I generated the fixture candidate, opened it in my editor, compared every row to the RFC wireframe, edited by hand wherever rendering diverged from intent, and verified the fixture matches the intended operator experience before committing."
 )
 
 // Config holds one fixture-backed comparison configuration.
@@ -135,9 +139,9 @@ func CompareSnapshot(snapshot string, cfg Config) Report {
 }
 
 // Compare checks snapshot against the fixture configuration.
-// When updateEnv is set to the exact value "i-have-reviewed", it writes snapshot
-// to the fixture path instead of comparing. Any other non-empty value produces
-// an error that explains the required acknowledgement.
+// When updateEnv contains PromotionAcknowledgment, Compare writes snapshot to
+// the fixture path instead of comparing. Any other non-empty value produces an
+// error that explains the required acknowledgement.
 func Compare(snapshot string, cfg Config, updateEnv string) Report {
 	path := strings.TrimSpace(cfg.Path)
 	if path == "" {
@@ -188,8 +192,6 @@ func Compare(snapshot string, cfg Config, updateEnv string) Report {
 	}
 }
 
-const fixturePromotionAck = "I generated the fixture candidate, opened it in my editor, compared every row to the RFC wireframe, edited by hand wherever rendering diverged from intent, and verified the fixture matches the intended operator experience before committing."
-
 func updateEnabled(envKey string) (bool, error) {
 	if envKey == "" {
 		return false, nil
@@ -198,14 +200,14 @@ func updateEnabled(envKey string) (bool, error) {
 	if value == "" {
 		return false, nil
 	}
-	if value != fixturePromotionAck {
+	if value != PromotionAcknowledgment {
 		return false, fmt.Errorf(
 			"fixture promotion refused: %s does not match the required acknowledgment.\n\n"+
-			"Set it to exactly this paragraph, then run the test again:\n"+
-			"  %s=%s\n\n"+
-			"After the fixture is written, open it, compare every row to the RFC wireframe, edit by hand if needed, and run without this env var to verify.\n"+
-			"See tui-done-criteria.md: Fixture promotion rule.",
-			envKey, envKey, fixturePromotionAck,
+				"Set it to exactly this paragraph, then run the test again:\n"+
+				"  %s=%s\n\n"+
+				"After the fixture is written, open it, compare every row to the RFC wireframe, edit by hand if needed, and run without this env var to verify.\n"+
+				"See tui-done-criteria.md: Fixture promotion rule.",
+			envKey, envKey, PromotionAcknowledgment,
 		)
 	}
 	return true, nil

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -295,7 +294,7 @@ func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wi
 			fail(errors.New("messages response did not complete successfully"))
 			return encoded, nil
 		}
-		projected, _, err := projectMessagesWebSearchLifecycles(completedItems, compat.ResponseItemsKind)
+		projected, _, err := projectMessagesWebSearchLifecycles(completedItems, canonical.ResponseItemsKind)
 		if err != nil {
 			fail(err)
 			return nil, err

@@ -103,7 +103,7 @@ func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (pro
 func (r azureBackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 	baseURL, err := resolveAzureResourceRoot(target.BaseURL)
 	if err != nil {
-		return nil, canonical.BadEndpoint("azure resource locator is required")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("azure resource locator is required"))
 	}
 	next := target.Clone()
 	switch target.ProtocolKind {

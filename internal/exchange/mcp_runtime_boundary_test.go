@@ -14,6 +14,42 @@ func TestUnavailableOnlyMCPRuntimeDoesNotDelayClientHandoff(t *testing.T) {
 	}
 }
 
+func TestMCPExecutionRecordsPolyfillTruth(t *testing.T) {
+	t.Parallel()
+	callID, err := canonical.NewToolCallID("call_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, err := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := canonical.ParseJSONObject([]byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := canonical.NewToolCallItem(callID, tool, canonical.NewJSONObjectToolInput(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, _ := item.ToolCall()
+	outcome, err := reduceCallingMCP(
+		exchangeState{mcp: &mcp.Run{}},
+		callingMCPPhase{calls: []canonical.ToolCallItem{call}},
+		mcpBatchStarted{},
+		runtimeBundle{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.nextState.polyfilled {
+		t.Fatal("MCP execution did not record polyfill truth")
+	}
+	if len(outcome.nextState.effectiveChanges) != 0 {
+		t.Fatalf("MCP execution invented semantic changes = %#v", outcome.nextState.effectiveChanges)
+	}
+}
+
 func TestMCPBatchReservationIsACommandBoundary(t *testing.T) {
 	t.Parallel()
 	outcome, err := beginMCPBatch(exchangeState{mcp: &mcp.Run{}}, callingMCPPhase{

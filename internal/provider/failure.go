@@ -6,12 +6,79 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 type classifiedFailure interface {
 	error
 	providerFailure()
+}
+
+// ExecutionPossibility records only what Swobu can prove about one issued
+// provider call. It is independent of the provider failure class.
+type ExecutionPossibility uint8
+
+const (
+	ExecutionNotDispatched ExecutionPossibility = iota + 1
+	ExecutionRejectedBeforeExecution
+	ExecutionMayHaveOccurred
+)
+
+// AttemptFailure is the validated terminal fact for one issued provider call.
+// Bound transports conservatively wrap an untyped error as
+// ExecutionMayHaveOccurred; only the exact adapter may claim an earlier fact.
+type AttemptFailure struct {
+	execution ExecutionPossibility
+	cause     error
+}
+
+func (e AttemptFailure) Error() string { return e.cause.Error() }
+func (e AttemptFailure) Unwrap() error { return e.cause }
+
+func (e AttemptFailure) Execution() ExecutionPossibility { return e.execution }
+func (e AttemptFailure) Cause() error                    { return e.cause }
+
+func (e AttemptFailure) valid() bool {
+	return e.cause != nil &&
+		(e.execution == ExecutionNotDispatched ||
+			e.execution == ExecutionRejectedBeforeExecution ||
+			e.execution == ExecutionMayHaveOccurred)
+}
+
+func newAttemptFailure(execution ExecutionPossibility, cause error) AttemptFailure {
+	if cause == nil {
+		panic("provider attempt failure requires a cause")
+	}
+	if prior, ok := AsAttemptFailure(cause); ok {
+		cause = prior.Cause()
+	}
+	failure := AttemptFailure{execution: execution, cause: normalizeFailureCause(cause)}
+	if !failure.valid() {
+		panic("provider attempt failure has invalid execution possibility")
+	}
+	return failure
+}
+
+func AttemptNotDispatched(cause error) AttemptFailure {
+	return newAttemptFailure(ExecutionNotDispatched, cause)
+}
+
+func AttemptRejectedBeforeExecution(cause error) AttemptFailure {
+	return newAttemptFailure(ExecutionRejectedBeforeExecution, cause)
+}
+
+func AttemptMayHaveExecuted(cause error) AttemptFailure {
+	return newAttemptFailure(ExecutionMayHaveOccurred, cause)
+}
+
+// AsAttemptFailure extracts a validated issued-call fact.
+func AsAttemptFailure(err error) (AttemptFailure, bool) {
+	var failure AttemptFailure
+	if !errors.As(err, &failure) || !failure.valid() {
+		return AttemptFailure{}, false
+	}
+	return failure, true
 }
 
 // IncompatibleTargetError means one exact target cannot represent a valid
@@ -47,9 +114,20 @@ func NewIncompatibleTarget(message string) error {
 	return IncompatibleTargetError{Reason: message}
 }
 
+// IncompatibleCapability marks one concrete canonical occurrence that the
+// selected target cannot lower. It preserves bounded human detail without
+// creating a provider support registry or allowing the issue to choose routing.
+func IncompatibleCapability(capability canonical.CapabilityPath, occurrence canonical.Occurrence, detail string) error {
+	unsupported := compat.NewUnsupported(compat.NewIssue(capability, occurrence))
+	if detail == "" {
+		return IncompatibleTarget(unsupported)
+	}
+	return IncompatibleTarget(fmt.Errorf("%s: %w", detail, unsupported))
+}
+
 // UnavailableError means provider I/O could not produce a usable backend
-// response. Another configured backend may be attempted while fallback is
-// otherwise open.
+// response. It does not state whether provider execution occurred or whether
+// replay is safe.
 type UnavailableError struct{ Cause error }
 
 func (e UnavailableError) Error() string {
@@ -118,22 +196,27 @@ func Internal(err error) error {
 // invocation cancellation behind a generic availability wrapper.
 func TransportFailure(ctx context.Context, err error) error {
 	if ctx != nil && ctx.Err() != nil {
-		return Cancelled(ctx.Err())
+		return AttemptMayHaveExecuted(Cancelled(ctx.Err()))
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return Cancelled(err)
+		return AttemptMayHaveExecuted(Cancelled(err))
 	}
-	return Unavailable(err)
+	return AttemptMayHaveExecuted(Unavailable(err))
 }
 
-// NormalizeFailure closes the backend transport error vocabulary. Exact
-// adapters may return a narrower classified failure; unclassified values stop
-// by default and never become fallback-eligible through status inference in
-// exchange orchestration.
+// NormalizeFailure closes the provider cause vocabulary. Execution possibility
+// remains a separate AttemptFailure fact; this function never grants replay.
 func NormalizeFailure(err error) error {
 	if err == nil {
 		return nil
 	}
+	if failure, ok := AsAttemptFailure(err); ok {
+		return failure
+	}
+	return normalizeFailureCause(err)
+}
+
+func normalizeFailureCause(err error) error {
 	var classified classifiedFailure
 	if errors.As(err, &classified) {
 		return err

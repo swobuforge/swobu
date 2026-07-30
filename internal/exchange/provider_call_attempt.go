@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -21,29 +20,74 @@ const (
 	providerCallAttemptHandoffReady
 )
 
-type providerCallFailureStage uint8
+type providerCallFailure struct {
+	Attempt provider.AttemptFailure
+}
+
+type providerReplaySafety uint8
 
 const (
-	providerCallFailureBeforeIngress providerCallFailureStage = iota
-	providerCallFailureBeforeHandoff
+	providerReplaySafe providerReplaySafety = iota + 1
+	providerReplayUnsafe
 )
 
-// providerCallFailure records where an issued call stopped while preserving
-// the provider-owned typed error as the sole failure taxonomy.
-type providerCallFailure struct {
-	Stage providerCallFailureStage
-	Cause error
+// providerReplaySafetyFor classifies the final projected canonical attempt.
+// Ordinary inference and caller-executed tools are safe to repeat. A remaining
+// native MCP source can execute outside Swobu, so uncertain delivery fails
+// closed without a parallel effect registry.
+func providerReplaySafetyFor(request canonical.CanonicalRequest) (providerReplaySafety, error) {
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return 0, err
+	}
+	var inspect func(canonical.ToolDeclaration) (providerReplaySafety, error)
+	inspect = func(declaration canonical.ToolDeclaration) (providerReplaySafety, error) {
+		switch declaration.Kind() {
+		case canonical.ToolKindFunction, canonical.ToolKindCustom,
+			canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
+			return providerReplaySafe, nil
+		case canonical.ToolKindNamespace:
+			namespace, ok := declaration.Namespace()
+			if !ok {
+				return 0, fmt.Errorf("canonical tool namespace branch is invalid")
+			}
+			if _, native := namespace.MCPSource(); native {
+				return providerReplayUnsafe, nil
+			}
+			for _, child := range namespace.Tools() {
+				safety, err := inspect(child)
+				if err != nil || safety == providerReplayUnsafe {
+					return safety, err
+				}
+			}
+			return providerReplaySafe, nil
+		default:
+			return 0, fmt.Errorf("canonical tool declaration has unknown execution kind %q", declaration.Kind())
+		}
+	}
+	for _, declaration := range environment.Declarations() {
+		safety, err := inspect(declaration)
+		if err != nil || safety == providerReplayUnsafe {
+			return safety, err
+		}
+	}
+	return providerReplaySafe, nil
 }
 
 // providerCallAttempt is compact reducer history for one issued command. Its
 // candidate index addresses the immutable route plan; the active phase alone
 // retains executable machinery and command correlation identity.
 type providerCallAttempt struct {
-	candidateIndex int
-	target         provider.TargetSnapshot
-	requirements   []compat.Feature
-	status         providerCallAttemptStatus
-	failure        *providerCallFailure
+	candidateIndex         int
+	target                 provider.TargetSnapshot
+	requestChoice          providerRequestChoice
+	providerRound          int
+	retry                  bool
+	replaySafety           providerReplaySafety
+	nativePreviousResponse bool
+	requestChanges         []compat.Change
+	status                 providerCallAttemptStatus
+	failure                *providerCallFailure
 }
 
 func (a providerCallAttempt) terminal() bool {
@@ -66,9 +110,9 @@ func findProviderCallAttempt(s exchangeState, id providerCallAttemptID) (provide
 	return s.providerCallAttempts[index], true
 }
 
-func failProviderCallAttempt(s exchangeState, id providerCallAttemptID, stage providerCallFailureStage, cause error) (exchangeState, error) {
-	if cause == nil {
-		return exchangeState{}, fmt.Errorf("exchange invariant: provider call attempt %d failed without an error", id)
+func failProviderCallAttempt(s exchangeState, id providerCallAttemptID, failure provider.AttemptFailure) (exchangeState, error) {
+	if _, ok := provider.AsAttemptFailure(failure); !ok {
+		return exchangeState{}, fmt.Errorf("exchange invariant: provider call attempt %d has invalid failure facts", id)
 	}
 	index, ok := providerCallAttemptIndex(s, id)
 	if !ok {
@@ -77,10 +121,9 @@ func failProviderCallAttempt(s exchangeState, id providerCallAttemptID, stage pr
 	if s.providerCallAttempts[index].status != providerCallAttemptCalling {
 		return exchangeState{}, fmt.Errorf("exchange invariant: provider call attempt %d is already terminal", id)
 	}
-	failure := &providerCallFailure{Stage: stage, Cause: cause}
 	attempts := append([]providerCallAttempt(nil), s.providerCallAttempts...)
 	attempts[index].status = providerCallAttemptFailed
-	attempts[index].failure = failure
+	attempts[index].failure = &providerCallFailure{Attempt: failure}
 	s.providerCallAttempts = attempts
 	return s, nil
 }
@@ -99,42 +142,34 @@ func completeProviderCallAttempt(s exchangeState, id providerCallAttemptID) (exc
 	return s, nil
 }
 
-func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, call providerCall, evidence exchangeEvidence) (reducerOutcome, error) {
+func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, call providerCall, requestChanges []compat.Change) (reducerOutcome, error) {
+	if err := compat.ValidateChanges(requestChanges); err != nil {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider request changes are invalid: %w", err)
+	}
+	for _, prior := range s.providerCallAttempts {
+		if prior.candidateIndex == selection.candidateIndex &&
+			prior.requestChoice == selection.requestChoice &&
+			prior.providerRound == call.providerRound &&
+			prior.retry == selection.retry {
+			return reducerOutcome{}, fmt.Errorf(
+				"exchange invariant: provider call attempt key was already consumed for candidate %d choice %d round %d retry %t",
+				selection.candidateIndex, selection.requestChoice, call.providerRound, selection.retry,
+			)
+		}
+	}
 	attemptID := providerCallAttemptID(len(s.providerCallAttempts) + 1)
 	attempt := providerCallAttempt{
 		candidateIndex: selection.candidateIndex, target: call.backend.Target,
-		requirements: providerCallRequirements(call),
-		status:       providerCallAttemptCalling,
+		requestChoice: selection.requestChoice, providerRound: call.providerRound,
+		retry: selection.retry, replaySafety: call.replaySafety,
+		nativePreviousResponse: nativePreviousResponseSent(call.request),
+		requestChanges:         compat.CloneChanges(requestChanges),
+		status:                 providerCallAttemptCalling,
 	}
 	s.providerCallAttempts = append(append([]providerCallAttempt(nil), s.providerCallAttempts...), attempt)
 	s.phase = callingProviderPhase{attemptID: attemptID, call: call}
 	return reducerOutcome{
 		nextState: s,
 		command:   callProviderCommand{attemptID: attemptID, backend: call.backend, document: call.document},
-		evidence:  evidence,
 	}, nil
-}
-
-// providerCallRequirements records only facts that participate in an
-// implemented alternative. Future axes add requirements only with their
-// concrete call-construction authority.
-func providerCallRequirements(call providerCall) []compat.Feature {
-	if nativePreviousResponseSent(call.request) {
-		return []compat.Feature{compat.RequestPreviousResponseResponses}
-	}
-	return nil
-}
-
-func routeFailoverEligible(err error) bool {
-	var unsupported provider.IncompatibleTargetError
-	var unavailable provider.UnavailableError
-	return errors.As(err, &unsupported) || errors.As(err, &unavailable)
-}
-
-func backendStatusCode(err error) int {
-	var backendErr canonical.BackendError
-	if errors.As(err, &backendErr) {
-		return backendErr.StatusCode
-	}
-	return 0
 }

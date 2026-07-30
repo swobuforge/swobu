@@ -52,7 +52,9 @@ func (m HistoryMatch) Unique() (Checkpoint, bool) {
 	return m.checkpoint.Clone(), true
 }
 
-// Store persists immutable checkpoints in workspace-slug partitions. The
+// Store retains immutable self-contained checkpoints in workspace-slug
+// partitions. It exposes no ancestor or chain operation because each response
+// ID resolves independently. The
 // caller supplies the validated slug resolved from the request URL; the store
 // owns no caller identity, mutable session head, or generic namespace.
 type Store interface {

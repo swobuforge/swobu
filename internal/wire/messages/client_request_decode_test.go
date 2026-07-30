@@ -37,7 +37,7 @@ func TestClientRequestDecoder_DecodesExplicitToolUseAndToolResultID(t *testing.T
 		]
 	}`)
 
-	request, clientDelivery, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+	request, clientDelivery, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,
@@ -89,7 +89,7 @@ func TestClientRequestDecoder_DecodesExplicitToolUseAndToolResultID(t *testing.T
 func TestClientRequestDecoder_AcceptsHistoricalToolUseWithoutCurrentTools(t *testing.T) {
 	t.Parallel()
 	raw := []byte(`{"model":"m","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"search","input":{"q":"hello"}}]}]}`)
-	request, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: raw})
+	request, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Messages, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestClientRequestDecoder_RejectsMissingToolUseName(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+	_, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,
@@ -152,7 +152,7 @@ func TestClientRequestDecoder_RejectsMissingToolResultID(t *testing.T) {
 		]
 	}`)
 
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+	_, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
 		protocolkind.Messages,
 		"application/json",
 		nil,

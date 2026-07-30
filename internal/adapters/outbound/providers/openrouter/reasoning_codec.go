@@ -17,7 +17,6 @@ import (
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 	"github.com/swobuforge/swobu/internal/wire/responses"
-	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 // reasoningCodec owns the OpenRouter dialect around an otherwise standard
@@ -25,26 +24,25 @@ import (
 // provider fields.
 type reasoningCodec struct{ standard protocolcodec.Codec }
 
-func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
 	}
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
-		return chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, sink, "")
-	})
+	var changes []compat.Change
+	document, err := chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, &changes, "")
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	delete(document.Payload, "reasoning_effort")
 	if err := applyOpenRouterReasoningRequest(document.Payload, req.Canonical); err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	environment, err := canonical.EffectiveTools(req.Canonical)
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	delete(document.Payload, "web_search_options")
 	if hasCanonicalWebSearch(environment.Declarations()) {
@@ -52,7 +50,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 	}
 	replaceOpenRouterWebSearchChoice(document.ToolChoice)
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, decisions, err
+	return encoded, changes, err
 }
 
 func hasCanonicalWebSearch(tools []canonical.ToolDeclaration) bool {
@@ -100,7 +98,7 @@ func applyOpenRouterReasoningRequest(payload map[string]any, req canonical.Canon
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if effortSet {
-				return provider.NewIncompatibleTarget("OpenRouter target cannot combine disabled canonical reasoning with inference effort")
+				return provider.IncompatibleCapability(canonical.RequestReasoning, canonical.Occurrence{}, "OpenRouter target cannot combine disabled canonical reasoning with inference effort")
 			}
 			out["enabled"] = false
 		case canonical.ReasoningAutomatic:
@@ -508,11 +506,12 @@ var _ provider.Codec = reasoningCodec{}
 // the standard codec retains shared response decoding.
 type responsesCodec struct{ standard protocolcodec.Codec }
 
-func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
 	}
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (responses.ProviderRequestDocument, error) {
+	var changes []compat.Change
+	document, err := func(sink *[]compat.Change) (responses.ProviderRequestDocument, error) {
 		return responses.LowerProviderRequestDocument(
 			responses.EncodeInput{Request: req.Canonical},
 			req.Delivery,
@@ -520,9 +519,9 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 			req.ExchangeID,
 			responses.EncodeOptions{},
 		)
-	})
+	}(&changes)
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	for index := range document.Tools {
 		if document.Tools[index].Type == canonical.ToolTypeWebSearch {
@@ -531,7 +530,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 	}
 	replaceOpenRouterWebSearchChoice(document.ToolChoice)
 	encoded, err := responses.EncodeProviderRequestDocument(document)
-	return encoded, decisions, err
+	return encoded, changes, err
 }
 
 func (c responsesCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {

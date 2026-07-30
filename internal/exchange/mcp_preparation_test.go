@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-func TestMCPPreparationDiscardsIngressAccessAfterOpen(t *testing.T) {
+func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
 	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
 	access, err := (mcp.Access{}).WithBearer(source, "incident-secret-bearer")
 	if err != nil {
@@ -30,8 +30,8 @@ func TestMCPPreparationDiscardsIngressAccessAfterOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(outcome.nextState.input.mcpAccess, mcp.Access{}) {
-		t.Fatal("exchange retained ingress MCP access after Open completed")
+	if !reflect.DeepEqual(outcome.nextState.input.mcpAccess, access) {
+		t.Fatal("exchange discarded ingress MCP access before native target projection")
 	}
 }
 

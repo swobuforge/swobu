@@ -11,72 +11,28 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
-	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *responsesResponseStream {
-	recording := &compat.RecordingSink{Delegate: sink}
-	streamSink := &responsesStreamDecisionSink{
-		recording: recording,
-		seen:      make(map[responsesStreamDecisionKey]struct{}),
-	}
-	return &responsesResponseStream{
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *responsesResponseStream {
+	reader := &responsesResponseStream{
 		exchangeID:      exchangeID,
 		responseEnvID:   canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:            streamSink,
-		recording:       recording,
 		reader:          core.NewSSEReader(stream.Body),
 		providerOutputs: map[int]*pendingResponseOutput{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
 		request:         request.Clone(),
 	}
-}
-
-type responsesStreamDecisionKey struct {
-	feature compat.Feature
-	outcome compat.Outcome
-	subject compat.Subject
-}
-
-// responsesStreamDecisionSink records each semantic compatibility occurrence
-// once even when output_item.done and response.completed repeat a checkpoint.
-// A terminal-only child has a new subject and therefore remains observable.
-type responsesStreamDecisionSink struct {
-	recording *compat.RecordingSink
-	seen      map[responsesStreamDecisionKey]struct{}
-}
-
-func (s *responsesStreamDecisionSink) Commit(ctx context.Context, exchangeID string, decisions []compat.Decision) error {
-	if s == nil || s.recording == nil {
-		return nil
-	}
-	fresh := make([]compat.Decision, 0, len(decisions))
-	for _, decision := range decisions {
-		key := responsesStreamDecisionKey{
-			feature: decision.Feature,
-			outcome: decision.Outcome,
-			subject: decision.Subject,
-		}
-		if _, exists := s.seen[key]; exists {
-			continue
-		}
-		s.seen[key] = struct{}{}
-		fresh = append(fresh, decision)
-	}
-	if len(fresh) == 0 {
-		return nil
-	}
-	return s.recording.Commit(ctx, exchangeID, fresh)
+	reader.changeLog = &reader.changes
+	return reader
 }
 
 type responsesResponseStream struct {
 	exchangeID            string
 	responseEnvID         canonical.EnvelopeID
-	sink                  compat.Sink
-	recording             *compat.RecordingSink
+	changeLog             *[]compat.Change
+	changes               []compat.Change
 	reader                *core.SSEReaderCloser
 	pending               canonical.EventSequence
 	unknownEventDecisions map[string]struct{}
@@ -145,11 +101,8 @@ func newResponsesTextState(ordinal uint32) *responsesTextState {
 	return &responsesTextState{ordinal: ordinal, parts: make(map[int]*responsesTextPartState)}
 }
 
-func (s *responsesResponseStream) Decisions() []compat.Decision {
-	if s.recording == nil {
-		return nil
-	}
-	return s.recording.Decisions()
+func (s *responsesResponseStream) Changes() []compat.Change {
+	return compat.CloneChanges(s.changes)
 }
 
 type responsesToolState struct {
@@ -202,16 +155,6 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		frameUsage := core.ExtractTokenUsage(rawFrame, tokenUsagePathSpec)
 		if !frameUsage.IsZero() {
 			s.latestUsage = frameUsage
-			_, inputPresent := frameUsage.InputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-			_, outputPresent := frameUsage.OutputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-			_, reasoningPresent := frameUsage.ReasoningTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/output_tokens_details/reasoning_tokens"))
-			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var frame streamFrame
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {
@@ -309,7 +252,6 @@ func (s *responsesResponseStream) enqueueError(code string, message string) {
 }
 
 func (s *responsesResponseStream) handleUnexpectedEOF(ctx context.Context) {
-	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 	s.enqueueError("stream_unexpected_eof", "output stream ended before completed")
 	s.discardOpenText()
 	s.closeOpenTools(canonical.EnvelopeStatusError)
@@ -327,7 +269,6 @@ func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, 
 		normalizedStatus = "completed"
 	}
 	s.completed = true
-	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	if s.hasOpenKnownOutput() {
 		s.discardOpenText()
 		s.closeOpenTools(canonical.EnvelopeStatusError)
@@ -445,12 +386,12 @@ func (s *responsesResponseStream) recordUnknownWebSearchStatus(frame streamFrame
 		return nil
 	}
 	state.statusDropRecorded = true
-	return emitResponsesCompatibilityDecision(
-		s.sink,
+	return appendResponsesOccurrenceChange(
+		s.changeLog,
 		s.exchangeID,
-		compat.ResponseItemsKind,
-		compat.Drop,
-		compat.Subject(fmt.Sprintf("wire:/output/%d/status", *frame.OutputIndex)),
+		canonical.ResponseItemsKind,
+		compat.Omission,
+		canonical.ResponseItemOccurrence(uint32(*frame.OutputIndex)),
 	)
 }
 
@@ -469,5 +410,5 @@ func (s *responsesResponseStream) classifyErasedProviderOutput(frame streamFrame
 	}
 	state.erasureRecorded = true
 	index := *frame.OutputIndex
-	return emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/output/%d/%s", index, field)))
+	return appendResponsesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index)))
 }

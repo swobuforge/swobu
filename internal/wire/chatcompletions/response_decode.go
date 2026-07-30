@@ -13,7 +13,6 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -106,7 +105,7 @@ func chatCompletion(reason string) canonical.Completion {
 	}
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("chat completions response is invalid JSON")
@@ -116,18 +115,8 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	}
 	choice := dto.Choices[0]
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
-	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-	_, reasoningPresent := usage.ReasoningTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
-	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
-		items, err := decodeChatChoiceItems(request, choice, sink, exchangeID)
+		items, err := decodeChatChoiceItems(request, choice, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +129,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			usage,
 		)), nil
 	}
-	items, err := decodeChatChoiceItems(request, choice, sink, exchangeID)
+	items, err := decodeChatChoiceItems(request, choice, changeLog, exchangeID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,26 +147,25 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 }
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *chatCompletionsEventReader {
-	recording := &compat.RecordingSink{Delegate: sink}
-	return &chatCompletionsEventReader{
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *chatCompletionsEventReader {
+	reader := &chatCompletionsEventReader{
 		exchangeID:      exchangeID,
 		responseID:      canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:            recording,
-		recording:       recording,
 		reader:          core.NewSSEReader(stream.Body),
 		toolCalls:       map[int]streamToolState{},
 		toolOccurrences: map[int]streamToolOccurrence{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
 		request:         request.Clone(),
 	}
+	reader.changeLog = &reader.changes
+	return reader
 }
 
 type chatCompletionsEventReader struct {
 	exchangeID      string
 	responseID      canonical.EnvelopeID
-	sink            compat.Sink
-	recording       *compat.RecordingSink
+	changeLog       *[]compat.Change
+	changes         []compat.Change
 	reader          *core.SSEReaderCloser
 	started         bool
 	resultID        string
@@ -195,20 +183,17 @@ type chatCompletionsEventReader struct {
 	request         canonical.CanonicalRequest
 }
 
-func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody, sink compat.Sink, exchangeID string) ([]canonical.CanonicalItem, error) {
+func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
 	items := make([]canonical.CanonicalItem, 0, 2+len(choice.Message.ToolCalls))
-	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls, sink, exchangeID)
+	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls, changeLog, exchangeID)
 	if err != nil {
 		return nil, err
 	}
 	return append(items, output...), nil
 }
 
-func (s *chatCompletionsEventReader) Decisions() []compat.Decision {
-	if s.recording == nil {
-		return nil
-	}
-	return s.recording.Decisions()
+func (s *chatCompletionsEventReader) Changes() []compat.Change {
+	return compat.CloneChanges(s.changes)
 }
 
 type streamToolState struct {
@@ -248,7 +233,6 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		event, err := s.reader.Next(ctx)
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				s.closeOpenChildren(canonical.EnvelopeStatusError)
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -268,16 +252,6 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		chunkUsage := core.ExtractTokenUsage(rawChunk, tokenUsagePathSpec)
 		if !chunkUsage.IsZero() {
 			s.latestUsage = chunkUsage
-			_, inputPresent := chunkUsage.InputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-			_, outputPresent := chunkUsage.OutputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-			_, reasoningPresent := chunkUsage.ReasoningTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, reasoningPresent, compat.ResponseUsageReasoningTokens, compat.Subject("wire:/usage/completion_tokens_details/reasoning_tokens"))
-			_, cacheReadPresent := chunkUsage.CacheReadTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-			_, cacheWritePresent := chunkUsage.CacheWriteTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
@@ -348,7 +322,7 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 				}
 				continue
 			}
-			if err := emitChatCompletionsCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/delta/tool_calls/%d/type", call.Index))); err != nil {
+			if err := appendChatOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(call.Index))); err != nil {
 				return err
 			}
 			delete(s.toolCalls, call.Index)
@@ -368,7 +342,7 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 			occurrence.Erased = erased
 			s.toolOccurrences[call.Index] = occurrence
 			if occurrence.Erased {
-				if err := emitChatCompletionsCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/delta/tool_calls/%d/type", call.Index))); err != nil {
+				if err := appendChatOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(call.Index))); err != nil {
 					return err
 				}
 				delete(s.toolCalls, call.Index)
@@ -458,7 +432,6 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		s.toolOccurrences[idx] = occurrence
 	}
 	s.completed = true
-	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
@@ -500,7 +473,6 @@ func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Conte
 		return
 	}
 	s.completed = true
-	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.closeOpenChildren(canonical.EnvelopeStatusError)
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})

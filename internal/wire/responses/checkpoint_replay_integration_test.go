@@ -64,7 +64,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 			if _, hasPrevious := stateless.PreviousResponse(); hasPrevious {
 				t.Fatal("different target retained previous_response_id")
 			}
-			document, err := EncodeCarrierWithDecisions(
+			document, err := EncodeCarrierWithChanges(
 				EncodeInput{Request: stateless}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
 			if err != nil {

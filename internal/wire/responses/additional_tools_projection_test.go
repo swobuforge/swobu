@@ -55,7 +55,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		t.Fatalf("checkpoint tools = %#v", canonicaltest.Tools(request))
 	}
 
-	responsesDocument, err := responses.EncodeCarrierWithDecisions(
+	responsesDocument, err := responses.EncodeCarrierWithChanges(
 		responses.EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", responses.EncodeOptions{},
 	)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		t.Fatalf("Responses projection lost ordered declaration carrier: %s", responsesDocument.RawBytes())
 	}
 
-	chatDocument, err := chatcompletions.EncodeCarrierWithDecisions(
+	chatDocument, err := chatcompletions.EncodeCarrierWithChanges(
 		request, delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	}
 	assertProjectedToolCarrier(t, chatDocument.RawBytes(), "tools")
 
-	messagesDocument, err := messages.EncodeCarrierWithDecisions(
+	messagesDocument, err := messages.EncodeCarrierWithChanges(
 		request, delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {

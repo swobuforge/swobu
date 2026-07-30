@@ -3,7 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -21,6 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type candidateSelectiveRuntime struct {
@@ -92,12 +93,8 @@ func (r candidateSelectiveRuntime) ResolveBackend(target provider.TargetSnapshot
 
 type decisionOnlyRejectCodec struct{}
 
-func (decisionOnlyRejectCodec) Encode(provider.Request) (carrier.Document, []compat.Decision, error) {
-	return carrier.Document{}, []compat.Decision{{
-		Feature: compat.RequestOutputFormat,
-		Outcome: compat.Reject,
-		Subject: "test:unmarked-a",
-	}}, canonical.NotImplemented("Swobu cannot implement this request projection")
+func (decisionOnlyRejectCodec) Encode(provider.Request) (carrier.Document, []compat.Change, error) {
+	return carrier.Document{}, nil, canonical.NotImplemented("Swobu cannot implement this request projection")
 }
 
 func (decisionOnlyRejectCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
@@ -106,12 +103,8 @@ func (decisionOnlyRejectCodec) Decode(context.Context, provider.Request, provide
 
 type unsupportedTestCodec struct{}
 
-func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat.Decision, error) {
-	return carrier.Document{}, []compat.Decision{{
-		Feature: compat.RequestOutputFormat,
-		Outcome: compat.Reject,
-		Subject: "test:candidate-a",
-	}}, provider.NewIncompatibleTarget("candidate cannot represent requested output")
+func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat.Change, error) {
+	return carrier.Document{}, nil, provider.NewIncompatibleTarget("candidate cannot represent requested output")
 }
 
 func (unsupportedTestCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
@@ -159,6 +152,21 @@ func reducerTestState(t *testing.T) exchangeState {
 }
 
 func reducerRuntime() runtimeBundle { return withRuntime(bufferedProviderTransport(nil)) }
+
+func mayHaveExecuted(err error) provider.AttemptFailure {
+	return provider.AttemptMayHaveExecuted(err)
+}
+
+func rejectedBeforeExecution(err error) provider.AttemptFailure {
+	return provider.AttemptRejectedBeforeExecution(err)
+}
+
+func invalidContinuationReference(target string, status int, message string) error {
+	return canonical.NewClassifiedBackendError(
+		canonical.BackendErrorClassContinuationReferenceInvalid,
+		canonical.NewBackendError(target, status, message, ""),
+	)
+}
 
 func mustBeginSession(t *testing.T, request canonical.CanonicalRequest) session.ResolvedRequest {
 	t.Helper()
@@ -269,7 +277,7 @@ func TestReducerSuccessDecodesProviderIngressBeforeTerminalHandoff(t *testing.T)
 	}
 }
 
-func TestReducerAloneChoosesRouteFailoverAttempt(t *testing.T) {
+func TestReducerRetriesOnceBeforeRouteFailover(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "retry-a"),
@@ -280,7 +288,7 @@ func TestReducerAloneChoosesRouteFailoverAttempt(t *testing.T) {
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
 	tr, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
-		err: provider.Unavailable(canonical.NewBackendError("retry-a", 503, "unavailable", "")),
+		failure: mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("retry-a", 503, "unavailable", ""))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -290,11 +298,90 @@ func TestReducerAloneChoosesRouteFailoverAttempt(t *testing.T) {
 	if !ok {
 		t.Fatalf("command = %T, want callProviderCommand", tr.command)
 	}
-	if next.candidateIndex != 1 || cmd.backend.Target.TargetID != "retry-b" {
-		t.Fatalf("retry did not advance exactly once: candidate=%d target=%q", next.candidateIndex, cmd.backend.Target.TargetID)
+	if next.candidateIndex != 0 || !next.retry || cmd.backend.Target.TargetID != "retry-a" {
+		t.Fatalf("retry = %#v target=%q", next.providerCallAttempt, cmd.backend.Target.TargetID)
 	}
-	if active.candidateIndex == next.candidateIndex || next.id != active.id+1 || len(tr.nextState.providerCallAttempts) != 2 {
-		t.Fatalf("route failover attempts = %#v", tr.nextState.providerCallAttempts)
+	fellBack, err := reduce(context.Background(), tr.nextState, providerCallFailed{
+		attemptID: next.id,
+		failure: mayHaveExecuted(provider.Unavailable(
+			canonical.NewBackendError("retry-a", 503, "still unavailable", ""),
+		)),
+	}, reducerRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback := activeProviderAttempt(t, fellBack.nextState)
+	if fallback.candidateIndex != 1 || fallback.retry || fallback.id != next.id+1 {
+		t.Fatalf("route fallback attempts = %#v", fellBack.nextState.providerCallAttempts)
+	}
+}
+
+func TestReducerDoesNotReplayNativeEffectAfterAmbiguousDelivery(t *testing.T) {
+	key, err := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := canonical.NewMCPConnectorSource(
+		"connector_mail",
+		canonical.Unspecified[[]string](),
+		canonical.NewMCPApprovalNever(),
+		canonical.MCPLoadingEager,
+		canonical.Unspecified[[]string](),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace, err := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := reducerTestState(t)
+	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			declarations,
+			testMessage(canonical.MessageRoleUser, "send the message"),
+		},
+	})
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "effect-a"),
+		requestpathTarget(t, "effect-b"),
+	}}
+	prepared := mustBeginSession(t, s.input.request)
+	s.prepared = &prepared
+
+	started := beginPreparedProviderCall(t, s)
+	active := activeProviderAttempt(t, started.nextState)
+	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
+		attemptID: active.id,
+		failure: mayHaveExecuted(provider.Unavailable(
+			canonical.NewBackendError("effect-a", http.StatusServiceUnavailable, "response unavailable", ""),
+		)),
+	}, reducerRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.command != nil {
+		t.Fatalf("ambiguous native effect failure issued %T", failed.command)
+	}
+	terminal, ok := failed.nextState.phase.(failedPhase)
+	if !ok {
+		t.Fatalf("phase = %T, want failedPhase", failed.nextState.phase)
+	}
+	if !strings.Contains(terminal.problem.Error(), "automatic replay stopped") {
+		t.Fatalf("terminal problem = %v", terminal.problem)
+	}
+	if len(failed.nextState.providerCallAttempts) != 1 {
+		t.Fatalf("provider calls = %d, want one", len(failed.nextState.providerCallAttempts))
 	}
 }
 
@@ -314,10 +401,12 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	}}
 	s.providerCallAttempts = []providerCallAttempt{{
 		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		replaySafety:   providerReplaySafe,
+		retry:          true,
 		status:         providerCallAttemptFailed,
 		failure: &providerCallFailure{
-			Stage: providerCallFailureBeforeIngress,
-			Cause: provider.Unavailable(canonical.NewBackendError("search-a", 503, "unavailable", "")),
+			Attempt: mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("search-a", 503, "unavailable", ""))),
 		},
 	}}
 
@@ -327,7 +416,83 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	}
 }
 
-func TestSynchronousCompletionFailureCanAdvanceRouteBeforeClientHandoff(t *testing.T) {
+func TestProviderReplaySafetyUsesFinalCanonicalToolOwnership(t *testing.T) {
+	webTools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	webRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, webTools.Declarations()...),
+			testMessage(canonical.MessageRoleUser, "search"),
+		},
+	})
+	if safety, err := providerReplaySafetyFor(webRequest); err != nil || safety != providerReplaySafe {
+		t.Fatalf("web-search safety = %d, %v", safety, err)
+	}
+
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	source, _ := canonical.NewMCPConnectorSource(
+		"connector_mail",
+		canonical.Unspecified[[]string](),
+		canonical.NewMCPApprovalNever(),
+		canonical.MCPLoadingEager,
+		canonical.Unspecified[[]string](),
+	)
+	namespace, _ := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	nativeTools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
+	nativeRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, nativeTools.Declarations()...),
+			testMessage(canonical.MessageRoleUser, "send"),
+		},
+	})
+	if safety, err := providerReplaySafetyFor(nativeRequest); err != nil || safety != providerReplayUnsafe {
+		t.Fatalf("native MCP safety = %d, %v", safety, err)
+	}
+}
+
+func TestProviderRecoveryStopsAfterLocalEffectRound(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "effect-a"),
+		requestpathTarget(t, "effect-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestFullHistory,
+		providerRound:  1,
+		replaySafety:   providerReplaySafe,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Attempt: mayHaveExecuted(provider.Unavailable(errors.New("post-MCP provider failure"))),
+		},
+	}}
+	if selection, ok := selectNextProviderCall(s); ok {
+		t.Fatalf("post-MCP recovery selected %#v", selection)
+	}
+}
+
+func TestProviderCancellationNeverSelectsRecovery(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "cancel-a"),
+		requestpathTarget(t, "cancel-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		replaySafety:   providerReplaySafe,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Attempt: mayHaveExecuted(provider.Cancelled(context.Canceled)),
+		},
+	}}
+	if selection, ok := selectNextProviderCall(s); ok {
+		t.Fatalf("cancelled attempt selected %#v", selection)
+	}
+}
+
+func TestSynchronousCompletionFailureRetriesBeforeRouteFallback(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "decode-unavailable-a"),
@@ -352,8 +517,10 @@ func TestSynchronousCompletionFailureCanAdvanceRouteBeforeClientHandoff(t *testi
 	}
 	recordedFirst, _ := findProviderCallAttempt(fellBack.nextState, first.id)
 	second := activeProviderAttempt(t, fellBack.nextState)
-	if recordedFirst.status != providerCallAttemptFailed || recordedFirst.failure.Stage != providerCallFailureBeforeHandoff || second.id != 2 || second.candidateIndex != 1 {
-		t.Fatalf("completion failover attempts = %#v", fellBack.nextState.providerCallAttempts)
+	if recordedFirst.status != providerCallAttemptFailed ||
+		recordedFirst.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred ||
+		second.id != 2 || second.candidateIndex != 0 || !second.retry {
+		t.Fatalf("completion retry attempts = %#v", fellBack.nextState.providerCallAttempts)
 	}
 }
 
@@ -393,12 +560,12 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasDecision(nativeAccepted.evidence.decisions, compat.RequestPreviousResponseResponses, compat.Exact) {
-		t.Fatalf("native acceptance evidence = %#v", nativeAccepted.evidence.decisions)
+	if changes := completedResponseChanges(t, nativeAccepted); hasPreviousResponseDecision(changes) {
+		t.Fatalf("exact native continuation emitted non-exact changes: %#v", changes)
 	}
 
 	retried, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
-		err: provider.Rejected(canonical.NewBackendError("native-a", http.StatusNotFound, "response not found", "")),
+		failure: rejectedBeforeExecution(provider.Rejected(invalidContinuationReference("native-a", http.StatusNotFound, "response not found"))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -429,16 +596,16 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if _, ok := completed.nextState.phase.(completedPhase); !ok {
 		t.Fatalf("retry without native reference phase = %T, want completedPhase", completed.nextState.phase)
 	}
-	if !hasDecision(completed.evidence.decisions, compat.RequestPreviousResponseResponses, compat.Drop) ||
-		!hasDecision(completed.evidence.decisions, compat.RequestPreviousResponse, compat.Exact) {
-		t.Fatalf("retry without native reference evidence = %#v", completed.evidence.decisions)
+	changes := completedResponseChanges(t, completed)
+	if !hasDecision(changes, canonical.RequestPreviousResponseResponses, compat.Approximation) {
+		t.Fatalf("retry without native reference changes = %#v", changes)
 	}
 	terminal := completed.nextState.phase.(completedPhase)
 	if len(completed.nextState.providerCallAttempts) != 2 || terminal.target.TargetID != active.target.TargetID {
 		t.Fatalf("terminal provider-call ledger/target = %#v %#v", completed.nextState.providerCallAttempts, terminal)
 	}
 	semanticFailed, err := reduce(context.Background(), retried.nextState, providerCallFailed{attemptID: retryAttempt.id,
-		err: provider.Rejected(canonical.NewBackendError("native-a", http.StatusNotFound, "still unavailable", "")),
+		failure: rejectedBeforeExecution(provider.Rejected(invalidContinuationReference("native-a", http.StatusNotFound, "still unavailable"))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -446,15 +613,15 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if _, ok := semanticFailed.nextState.phase.(callingProviderPhase); ok {
 		t.Fatal("failed retry without native reference produced a third request")
 	}
-	if hasPreviousResponseDecision(semanticFailed.evidence.decisions) {
-		t.Fatalf("terminal call failures invented previous-response evidence: %#v", semanticFailed.evidence.decisions)
+	if hasPreviousResponseDecision(semanticFailed.nextState.effectiveChanges) {
+		t.Fatalf("terminal call failures invented previous-response changes: %#v", semanticFailed.nextState.effectiveChanges)
 	}
 	if len(semanticFailed.nextState.providerCallAttempts) != 2 {
 		t.Fatalf("provider calls = %d, want exactly two", len(semanticFailed.nextState.providerCallAttempts))
 	}
 }
 
-func TestReducerRetriesUnstructured400WithoutNativeReference(t *testing.T) {
+func TestReducerDoesNotInferNativeReferenceFailureFromUnstructured400(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -472,15 +639,17 @@ func TestReducerRetriesUnstructured400WithoutNativeReference(t *testing.T) {
 
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
-	retried, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
-		err: provider.Rejected(canonical.NewBackendError("native-a", http.StatusBadRequest, "unstructured endpoint error", "")),
+	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
+		failure: mayHaveExecuted(provider.Rejected(canonical.NewBackendError("native-a", http.StatusBadRequest, "unstructured endpoint error", ""))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryAttempt := activeProviderAttempt(t, retried.nextState)
-	if retryAttempt.candidateIndex != 0 || nativePreviousResponseSent(retryAttempt.call.request) {
-		t.Fatalf("400 retry candidate=%d request=%#v", retryAttempt.candidateIndex, retryAttempt.call.request)
+	if failed.command != nil {
+		t.Fatalf("unstructured 400 issued %T", failed.command)
+	}
+	if _, ok := failed.nextState.phase.(failedPhase); !ok {
+		t.Fatalf("phase = %T, want failedPhase", failed.nextState.phase)
 	}
 }
 
@@ -504,7 +673,7 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 	first := activeProviderAttempt(t, started.nextState)
 	fullHistory, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: first.id,
-		err:       provider.Rejected(canonical.NewBackendError("native-a", http.StatusNotFound, "missing", "")),
+		failure:   rejectedBeforeExecution(provider.Rejected(invalidContinuationReference("native-a", http.StatusNotFound, "missing"))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -512,48 +681,63 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 	second := activeProviderAttempt(t, fullHistory.nextState)
 	routeFailover, err := reduce(context.Background(), fullHistory.nextState, providerCallFailed{
 		attemptID: second.id,
-		err:       provider.Unavailable(canonical.NewBackendError("native-a", http.StatusServiceUnavailable, "unavailable", "")),
+		failure:   mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("native-a", http.StatusServiceUnavailable, "unavailable", ""))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasDecision(routeFailover.evidence.decisions, compat.RequestPreviousResponseResponses, compat.Reject) {
-		t.Fatalf("semantic operational failure manufactured native rejection evidence: %#v", routeFailover.evidence.decisions)
+	if hasPreviousResponseDecision(routeFailover.nextState.effectiveChanges) {
+		t.Fatalf("semantic operational failure manufactured continuation changes: %#v", routeFailover.nextState.effectiveChanges)
 	}
 	third := activeProviderAttempt(t, routeFailover.nextState)
-	if len(routeFailover.nextState.providerCallAttempts) != 3 || third.id != 3 || third.candidateIndex != 1 {
-		t.Fatalf("route failover after full-history failure = %#v", routeFailover.nextState.providerCallAttempts)
+	if len(routeFailover.nextState.providerCallAttempts) != 3 || third.id != 3 ||
+		third.candidateIndex != 0 || !third.retry || third.requestChoice != providerRequestFullHistory {
+		t.Fatalf("full-history operational retry = %#v", routeFailover.nextState.providerCallAttempts)
 	}
 }
 
-func hasDecision(decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) bool {
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
+func hasDecision(changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) bool {
+	for _, decision := range changes {
+		if decision.Capability == feature && decision.Kind == outcome {
 			return true
 		}
 	}
 	return false
 }
 
-func hasPreviousResponseDecision(decisions []compat.Decision) bool {
-	for _, decision := range decisions {
-		if decision.Feature == compat.RequestPreviousResponseResponses || decision.Feature == compat.RequestPreviousResponse {
+func hasPreviousResponseDecision(changes []compat.Change) bool {
+	for _, decision := range changes {
+		if decision.Capability == canonical.RequestPreviousResponseResponses || decision.Capability == canonical.RequestPreviousResponse {
 			return true
 		}
 	}
 	return false
 }
 
-func decisionSubject(decisions []compat.Decision, feature compat.Feature, outcome compat.Outcome) (compat.Subject, bool) {
-	for _, decision := range decisions {
-		if decision.Feature == feature && decision.Outcome == outcome {
-			return decision.Subject, true
+func completedResponseChanges(t *testing.T, outcome reducerOutcome) []compat.Change {
+	t.Helper()
+	terminal, ok := outcome.nextState.phase.(completedPhase)
+	if !ok {
+		t.Fatalf("phase = %T, want completedPhase", outcome.nextState.phase)
+	}
+	body := ClientTransportForTest(terminal.response).Body
+	if body != nil {
+		if _, err := io.ReadAll(body); err != nil {
+			t.Fatalf("read completed response: %v", err)
 		}
 	}
-	return "", false
+	completion := responseCompletion(terminal.response)
+	if completion == nil {
+		t.Fatal("completed response has no completion truth")
+	}
+	snapshot := completion.Snapshot()
+	if snapshot.State != wire.CompletionCompleted {
+		t.Fatalf("completion state = %v, want completed (error %v)", snapshot.State, snapshot.Err)
+	}
+	return snapshot.Changes
 }
 
-func TestReducerDoesNotRetryNativePreviousResponseWithoutReferenceOn500(t *testing.T) {
+func TestReducerOperationalRetryRetainsNativePreviousResponseOn500(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -569,16 +753,18 @@ func TestReducerDoesNotRetryNativePreviousResponseWithoutReferenceOn500(t *testi
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
-		err: provider.Unavailable(canonical.NewBackendError("native-a", http.StatusInternalServerError, "failed", "")),
+		failure: mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("native-a", http.StatusInternalServerError, "failed", ""))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := failed.nextState.phase.(callingProviderPhase); ok {
-		t.Fatal("500 triggered retry without native reference")
+	retry := activeProviderAttempt(t, failed.nextState)
+	if retry.requestChoice != providerRequestPreferred || !retry.retry ||
+		!nativePreviousResponseSent(retry.call.request) {
+		t.Fatalf("500 operational retry = %#v", retry.providerCallAttempt)
 	}
-	if hasPreviousResponseDecision(failed.evidence.decisions) {
-		t.Fatalf("500 emitted previous-response compatibility evidence: %#v", failed.evidence.decisions)
+	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
+		t.Fatalf("500 emitted previous-response compatibility changes: %#v", failed.nextState.effectiveChanges)
 	}
 }
 
@@ -600,9 +786,8 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 	if nativePreviousResponseSent(attempt.call.request) {
 		t.Fatal("target mismatch sent native previous response")
 	}
-	if hasDecision(started.evidence.decisions, compat.RequestPreviousResponseResponses, compat.Drop) ||
-		hasDecision(started.evidence.decisions, compat.RequestPreviousResponse, compat.Exact) {
-		t.Fatalf("target mismatch emitted success evidence before handoff: %#v", started.evidence.decisions)
+	if hasPreviousResponseDecision(started.nextState.effectiveChanges) {
+		t.Fatalf("target mismatch emitted effective changes before handoff: %#v", started.nextState.effectiveChanges)
 	}
 	ingress, err := attempt.call.backend.Transport.Send(context.Background(), attempt.call.document)
 	if err != nil {
@@ -612,9 +797,9 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasDecision(completed.evidence.decisions, compat.RequestPreviousResponseResponses, compat.Drop) ||
-		!hasDecision(completed.evidence.decisions, compat.RequestPreviousResponse, compat.Exact) {
-		t.Fatalf("target mismatch handoff evidence = %#v", completed.evidence.decisions)
+	changes := completedResponseChanges(t, completed)
+	if !hasDecision(changes, canonical.RequestPreviousResponseResponses, compat.Approximation) {
+		t.Fatalf("target mismatch handoff changes = %#v", changes)
 	}
 }
 
@@ -644,17 +829,21 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 		t.Fatal("provider decode/partial-output failure triggered retry without native reference")
 	}
 	failedAttempt, _ := findProviderCallAttempt(failed.nextState, active.id)
-	if failedAttempt.status != providerCallAttemptFailed || failedAttempt.failure.Stage != providerCallFailureBeforeHandoff {
-		t.Fatalf("attempt = %#v, want failed before handoff", failedAttempt)
+	if failedAttempt.status != providerCallAttemptFailed ||
+		failedAttempt.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred {
+		t.Fatalf("attempt = %#v, want possible provider execution", failedAttempt)
 	}
-	if hasPreviousResponseDecision(failed.evidence.decisions) {
-		t.Fatalf("decode failure emitted previous-response compatibility evidence: %#v", failed.evidence.decisions)
+	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
+		t.Fatalf("decode failure emitted previous-response compatibility changes: %#v", failed.nextState.effectiveChanges)
 	}
 }
 
 func TestProviderResultAttemptIdentityRejectsUnknownAndNonActiveCallingAttempts(t *testing.T) {
 	state := reducerTestState(t)
-	if _, err := reduce(context.Background(), state, providerCallFailed{attemptID: 99, err: errors.New("unknown")}, reducerRuntime()); err == nil {
+	if _, err := reduce(context.Background(), state, providerCallFailed{
+		attemptID: 99,
+		failure:   mayHaveExecuted(errors.New("unknown")),
+	}, reducerRuntime()); err == nil {
 		t.Fatal("unknown provider call attempt was accepted")
 	}
 	state.providerCallAttempts = []providerCallAttempt{
@@ -662,7 +851,10 @@ func TestProviderResultAttemptIdentityRejectsUnknownAndNonActiveCallingAttempts(
 		{status: providerCallAttemptCalling},
 	}
 	state.phase = callingProviderPhase{attemptID: 2}
-	if _, err := reduce(context.Background(), state, providerCallFailed{attemptID: 1, err: errors.New("stale")}, reducerRuntime()); err == nil {
+	if _, err := reduce(context.Background(), state, providerCallFailed{
+		attemptID: 1,
+		failure:   mayHaveExecuted(errors.New("stale")),
+	}, reducerRuntime()); err == nil {
 		t.Fatal("non-active calling provider call attempt was accepted")
 	}
 }
@@ -672,12 +864,15 @@ func TestDuplicateProviderResultForTerminalAttemptIsInvariantError(t *testing.T)
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
-		err:       provider.Rejected(canonical.NewBackendError("a", http.StatusConflict, "rejected", "")),
+		failure:   rejectedBeforeExecution(provider.Rejected(canonical.NewBackendError("a", http.StatusConflict, "rejected", ""))),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reduce(context.Background(), failed.nextState, providerCallFailed{attemptID: active.id, err: errors.New("duplicate")}, reducerRuntime()); err == nil {
+	if _, err := reduce(context.Background(), failed.nextState, providerCallFailed{
+		attemptID: active.id,
+		failure:   mayHaveExecuted(errors.New("duplicate")),
+	}, reducerRuntime()); err == nil {
 		t.Fatal("duplicate result was accepted by the synchronous reducer contract")
 	}
 }
@@ -711,8 +906,39 @@ func TestProviderCallAttemptLifecycleRejectsIllegalTransitions(t *testing.T) {
 	if _, err := completeProviderCallAttempt(acceptedState, 1); err == nil {
 		t.Fatal("terminal attempt completed twice")
 	}
-	if _, err := failProviderCallAttempt(state, 1, providerCallFailureBeforeIngress, nil); err == nil {
-		t.Fatal("failed status accepted a nil failure")
+	if _, err := failProviderCallAttempt(
+		acceptedState,
+		1,
+		mayHaveExecuted(errors.New("duplicate")),
+	); err == nil {
+		t.Fatal("terminal attempt accepted a second failure")
+	}
+	if _, err := failProviderCallAttempt(state, 1, provider.AttemptFailure{}); err == nil {
+		t.Fatal("zero provider attempt failure was accepted")
+	}
+}
+
+func TestProviderCallAttemptRejectsConsumedAttemptKey(t *testing.T) {
+	s := reducerTestState(t)
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		providerRound:  0,
+		retry:          false,
+		status:         providerCallAttemptFailed,
+	}}
+	call := providerCall{
+		backend:       provider.Backend{Target: provider.TargetSnapshot{TargetID: "target-a"}},
+		providerRound: 0,
+		replaySafety:  providerReplaySafe,
+	}
+	if _, err := beginProviderCallAttempt(
+		s,
+		providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
+		call,
+		nil,
+	); err == nil {
+		t.Fatal("consumed provider attempt key was reissued")
 	}
 }
 
@@ -858,7 +1084,7 @@ func TestBackendResolutionMustPreserveResolvedTargetProjection(t *testing.T) {
 	}
 }
 
-func TestProviderCallRequirementsAndEvidenceSubjectUseActualAttempt(t *testing.T) {
+func TestProviderCallRequirementsUseActualAttempt(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -873,17 +1099,8 @@ func TestProviderCallRequirementsAndEvidenceSubjectUseActualAttempt(t *testing.T
 	}
 	started := beginPreparedProviderCall(t, s)
 	attempt := activeProviderAttempt(t, started.nextState)
-	requirementsFunction := reflect.TypeOf(providerCallRequirements)
-	if requirementsFunction.In(0) != reflect.TypeOf(providerCall{}) {
-		t.Fatalf("providerCallRequirements input = %v, want complete providerCall", requirementsFunction.In(0))
-	}
-	requirements := providerCallRequirements(attempt.call)
-	if len(requirements) != 1 || requirements[0] != compat.RequestPreviousResponseResponses {
-		t.Fatalf("provider call requirements = %#v", requirements)
-	}
-	wantSubject := compat.Subject(fmt.Sprintf("route:target/native-a/version/%d/provider_call/1", target.Version()))
-	if got := previousResponseDecision(attempt.providerCallAttempt, attempt.id, compat.Exact).Subject; got != wantSubject {
-		t.Fatalf("subject = %q, want %q", got, wantSubject)
+	if !attempt.nativePreviousResponse {
+		t.Fatal("attempt ledger lost the native continuation realization")
 	}
 }
 
@@ -903,7 +1120,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
-		err:       provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice"),
+		failure:   rejectedBeforeExecution(provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice")),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -911,8 +1128,8 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	if _, ok := failed.nextState.phase.(callingProviderPhase); ok {
 		t.Fatal("unrelated unsupported failure selected semantic history")
 	}
-	if hasPreviousResponseDecision(failed.evidence.decisions) {
-		t.Fatalf("unrelated unsupported failure emitted native evidence: %#v", failed.evidence.decisions)
+	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
+		t.Fatalf("unrelated unsupported failure emitted native changes: %#v", failed.nextState.effectiveChanges)
 	}
 }
 
@@ -933,7 +1150,7 @@ func TestBackendRejectionStatusesDoNotAdvanceRoute(t *testing.T) {
 	for _, status := range []int{http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			err := canonical.NewBackendError("rejected-a", status, "request rejected", "")
-			if routeFailoverEligible(err) {
+			if candidatePreparationCanAdvance(err) {
 				t.Fatalf("status %d was treated as fallback-eligible", status)
 			}
 		})
@@ -958,7 +1175,7 @@ func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil, canonical.NormalizedPathResponses)
+	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1035,6 +1252,7 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 		canonical.ClientFamilyResponses,
 		delivery.BufferedDelivery(),
 		testDecodedRequest(request),
+		nil,
 		workspace,
 		nil,
 		canonical.NormalizedPathResponses,
@@ -1096,6 +1314,7 @@ func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
 		canonical.ClientFamilyResponses,
 		delivery.BufferedDelivery(),
 		testDecodedRequest(request),
+		nil,
 		workspace,
 		nil,
 		canonical.NormalizedPathResponses,
@@ -1156,7 +1375,7 @@ func TestFailedResponsesWebSearchLifecycleCompletesAsTypedProviderOutput(t *test
 	}
 }
 
-func TestCompatibilityRejectDoesNotMakeFailureFallbackEligible(t *testing.T) {
+func TestUntypedPreparationFailureDoesNotMakeFallbackEligible(t *testing.T) {
 	slug, _ := routing.ParseWorkspaceSlug("dev")
 	routeName, _ := routing.ParseRouteName("a")
 	firstTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "unmarked-a")})
@@ -1174,7 +1393,7 @@ func TestCompatibilityRejectDoesNotMakeFailureFallbackEligible(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), workspace, nil, canonical.NormalizedPathResponses)
+	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
 	if err == nil {
 		t.Fatal("unmarked codec rejection unexpectedly succeeded through fallback")
 	}
@@ -1222,14 +1441,14 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
-	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), workspace, nil, canonical.NormalizedPathResponses)
+	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if store.getCalls != 1 {
 		t.Fatalf("checkpoint Get calls = %d, want exactly 1 across fallback", store.getCalls)
 	}
-	if providerCalls != 2 {
-		t.Fatalf("provider calls = %d, want 2", providerCalls)
+	if providerCalls != 3 {
+		t.Fatalf("provider calls = %d, want one retry plus fallback", providerCalls)
 	}
 }

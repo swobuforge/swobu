@@ -10,21 +10,18 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
-	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, EncodeOptions{})
-	})
-	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, Access: input.MCPAccess}, d, &changes, exchangeID, EncodeOptions{})
+	return wire.ProviderEncodeResult{Document: document, Changes: changes}, err
 }
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (carrier.Document, error) {
-		return EncodeCarrierWithDecisions(EncodeInput{Request: input.Request}, d, sink, exchangeID, options)
-	})
-	return wire.ProviderEncodeResult{Document: document, Decisions: decisions}, err
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, Access: input.MCPAccess}, d, &changes, exchangeID, options)
+	return wire.ProviderEncodeResult{Document: document, Changes: changes}, err
 }
 
 func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, request canonical.CanonicalRequest, doc carrier.Document, exchangeID string) (wire.ProviderDecodeResult, error) {
@@ -33,10 +30,9 @@ func (ProviderDocumentDecoder) DecodeProviderDocument(ctx context.Context, reque
 		carrierErr.Details = map[string]string{"wire_document_invariant": err.Error()}
 		return wire.ProviderDecodeResult{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	stream, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (canonical.ResponseStream, error) {
-		return decodeResponseBuffered(ctx, request, doc.RawBytes(), exchangeID, sink)
-	})
-	return wire.ProviderDecodeResult{Stream: stream, Decisions: decisions}, err
+	var changes []compat.Change
+	stream, err := decodeResponseBuffered(ctx, request, doc.RawBytes(), exchangeID, &changes)
+	return wire.ProviderDecodeResult{Stream: stream, Changes: changes}, err
 }
 
 func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string) (wire.ProviderDecodeResult, error) {
@@ -45,8 +41,7 @@ func (ProviderEnvelopeDecoder) DecodeProviderEnvelope(request canonical.Canonica
 		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}
 		return wire.ProviderDecodeResult{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	reader, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (*responsesResponseStream, error) {
-		return decodeResponseStream(request, stream, exchangeID, sink), nil
-	})
-	return wire.ProviderDecodeResult{Stream: reader, Decisions: decisions, TerminalDecisions: reader}, err
+	var changes []compat.Change
+	reader := decodeResponseStream(request, stream, exchangeID, &changes)
+	return wire.ProviderDecodeResult{Stream: reader, Changes: changes, ProgressiveChanges: reader.Changes}, nil
 }

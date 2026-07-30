@@ -8,6 +8,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // bufferedClientBody defers canonical consumption and checkpoint commit until the
@@ -17,17 +19,22 @@ type bufferedClientBody struct {
 	ctx        context.Context
 	call       providerCall
 	envelope   canonical.ResponseStream
-	sink       compat.Sink
-	committer  *checkpointCommitter
 	initialize sync.Once
 	close      sync.Once
 	reader     *bytes.Reader
 	err        error
 	consumed   bool
+	completion *wire.ResponseCompletion
+	complete   func(*historyfingerprint.Response, []compat.Change)
+	fail       func(error)
 }
 
-func newBufferedClientBody(ctx context.Context, call providerCall, envelope canonical.ResponseStream, sink compat.Sink, committer *checkpointCommitter) *bufferedClientBody {
-	return &bufferedClientBody{ctx: ctx, call: call, envelope: envelope, sink: sink, committer: committer}
+func newBufferedClientBody(ctx context.Context, call providerCall, envelope canonical.ResponseStream) *bufferedClientBody {
+	completion, complete, fail := wire.NewResponseCompletion()
+	return &bufferedClientBody{
+		ctx: ctx, call: call, envelope: envelope,
+		completion: completion, complete: complete, fail: fail,
+	}
 }
 
 func (b *bufferedClientBody) Read(p []byte) (int, error) {
@@ -42,19 +49,21 @@ func (b *bufferedClientBody) prepare() {
 	response, err := projectClientDocument(b.ctx, b.envelope)
 	b.consumed = true
 	if err != nil {
+		b.fail(err)
+		if terminal, ok := b.envelope.(interface{ TerminalError() error }); ok && terminal.TerminalError() != nil {
+			b.err = terminal.TerminalError()
+			return
+		}
 		b.err = err
 		return
 	}
 	document, err := b.call.clientCodec.EncodeResponseDocument(b.call.fullRequest, response)
-	commitDecisionsBestEffort(b.ctx, b.sink, b.call.exchangeID, document.Decisions)
 	if err != nil {
+		b.fail(err)
 		b.err = err
 		return
 	}
-	if err := b.committer.commitDocument(b.ctx, document.ResponseFingerprint); err != nil {
-		b.err = err
-		return
-	}
+	b.complete(document.ResponseFingerprint, document.Changes)
 	b.reader = bytes.NewReader(document.Document.RawBytes())
 }
 
@@ -62,6 +71,7 @@ func (b *bufferedClientBody) Close() error {
 	var err error
 	b.close.Do(func() {
 		if !b.consumed && b.envelope != nil {
+			b.fail(io.ErrClosedPipe)
 			err = b.envelope.Close(b.ctx)
 		}
 	})

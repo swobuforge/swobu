@@ -6,8 +6,8 @@
 // commands, telemetry disclosure, transcript-mode output, or framework focus
 // state.
 //
-// Topology: readmodel, ports, adapters, pages, sections, features, ui, design,
-// and testkit.
+// Topology: readmodel, ports, adapters, pages, sections, features, ui, and
+// testkit.
 //
 // Laws:
 //   - direct go-tui only; no wrappers, no internal/tui shim, no retained

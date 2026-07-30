@@ -32,7 +32,6 @@ func beginMCPCall(s exchangeState, phase callingMCPPhase) (reducerOutcome, error
 	}
 	call := phase.calls[phase.next]
 	s.phase = phase
-	s.fallbackClosed = true
 	return reducerOutcome{
 		nextState: s,
 		command:   callMCPCommand{run: s.mcp, call: call},
@@ -45,6 +44,7 @@ func reduceCallingMCP(s exchangeState, phase callingMCPPhase, event exchangeEven
 			s.phase = failedPhase{problem: started.err, target: phase.target}
 			return reducerOutcome{nextState: s}, nil
 		}
+		s.polyfilled = true
 		return beginMCPCall(s, phase)
 	}
 	returned, ok := event.(mcpToolReturned)
@@ -67,13 +67,13 @@ func reduceCallingMCP(s exchangeState, phase callingMCPPhase, event exchangeEven
 	s.prepared = &session.ResolvedRequest{
 		Full: next, Delta: next, ResolvedMedia: s.prepared.ResolvedMedia.Clone(),
 	}
-	call, target, evidence, preparation, err := prepareProviderCall(s, phase.selection, runner, nil)
+	call, target, requestChanges, preparation, err := prepareProviderCall(s, phase.selection, runner, nil)
 	if preparation != nil {
 		err = canonical.InternalError("MCP tool results unexpectedly require another preparation effect")
 	}
 	if err != nil {
 		s.phase = failedPhase{problem: err, target: target}
-		return reducerOutcome{nextState: s, evidence: evidence}, nil
+		return reducerOutcome{nextState: s}, nil
 	}
-	return beginProviderCallAttempt(s, phase.selection, call, evidence)
+	return beginProviderCallAttempt(s, phase.selection, call, requestChanges)
 }

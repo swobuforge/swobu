@@ -28,3 +28,24 @@ func TestClassifyBackendError_LiveCaptureToolChoiceUnsupported(t *testing.T) {
 		t.Fatalf("fixture error was not classified as tool-choice unsupported: %#v", classified)
 	}
 }
+
+func TestClassifyBackendError_ContinuationReferenceRequiresOwnedFields(t *testing.T) {
+	classified := classifyBackendError(canonical.NewBackendError(
+		"backend-a",
+		404,
+		`{"error":{"message":"previous_response_id was not found","param":"previous_response_id","code":"not_found"}}`,
+		"",
+	))
+	if !canonical.IsBackendErrorClass(classified, canonical.BackendErrorClassContinuationReferenceInvalid) {
+		t.Fatalf("continuation error was not classified: %#v", classified)
+	}
+	unstructured := classifyBackendError(canonical.NewBackendError(
+		"backend-a",
+		404,
+		`{"error":{"message":"not found"}}`,
+		"",
+	))
+	if canonical.IsBackendErrorClass(unstructured, canonical.BackendErrorClassContinuationReferenceInvalid) {
+		t.Fatalf("unstructured status became continuation fact: %#v", unstructured)
+	}
+}

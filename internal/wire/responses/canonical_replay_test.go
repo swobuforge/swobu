@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/mcp"
 )
 
 func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T) {
@@ -18,7 +19,7 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := EncodeCarrierWithDecisions(
+	document, err := EncodeCarrierWithChanges(
 		EncodeInput{Request: decoded.Request.Request},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
@@ -74,12 +75,12 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatalf("canonical result content = %#v, want exact text output", result.Content())
 	}
 
-	document, err := EncodeCarrierWithDecisions(
+	document, err := EncodeCarrierWithChanges(
 		EncodeInput{Request: decoded.Request.Request},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
-		t.Fatalf("EncodeCarrierWithDecisions returned err=%v", err)
+		t.Fatalf("EncodeCarrierWithChanges returned err=%v", err)
 	}
 	var payload struct {
 		Input []struct {
@@ -113,7 +114,7 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatal("custom output did not participate in the Responses history fingerprint")
 	}
 
-	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, nil, "")
+	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, mcp.Access{}, nil, "")
 	if err != nil {
 		t.Fatalf("encode result-only segment: %v", err)
 	}
@@ -140,12 +141,12 @@ func TestCanonicalResponsesReplayPreservesEmptyCustomToolOutput(t *testing.T) {
 		t.Fatalf("custom output text = %#v, want explicit empty text", result.Content())
 	}
 
-	document, err := EncodeCarrierWithDecisions(
+	document, err := EncodeCarrierWithChanges(
 		EncodeInput{Request: decoded.Request.Request},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
-		t.Fatalf("EncodeCarrierWithDecisions returned err=%v", err)
+		t.Fatalf("EncodeCarrierWithChanges returned err=%v", err)
 	}
 	var payload struct {
 		Input []struct {
@@ -224,12 +225,12 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 				}
 			}
 
-			document, err := EncodeCarrierWithDecisions(
+			document, err := EncodeCarrierWithChanges(
 				EncodeInput{Request: decoded.Request.Request},
 				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
 			if err != nil {
-				t.Fatalf("EncodeCarrierWithDecisions returned err=%v", err)
+				t.Fatalf("EncodeCarrierWithChanges returned err=%v", err)
 			}
 			var payload struct {
 				Input []struct {
@@ -296,7 +297,7 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 	items := []canonical.CanonicalItem{functionCall, functionResult, customCall, customResult}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: items})
 
-	encoded, err := encodeConversation(request, items, nil, nil, "")
+	encoded, err := encodeConversation(request, items, nil, mcp.Access{}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

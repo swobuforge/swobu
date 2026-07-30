@@ -81,7 +81,7 @@ func TestEncode_OmitsMaxCompletionTokensWhenMaxOutputTokensUnset(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"max_tokens":64,"temperature":0.25,"top_p":0.9,"stop":["END","DONE"]}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 func TestDecodeRequest_DecodesGPT5GenerationControls(t *testing.T) {
 	t.Parallel()
 
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64,"temperature":0.25,"top_p":0.9}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
@@ -124,7 +124,7 @@ func TestDecodeRequest_DecodesGPT5GenerationControls(t *testing.T) {
 func TestDecodeRequest_MaxCompletionTokensExplicitlyPrecedesLegacyMaxTokens(t *testing.T) {
 	t.Parallel()
 
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":32,"max_completion_tokens":64}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
@@ -200,7 +200,7 @@ func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 }
 
 func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	req := []byte(`{"model":"claude-3-5","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"reply_shape","description":"structured reply","schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false},"strict":true}}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
@@ -230,13 +230,13 @@ func TestChatCompletionsJSONObjectRoundTrips(t *testing.T) {
 }
 
 func TestChatCompletionsUnknownOutputFormatIsBadRequestWithoutDrop(t *testing.T) {
-	sink := &compat.RecordingSink{}
-	_, err := decodeChatCompletionsOutputFormat(json.RawMessage(`{"type":"future_format"}`), sink, "ex")
+	var changes []compat.Change
+	_, err := decodeChatCompletionsOutputFormat(json.RawMessage(`{"type":"future_format"}`), &changes, "ex")
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error = %v, want BAD_REQUEST", err)
 	}
-	if len(sink.Decisions()) != 0 {
-		t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want no successful changes", changes)
 	}
 }

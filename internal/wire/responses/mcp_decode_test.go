@@ -5,11 +5,9 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/session"
-	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -41,8 +39,8 @@ func TestResponsesTopLevelMCPSourceIsRequestScopedAndUsesServerDescription(t *te
 	if source.Description() != "Docs" {
 		t.Fatalf("server description = %q", source.Description())
 	}
-	if remote.Endpoint() != "https://mcp.example.test/rpc" {
-		t.Fatalf("endpoint = %q", remote.Endpoint())
+	if endpoint, ok := remote.URL(); !ok || endpoint != "https://mcp.example.test/rpc" {
+		t.Fatalf("endpoint = %q URL=%t", endpoint, ok)
 	}
 }
 
@@ -90,40 +88,59 @@ func TestResponsesMCPSourcePreservesPositionAmongOrdinaryTools(t *testing.T) {
 	}
 }
 
-func TestResponsesKnownUnsupportedMCPDeclarationsEraseLocally(t *testing.T) {
-	for _, tool := range []string{
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc"}`,
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":null}`,
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"always"}`,
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","headers":{"X-Tenant":"restricted"}}`,
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","defer_loading":true}`,
-		`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","allowed_callers":["direct"]}`,
-		`{"type":"mcp","server_label":"docs","connector_id":"connector_gmail","require_approval":"never"}`,
-		`{"type":"mcp","server_label":"docs","tunnel_id":"tunnel_1","require_approval":"never"}`,
-	} {
-		raw := []byte(`{"model":"m","input":"test","tools":[
-			{"type":"function","name":"safe_sibling","parameters":{"type":"object"}},` + tool + `]}`)
-		decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
-			carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}),
-		)
-		if err != nil {
-			t.Fatalf("unsupported MCP declaration rejected whole request: %v", err)
-		}
-		tools := canonicaltest.Tools(decoded.Request.Request)
-		if len(tools) != 1 || tools[0].Key().Name() != "safe_sibling" {
-			t.Fatalf("residual tools = %#v, want safe sibling only", tools)
-		}
-		if len(decoded.Decisions) != 1 || decoded.Decisions[0] != (compat.Decision{
-			Feature: compat.RequestTools,
-			Outcome: compat.Drop,
-			Subject: compat.Subject("wire:/tools/1"),
-		}) {
-			t.Fatalf("decisions = %#v, want one declaration-local MCP drop", decoded.Decisions)
-		}
+func TestResponsesKnownMCPDeclarationsSurviveIngressTyped(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     string
+		kind     canonical.MCPSourceKind
+		approval canonical.MCPApprovalKind
+		loading  canonical.MCPLoading
+		callers  bool
+	}{
+		{name: "missing approval defaults always", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc"}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalAlways, loading: canonical.MCPLoadingEager},
+		{name: "null approval defaults always", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":null}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalAlways, loading: canonical.MCPLoadingEager},
+		{name: "always", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"always"}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalAlways, loading: canonical.MCPLoadingEager},
+		{name: "headers", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","headers":{"X-Tenant":"restricted"}}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalNever, loading: canonical.MCPLoadingEager},
+		{name: "deferred", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","defer_loading":true}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalNever, loading: canonical.MCPLoadingDeferred},
+		{name: "callers", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":"never","allowed_callers":["direct"]}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalNever, loading: canonical.MCPLoadingEager, callers: true},
+		{name: "connector", tool: `{"type":"mcp","server_label":"docs","connector_id":"connector_gmail","require_approval":"never"}`, kind: canonical.MCPSourceConnectorID, approval: canonical.MCPApprovalNever, loading: canonical.MCPLoadingEager},
+		{name: "tunnel", tool: `{"type":"mcp","server_label":"docs","tunnel_id":"tunnel_1","require_approval":"never"}`, kind: canonical.MCPSourceTunnelID, approval: canonical.MCPApprovalNever, loading: canonical.MCPLoadingEager},
+		{name: "filter", tool: `{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc","require_approval":{"always":{"tool_names":["write"]},"never":{"read_only":true}}}`, kind: canonical.MCPSourceURL, approval: canonical.MCPApprovalFilter, loading: canonical.MCPLoadingEager},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"model":"m","input":"test","tools":[
+			{"type":"function","name":"safe_sibling","parameters":{"type":"object"}},` + test.tool + `]}`)
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
+				carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools, err := canonical.EffectiveTools(decoded.Request.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			declarations := tools.Declarations()
+			if len(declarations) != 2 {
+				t.Fatalf("declarations = %#v", declarations)
+			}
+			namespace, ok := declarations[1].Namespace()
+			source, sourceOK := namespace.MCPSource()
+			_, callersSet := source.AllowedCallers().Get()
+			if !ok || !sourceOK || source.Kind() != test.kind ||
+				source.Approval().Kind() != test.approval ||
+				source.Loading() != test.loading || callersSet != test.callers {
+				t.Fatalf("source = %#v", source)
+			}
+			if len(decoded.Changes) != 0 {
+				t.Fatalf("ingress changes = %#v", decoded.Changes)
+			}
+		})
 	}
 }
 
-func TestResponsesRequiredPolicyRejectsAfterUnsupportedMCPIsErased(t *testing.T) {
+func TestResponsesRequiredPolicySurvivesKnownMCPAdmission(t *testing.T) {
 	raw := []byte(`{"model":"m","input":"test","tool_choice":"required","tools":[{
 		"type":"mcp","server_label":"docs","connector_id":"connector_gmail",
 		"require_approval":"never"
@@ -134,12 +151,12 @@ func TestResponsesRequiredPolicyRejectsAfterUnsupportedMCPIsErased(t *testing.T)
 	if err != nil {
 		t.Fatalf("wire decoder rejected MCP before residual validation: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err == nil {
-		t.Fatal("required policy survived after its only MCP declaration erased")
+	if _, err := session.Begin(decoded.Request.Request); err != nil {
+		t.Fatalf("required MCP policy was invalidated at ingress: %v", err)
 	}
 }
 
-func TestResponsesSpecificPolicyRejectsAfterSelectedMCPIsErased(t *testing.T) {
+func TestResponsesSpecificPolicySurvivesKnownMCPAdmission(t *testing.T) {
 	raw := []byte(`{"model":"m","input":"test",
 		"tool_choice":{"type":"mcp","server_label":"docs"},
 		"tools":[{
@@ -152,12 +169,12 @@ func TestResponsesSpecificPolicyRejectsAfterSelectedMCPIsErased(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wire decoder rejected selected MCP before residual validation: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err == nil {
-		t.Fatal("specific policy survived after its selected MCP declaration erased")
+	if _, err := session.Begin(decoded.Request.Request); err != nil {
+		t.Fatalf("specific MCP policy was invalidated at ingress: %v", err)
 	}
 }
 
-func TestResponsesEmbeddedUnsupportedMCPMatchesOmissionFingerprint(t *testing.T) {
+func TestResponsesEmbeddedMCPFingerprintIncludesSemanticsButExcludesAccess(t *testing.T) {
 	decode := func(tools string) wire.ClientRequestResult {
 		t.Helper()
 		raw := []byte(`{"model":"m","input":[
@@ -172,16 +189,20 @@ func TestResponsesEmbeddedUnsupportedMCPMatchesOmissionFingerprint(t *testing.T)
 		}
 		return decoded.Request
 	}
-	without := decode(`{"type":"function","name":"safe_sibling","parameters":{"type":"object"}}`)
-	withUnsupported := decode(`
-		{"type":"function","name":"safe_sibling","parameters":{"type":"object"}},
+	first := decode(`
 		{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc",
-		 "require_approval":"never","headers":{"X-Tenant":"restricted"}}`)
-	if withUnsupported.RequestFingerprint != without.RequestFingerprint {
-		t.Fatal("erased embedded MCP declaration changed request fingerprint")
+		 "require_approval":"never","headers":{"X-Tenant":"one"}}`)
+	second := decode(`
+		{"type":"mcp","server_label":"docs","server_url":"https://mcp.example.test/rpc",
+		 "require_approval":"never","headers":{"X-Tenant":"two"}}`)
+	differentSemantics := decode(`
+		{"type":"mcp","server_label":"docs","connector_id":"connector_gmail",
+		 "require_approval":"never","headers":{"X-Tenant":"one"}}`)
+	if first.RequestFingerprint != second.RequestFingerprint {
+		t.Fatal("transient MCP headers changed request fingerprint")
 	}
-	if len(canonicaltest.Tools(withUnsupported.Request)) != 1 {
-		t.Fatalf("residual tools = %#v, want safe sibling only", canonicaltest.Tools(withUnsupported.Request))
+	if first.RequestFingerprint == differentSemantics.RequestFingerprint {
+		t.Fatal("typed MCP source semantics were absent from request fingerprint")
 	}
 }
 

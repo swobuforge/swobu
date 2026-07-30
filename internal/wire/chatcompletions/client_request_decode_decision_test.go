@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeClientRequestWithDecisions_DropsUnknownToolCallAndPreservesKnownSibling(t *testing.T) {
+func TestDecodeClientRequestWithChanges_DropsUnknownToolCallAndPreservesKnownSibling(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -22,35 +22,35 @@ func TestDecodeClientRequestWithDecisions_DropsUnknownToolCallAndPreservesKnownS
 			{"role":"assistant","content":"kept","tool_calls":[{"type":"unsupported","id":"tc_2"}]}
 		]
 	}`)
-	sink := &recordingDecisionSink{}
-
-	request, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_decode")
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
+	request := decoded.Request.Request
 	if got := joinItemText(request.Items()); got != "kept" {
 		t.Fatalf("surviving text = %q, want kept", got)
 	}
-	if len(sink.effects) != 2 {
-		t.Fatalf("captured effects len=%d want=2", len(sink.effects))
+	if len(decoded.Changes) != 2 {
+		t.Fatalf("captured changes len=%d want=2", len(decoded.Changes))
 	}
 	want := []struct {
-		feature compat.Feature
-		outcome compat.Outcome
-		subject compat.Subject
+		feature canonical.CapabilityPath
+		outcome compat.Kind
+		item    uint32
 	}{
-		{feature: compat.RequestItemsToolCallCallID, outcome: compat.Approx, subject: compat.Subject("wire:/messages/0/tool_calls/0/id")},
-		{feature: compat.RequestItemsToolCallTool, outcome: compat.Drop, subject: compat.Subject("wire:/messages/1/tool_calls/0/type")},
+		{feature: canonical.RequestItemsToolCallCallID, outcome: compat.Approximation, item: 0},
+		{feature: canonical.RequestItemsToolCallTool, outcome: compat.Omission, item: 1},
 	}
-	for i, effectItem := range sink.effects {
+	for i, effectItem := range decoded.Changes {
 		compatEffect := effectItem
-		if compatEffect.Feature != want[i].feature || compatEffect.Outcome != want[i].outcome || compatEffect.Subject != want[i].subject {
-			t.Fatalf("effect[%d] = %#v, want %s %s %q", i, compatEffect, want[i].feature, want[i].outcome, want[i].subject)
+		item, ok := compatEffect.Occurrence.RequestItem()
+		if compatEffect.Capability != want[i].feature || compatEffect.Kind != want[i].outcome || !ok || item != want[i].item {
+			t.Fatalf("change[%d] = %#v, want %s %d", i, compatEffect, want[i].feature, want[i].item)
 		}
 	}
 }
 
-func TestDecodeClientRequestWithDecisions_DropsUnknownToolDeclarationBesideKnown(t *testing.T) {
+func TestDecodeClientRequestWithChanges_DropsUnknownToolDeclarationBesideKnown(t *testing.T) {
 	raw := []byte(`{
 		"model":"gpt-4o-mini",
 		"tools":[
@@ -59,11 +59,11 @@ func TestDecodeClientRequestWithDecisions_DropsUnknownToolDeclarationBesideKnown
 		],
 		"messages":[{"role":"user","content":"run"}]
 	}`)
-	sink := &recordingDecisionSink{}
-	request, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex")
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
+	request := decoded.Request.Request
 	environment, err := canonical.EffectiveTools(request)
 	if err != nil {
 		t.Fatal(err)
@@ -71,12 +71,16 @@ func TestDecodeClientRequestWithDecisions_DropsUnknownToolDeclarationBesideKnown
 	if len(environment.Declarations()) != 1 {
 		t.Fatalf("surviving tools = %#v, want one", environment.Declarations())
 	}
-	if len(sink.effects) != 1 || sink.effects[0].Subject != compat.Subject("wire:/tools/1/type") {
-		t.Fatalf("compatibility effects = %#v", sink.effects)
+	if len(decoded.Changes) != 1 {
+		t.Fatalf("compatibility changes = %#v", decoded.Changes)
+	}
+	index, ok := decoded.Changes[0].Occurrence.ToolIndex()
+	if !ok || index != 1 {
+		t.Fatalf("compatibility changes = %#v", decoded.Changes)
 	}
 }
 
-func TestDecodeClientRequestWithDecisions_RecordsToolCallArgumentsScar(t *testing.T) {
+func TestDecodeClientRequestWithChanges_RecordsToolCallArgumentsScar(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
@@ -85,11 +89,9 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallArgumentsScar(t *testin
 			{"role":"user","tool_calls":[{"type":"function","id":"tc_1","function":{"name":"search","arguments":"oops"}}]}
 		]
 	}`)
-	sink := &recordingDecisionSink{}
-
-	_, _, err := (legacyClientRequestDecoder{}).DecodeClientRequestWithDecisions(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw}, sink, "ex_chatcompletions_args")
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
 	if err == nil {
-		t.Fatal("expected DecodeClientRequestWithDecisions to reject invalid function arguments")
+		t.Fatal("expected DecodeClientRequestWithChanges to reject invalid function arguments")
 	}
 	var compatErr canonical.Error
 	if !errors.As(err, &compatErr) {
@@ -101,14 +103,7 @@ func TestDecodeClientRequestWithDecisions_RecordsToolCallArgumentsScar(t *testin
 	if !strings.Contains(compatErr.Message, "arguments") {
 		t.Fatalf("error message = %q, want arguments to be mentioned", compatErr.Message)
 	}
-	if len(sink.effects) != 1 {
-		t.Fatalf("captured effects len=%d want=1", len(sink.effects))
-	}
-	compatEffect := sink.effects[0]
-	if compatEffect.Feature != compat.RequestItemsToolCallInput || compatEffect.Outcome != compat.Reject {
-		t.Fatalf("captured effect = %#v, want tool.call_arguments reject", compatEffect)
-	}
-	if compatEffect.Subject != compat.Subject("wire:/messages/0/tool_calls/0/function/arguments") {
-		t.Fatalf("captured subject = %q, want wire:/messages/0/tool_calls/0/function/arguments", compatEffect.Subject)
+	if len(decoded.Changes) != 0 {
+		t.Fatalf("failed lowering returned successful changes: %#v", decoded.Changes)
 	}
 }

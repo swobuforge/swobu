@@ -7,5 +7,5 @@ import (
 )
 
 func EncodeCarrier(request canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	return EncodeCarrierWithDecisions(EncodeInput{Request: request}, d, nil, "", EncodeOptions{})
+	return EncodeCarrierWithChanges(EncodeInput{Request: request}, d, nil, "", EncodeOptions{})
 }

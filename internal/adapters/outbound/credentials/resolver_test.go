@@ -100,18 +100,14 @@ func TestResolver_ResolvesSecretFileLocatorFromFileStore(t *testing.T) {
 	}
 }
 
-func TestResolver_ResolveCredential_StoredSecretFallsBackToFileStore(t *testing.T) {
+func TestResolver_SecretReferenceDoesNotFallBackToFileStore(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	if _, err := StoreMaterializedCredential("openai", "openai/default", "token-fallback", CredentialWritePolicyFile); err != nil {
 		t.Fatalf("store file mode: %v", err)
 	}
 	resolver := NewStoredSecretResolver(fakeKeyringClient{err: fmt.Errorf("backend unavailable")})
-	token, err := resolver.ResolveCredential(context.Background(), "openai", "secret:openai/default")
-	if err != nil {
-		t.Fatalf("ResolveCredential returned error: %v", err)
-	}
-	if token != "token-fallback" {
-		t.Fatalf("token=%q want token-fallback", token)
+	if _, err := resolver.ResolveCredential(context.Background(), "openai", "secret:openai/default"); err == nil {
+		t.Fatal("secret reference resolved through file store")
 	}
 }
 

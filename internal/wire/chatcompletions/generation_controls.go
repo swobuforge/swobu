@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
+	"github.com/swobuforge/swobu/internal/wire/reasoningprojection"
 )
 
 func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (canonical.GenerationControls, canonical.ReasoningControls, error) {
@@ -43,6 +44,13 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 		} else {
 			parsed := canonical.InferenceEffort(value)
 			effort = &parsed
+			var err error
+			reasoning, err = canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+				Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute()),
+			})
+			if err != nil {
+				return canonical.GenerationControls{}, canonical.ReasoningControls{}, err
+			}
 		}
 	}
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
@@ -55,20 +63,15 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 	return controls, reasoning, err
 }
 
-func encodeChatCompletionsReasoning(payload map[string]any, request canonical.CanonicalRequest) error {
-	if compute, ok := request.Reasoning().ComputeField().Get(); ok {
-		switch compute.Kind() {
-		case canonical.ReasoningDisabled:
-			if request.Controls().Effort.IsSpecified() {
-				return provider.NewIncompatibleTarget("Chat Completions cannot represent disabled reasoning with inference effort")
-			}
-			payload["reasoning_effort"] = "none"
-		case canonical.ReasoningAutomatic, canonical.ReasoningBudget:
-			return provider.NewIncompatibleTarget("Chat Completions reasoning_effort cannot represent explicit canonical reasoning compute")
-		}
+func encodeChatCompletionsReasoning(payload map[string]any, request canonical.CanonicalRequest, changeLog *[]compat.Change) error {
+	value, present, changes := reasoningprojection.ProjectOrdinalReasoning(request.Reasoning(), request.Controls().Effort)
+	if present {
+		payload["reasoning_effort"] = value
 	}
-	if effort, ok := request.Controls().Effort.Get(); ok {
-		payload["reasoning_effort"] = effort
+	if changeLog != nil {
+		for _, change := range changes {
+			*changeLog = compat.AppendUnique(*changeLog, change)
+		}
 	}
 	return nil
 }

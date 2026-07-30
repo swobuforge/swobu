@@ -17,8 +17,8 @@ import (
 
 func TestDecodeResponsesProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Here is the result"},{"type":"output_image","image_url":"https://example.test/output.png"}]}]}`)
-	sink := &recordingDecisionSink{}
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", sink)
+	changeLog := &recordingChanges{}
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +39,15 @@ func TestDecodeResponsesProviderAssistantImageBesideTextDropsImage(t *testing.T)
 		t.Fatalf("surviving text = %q, %v", text, ok)
 	}
 	drops := 0
-	for _, decision := range sink.effects {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop &&
-			decision.Subject == compat.Subject("wire:/output/0/content/1/type") {
+	for _, decision := range *changeLog {
+		item, ok := decision.Occurrence.ResponseItem()
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission &&
+			ok && item == 0 {
 			drops++
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("assistant image drop decisions = %d, want 1; all=%#v", drops, sink.effects)
+		t.Fatalf("assistant image drop changes = %d, want 1; all=%#v", drops, *changeLog)
 	}
 }
 

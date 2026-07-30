@@ -24,12 +24,12 @@ func TestChatCompletionsHoistsMidHistoryToolAdditionWithEvidence(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "after"),
 		},
 	})
-	sink := &recordingDecisionSink{}
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange")
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.RawBytes()) == 0 || !decisionRecorded(sink.effects, compat.RequestTools, compat.Approx) {
-		t.Fatalf("document=%s decisions=%#v", document.RawBytes(), sink.effects)
+	if len(document.RawBytes()) == 0 || !decisionRecorded(changes, canonical.RequestTools, compat.Approximation) {
+		t.Fatalf("document=%s changes=%#v", document.RawBytes(), changes)
 	}
 }

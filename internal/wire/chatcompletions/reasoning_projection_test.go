@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestBufferedChatProjectionOmitsReasoningAndRecordsPortableDrop(t *testing.T) {
@@ -32,7 +33,7 @@ func TestBufferedChatProjectionOmitsReasoningAndRecordsPortableDrop(t *testing.T
 	if bytes.Contains(result.Document.RawBytes(), []byte("brief")) {
 		t.Fatalf("standard Chat exposed reasoning: %s", result.Document.RawBytes())
 	}
-	assertOneChatReasoningDrop(t, result.Decisions)
+	assertOneChatReasoningDrop(t, result.Changes)
 }
 
 func TestBufferedChatProjectionRejectsReasoningOnlySuccess(t *testing.T) {
@@ -75,7 +76,7 @@ func TestStreamedChatProjectionRecordsReasoningDropWithVisibleText(t *testing.T)
 	if _, err := io.ReadAll(encoded.Stream.Body); err != nil {
 		t.Fatal(err)
 	}
-	assertOneChatReasoningDrop(t, encoded.TerminalDecisions.Decisions())
+	assertOneChatReasoningDrop(t, encoded.Completion.Snapshot().Changes)
 }
 
 func TestStreamedChatProjectionRejectsReasoningOnlySuccess(t *testing.T) {
@@ -101,7 +102,9 @@ func TestStreamedChatProjectionRejectsReasoningOnlySuccess(t *testing.T) {
 	if _, err := io.ReadAll(encoded.Stream.Body); err == nil {
 		t.Fatal("reasoning-only stream closed as an empty successful Chat response")
 	}
-	assertOneChatReasoningDrop(t, encoded.TerminalDecisions.Decisions())
+	if encoded.Completion.Snapshot().State != wire.CompletionFailed {
+		t.Fatalf("completion = %#v, want failed", encoded.Completion.Snapshot())
+	}
 }
 
 func chatReasoningItem(t *testing.T) canonical.CanonicalItem {
@@ -117,15 +120,15 @@ func chatReasoningItem(t *testing.T) canonical.CanonicalItem {
 	return reasoning
 }
 
-func assertOneChatReasoningDrop(t *testing.T, decisions []compat.Decision) {
+func assertOneChatReasoningDrop(t *testing.T, changes []compat.Change) {
 	t.Helper()
 	count := 0
-	for _, decision := range decisions {
-		if decision.Feature == compat.ResponseItemsReasoning && decision.Outcome == compat.Drop {
+	for _, decision := range changes {
+		if decision.Capability == canonical.ResponseItemsReasoning && decision.Kind == compat.Omission {
 			count++
 		}
 	}
 	if count != 1 {
-		t.Fatalf("reasoning drop count = %d in %#v, want 1", count, decisions)
+		t.Fatalf("reasoning drop count = %d in %#v, want 1", count, changes)
 	}
 }

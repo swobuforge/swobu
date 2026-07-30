@@ -15,14 +15,13 @@ import (
 )
 
 func TestChatResponseUnknownOnlyCallCannotSatisfyToolCallsFinish(t *testing.T) {
-	sink := &compat.RecordingSink{}
+	var changes []compat.Change
 	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"type":"future_call","id":""}]},"finish_reason":"tool_calls"}]}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", sink); err == nil {
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &changes); err == nil {
 		t.Fatal("unknown-only tool call satisfied tool_calls finish reason")
 	}
-	decisions := sink.Decisions()
-	if len(decisions) != 1 || decisions[0].Outcome != compat.Drop {
-		t.Fatalf("compatibility decisions = %#v, want erased-call evidence", decisions)
+	if len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("compatibility changes = %#v, want erased-call evidence", changes)
 	}
 }
 
@@ -44,8 +43,8 @@ func TestChatStreamRejectsContradictoryTypeAfterToolAdmission(t *testing.T) {
 		if err == io.EOF {
 			t.Fatal("contradictory late tool type reached stream EOF")
 		}
-		if len(stream.Decisions()) != 0 {
-			t.Fatalf("late contradiction was recorded as erasure: %#v", stream.Decisions())
+		if len(stream.Changes()) != 0 {
+			t.Fatalf("late contradiction was recorded as erasure: %#v", stream.Changes())
 		}
 		return
 	}
@@ -101,13 +100,13 @@ func TestChatStreamKeepsExactUnknownToolOccurrenceErased(t *testing.T) {
 		}
 	}
 	drops := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
+	for _, decision := range stream.Changes() {
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission {
 			drops++
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("unknown tool evidence = %#v, want one retained erasure", stream.Decisions())
+		t.Fatalf("unknown tool evidence = %#v, want one retained erasure", stream.Changes())
 	}
 }
 
@@ -135,9 +134,9 @@ func TestChatStreamDoesNotEraseKnownCustomToolCall(t *testing.T) {
 	if !found {
 		t.Fatal("known streamed custom tool call did not preserve raw input")
 	}
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind {
-			t.Fatalf("known custom tool call recorded as additive erasure: %#v", stream.Decisions())
+	for _, decision := range stream.Changes() {
+		if decision.Capability == canonical.ResponseItemsKind {
+			t.Fatalf("known custom tool call recorded as additive erasure: %#v", stream.Changes())
 		}
 	}
 }
@@ -602,13 +601,13 @@ func TestChatStreamCompactsUnknownAndKnownCallsInProviderIndexOrder(t *testing.T
 	}
 	assertChatCompletedToolOrder(t, completed, []string{"a", "b"}, []uint32{0, 1})
 	erasedCalls := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
+	for _, decision := range stream.Changes() {
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission {
 			erasedCalls++
 		}
 	}
 	if erasedCalls != 1 {
-		t.Fatalf("compatibility decisions = %#v, want one erased unknown call", stream.Decisions())
+		t.Fatalf("compatibility changes = %#v, want one erased unknown call", stream.Changes())
 	}
 }
 

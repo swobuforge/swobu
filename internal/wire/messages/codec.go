@@ -2,7 +2,6 @@
 package messages
 
 import (
-	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -24,7 +23,11 @@ type messagesEnvelopeStreamEncoder struct {
 	request                    canonical.CanonicalRequest
 	pendingWebSearchStarts     map[string]sse.StreamEvent
 	unresolvedWebSearchCallIDs map[string]struct{}
-	decisions                  *compat.RecordingSink
+	changes                    []compat.Change
+}
+
+func (s *messagesEnvelopeStreamEncoder) Changes() []compat.Change {
+	return compat.CloneChanges(s.changes)
 }
 
 func (s *messagesEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
@@ -223,7 +226,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			return append(frames, more...), err
 		}
 		if len(s.unresolvedWebSearchCallIDs) > 0 {
-			return nil, provider.NewIncompatibleTarget("Messages cannot represent an unresolved canonical web-search call")
+			return nil, provider.IncompatibleCapability(canonical.ResponseItemsKind, canonical.Occurrence{}, "Messages cannot represent an unresolved canonical web-search call")
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {
@@ -348,13 +351,11 @@ func (s *messagesEnvelopeStreamEncoder) encodeCompletedWebSearchResult(event sse
 	callID := result.CallID().String()
 	if _, omitted := s.unresolvedWebSearchCallIDs[callID]; omitted {
 		delete(s.unresolvedWebSearchCallIDs, callID)
-		if err := s.decisions.Commit(context.Background(), "", []compat.Decision{{
-			Feature: compat.ResponseItemsKind,
-			Outcome: compat.Drop,
-			Subject: compat.Subject("web_search:" + callID),
-		}}); err != nil {
-			return nil, canonical.InternalError("messages stream compatibility decision recording failed")
-		}
+		s.changes = append(s.changes, compat.Change{
+			Capability: canonical.ResponseItemsKind,
+			Kind:       compat.Omission,
+			Occurrence: canonical.CallOccurrence(result.CallID()),
+		})
 		return nil, nil
 	}
 	search, _ := result.WebSearch()

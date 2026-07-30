@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -24,14 +23,13 @@ type checkpointCaptureSnapshot struct {
 	err      error
 }
 
-// checkpointCaptureResponseStream records the canonical response pulled by the client
-// encoder. It projects one draft at terminal success and never writes storage;
-// the delivery wrapper later gates terminal publication on commit.
+// checkpointCaptureResponseStream records the canonical response pulled toward
+// client encoding. It projects one draft at terminal success and never writes
+// storage; checkpointTerminalGate owns publication gating.
 type checkpointCaptureResponseStream struct {
 	upstream canonical.ResponseStream
 	binding  canonical.ResponseBinding
 	events   []canonical.Event
-	mu       sync.RWMutex
 	result   checkpointCaptureSnapshot
 }
 
@@ -79,11 +77,9 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 		s.fail(fmt.Errorf("projecting checkpoint response: %w", projectionErr))
 		return event, nil
 	}
-	s.mu.Lock()
 	if s.result.state == checkpointCapturePending {
 		s.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: *response}
 	}
-	s.mu.Unlock()
 	return event, nil
 }
 
@@ -95,14 +91,10 @@ func (s *checkpointCaptureResponseStream) Close(ctx context.Context) error {
 }
 
 func (s *checkpointCaptureResponseStream) snapshot() checkpointCaptureSnapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	return s.result
 }
 
 func (s *checkpointCaptureResponseStream) fail(err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.result.state == checkpointCapturePending {
 		s.result = checkpointCaptureSnapshot{state: checkpointCaptureFailed, err: err}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
@@ -13,33 +14,34 @@ import (
 // ProviderRequestTool is one typed Responses tool declaration before exact-
 // provider spelling and the single JSON serialization boundary.
 type ProviderRequestTool struct {
-	Type        string                `json:"type"`
-	Name        string                `json:"name,omitempty"`
-	Description string                `json:"description,omitempty"`
-	Parameters  any                   `json:"parameters,omitempty"`
-	Strict      *bool                 `json:"strict,omitempty"`
-	Format      any                   `json:"format,omitempty"`
-	Tools       []ProviderRequestTool `json:"tools,omitempty"`
-	Execution   string                `json:"execution,omitempty"`
+	Type              string                `json:"type"`
+	Name              string                `json:"name,omitempty"`
+	Description       string                `json:"description,omitempty"`
+	Parameters        any                   `json:"parameters,omitempty"`
+	Strict            *bool                 `json:"strict,omitempty"`
+	Format            any                   `json:"format,omitempty"`
+	Tools             []ProviderRequestTool `json:"tools,omitempty"`
+	Execution         string                `json:"execution,omitempty"`
+	ServerLabel       string                `json:"server_label,omitempty"`
+	ServerDescription string                `json:"server_description,omitempty"`
+	ServerURL         string                `json:"server_url,omitempty"`
+	ConnectorID       string                `json:"connector_id,omitempty"`
+	TunnelID          string                `json:"tunnel_id,omitempty"`
+	AllowedTools      *[]string             `json:"allowed_tools,omitempty"`
+	AllowedCallers    *[]string             `json:"allowed_callers,omitempty"`
+	RequireApproval   any                   `json:"require_approval,omitempty"`
+	Headers           map[string]string     `json:"headers,omitempty"`
+	Authorization     string                `json:"authorization,omitempty"`
+	DeferLoading      *bool                 `json:"defer_loading,omitempty"`
 }
 
-func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) ([]ProviderRequestTool, error) {
+func encodeResponsesTools(tools []canonical.ToolDeclaration, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	for _, tool := range tools {
-		if decl, ok := tool.Function(); ok {
-			if strict, specified := decl.Strict().Get(); specified && strict {
-				if err := emitResponsesRequestDecision(sink, exchangeID, compat.RequestToolsSchemaStrict, compat.Exact); err != nil {
-					return nil, err
-				}
-				break
-			}
-		}
-	}
 	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
-		wire, err := encodeResponsesTool(tool)
+		wire, err := encodeResponsesTool(tool, access)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +50,7 @@ func encodeResponsesTools(tools []canonical.ToolDeclaration, sink compat.Sink, e
 	return out, nil
 }
 
-func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, error) {
+func encodeResponsesTool(tool canonical.ToolDeclaration, access mcp.Access) (ProviderRequestTool, error) {
 	if tool.Kind() == "" {
 		return ProviderRequestTool{}, canonical.BadRequest("response request tool declarations are invalid")
 	}
@@ -62,9 +64,12 @@ func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, e
 		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
 	}
 	if namespace, ok := tool.Namespace(); ok {
+		if source, isMCP := namespace.MCPSource(); isMCP {
+			return encodeResponsesMCPTool(namespace, source, access)
+		}
 		children := make([]ProviderRequestTool, 0, len(namespace.Tools()))
 		for _, child := range namespace.Tools() {
-			wire, err := encodeResponsesTool(child)
+			wire, err := encodeResponsesTool(child, access)
 			if err != nil {
 				return ProviderRequestTool{}, err
 			}
@@ -84,7 +89,45 @@ func encodeResponsesTool(tool canonical.ToolDeclaration) (ProviderRequestTool, e
 		}
 		return ProviderRequestTool{Type: "tool_search", Description: discovery.Description(), Parameters: parameters, Execution: execution}, nil
 	}
-	return ProviderRequestTool{}, provider.NewIncompatibleTarget("Responses cannot represent this canonical tool declaration type")
+	return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
+}
+
+func encodeResponsesMCPTool(namespace canonical.ToolNamespace, source canonical.MCPSource, access mcp.Access) (ProviderRequestTool, error) {
+	if source.Approval().Kind() != canonical.MCPApprovalNever {
+		return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(namespace.Key()), "Responses MCP approval requires an approval request/response lifecycle")
+	}
+	wire := ProviderRequestTool{
+		Type:              "mcp",
+		ServerLabel:       namespace.Key().Name(),
+		ServerDescription: namespace.Description(),
+		RequireApproval:   "never",
+	}
+	switch source.Kind() {
+	case canonical.MCPSourceURL:
+		wire.ServerURL, _ = source.URL()
+	case canonical.MCPSourceConnectorID:
+		wire.ConnectorID, _ = source.ConnectorID()
+	case canonical.MCPSourceTunnelID:
+		wire.TunnelID, _ = source.TunnelID()
+	default:
+		return ProviderRequestTool{}, canonical.InternalError("canonical MCP source kind is invalid")
+	}
+	if allowed, specified := source.AllowedTools().Get(); specified {
+		copied := append([]string(nil), allowed...)
+		wire.AllowedTools = &copied
+	}
+	if callers, specified := source.AllowedCallers().Get(); specified {
+		copied := append([]string(nil), callers...)
+		wire.AllowedCallers = &copied
+	}
+	if source.Loading() == canonical.MCPLoadingDeferred {
+		deferred := true
+		wire.DeferLoading = &deferred
+	}
+	private := access.ForSource(namespace.Key())
+	wire.Authorization = private.Authorization
+	wire.Headers = private.Headers
+	return wire, nil
 }
 
 func responsesNamespaceLeafName(name string) string {
@@ -162,7 +205,7 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 	return json.RawMessage(raw), nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (any, error) {
+func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.ValidateForTools(tools); err != nil {
 		return nil, err
 	}

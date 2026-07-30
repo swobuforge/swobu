@@ -3,30 +3,19 @@ package profile
 import (
 	"slices"
 	"strings"
-
-	"github.com/swobuforge/swobu/internal/compat"
 )
 
 // ProviderDeploymentRecord carries one catalog-visible deployment plus the discovery
 // facts the UI and probe surfaces can render without re-inferring provider
 // policy.
 type ProviderDeploymentRecord struct {
-	Name                       string                         `json:"name"`
-	ModelName                  string                         `json:"model_name,omitempty"`
-	ModelPublisher             string                         `json:"model_publisher,omitempty"`
-	ModelVersion               string                         `json:"model_version,omitempty"`
-	Family                     string                         `json:"family,omitempty"`
-	SupportedProviderProtocols []string                       `json:"supported_provider_protocols,omitempty"`
-	DefaultProviderProtocol    string                         `json:"default_provider_protocol,omitempty"`
-	Capabilities               []ProviderDeploymentCapability `json:"facts,omitempty"`
-}
-
-// ProviderDeploymentCapability records one explicit runtime observation that
-// can affect selection or gating. Missing support stays unknown and therefore
-// conservative.
-type ProviderDeploymentCapability struct {
-	Feature compat.Feature `json:"feature"`
-	Support compat.Support `json:"support"`
+	Name                       string   `json:"name"`
+	ModelName                  string   `json:"model_name,omitempty"`
+	ModelPublisher             string   `json:"model_publisher,omitempty"`
+	ModelVersion               string   `json:"model_version,omitempty"`
+	Family                     string   `json:"family,omitempty"`
+	SupportedProviderProtocols []string `json:"supported_provider_protocols,omitempty"`
+	DefaultProviderProtocol    string   `json:"default_provider_protocol,omitempty"`
 }
 
 // NewProviderDeployment builds one immutable deployment descriptor from raw
@@ -39,7 +28,6 @@ func NewProviderDeployment(
 	family string,
 	supportedProtocols []string,
 	defaultProtocol string,
-	facts ...ProviderDeploymentCapability,
 ) ProviderDeploymentRecord {
 	deployment := ProviderDeploymentRecord{
 		Name:                       strings.TrimSpace(name),           // swobu:io-string source=boundary
@@ -49,9 +37,6 @@ func NewProviderDeployment(
 		Family:                     strings.TrimSpace(family),         // swobu:io-string source=boundary
 		SupportedProviderProtocols: CloneModelIDs(supportedProtocols),
 		DefaultProviderProtocol:    strings.TrimSpace(defaultProtocol), // swobu:io-string source=boundary
-	}
-	if len(facts) > 0 {
-		deployment.Capabilities = slices.Clone(facts)
 	}
 	return deployment
 }
@@ -82,9 +67,6 @@ func CloneProviderDeployments(deployments []ProviderDeploymentRecord) []Provider
 		deployment.Family = strings.TrimSpace(deployment.Family)                                   // swobu:io-string source=boundary
 		deployment.DefaultProviderProtocol = strings.TrimSpace(deployment.DefaultProviderProtocol) // swobu:io-string source=boundary
 		deployment.SupportedProviderProtocols = CloneModelIDs(deployment.SupportedProviderProtocols)
-		if len(deployment.Capabilities) > 0 {
-			deployment.Capabilities = slices.Clone(deployment.Capabilities)
-		}
 		out = append(out, deployment)
 	}
 	return slices.Clone(out)

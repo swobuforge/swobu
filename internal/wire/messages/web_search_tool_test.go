@@ -17,7 +17,7 @@ import (
 func TestDecodeMessagesWebSearchDropsDynamicCallerPreference(t *testing.T) {
 	base := ProviderRequestTool{Type: "web_search_20260209", Name: "web_search"}
 	base.AllowedCallers = []string{"code_execution"}
-	declaration, err := decodeMessagesWebSearchTool(base, 0, nil, "")
+	declaration, err := decodeMessagesWebSearchTool(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,17 +35,8 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	if tools := canonicaltest.Tools(decoded.Request.Request); len(tools) != 1 || tools[0].Kind() != canonical.ToolKindWebSearch {
 		t.Fatalf("tools = %#v", tools)
 	}
-	want := map[compat.Subject]bool{}
-	for _, field := range []string{"max_uses", "allowed_domains", "blocked_domains", "user_location", "allowed_callers", "response_inclusion"} {
-		want[compat.Subject("wire:/tools/0/"+field)] = true
-	}
-	if len(decoded.Decisions) != len(want) {
-		t.Fatalf("decisions = %#v", decoded.Decisions)
-	}
-	for _, decision := range decoded.Decisions {
-		if decision.Feature != compat.RequestTools || decision.Outcome != compat.Drop || !want[decision.Subject] {
-			t.Fatalf("decision = %#v", decision)
-		}
+	if len(decoded.Changes) != 0 {
+		t.Fatalf("wire-only preferences created semantic changes: %#v", decoded.Changes)
 	}
 }
 
@@ -97,8 +88,8 @@ func TestDecodeResponseBufferedErasesUnknownWebSearchChildren(t *testing.T) {
 			{"type":"web_search_result_location","url":"https://example.com/x","title":"Example"}
 		]}
 	]}`)
-	sink := &compat.RecordingSink{}
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", sink)
+	var changes []compat.Change
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,15 +104,12 @@ func TestDecodeResponseBufferedErasesUnknownWebSearchChildren(t *testing.T) {
 	if len(response.Items()) != 3 {
 		t.Fatalf("items = %#v, want call, result, and cited message", response.Items())
 	}
-	want := map[compat.Subject]struct{}{
-		"wire:/content/1/content/0/type":   {},
-		"wire:/content/2/citations/0/type": {},
+	if len(changes) != 2 {
+		t.Fatalf("changes = %#v", changes)
 	}
-	if len(sink.Decisions()) != len(want) {
-		t.Fatalf("decisions = %#v", sink.Decisions())
-	}
-	for _, decision := range sink.Decisions() {
-		if _, ok := want[decision.Subject]; !ok || decision.Outcome != compat.Drop {
+	for index, decision := range changes {
+		item, ok := decision.Occurrence.ResponseItem()
+		if !ok || item != uint32(index+1) || decision.Kind != compat.Omission {
 			t.Fatalf("decision = %#v", decision)
 		}
 	}
@@ -154,14 +142,14 @@ func TestDecodeResponseBufferedRejectsMissingNestedWebSearchDiscriminators(t *te
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			sink := &compat.RecordingSink{}
-			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", sink)
+			var changes []compat.Change
+			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", &changes)
 			var backendErr canonical.BackendError
 			if !errors.As(err, &backendErr) {
 				t.Fatalf("error = %v, want backend error", err)
 			}
-			if len(sink.Decisions()) != 0 {
-				t.Fatalf("decisions = %#v, want no Drop", sink.Decisions())
+			if len(changes) != 0 {
+				t.Fatalf("changes = %#v, want no successful changes", changes)
 			}
 		})
 	}
@@ -224,7 +212,7 @@ func TestMessagesWebSearchCallerMalformationRemainsBadRequest(t *testing.T) {
 					"s",
 					json.RawMessage(`[{"url":"https://example.com"}]`),
 					false,
-					messagesProjectionEvidence{feature: compat.RequestItemsKind},
+					messagesProjectionEvidence{feature: canonical.RequestItemsKind},
 				)
 				return err
 			},
@@ -235,7 +223,7 @@ func TestMessagesWebSearchCallerMalformationRemainsBadRequest(t *testing.T) {
 				_, err := decodeMessagesCitedText(
 					"answer",
 					[]messagesCitationDTO{{Type: "web_search_result_location", URL: "not-a-url"}},
-					messagesProjectionEvidence{feature: compat.RequestItemsKind},
+					messagesProjectionEvidence{feature: canonical.RequestItemsKind},
 				)
 				return err
 			},
@@ -256,7 +244,7 @@ func TestDecodeResponseBufferedRejectsAllErasedWebSearchResult(t *testing.T) {
 		{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},
 		{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"future_result"}]}
 	]}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &compat.RecordingSink{}); err == nil ||
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil); err == nil ||
 		!strings.Contains(err.Error(), "backend error from messages") {
 		t.Fatalf("error = %v, want backend-origin all-erased result", err)
 	}

@@ -1,8 +1,6 @@
 package messages
 
 import (
-	"context"
-
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -11,9 +9,9 @@ import (
 // projectMessagesWebSearchLifecycles removes only completed call/result pairs
 // that Messages cannot express exactly. The leaf encoders remain strict so an
 // unresolved call still rejects and can drive ordinary target fallback.
-func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature compat.Feature) ([]canonical.CanonicalItem, []compat.Decision, error) {
+func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature canonical.CapabilityPath) ([]canonical.CanonicalItem, []compat.Change, error) {
 	drop := map[int]struct{}{}
-	decisions := make([]compat.Decision, 0)
+	changes := make([]compat.Change, 0)
 	var matcher canonical.ToolEffectMatcher
 	effects := make([]canonical.ToolEffect, 0)
 	for index, item := range items {
@@ -31,10 +29,12 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
-			if feature == compat.ResponseItemsKind {
+			if feature == canonical.ResponseItemsKind {
 				return nil, nil, canonical.NewBackendError("messages", 0, "backend returned an invalid web-search lifecycle: "+err.Error(), "")
 			}
-			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent invalid canonical web-search lifecycle: " + err.Error())
+			return nil, nil, provider.IncompatibleTarget(compat.NewUnsupported(
+				compat.NewIssue(feature, canonical.Occurrence{}),
+			))
 		}
 		if completed != nil {
 			effects = append(effects, *completed)
@@ -51,14 +51,16 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 			continue
 		}
 		if effect.ResultIndex < 0 {
-			return nil, nil, provider.NewIncompatibleTarget("Messages cannot represent unresolved canonical web-search call " + effect.CallID.String())
+			return nil, nil, provider.IncompatibleTarget(compat.NewUnsupported(
+				compat.NewIssue(feature, canonical.CallOccurrence(effect.CallID)),
+			))
 		}
 		drop[effect.CallIndex] = struct{}{}
 		drop[effect.ResultIndex] = struct{}{}
-		decisions = append(decisions, compat.Decision{
-			Feature: feature,
-			Outcome: compat.Drop,
-			Subject: compat.Subject("web_search:" + effect.CallID.String()),
+		changes = append(changes, compat.Change{
+			Capability: feature,
+			Kind:       compat.Omission,
+			Occurrence: canonical.CallOccurrence(effect.CallID),
 		})
 	}
 	if len(drop) == 0 {
@@ -71,15 +73,5 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		out = append(out, item)
 	}
-	return out, decisions, nil
-}
-
-func commitMessagesProjectionDecisions(sink compat.Sink, exchangeID string, decisions []compat.Decision) error {
-	if sink == nil || len(decisions) == 0 {
-		return nil
-	}
-	if err := sink.Commit(context.Background(), exchangeID, decisions); err != nil {
-		return canonical.InternalError("compatibility decision sink commit failed")
-	}
-	return nil
+	return out, changes, nil
 }

@@ -197,9 +197,9 @@ func assertMessagesReaderBackendErrorWithoutDrop(t *testing.T, stream *messagesE
 		if err == io.EOF || !strings.Contains(err.Error(), "backend error") {
 			t.Fatalf("stream error = %v, want backend-origin missing discriminator", err)
 		}
-		for _, decision := range stream.Decisions() {
-			if decision.Outcome == compat.Drop {
-				t.Fatalf("missing discriminator recorded as additive erasure: %#v", stream.Decisions())
+		for _, decision := range stream.Changes() {
+			if decision.Kind == compat.Omission {
+				t.Fatalf("missing discriminator recorded as additive erasure: %#v", stream.Changes())
 			}
 		}
 		return
@@ -314,8 +314,8 @@ func TestMessagesStreamUnknownBlockCannotSatisfyToolUseStop(t *testing.T) {
 			if err == io.EOF {
 				t.Fatal("unknown-only tool block reached successful stream EOF")
 			}
-			if len(stream.Decisions()) != 1 || stream.Decisions()[0].Outcome != compat.Drop {
-				t.Fatalf("compatibility decisions = %#v", stream.Decisions())
+			if len(stream.Changes()) != 1 || stream.Changes()[0].Kind != compat.Omission {
+				t.Fatalf("compatibility changes = %#v", stream.Changes())
 			}
 			return
 		}
@@ -449,17 +449,18 @@ func TestMessagesStreamRecordsUnknownDeltaKindOncePerKnownBlock(t *testing.T) {
 		}
 	}
 	drops := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Subject == compat.Subject("wire:/content_blocks/0/deltas/type") {
+	for _, decision := range stream.Changes() {
+		item, ok := decision.Occurrence.ResponseItem()
+		if ok && item == 0 {
 			drops++
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("compatibility decisions = %#v, want one unknown-delta decision per known block", stream.Decisions())
+		t.Fatalf("compatibility changes = %#v, want one unknown-delta decision per known block", stream.Changes())
 	}
 }
 
-func TestMessagesStreamRecordsUnknownTopLevelEventOncePerTypeAndBlock(t *testing.T) {
+func TestMessagesStreamIgnoresUnknownTopLevelWireEvents(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"index\":3,\"value\":\"one\"}\n\n" +
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"index\":3,\"value\":\"two\"}\n\n" +
@@ -476,18 +477,12 @@ func TestMessagesStreamRecordsUnknownTopLevelEventOncePerTypeAndBlock(t *testing
 			t.Fatal(err)
 		}
 	}
-	drops := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
-			drops++
-		}
-	}
-	if drops != 2 {
-		t.Fatalf("unknown top-level decisions = %d, want one per event type and block; all decisions = %#v", drops, stream.Decisions())
+	if len(stream.Changes()) != 0 {
+		t.Fatalf("wire-only events created semantic changes: %#v", stream.Changes())
 	}
 }
 
-func TestMessagesStreamUnknownTopLevelEventDoesNotUseGenericIDForDeduplication(t *testing.T) {
+func TestMessagesStreamIgnoresUnknownTopLevelEventIDs(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"id\":\"event_1\",\"value\":\"one\"}\n\n" +
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"id\":\"event_2\",\"value\":\"two\"}\n\n" +
@@ -503,13 +498,7 @@ func TestMessagesStreamUnknownTopLevelEventDoesNotUseGenericIDForDeduplication(t
 			t.Fatal(err)
 		}
 	}
-	drops := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
-			drops++
-		}
-	}
-	if drops != 1 {
-		t.Fatalf("unknown top-level decisions = %d, want one per event type without semantic identity; all decisions = %#v", drops, stream.Decisions())
+	if len(stream.Changes()) != 0 {
+		t.Fatalf("wire-only events created semantic changes: %#v", stream.Changes())
 	}
 }

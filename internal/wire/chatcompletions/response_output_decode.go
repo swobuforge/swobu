@@ -2,7 +2,6 @@ package chatcompletions
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -45,8 +44,8 @@ func admitChatToolCallUnion(rawType string, hasFunction, hasCustom, complete boo
 	}
 }
 
-func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.RawMessage, toolCalls []toolCallBody, sink compat.Sink, exchangeID string) ([]canonical.CanonicalItem, error) {
-	message, hasMessage, err := decodeOpenAIContentMessage(content, sink, exchangeID)
+func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.RawMessage, toolCalls []toolCallBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
+	message, hasMessage, err := decodeOpenAIContentMessage(content, changeLog, exchangeID)
 	if err != nil {
 		return nil, canonical.InternalError("chat completions response content is unsupported")
 	}
@@ -65,7 +64,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			return nil, err
 		}
 		if erased {
-			if err := emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/message/tool_calls/%d/type", index))); err != nil {
+			if err := appendChatOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 				return nil, err
 			}
 			continue
@@ -118,7 +117,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 	return out, nil
 }
 
-func decodeOpenAIContentMessage(raw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.CanonicalItem, bool, error) {
+func decodeOpenAIContentMessage(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalItem, bool, error) {
 	parts, err := openaiwire.DecodeContentParts(raw, "chat completions response content is invalid")
 	if err != nil {
 		return canonical.CanonicalItem{}, false, err
@@ -142,7 +141,7 @@ func decodeOpenAIContentMessage(raw json.RawMessage, sink compat.Sink, exchangeI
 				content = append(content, canonical.NewTextMessagePart(text))
 			}
 		default:
-			return emitChatCompletionsCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/choices/0/message/content/%d/type", index)))
+			return appendChatOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponsePartOccurrence(canonical.ItemPosition{Item: 0, Part: uint32(index)}))
 		}
 		return nil
 	})

@@ -37,14 +37,17 @@ func TestDefaultResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
 	}
 }
 
-type failingCheckpointStore struct{}
+type failingCheckpointStore struct{ puts *int }
 
 func (failingCheckpointStore) Get(context.Context, string, canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
 	return session.Checkpoint{}, false, nil
 }
 
-func (failingCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
-	return errors.New("forced checkpoint store failure")
+func (s failingCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
+	if s.puts != nil {
+		*s.puts++
+	}
+	return errors.New("forced checkpoint store failure at /private/checkpoints")
 }
 
 func (failingCheckpointStore) FindByHistory(context.Context, string, historyfingerprint.History) (session.HistoryMatch, error) {
@@ -319,8 +322,14 @@ func TestRunnerCheckpointCommitFailureRejectsBufferedBodyBeforePublication(t *te
 }
 
 func TestRunnerCheckpointCommitFailureReplacesStreamingTerminalSuccess(t *testing.T) {
-	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader("ignored")))).
-		WithCheckpointStore(failingCheckpointStore{}).
+	providerCalls := 0
+	checkpointPuts := 0
+	transport := streamingProviderTransport(io.NopCloser(strings.NewReader("ignored")))
+	runner := withRuntime(func(ctx context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+		providerCalls++
+		return transport(ctx, target, document)
+	}).
+		WithCheckpointStore(failingCheckpointStore{puts: &checkpointPuts}).
 		WithResponseIDs(deterministicResponseIDGenerator{})
 
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -347,17 +356,27 @@ func TestRunnerCheckpointCommitFailureReplacesStreamingTerminalSuccess(t *testin
 	if strings.Contains(string(raw), `"status":"completed"`) {
 		t.Fatalf("published terminal success on failed checkpoint commit: %s", raw)
 	}
+	if strings.Contains(string(raw), "/private/checkpoints") || strings.Contains(string(raw), "forced checkpoint") {
+		t.Fatalf("public terminal exposed checkpoint implementation cause: %s", raw)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls = %d, want one without checkpoint retry", providerCalls)
+	}
+	if checkpointPuts != 1 {
+		t.Fatalf("checkpoint puts = %d, want one", checkpointPuts)
+	}
 }
 
-func TestCheckpointCommitFailureSuppressesEveryProtocolTerminalMarker(t *testing.T) {
+func TestCheckpointCommitFailureProjectsEveryProtocolFailureTerminal(t *testing.T) {
 	tests := []struct {
 		name      string
 		family    canonical.ClientFamily
 		forbidden []string
+		required  []string
 	}{
-		{name: "chat completions", family: canonical.ClientFamilyChatCompletions, forbidden: []string{`"finish_reason"`, "data: [DONE]"}},
-		{name: "messages", family: canonical.ClientFamilyMessages, forbidden: []string{"event: message_delta", "event: message_stop", `"type":"message_stop"`}},
-		{name: "responses", family: canonical.ClientFamilyResponses, forbidden: []string{"event: response.completed", `"type":"response.completed"`}},
+		{name: "chat completions", family: canonical.ClientFamilyChatCompletions, forbidden: []string{`"finish_reason"`}, required: []string{`"code":"INTERNAL_ERROR"`, `"type":"swobu_stream_error"`, "data: [DONE]"}},
+		{name: "messages", family: canonical.ClientFamilyMessages, forbidden: []string{"event: message_delta", "event: message_stop", `"type":"message_stop"`}, required: []string{"event: error", `"code":"INTERNAL_ERROR"`}},
+		{name: "responses", family: canonical.ClientFamilyResponses, forbidden: []string{"event: response.completed", `"type":"response.completed"`}, required: []string{`"type":"response.failed"`, `"code":"INTERNAL_ERROR"`}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -394,6 +413,11 @@ func TestCheckpointCommitFailureSuppressesEveryProtocolTerminalMarker(t *testing
 			for _, marker := range test.forbidden {
 				if strings.Contains(string(raw), marker) {
 					t.Fatalf("published terminal marker %q before checkpoint commit:\n%s", marker, raw)
+				}
+			}
+			for _, marker := range test.required {
+				if !strings.Contains(string(raw), marker) {
+					t.Fatalf("missing failure terminal marker %q:\n%s", marker, raw)
 				}
 			}
 		})

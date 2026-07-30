@@ -17,6 +17,9 @@
 // is one protocol message; it never invents messages from io.Reader chunks.
 // One connection-owned reader cancels the connection context on disconnect,
 // while response.create exchanges are processed serially with distinct
-// exchange identities. This package must not take on provider-dialect logic or
-// redefine canonical request semantics.
+// exchange identities. Responses WebSocket validates a loopback TCP peer,
+// literal loopback request authority, and exact browser origin before upgrade;
+// native loopback clients may omit Origin. Forwarded headers are not trust
+// inputs. This package must not take on provider-dialect logic or redefine
+// canonical request semantics.
 package httpapi

@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
-	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 func TestMessagesCitationExcerptRoundTripsAsCitationEvidence(t *testing.T) {
@@ -84,12 +83,12 @@ func TestMessagesResponseOmitsCompletedUnrepresentableWebSearchPair(t *testing.T
 			if !bytes.Contains(raw, []byte(`"text":"answer"`)) || !bytes.Contains(raw, []byte(`"url":"https://example.com/source"`)) {
 				t.Fatalf("text or citation was lost: %s", raw)
 			}
-			if len(encoded.Decisions) != 1 || encoded.Decisions[0] != (compat.Decision{
-				Feature: compat.ResponseItemsKind,
-				Outcome: compat.Drop,
-				Subject: compat.Subject("web_search:search_original"),
+			if len(encoded.Changes) != 1 || encoded.Changes[0] != (compat.Change{
+				Capability: canonical.ResponseItemsKind,
+				Kind:       compat.Omission,
+				Occurrence: canonical.CallOccurrence(callID),
 			}) {
-				t.Fatalf("decisions = %#v", encoded.Decisions)
+				t.Fatalf("changes = %#v", encoded.Changes)
 			}
 		})
 	}
@@ -125,13 +124,13 @@ func TestMessagesStreamingResponseOmitsCompletedUnrepresentableWebSearchPair(t *
 	if !bytes.Contains(raw, []byte("answer")) {
 		t.Fatalf("assistant text was lost: %s", raw)
 	}
-	decisions := encoded.TerminalDecisions.Decisions()
-	if len(decisions) != 1 || decisions[0] != (compat.Decision{
-		Feature: compat.ResponseItemsKind,
-		Outcome: compat.Drop,
-		Subject: "web_search:search_original",
+	changes := encoded.Completion.Snapshot().Changes
+	if len(changes) != 1 || changes[0] != (compat.Change{
+		Capability: canonical.ResponseItemsKind,
+		Kind:       compat.Omission,
+		Occurrence: canonical.CallOccurrence(callID),
 	}) {
-		t.Fatalf("decisions = %#v", decisions)
+		t.Fatalf("changes = %#v", changes)
 	}
 }
 
@@ -149,9 +148,9 @@ func TestMessagesProjectionPairsReusedWebSearchIDByOccurrence(t *testing.T) {
 		[]canonical.MessagePart{canonical.NewTextMessagePart("answer")},
 	)
 
-	projected, decisions, err := projectMessagesWebSearchLifecycles(
+	projected, changes, err := projectMessagesWebSearchLifecycles(
 		[]canonical.CanonicalItem{call, result, call, result, message},
-		compat.ResponseItemsKind,
+		canonical.ResponseItemsKind,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -159,8 +158,8 @@ func TestMessagesProjectionPairsReusedWebSearchIDByOccurrence(t *testing.T) {
 	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
 		t.Fatalf("projected items = %#v, want only message", projected)
 	}
-	if len(decisions) != 2 {
-		t.Fatalf("decisions = %#v, want two occurrence-local drops", decisions)
+	if len(changes) != 2 {
+		t.Fatalf("changes = %#v, want two occurrence-local drops", changes)
 	}
 }
 
@@ -215,22 +214,36 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("continue")})
 
 	completed := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable, resultItem, message}})
-	_, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (struct{}, error) {
-		_, err := EncodeCarrierWithDecisions(completed, delivery.BufferedDelivery(), sink, "exchange")
-		return struct{}{}, err
-	})
+	var changes []compat.Change
+	_, err := EncodeCarrierWithChanges(completed, delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decisions) != 1 || decisions[0].Feature != compat.RequestItemsKind || decisions[0].Outcome != compat.Drop || decisions[0].Subject != "web_search:search_original" {
-		t.Fatalf("decisions = %#v", decisions)
+	if len(changes) != 1 {
+		t.Fatalf("changes = %#v", changes)
+	}
+	call, ok := changes[0].Occurrence.Call()
+	if changes[0].Capability != canonical.RequestItemsKind || changes[0].Kind != compat.Omission || !ok || call != callID {
+		t.Fatalf("changes = %#v", changes)
 	}
 
 	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
-	_, err = EncodeCarrierWithDecisions(unresolved, delivery.BufferedDelivery(), nil, "")
+	_, err = EncodeCarrierWithChanges(unresolved, delivery.BufferedDelivery(), nil, "")
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
+	}
+	var unsupported compat.UnsupportedError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("error = %T %v, want canonical unsupported issue", err, err)
+	}
+	issues := unsupported.Issues()
+	if len(issues) != 1 {
+		t.Fatalf("unsupported issues = %#v", issues)
+	}
+	issueCall, ok := issues[0].Occurrence().Call()
+	if issues[0].Capability() != canonical.RequestItemsKind || !ok || issueCall != callID {
+		t.Fatalf("unsupported issues = %#v", issues)
 	}
 }
 
@@ -238,7 +251,7 @@ func TestMessagesSingleQuerySearchPreservesOriginalCallID(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("search_original")
 	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"one"}}))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{call}})
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), nil, "")
+	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

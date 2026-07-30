@@ -17,8 +17,8 @@ import (
 
 func TestDecodeMessagesProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Here is the result"},{"type":"image","source":{"type":"url","url":"https://example.test/output.png"}}]}`)
-	sink := &recordingDecisionSink{}
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", sink)
+	var changes []compat.Change
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +39,15 @@ func TestDecodeMessagesProviderAssistantImageBesideTextDropsImage(t *testing.T) 
 		t.Fatalf("surviving text = %q, %v", text, ok)
 	}
 	drops := 0
-	for _, decision := range sink.effects {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop &&
-			decision.Subject == compat.Subject("wire:/content/1/type") {
+	for _, decision := range changes {
+		item, occurrenceOK := decision.Occurrence.ResponseItem()
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission &&
+			occurrenceOK && item == 1 {
 			drops++
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("assistant image drop decisions = %d, want 1; all=%#v", drops, sink.effects)
+		t.Fatalf("assistant image omission changes = %d, want 1; all=%#v", drops, changes)
 	}
 }
 
@@ -73,7 +74,7 @@ func TestEncodeMessagesImages_PreservesDirectURLAndNestedToolResultImages(t *tes
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message, result}})
 
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,12 +149,12 @@ func TestEncodeMessagesImageDetailOmitsWithDecision(t *testing.T) {
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
-	sink := &recordingDecisionSink{}
-	if _, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), sink, "ex"); err != nil {
+	var changes []compat.Change
+	if _, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex"); err != nil {
 		t.Fatalf("Messages lowering failed: %v", err)
 	}
-	if len(sink.effects) != 1 || sink.effects[0].Feature != compat.RequestItemsMessageImageDetail || sink.effects[0].Outcome != compat.Approx {
-		t.Fatalf("decisions = %#v", sink.effects)
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsMessageImageDetail || changes[0].Kind != compat.Approximation {
+		t.Fatalf("changes = %#v", changes)
 	}
 }
 
@@ -161,7 +162,7 @@ func TestEncodeMessagesImages_URLCarrierUsesURLBlock(t *testing.T) {
 	image, _ := canonical.NewURLImage("https://example.test/bedrock.png", canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "ex")
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestEncodeMessagesToolResult_MultipleTextPartsRemainAnArray(t *testing.T) {
 		canonical.NewTextToolResultPart("two"),
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
-	doc, err := EncodeCarrierWithDecisions(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,11 @@
 // Package session owns immutable state required to resume a logical model
 // session across independent requests.
 //
-// Each successfully client-encoded response must commit one checkpoint keyed by
-// its Swobu response ID and partitioned by workspace. Client wire storage hints
+// Each successfully client-encoded completed response must commit one
+// self-contained checkpoint keyed by its Swobu response ID and partitioned by
+// workspace. The checkpoint retains the complete effective request, canonical
+// response, and occurrence-bound resolved media. It has no parent chain,
+// request-delta graph, lifecycle status, or provider sidecar. Client wire storage hints
 // cannot suppress this correctness state: provider-specific opaque thinking and
 // resolved media may be absent from the client projection but required by a
 // later continuation. An optional opaque
@@ -18,6 +21,11 @@
 // becoming history. They expire once the turn completes. Explicit compute or
 // effort conflicts reject. Partial result batches are legal, while duplicate
 // or foreign call IDs are malformed continuations.
+//
+// Checkpoints are a bounded process-local recent window. Expiry, reclamation,
+// and daemon restart forget them; this package does not promise restart-safe
+// persistence. An unresolved Swobu response ID is never reinterpreted as an
+// external provider-native selector.
 //
 // Checkpoints also retain validated external-media bytes bound to exact
 // canonical request occurrences, so resumed execution never depends on

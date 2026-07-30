@@ -23,16 +23,16 @@ func TestMessagesHoistsMidHistoryContextWithEvidence(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "after"),
 		},
 	})
-	sink := &recordingDecisionSink{}
-	document, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "exchange")
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
-	for _, decision := range sink.effects {
-		found = found || decision.Feature == compat.RequestInstructions && decision.Outcome == compat.Approx
+	for _, decision := range changes {
+		found = found || decision.Capability == canonical.RequestInstructions && decision.Kind == compat.Approximation
 	}
 	if len(document.RawBytes()) == 0 || !found {
-		t.Fatalf("document=%s decisions=%#v", document.RawBytes(), sink.effects)
+		t.Fatalf("document=%s changes=%#v", document.RawBytes(), changes)
 	}
 }

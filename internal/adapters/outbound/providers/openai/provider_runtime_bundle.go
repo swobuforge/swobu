@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
-	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
@@ -41,11 +40,12 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 // chatCompletionsCodec owns OpenAI's max_completion_tokens request spelling.
 type chatCompletionsCodec struct{ protocolcodec.Codec }
 
-func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
 	}
-	document, decisions, err := shared.WithAccumulatedDecisions(func(sink compat.Sink) (chatcompletions.ProviderRequestDocument, error) {
+	var changes []compat.Change
+	document, err := func(sink *[]compat.Change) (chatcompletions.ProviderRequestDocument, error) {
 		document, err := chatcompletions.LowerProviderRequestDocument(
 			req.Canonical,
 			req.Delivery,
@@ -59,16 +59,16 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 			return chatcompletions.ProviderRequestDocument{}, err
 		}
 		return document, nil
-	})
+	}(&changes)
 	if err != nil {
-		return carrier.Document{}, decisions, err
+		return carrier.Document{}, changes, err
 	}
 	if document.MaxTokens != nil {
 		document.MaxCompletionTokens = document.MaxTokens
 		document.MaxTokens = nil
 	}
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, decisions, err
+	return encoded, changes, err
 }
 
 var _ provider.Codec = chatCompletionsCodec{}

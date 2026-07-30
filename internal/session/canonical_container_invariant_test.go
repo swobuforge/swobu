@@ -25,6 +25,17 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 
 	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"HistoryFingerprint", "Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
 	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia"})
+
+	store := reflect.TypeOf((*Store)(nil)).Elem()
+	wantMethods := []string{"FindByHistory", "Get", "Put"}
+	if store.NumMethod() != len(wantMethods) {
+		t.Fatalf("Store has %d methods, want %d", store.NumMethod(), len(wantMethods))
+	}
+	for idx, methodName := range wantMethods {
+		if store.Method(idx).Name != methodName {
+			t.Fatalf("Store method %d = %q, want %q", idx, store.Method(idx).Name, methodName)
+		}
+	}
 }
 
 func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
@@ -57,7 +68,10 @@ func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 		"Record.Native",
 		"ProviderEncodeInput.NativeContinuation",
 		"EventMetadataFields.Raw",
-		"map[compat.Feature]any",
+		"map[canonical.CapabilityPath]any",
+		"ParentContinuation",
+		"ContinuationChain",
+		"Chain(ctx",
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {

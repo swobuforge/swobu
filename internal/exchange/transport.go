@@ -2,17 +2,13 @@ package exchange
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // ClientResponse is the sealed client-delivery sum. Its concrete variants
@@ -20,15 +16,18 @@ import (
 type ClientResponse interface{ isClientResponse() }
 
 type BufferedResponse struct {
-	Response transportpkg.Response
+	Response   carrier.Response
+	completion *wire.ResponseCompletion
 }
 
 type StreamingResponse struct {
-	Response transportpkg.Response
+	Response   carrier.Response
+	completion *wire.ResponseCompletion
 }
 
 type MessageStreamingResponse struct {
-	Response transportpkg.MessageResponse
+	Response   carrier.MessageTransportResponse
+	completion *wire.ResponseCompletion
 }
 
 func (BufferedResponse) isClientResponse()         {}
@@ -40,22 +39,22 @@ func NewBufferedResponse(doc carrier.Document) ClientResponse {
 	if header.Get("Content-Type") == "" {
 		header.Set("Content-Type", "application/json")
 	}
-	return BufferedResponse{Response: transportpkg.Response{
+	return BufferedResponse{Response: carrier.Response{
 		Status: http.StatusOK,
 		Header: header,
 		Body:   io.NopCloser(bytes.NewReader(doc.RawBytes())),
 	}}
 }
 
-func newBufferedClientResponse(body io.ReadCloser) ClientResponse {
-	return BufferedResponse{Response: transportpkg.Response{
+func newBufferedClientResponse(body *bufferedClientBody) ClientResponse {
+	return BufferedResponse{Response: carrier.Response{
 		Status: http.StatusOK,
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   body,
-	}}
+	}, completion: body.completion}
 }
 
-func NewStreamingResponse(stream carrier.ByteStream) ClientResponse {
+func NewStreamingResponse(stream carrier.ByteStream, completion *wire.ResponseCompletion) ClientResponse {
 	header := cloneHeader(stream.Header)
 	if header.Get("Content-Type") == "" {
 		if strings.TrimSpace(stream.MediaType) == "" { // swobu:io-string source=boundary
@@ -68,23 +67,36 @@ func NewStreamingResponse(stream carrier.ByteStream) ClientResponse {
 	if body == nil {
 		body = io.NopCloser(bytes.NewReader(nil))
 	}
-	return StreamingResponse{Response: transportpkg.Response{
+	return StreamingResponse{Response: carrier.Response{
 		Status: http.StatusOK,
 		Header: header,
 		Body:   body,
-	}}
+	}, completion: completion}
 }
 
-func NewMessageStreamingResponse(stream carrier.MessageResponse) ClientResponse {
+func NewMessageStreamingResponse(stream carrier.MessageResponse, completion *wire.ResponseCompletion) ClientResponse {
 	header := cloneHeader(stream.Header)
 	if header.Get("Content-Type") == "" {
 		header.Set("Content-Type", stream.MediaType)
 	}
-	return MessageStreamingResponse{Response: transportpkg.MessageResponse{
+	return MessageStreamingResponse{Response: carrier.MessageTransportResponse{
 		Status:   http.StatusOK,
 		Header:   header,
 		Messages: stream.Messages,
-	}}
+	}, completion: completion}
+}
+
+func responseCompletion(response ClientResponse) *wire.ResponseCompletion {
+	switch value := response.(type) {
+	case BufferedResponse:
+		return value.completion
+	case StreamingResponse:
+		return value.completion
+	case MessageStreamingResponse:
+		return value.completion
+	default:
+		return nil
+	}
 }
 
 func cloneHeader(in http.Header) http.Header {
@@ -102,132 +114,4 @@ func cloneHeader(in http.Header) http.Header {
 
 func deliveryIsIncremental(clientDelivery delivery.Delivery, providerDelivery delivery.Delivery) bool {
 	return clientDelivery.IsStreaming() && providerDelivery.IsStreaming()
-}
-
-func commitDecisionsBestEffort(ctx context.Context, sink compat.Sink, exchangeID string, decisions []compat.Decision) {
-	if sink == nil || len(decisions) == 0 {
-		return
-	}
-	_ = sink.Commit(ctx, exchangeID, decisions)
-}
-
-func deliveryCompatibilityDecisions(call providerCall, incremental bool) []compat.Decision {
-	if !call.clientDelivery.IsStreaming() {
-		return nil
-	}
-	decisions := make([]compat.Decision, 0, 4)
-	if decision, ok := deliveryStreamingDecision(call, incremental); ok {
-		decisions = append(decisions, decision)
-	}
-	if decision, ok := deliveryIncrementalDecision(call, incremental); ok {
-		decisions = append(decisions, decision)
-	}
-	decisions = append(decisions, deliveryFramingDecisions(call)...)
-	return decisions
-}
-
-func deliveryIncrementalDecision(call providerCall, incremental bool) (compat.Decision, bool) {
-	if !call.clientDelivery.IsStreaming() {
-		return compat.Decision{}, false
-	}
-	outcome := compat.Approx
-	if incremental {
-		outcome = compat.Exact
-	}
-	return compat.Decision{
-		Feature: compat.DeliveryIncremental,
-		Outcome: outcome,
-		Subject: routeDecisionSubject(call.backend.Target.ProviderID(), string(call.backend.Target.ProtocolKind)),
-	}, true
-}
-
-func deliveryFramingDecisions(call providerCall) []compat.Decision {
-	if !call.clientDelivery.IsStreaming() {
-		return nil
-	}
-	subject := routeDecisionSubject(call.backend.Target.ProviderID(), string(call.backend.Target.ProtocolKind))
-	switch call.clientDelivery.Framing {
-	case delivery.FramingSSE:
-		outcome := compat.Exact
-		if call.request.Delivery.IsStreaming() && call.request.Delivery.Framing == delivery.FramingWebSocket {
-			outcome = compat.Approx
-		}
-		return []compat.Decision{
-			{
-				Feature: compat.DeliveryServerSentEvents,
-				Outcome: outcome,
-				Subject: subject,
-			},
-		}
-	case delivery.FramingWebSocket:
-		if call.request.Delivery.IsStreaming() && call.request.Delivery.Framing == delivery.FramingSSE {
-			return []compat.Decision{
-				{
-					Feature: compat.DeliveryServerSentEvents,
-					Outcome: compat.Approx,
-					Subject: subject,
-				},
-				{
-					Feature: compat.DeliveryWebSocket,
-					Outcome: compat.Approx,
-					Subject: subject,
-				},
-			}
-		}
-		return []compat.Decision{
-			{
-				Feature: compat.DeliveryWebSocket,
-				Outcome: compat.Exact,
-				Subject: subject,
-			},
-		}
-	default:
-		return nil
-	}
-}
-
-func deliveryStreamingDecision(call providerCall, incremental bool) (compat.Decision, bool) {
-	if !call.clientDelivery.IsStreaming() {
-		return compat.Decision{}, false
-	}
-	outcome := compat.Approx
-	if incremental {
-		outcome = compat.Exact
-	}
-	return compat.Decision{
-		Feature: compat.DeliveryStreaming,
-		Outcome: outcome,
-		Subject: routeDecisionSubject(call.backend.Target.ProviderID(), string(call.backend.Target.ProtocolKind)),
-	}, true
-}
-
-// Backend errors become message-only canonical errors before the client
-// envelope is written, so record the shape drop on the candidate route here.
-func backendErrorShapeDecisions(call providerCall, err error) []compat.Decision {
-	var backendErr canonical.BackendError
-	if !errors.As(err, &backendErr) {
-		return nil
-	}
-	if strings.TrimSpace(backendErr.Message) == "" { // swobu:io-string source=boundary
-		return nil
-	}
-	subject := routeDecisionSubject(call.backend.Target.ProviderID(), string(call.backend.Target.ProtocolKind))
-	if subject == "" {
-		return nil
-	}
-	return []compat.Decision{
-		{
-			Feature: compat.ErrorShape,
-			Outcome: compat.Drop,
-			Subject: subject,
-		},
-	}
-}
-
-func routeDecisionSubject(providerID string, protocol string) compat.Subject {
-	protocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
-	if providerID == "" || protocol == "" {
-		return ""
-	}
-	return compat.Subject("route:provider/" + providerID + "/protocol/" + protocol)
 }

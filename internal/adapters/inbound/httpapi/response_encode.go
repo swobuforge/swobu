@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
-	transportpkg "github.com/swobuforge/swobu/internal/transport"
 )
 
-func writeSuccessResponse(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, out exchange.RequestOutput) transportpkg.DeliveryResult {
+func writeSuccessResponse(ctx context.Context, w http.ResponseWriter, requestID string, family canonical.ClientFamily, out exchange.RequestOutput) delivery.Result {
 	_ = family
 	switch response := out.Response.(type) {
 	case exchange.BufferedResponse:
@@ -20,12 +21,12 @@ func writeSuccessResponse(ctx context.Context, w http.ResponseWriter, requestID 
 	case exchange.StreamingResponse:
 		return writeStreamingSuccess(ctx, w, requestID, response.Response)
 	}
-	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("client response variant is invalid")}
+	return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("client response variant is invalid")}
 }
 
-func writeBufferedResponse(ctx context.Context, w http.ResponseWriter, response transportpkg.Response) transportpkg.DeliveryResult {
+func writeBufferedResponse(ctx context.Context, w http.ResponseWriter, response carrier.Response) delivery.Result {
 	if response.Body == nil {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("buffered client response is missing transport body")}
+		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("buffered client response is missing transport body")}
 	}
 	defer func() { _ = response.Body.Close() }()
 	prefix, err := readFirstStreamChunk(response.Body)
@@ -44,14 +45,14 @@ func writeBufferedResponse(ctx context.Context, w http.ResponseWriter, response 
 	if terminalErr := responseBodyTerminalError(response.Body); terminalErr != nil {
 		return classifyDeliveryFailure(ctx, response.Body, terminalErr, nil)
 	}
-	return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
+	return delivery.Result{Kind: delivery.Succeeded}
 }
 
 // swobu:lint ignore function-complexity because=streaming success encoding keeps transport branching local to one HTTP seam.
-func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID string, response transportpkg.Response) transportpkg.DeliveryResult {
+func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID string, response carrier.Response) delivery.Result {
 	_ = requestID
 	if response.Body == nil {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing transport body")}
+		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing transport body")}
 	}
 
 	closeDone := make(chan struct{})
@@ -123,29 +124,29 @@ func writeStreamingSuccess(ctx context.Context, w http.ResponseWriter, requestID
 			if terminalErr := responseBodyTerminalError(response.Body); terminalErr != nil {
 				return classifyDeliveryFailure(ctx, response.Body, terminalErr, closeDone)
 			}
-			return transportpkg.DeliveryResult{Kind: transportpkg.DeliverySucceeded}
+			return delivery.Result{Kind: delivery.Succeeded}
 		}
 		return classifyDeliveryFailure(ctx, response.Body, readErr, closeDone)
 	}
 }
 
-func classifyClientWriteFailure(ctx context.Context, err error, closeDone <-chan struct{}) transportpkg.DeliveryResult {
+func classifyClientWriteFailure(ctx context.Context, err error, closeDone <-chan struct{}) delivery.Result {
 	if streamDownstreamClosed(ctx, closeDone) {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientCancelled, Err: err}
+		return delivery.Result{Kind: delivery.ClientCancelled, Err: err}
 	}
-	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientWriteFailed, Err: err}
+	return delivery.Result{Kind: delivery.ClientWriteFailed, Err: err}
 }
 
-func classifyDeliveryFailure(ctx context.Context, body io.ReadCloser, err error, closeDone <-chan struct{}) transportpkg.DeliveryResult {
+func classifyDeliveryFailure(ctx context.Context, body io.ReadCloser, err error, closeDone <-chan struct{}) delivery.Result {
 	if streamDownstreamClosed(ctx, closeDone) || errors.Is(err, context.Canceled) {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryClientCancelled, Err: err}
+		return delivery.Result{Kind: delivery.ClientCancelled, Err: err}
 	}
 	var checkpointErr exchange.CheckpointCommitError
 	if errors.As(err, &checkpointErr) {
-		return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryCheckpointCommitFailed, Err: err}
+		return delivery.Result{Kind: delivery.CheckpointCommitFailed, Err: err}
 	}
 	_ = body
-	return transportpkg.DeliveryResult{Kind: transportpkg.DeliveryProviderStreamFailed, Err: err}
+	return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: err}
 }
 
 func responseBodyTerminalError(body io.ReadCloser) error {

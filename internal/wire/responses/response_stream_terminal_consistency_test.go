@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -80,7 +79,7 @@ func TestDecodeResponseStreamValidatesResolvedTerminalAdditionsWithEvidence(t *t
 		responsesCompletedFrame(`[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"kept"},{"type":"future_content"}]}]`, "")
 	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/content/1/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamReconcilesOutOfOrderReasoningIndexes(t *testing.T) {
@@ -102,7 +101,7 @@ func TestDecodeResponseStreamReconcilesOutOfOrderReasoningIndexes(t *testing.T) 
 	if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "kept" {
 		t.Fatalf("reasoning = %#v, want compact kept summary", response.Items()[0])
 	}
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/summary/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamRejectsAggregateOutputTextAcrossContentGap(t *testing.T) {
@@ -112,7 +111,7 @@ func TestDecodeResponseStreamRejectsAggregateOutputTextAcrossContentGap(t *testi
 	assertResponsesDecoderBackendError(t, canonical.CanonicalRequest{}, raw)
 }
 
-func TestResponsesUnknownEventEvidenceUsesOutputIndexBeforeItemID(t *testing.T) {
+func TestResponsesUnknownWireEventsDoNotCreateSemanticEvidence(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.future.delta\ndata: {\"type\":\"response.future.delta\",\"output_index\":0,\"item_id\":\"shared\"}\n\n" +
 		"event: response.future.delta\ndata: {\"type\":\"response.future.delta\",\"output_index\":1,\"item_id\":\"shared\"}\n\n"
@@ -122,14 +121,8 @@ func TestResponsesUnknownEventEvidenceUsesOutputIndexBeforeItemID(t *testing.T) 
 			break
 		}
 	}
-	count := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
-			count++
-		}
-	}
-	if count != 2 {
-		t.Fatalf("unknown-event Drop decisions = %d, want one per output index; all=%#v", count, stream.Decisions())
+	if len(stream.Changes()) != 0 {
+		t.Fatalf("wire-only events created semantic changes: %#v", stream.Changes())
 	}
 }
 
@@ -297,7 +290,7 @@ func TestDecodeResponseStreamRecordsDiscoveryChildErasureAtDone(t *testing.T) {
 	if completed != 1 {
 		t.Fatalf("completed discovery results = %d, want 1", completed)
 	}
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/tools/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamDeduplicatesRepeatedChildErasureEvidence(t *testing.T) {
@@ -307,7 +300,7 @@ func TestDecodeResponseStreamDeduplicatesRepeatedChildErasureEvidence(t *testing
 		responsesCompletedFrame("["+item+"]", "")
 	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/content/1/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func TestDecodeResponseStreamRejectsAllErasedDiscoveryResult(t *testing.T) {

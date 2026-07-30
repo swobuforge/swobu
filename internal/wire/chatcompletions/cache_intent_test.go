@@ -52,7 +52,7 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 }
 
 func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"` + projectedName + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)

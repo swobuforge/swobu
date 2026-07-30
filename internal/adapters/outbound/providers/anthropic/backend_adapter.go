@@ -68,18 +68,18 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 // Send performs Anthropic HTTP transport over a final Messages document.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
 	if err := validateAnthropicProviderProtocol(target.ProviderProtocol); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("anthropic provider base URL is required")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("anthropic provider base URL is required"))
 	}
 	if doc.IsEmpty() {
-		return nil, canonical.InternalError("anthropic provider request document is required")
+		return nil, provider.AttemptNotDispatched(canonical.InternalError("anthropic provider request document is required"))
 	}
 	wireReqBody := doc.RawBytes()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpedge.JoinBaseURLAndPath(target.BaseURL, "/messages"), bytes.NewReader(wireReqBody))
 	if err != nil {
-		return nil, canonical.BadEndpoint("anthropic provider request could not be built")
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("anthropic provider request could not be built"))
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -88,7 +88,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef); err != nil {
-		return nil, err
+		return nil, provider.AttemptNotDispatched(err)
 	}
 
 	resp, err := e.client.Do(httpReq)
@@ -100,13 +100,13 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return nil, canonical.InternalError("backend response content encoding is unsupported or invalid")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 	}
 	if resp.StatusCode >= 400 {
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
+		return nil, provider.AttemptMayHaveExecuted(httpedge.ReadBackendHTTPError(resp, target.TargetID))
 	}
 	if httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
 		return provider.StreamIngress{Stream: carrier.ByteStream{
@@ -118,7 +118,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	raw, readErr := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if readErr != nil {
-		return nil, canonical.InternalError("backend success response could not be read")
+		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend success response could not be read"))
 	}
 	return provider.DocumentIngress{Document: carrier.NewDocument(
 		protocolkind.Messages,

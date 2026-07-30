@@ -46,16 +46,13 @@ func TestResponsesDecodeLogsCorrelatedImageProvenance(t *testing.T) {
 		"tool_result_image_count=1",
 		"first_tool_result_item=1",
 		"first_tool_result_part=1",
-		"first_tool_call_id=call_image",
-		"first_tool_name=inspect",
-		"first_tool_kind=function",
 		"first_source=url",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, got)
 		}
 	}
-	for _, secret := range []string{"secret.example", "private result"} {
+	for _, secret := range []string{"secret.example", "private result", "call_image", "inspect"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("logs exposed %q\nlogs:\n%s", secret, got)
 		}

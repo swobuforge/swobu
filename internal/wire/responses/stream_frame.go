@@ -9,9 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
 )
 
 type streamFrame struct {
@@ -212,9 +210,6 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 			s.unknownEventDecisions = make(map[string]struct{})
 		}
 		s.unknownEventDecisions[key] = struct{}{}
-		if err := emitResponsesCompatibilityDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/events/%d/type", frame.EventIndex))); err != nil {
-			return false, canonical.Event{}, err
-		}
 		return true, canonical.Event{}, nil
 	}
 }
@@ -285,7 +280,6 @@ func (s *responsesResponseStream) handleResponseCreated(ctx context.Context, fra
 	if strings.TrimSpace(providerResponseID) == "" { // swobu:io-string source=provider-wire
 		return canonical.InternalError("responses stream is missing response id")
 	}
-	emitNativeResponseIDCaptured(ctx, s.sink, s.exchangeID, providerResponseID)
 	model := strings.TrimSpace(frame.Model) // swobu:io-string source=boundary
 	if model == "" {
 		model = strings.TrimSpace(frame.Response.Model) // swobu:io-string source=boundary
@@ -439,7 +433,7 @@ func (s *responsesResponseStream) handleOutputItemDone(ctx context.Context, fram
 			true,
 			"completed",
 			s.exchangeID,
-			s.sink,
+			s.changeLog,
 		)
 		if err != nil {
 			return false, err
@@ -541,7 +535,6 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 	terminalStatus := responsesTerminalStatus(frame.Type, frame.Status, frame.Response.Status)
 	if terminalReason, promptBlocked := responsesTerminalReason(frame.Type, frame.Status, frame.Response.Status, frame.Response.ContentFilters, responseIncompleteReason(frame.Response.IncompleteDetails)); promptBlocked {
 		s.completed = true
-		deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 		s.discardOpenText()
 		s.closeOpenTools(canonical.EnvelopeStatusError)
 		s.enqueueError("content_filter", responsesContentFilterMessage(responsesBlockedContentFilterSource(frame.Response.ContentFilters)))
@@ -592,7 +585,7 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 		if len(wireItems) > 0 || s.completedItems == 0 && strings.TrimSpace(frame.Response.OutputText) != "" {
 			for position, raw := range wireItems {
 				index := originalIndexes[position]
-				projectionSink := s.sink
+				projectionSink := s.changeLog
 				if state := s.outputAt(index); state.erased && state.erasureRecorded {
 					projectionSink = nil
 				}
@@ -632,11 +625,10 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 			return canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 		}
 		s.completed = true
-		deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 		s.enqueueUsage(s.latestUsage)
 		s.enqueueFinish(responsesCompletion(terminalStatus, terminalReason))
 		s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
-		logResponsesTerminalProjection(usedFallback, terminalReason, len(frame.Response.Output), strings.TrimSpace(frame.Response.OutputText) != "", fallbackItems) // swobu:io-string source=provider-wire
+		logResponsesTerminalProjection(usedFallback, len(frame.Response.Output), strings.TrimSpace(frame.Response.OutputText) != "", fallbackItems) // swobu:io-string source=provider-wire
 		return nil
 	}
 }
@@ -657,16 +649,16 @@ func itemStatusAt(items []json.RawMessage, index int) string {
 // preserves local additive erasure and records terminal-only child evidence.
 func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Context, index int, raw json.RawMessage, item responsesWireOutputItemDTO, responseStatus string) error {
 	state := s.outputAt(index)
-	sink := s.sink
+	changeLog := s.changeLog
 	if (state.erased && state.erasureRecorded) || state.statusDropRecorded {
 		// The resolved top-level erasure already recorded its one occurrence
 		// decision, or its status refinement was already omitted. Decoding here
 		// is solely semantic validation.
-		sink = nil
+		changeLog = nil
 	}
 	terminalItems, err := decodeCompletedResponsesItemSetAtIndexes(
 		ctx, s.request, []json.RawMessage{raw}, "", []int{index}, true,
-		responseStatus, s.exchangeID, sink,
+		responseStatus, s.exchangeID, changeLog,
 	)
 	if err != nil {
 		return err

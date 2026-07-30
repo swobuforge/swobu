@@ -245,19 +245,19 @@ func TestBedrockMessagesReplaysOpaqueThinking(t *testing.T) {
 }
 
 type testProviderRequest struct {
-	Request      canonical.CanonicalRequest
-	Contract     exchange.ExecutionContract
-	Target       provider.TargetSnapshot
-	ExchangeID   string
-	DecisionSink compat.Sink
+	Request    canonical.CanonicalRequest
+	Contract   exchange.ExecutionContract
+	Target     provider.TargetSnapshot
+	ExchangeID string
+	Changes    *[]compat.Change
 }
 
-func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...compat.Sink) testProviderRequest {
-	var sink compat.Sink
+func newTestProviderRequest(exchangeID string, _ any, request canonical.CanonicalRequest, _ carrier.Document, contract exchange.ExecutionContract, target provider.TargetSnapshot, sinks ...*[]compat.Change) testProviderRequest {
+	var sink *[]compat.Change
 	if len(sinks) > 0 {
 		sink = sinks[0]
 	}
-	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, DecisionSink: sink}
+	return testProviderRequest{Request: request, Contract: contract, Target: target, ExchangeID: exchangeID, Changes: sink}
 }
 
 func newBedrockProviderRequest(t *testing.T, baseURL, credentialRef string, kind protocolkind.ProtocolKind, providerDelivery delivery.Delivery) testProviderRequest {
@@ -288,9 +288,7 @@ func executeBedrockProviderRequest(ctx context.Context, exec BackendAdapter, req
 	return backend.Transport.Send(ctx, doc)
 }
 
-type recordingDecisionSink struct {
-	effects []compat.Decision
-}
+type recordingChanges = []compat.Change
 
 type testCredentialProvider struct {
 	token string
@@ -301,11 +299,6 @@ func (p testCredentialProvider) ResolveCredential(context.Context, string, strin
 		return p.token, nil
 	}
 	return "test-token", nil
-}
-
-func (s *recordingDecisionSink) Commit(_ context.Context, _ string, effects []compat.Decision) error {
-	s.effects = append(s.effects, effects...)
-	return nil
 }
 
 func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
@@ -674,7 +667,7 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 	})
 	exec := NewExecutor(upstream.Client())
 	exec.credentials = testCredentialProvider{token: "test-token"}
-	sink := &recordingDecisionSink{}
+	sink := &recordingChanges{}
 	req := newTestProviderRequest(
 		"test-ex", protocolkind.Responses, request,
 		carrier.Document{},
@@ -720,8 +713,8 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 		t.Fatalf("content[0]=%T want map[string]any", content[0])
 	}
 
-	if len(sink.effects) != 0 {
-		t.Fatalf("captured effects len=%d want 0", len(sink.effects))
+	if len(*sink) != 0 {
+		t.Fatalf("captured effects len=%d want 0", len(*sink))
 	}
 }
 
@@ -735,29 +728,5 @@ func TestBedrockEndpointClassAndRegion_MantleOnly(t *testing.T) {
 	class, region = bedrockEndpointClassAndRegion("https://bedrock.us-west-2.amazonaws.com/openai/v1")
 	if class != "unknown" || region != "" {
 		t.Fatalf("class=%q region=%q want unknown/empty for non-Mantle host", class, region)
-	}
-}
-
-func TestBedrockModelIDFromPayload(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte(`{"model":"openai.gpt-oss-20b","messages":[{"role":"user","content":"ping"}]}`)
-	if got := bedrockModelIDFromPayload(raw); got != "openai.gpt-oss-20b" {
-		t.Fatalf("model id=%q", got)
-	}
-	if got := bedrockModelIDFromPayload([]byte(`{"messages":[]}`)); got != "" {
-		t.Fatalf("model id=%q want empty", got)
-	}
-}
-
-func TestBedrockModelARNCandidates(t *testing.T) {
-	t.Parallel()
-
-	foundation, inference := bedrockModelARNCandidates("us-east-1", "amazon.nova-lite-v1:0")
-	if foundation != "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0" {
-		t.Fatalf("foundation=%q", foundation)
-	}
-	if inference != "arn:aws:bedrock:us-east-1::inference-profile/amazon.nova-lite-v1:0" {
-		t.Fatalf("inference=%q", inference)
 	}
 }

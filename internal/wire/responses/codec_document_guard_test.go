@@ -22,10 +22,10 @@ func TestDecodeProviderDocument_InvalidWireCarrierFailsImmediately(t *testing.T)
 		{name: "missing body", doc: carrier.NewDocument(protocolkind.Responses, "application/json", nil, nil, carrier.Meta{}), reasonMatch: "body must be configured"},
 	}
 
-	codec := legacyProviderDocumentDecoder{}
+	codec := ProviderDocumentDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := codec.DecodeProviderDocument(context.Background(), tt.doc, "ex_guard", nil)
+			_, err := codec.DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, tt.doc, "ex_guard")
 			if err == nil {
 				t.Fatal("expected decode document guard error, got nil")
 			}

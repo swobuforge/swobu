@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"context"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -9,9 +8,9 @@ import (
 )
 
 type loweredResponsesInstructions struct {
-	Text      string
-	Exact     bool
-	Decisions []compat.Decision
+	Text    string
+	Exact   bool
+	Changes []compat.Change
 }
 
 func flattenInstructionsForResponses(items []canonical.CanonicalItem) loweredResponsesInstructions {
@@ -39,14 +38,7 @@ func flattenInstructionsForResponses(items []canonical.CanonicalItem) loweredRes
 	exact = exact && count <= 1
 	lowered := loweredResponsesInstructions{Text: out.String(), Exact: exact}
 	if !exact && count > 0 {
-		lowered.Decisions = []compat.Decision{{Feature: compat.RequestInstructions, Outcome: compat.Approx, Subject: compat.Subject("responses.instructions")}}
+		lowered.Changes = []compat.Change{compat.NewChange(canonical.RequestInstructions, compat.Approximation, canonical.Occurrence{})}
 	}
 	return lowered
-}
-
-func commitResponsesInstructionDecisions(sink compat.Sink, exchangeID string, lowered loweredResponsesInstructions) error {
-	if sink == nil || len(lowered.Decisions) == 0 {
-		return nil
-	}
-	return sink.Commit(context.Background(), exchangeID, lowered.Decisions)
 }

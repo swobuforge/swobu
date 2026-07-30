@@ -1,7 +1,6 @@
 package chatcompletions
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -19,17 +18,16 @@ func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T)
 		{name: "missing body", wire: carrier.ByteStream{MediaType: "text/event-stream"}, reasonMatch: "body must be configured"},
 	}
 
-	codec := legacyProviderEnvelopeDecoder{}
+	codec := ProviderEnvelopeDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := codec.DecodeProviderEnvelope(tt.wire, "ex_guard", nil)
-			_, readErr := reader.Next(context.Background())
-			if readErr == nil {
+			_, decodeErr := codec.DecodeProviderEnvelope(canonical.CanonicalRequest{}, tt.wire, "ex_guard")
+			if decodeErr == nil {
 				t.Fatal("expected decode stream guard error, got nil")
 			}
 			var compatErr canonical.Error
-			if !errors.As(readErr, &compatErr) {
-				t.Fatalf("expected canonical.Error, got %T", readErr)
+			if !errors.As(decodeErr, &compatErr) {
+				t.Fatalf("expected canonical.Error, got %T", decodeErr)
 			}
 			if compatErr.Code != canonical.ErrorCodeInternal {
 				t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeInternal)

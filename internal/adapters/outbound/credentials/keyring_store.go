@@ -12,12 +12,6 @@ import (
 var keyringSet = keyringcommodity.Set
 var keyringGet = keyringcommodity.Get
 
-// StoreStoredSecret writes a provider-scoped stored secret.
-func StoreStoredSecret(providerSpec string, keyName string, secret string) error {
-	_, err := StoreMaterializedCredential(providerSpec, keyName, secret, CredentialWritePolicyAuto)
-	return err
-}
-
 func StoreMaterializedCredential(providerSpec string, keyName string, secret string, policy CredentialWritePolicy) (string, error) {
 	spec := strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
 	name := strings.TrimSpace(keyName)      // swobu:io-string source=boundary
@@ -56,9 +50,7 @@ func StoreMaterializedCredential(providerSpec string, keyName string, secret str
 			slog.Warn("keyring write failed, falling back to credential file store",
 				"component", "credentials",
 				"provider_spec", strings.ToLower(spec), // swobu:io-string source=boundary
-				"credential_slot", name,
 				"write_policy", string(selectedPolicy),
-				"error", err.Error(),
 			)
 		}
 		if err := (&secretFileStore{}).Store(name, encoded); err != nil {
@@ -79,9 +71,6 @@ func StoreSecretByRef(providerSpec string, credentialRef string, secret string) 
 	}
 	if kind == "secret" {
 		if err := keyringSet(KeyringScopeForProvider(providerSpec), name, secret); err != nil {
-			if fallbackErr := (&secretFileStore{}).Store(name, secret); fallbackErr == nil {
-				return nil
-			}
 			return fmt.Errorf("keyring write failed for %q: %w", name, err)
 		}
 		return nil
@@ -100,16 +89,10 @@ func ResolveStoredSecretByRef(providerSpec string, credentialRef string) (string
 	if kind == "secret" {
 		token, err := keyringGet(KeyringScopeForProvider(providerSpec), name)
 		if err != nil {
-			if fallback, fallbackErr := (&secretFileStore{}).ResolveRaw(name); fallbackErr == nil {
-				return fallback, nil
-			}
 			return "", fmt.Errorf("keyring lookup failed for %q: %w", name, err)
 		}
 		token = strings.TrimSpace(token) // swobu:io-string source=boundary
 		if token == "" {
-			if fallback, fallbackErr := (&secretFileStore{}).ResolveRaw(name); fallbackErr == nil {
-				return fallback, nil
-			}
 			return "", fmt.Errorf("keyring token for %q is empty", name)
 		}
 		return token, nil

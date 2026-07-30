@@ -2,7 +2,6 @@
 package chatcompletions
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
@@ -22,7 +21,11 @@ type chatCompletionsEnvelopeStreamEncoder struct {
 	pendingWebSearchCallIDs map[string]struct{}
 	sawReasoning            bool
 	sawVisibleOutput        bool
-	decisions               *compat.RecordingSink
+	changes                 []compat.Change
+}
+
+func (s *chatCompletionsEnvelopeStreamEncoder) Changes() []compat.Change {
+	return compat.CloneChanges(s.changes)
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
@@ -180,20 +183,16 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 						return nil, canonical.NewBackendError("", 0, "backend returned an orphan web-search result to a Chat Completions client", "")
 					}
 					delete(s.pendingWebSearchCallIDs, callID)
-					if err := s.decisions.Commit(context.Background(), "", []compat.Decision{{
-						Feature: compat.ResponseItemsKind,
-						Outcome: compat.Drop,
-						Subject: compat.Subject("web_search:" + callID),
-					}}); err != nil {
-						return nil, canonical.InternalError("Chat Completions stream compatibility decision recording failed")
-					}
+					s.changes = append(s.changes, compat.Change{
+						Capability: canonical.ResponseItemsKind,
+						Kind:       compat.Omission,
+						Occurrence: canonical.CallOccurrence(result.CallID()),
+					})
 					return nil, nil
 				}
 			}
 			citationDecisions := chatCompletionsCitationDropDecisions(event.ItemOrdinal, *event.CompletedItem)
-			if err := s.decisions.Commit(context.Background(), "", citationDecisions); err != nil {
-				return nil, canonical.InternalError("Chat Completions stream compatibility decision recording failed")
-			}
+			s.changes = append(s.changes, citationDecisions...)
 		}
 		return nil, nil
 	case sse.StreamEventCompleted:
@@ -202,9 +201,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		}
 		finishReason := event.Completion.Reason()
 		projectionDecisions, projectionErr := finalizeChatClientProjection(s.sawReasoning, s.sawVisibleOutput, finishReason)
-		if err := s.decisions.Commit(context.Background(), "", projectionDecisions); err != nil {
-			return nil, canonical.InternalError("Chat Completions stream compatibility decision recording failed")
-		}
+		s.changes = append(s.changes, projectionDecisions...)
 		if projectionErr != nil {
 			return nil, projectionErr
 		}

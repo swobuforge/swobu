@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/transport"
 )
 
 func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
@@ -37,7 +37,7 @@ func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, 
 	}, trafficevidence.TerminalOutcome{
 		Result:             result,
 		StatusCode:         statusCode,
-		DeliveryKind:       transport.DeliveryResultKind(deliveryKind),
+		DeliveryKind:       delivery.ResultKind(deliveryKind),
 		CanonicalErrorCode: canonical.ErrorCode(canonicalErrorCode),
 		AttemptCount:       attemptCount,
 		FallbackRecovered:  fallbackRecovered,
@@ -254,7 +254,7 @@ func TestProductReport_MaximalEncodesUnderCeiling(t *testing.T) {
 			RequestPath:        canonical.NormalizedPathChatCompletions,
 			Provider:           profile.ProviderSpecOpenRouter,
 			StatusCode:         599,
-			DeliveryKind:       transport.DeliveryCheckpointCommitFailed,
+			DeliveryKind:       delivery.CheckpointCommitFailed,
 			CanonicalErrorCode: canonical.ErrorCodeUnsupportedDelivery,
 			AttemptCount:       productReportAttemptCountMax,
 			FallbackRecovered:  false,

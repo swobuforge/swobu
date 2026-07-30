@@ -3,12 +3,10 @@ package messages
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
@@ -66,7 +64,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, sink compat.Sink) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("messages response is invalid JSON")
@@ -98,8 +96,8 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		switch blockType {
 		case "text":
 			part, err := decodeMessagesCitedText(block.Text, block.Citations, messagesProjectionEvidence{
-				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/content/%d/citations", index),
+				feature: canonical.ResponseItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.ResponseItemOccurrence(uint32(index)),
 			})
 			if err != nil {
 				return nil, err
@@ -166,7 +164,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			items = append(items, item)
 		case "server_tool_use":
 			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
-				if err := emitMessagesWireDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content/%d/name", index))); err != nil {
+				if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 					return nil, err
 				}
 				continue
@@ -175,8 +173,8 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 				return nil, canonical.InternalError("messages response message item is invalid")
 			}
 			item, err := decodeMessagesWebSearchCall(block.ID, block.Input, messagesProjectionEvidence{
-				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/content/%d/input", index),
+				feature: canonical.ResponseItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.ResponseItemOccurrence(uint32(index)),
 			})
 			if err != nil {
 				return nil, err
@@ -187,15 +185,15 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 				return nil, canonical.InternalError("messages response message item is invalid")
 			}
 			item, err := decodeMessagesWebSearchResult(block.ToolUseID, block.Content, block.IsError, messagesProjectionEvidence{
-				feature: compat.ResponseItemsKind, sink: sink, exchangeID: exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/content/%d/content", index),
+				feature: canonical.ResponseItemsKind, changeLog: changeLog, exchangeID: exchangeID,
+				occurrence: canonical.ResponseItemOccurrence(uint32(index)),
 			})
 			if err != nil {
 				return nil, err
 			}
 			items = append(items, item)
 		default:
-			if err := emitMessagesWireDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content/%d/type", index))); err != nil {
+			if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 				return nil, err
 			}
 			continue
@@ -207,14 +205,6 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	if err := validateMessagesResponseResidual(items, dto.StopReason, len(dto.Content)); err != nil {
 		return nil, err
 	}
-	_, inputPresent := usage.InputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-	_, outputPresent := usage.OutputTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-	_, cacheReadPresent := usage.CacheReadTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-	_, cacheWritePresent := usage.CacheWriteTokens()
-	openaiwire.EmitUsageDecision(ctx, sink, exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 	return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 		exchangeID,
 		canonical.ResponseRef{},

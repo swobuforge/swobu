@@ -239,12 +239,8 @@ func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, er
 			normalized = append(normalized, tools[index])
 			continue
 		}
-		projection, err := decodeResponsesMCPNamespace(tools[index], mcp.Access{})
-		if err != nil {
+		if _, err := decodeResponsesMCPNamespace(tools[index], mcp.Access{}); err != nil {
 			return nil, err
-		}
-		if projection.drop {
-			continue
 		}
 		tools[index].Headers = nil
 		tools[index].Authorization = nil
@@ -410,7 +406,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		return canonical.InternalError("responses web-search result has no prior call")
 	case canonical.ItemKindToolDiscoveryResult:
 		result, _ := item.ToolDiscoveryResult()
-		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), nil, "")
+		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), mcp.Access{}, nil, "")
 		if err != nil {
 			return err
 		}

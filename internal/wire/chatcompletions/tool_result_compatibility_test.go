@@ -13,11 +13,11 @@ func TestChatToolResultLossesRecordApproximation(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("a"), canonical.NewTextToolResultPart("b")}, true)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
 
-	sink := &recordingDecisionSink{}
-	if _, err := EncodeCarrierWithDecisions(request, delivery.BufferedDelivery(), sink, "ex"); err != nil {
+	changeLog := &recordingChanges{}
+	if _, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), changeLog, "ex"); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.effects) != 2 || sink.effects[0].Feature != compat.RequestItemsToolResultIsError || sink.effects[0].Outcome != compat.Approx || sink.effects[1].Feature != compat.RequestItemsToolResultContentBoundaries || sink.effects[1].Outcome != compat.Approx {
-		t.Fatalf("compatibility decisions = %#v", sink.effects)
+	if len(*changeLog) != 2 || (*changeLog)[0].Capability != canonical.RequestItemsToolResultIsError || (*changeLog)[0].Kind != compat.Approximation || (*changeLog)[1].Capability != canonical.RequestItemsToolResultContentBoundaries || (*changeLog)[1].Kind != compat.Approximation {
+		t.Fatalf("compatibility changes = %#v", *changeLog)
 	}
 }

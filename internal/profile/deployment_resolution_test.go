@@ -3,8 +3,6 @@ package profile
 import (
 	"reflect"
 	"testing"
-
-	"github.com/swobuforge/swobu/internal/compat"
 )
 
 func TestResolveProviderDeployment_ExplicitFactsWinOverProviderDefaults(t *testing.T) {
@@ -53,21 +51,5 @@ func TestResolveProviderDeployment_AmbiguousMetadataDoesNotAutoSelect(t *testing
 	}
 	if resolution.SupportsProtocol(ProviderProtocolAuto) {
 		t.Fatal("auto must not be treated as a deployment protocol")
-	}
-}
-
-func TestResolveProviderDeployment_UnknownCapabilitiesFailClosed(t *testing.T) {
-	t.Parallel()
-
-	resolution := ResolveProviderDeployment("openai", ProviderDeploymentRecord{
-		Capabilities: []ProviderDeploymentCapability{
-			{Feature: compat.RequestTools, Support: compat.Supported},
-		},
-	})
-	if got := resolution.CapabilitySupport(compat.RequestTools); got != compat.Supported {
-		t.Fatalf("tool declaration support=%q want supported", got)
-	}
-	if got := resolution.CapabilitySupport(compat.RequestOutputFormat); got != compat.Unknown {
-		t.Fatalf("structured output support=%q want unknown", got)
 	}
 }

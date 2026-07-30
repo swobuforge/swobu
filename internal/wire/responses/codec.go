@@ -13,7 +13,7 @@ import (
 // DecodeResponsesToolPolicy maps responses tool_choice into canonical tool
 // policy. String auto/required values remain direct. Specific tool selection is
 // resolved against the declared tools so the semantic tool ID stays canonical.
-func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclaration, sink compat.Sink, exchangeID string) (canonical.ToolPolicy, error) {
+func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (canonical.ToolPolicy, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		if len(tools) > 0 {
@@ -89,7 +89,7 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 		if name == "" {
 			return canonical.ToolPolicy{}, canonical.BadRequest("responses request tool_choice specific requires a tool name")
 		}
-		resolved, _, err := responsesResolveToolChoiceByWireName(tools, name, normalizedType, fieldPath, sink, exchangeID)
+		resolved, _, err := responsesResolveToolChoiceByWireName(tools, name, normalizedType, fieldPath, changeLog, exchangeID)
 		if err != nil {
 			return canonical.ToolPolicy{}, err
 		}

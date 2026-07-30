@@ -430,7 +430,7 @@ func TestDecodeResponseStreamRecordsUnknownPartBeforeStreamedKnownPart(t *testin
 		t.Fatal(err)
 	}
 	assertResponsesMessageTexts(t, response.Items(), "after")
-	assertResponsesStreamDrop(t, stream, "wire:/output/0/content/0/type", 1)
+	assertResponsesStreamDrop(t, stream, 1)
 }
 
 func assertResponsesStreamFailsBeforeCompletion(t *testing.T, request canonical.CanonicalRequest, raw string) {
@@ -520,8 +520,8 @@ func TestDecodeResponseStreamPreservesWebSearchCallWhenStatusIsUnknown(t *testin
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"future_status\",\"action\":{\"type\":\"search\",\"queries\":[\"q\"]}}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"kept\"}]}}\n\n" +
 		responsesCompletedFrame("[]", "")
-	sink := &compat.RecordingSink{}
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", sink)
+	changeLog := &recordingChanges{}
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", changeLog)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_1", TargetID: "target", TargetVersion: 1})
 	envelope, err := canonical.ReadClosedEnvelope(context.Background(), bound, canonical.EnvResponse)
 	if err != nil {
@@ -542,16 +542,17 @@ func TestDecodeResponseStreamPreservesWebSearchCallWhenStatusIsUnknown(t *testin
 		t.Fatal("completed stream projected an unsettled web-search call")
 	}
 	drops := 0
-	for _, decision := range stream.Decisions() {
-		if decision.Feature == compat.ResponseItemsKind && decision.Outcome == compat.Drop {
+	for _, decision := range stream.Changes() {
+		if decision.Capability == canonical.ResponseItemsKind && decision.Kind == compat.Omission {
 			drops++
-			if decision.Subject != compat.Subject("wire:/output/0/status") {
-				t.Fatalf("drop subject = %q, want web-search status", decision.Subject)
+			item, ok := decision.Occurrence.ResponseItem()
+			if !ok || item != 0 {
+				t.Fatalf("omission occurrence = %#v, want web-search item", decision.Occurrence)
 			}
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("decisions = sink %#v stream %#v, want one Drop", sink.Decisions(), stream.Decisions())
+		t.Fatalf("changes = changeLog %#v stream %#v, want one Drop", *changeLog, stream.Changes())
 	}
 }
 
@@ -565,19 +566,20 @@ func TestDecodeResponseStreamUnknownWebSearchStatusFailsAtSettlement(t *testing.
 	if err == nil || !strings.Contains(err.Error(), "web-search call has no provider result") {
 		t.Fatalf("stream settlement error = %v, want unsettled web-search failure", err)
 	}
-	decisions := stream.Decisions()
+	changes := stream.Changes()
 	drops := 0
-	for _, decision := range decisions {
-		if decision.Feature != compat.ResponseItemsKind || decision.Outcome != compat.Drop {
+	for _, decision := range changes {
+		if decision.Capability != canonical.ResponseItemsKind || decision.Kind != compat.Omission {
 			continue
 		}
 		drops++
-		if decision.Subject != compat.Subject("wire:/output/0/status") {
-			t.Fatalf("drop subject = %q, want occurrence-local status", decision.Subject)
+		item, ok := decision.Occurrence.ResponseItem()
+		if !ok || item != 0 {
+			t.Fatalf("omission occurrence = %#v, want web-search item", decision.Occurrence)
 		}
 	}
 	if drops != 1 {
-		t.Fatalf("decisions = %#v, want occurrence-local status Drop", decisions)
+		t.Fatalf("changes = %#v, want occurrence-local status Drop", changes)
 	}
 }
 

@@ -16,7 +16,7 @@ func TestResponseCompletionIsWriteOnceAndNonBlocking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	complete(&fingerprint)
+	complete(&fingerprint, nil)
 	fail(errors.New("late failure"))
 	got := observation.Snapshot()
 	if got.State != CompletionCompleted || got.ResponseFingerprint == nil || *got.ResponseFingerprint != fingerprint || got.Err != nil {
@@ -32,7 +32,7 @@ func TestResponseCompletionFailureCarriesNoFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	complete(&fingerprint)
+	complete(&fingerprint, nil)
 	got := cell.Snapshot()
 	if got.State != CompletionFailed || !errors.Is(got.Err, want) || got.ResponseFingerprint != nil {
 		t.Fatalf("failed snapshot = %#v", got)
@@ -41,7 +41,7 @@ func TestResponseCompletionFailureCarriesNoFingerprint(t *testing.T) {
 
 func TestResponseCompletionCanCompleteWithoutFingerprintCapability(t *testing.T) {
 	cell, complete, _ := NewResponseCompletion()
-	complete(nil)
+	complete(nil, nil)
 	got := cell.Snapshot()
 	if got.State != CompletionCompleted || got.ResponseFingerprint != nil || got.Err != nil {
 		t.Fatalf("completed snapshot without capability = %#v", got)

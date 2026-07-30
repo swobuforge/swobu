@@ -11,7 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func decodeResponsesWebSearchInclude(raw json.RawMessage, sink compat.Sink, exchangeID string) error {
+func decodeResponsesWebSearchInclude(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) error {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
@@ -20,11 +20,9 @@ func decodeResponsesWebSearchInclude(raw json.RawMessage, sink compat.Sink, exch
 	if err := json.Unmarshal(trimmed, &values); err != nil {
 		return canonical.BadRequest("responses include is invalid")
 	}
-	for index, value := range values {
+	for _, value := range values {
 		if value == "web_search_call.action.sources" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestTools, compat.Drop, compat.Subject(fmt.Sprintf("wire:/include/%d", index))); err != nil {
-				return err
-			}
+			continue
 		}
 	}
 	return nil
@@ -32,7 +30,7 @@ func decodeResponsesWebSearchInclude(raw json.RawMessage, sink compat.Sink, exch
 
 func (s *responsesResponseStream) completeMessageItem(frame streamFrame) (bool, error) {
 	index := *frame.OutputIndex
-	item, present, err := decodeResponsesMessageOutputItem(responsesWireOutputItemDTO{Type: "message", ID: frame.Item.ID, Status: frame.Item.Status, Role: "assistant", Content: frame.Item.Content}, s.sink, s.exchangeID, fmt.Sprintf("wire:/output/%d/content", index))
+	item, present, err := decodeResponsesMessageOutputItem(responsesWireOutputItemDTO{Type: "message", ID: frame.Item.ID, Status: frame.Item.Status, Role: "assistant", Content: frame.Item.Content}, s.changeLog, s.exchangeID, canonical.ResponseItemOccurrence(uint32(index)))
 	if err != nil {
 		return false, err
 	}
@@ -162,7 +160,7 @@ func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame, state
 	if frame.OutputIndex != nil {
 		index = *frame.OutputIndex
 	}
-	lifecycle, err := decodeResponsesWebSearchLifecycleWithDecisions(itemID, frame.Item.Action, state, s.sink, s.exchangeID, fmt.Sprintf("wire:/output/%d/action/sources", index), true)
+	lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(itemID, frame.Item.Action, state, s.changeLog, s.exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true)
 	if err != nil {
 		return false, err
 	}
@@ -202,7 +200,7 @@ func decodeResponsesWebSearchLifecycleState(raw string) (responsesWebSearchLifec
 }
 
 func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState) ([]canonical.CanonicalItem, error) {
-	return decodeResponsesWebSearchLifecycleWithDecisions(id, rawAction, state, nil, "", "", false)
+	return decodeResponsesWebSearchLifecycleWithChanges(id, rawAction, state, nil, "", canonical.Occurrence{}, false)
 }
 
 func responsesWebSearchMalformed(providerOutput bool, message string) error {
@@ -212,7 +210,7 @@ func responsesWebSearchMalformed(providerOutput bool, message string) error {
 	return canonical.BadRequest(message)
 }
 
-func decodeResponsesWebSearchLifecycleWithDecisions(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState, sink compat.Sink, exchangeID string, sourcesSubjectPrefix string, providerOutput bool) ([]canonical.CanonicalItem, error) {
+func decodeResponsesWebSearchLifecycleWithChanges(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState, changeLog *[]compat.Change, exchangeID string, occurrence canonical.Occurrence, providerOutput bool) ([]canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(strings.TrimSpace(id)) // swobu:io-string source=provider-wire
 	if err != nil {
 		return nil, responsesWebSearchMalformed(providerOutput, "responses web-search call is missing id")
@@ -277,7 +275,7 @@ func decodeResponsesWebSearchLifecycleWithDecisions(id string, rawAction json.Ra
 		return items, nil
 	}
 	sources := make([]canonical.WebSource, 0, len(wireSources))
-	for index, wireSource := range wireSources {
+	for _, wireSource := range wireSources {
 		kind := strings.TrimSpace(wireSource.Type) // swobu:io-string source=provider-wire
 		if providerOutput {
 			if err := admitResponsesProviderOutputChild(kind); err != nil {
@@ -285,7 +283,7 @@ func decodeResponsesWebSearchLifecycleWithDecisions(id string, rawAction json.Ra
 			}
 		}
 		if kind != "" && kind != "url" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", sourcesSubjectPrefix, index))); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, occurrence); err != nil {
 				return nil, err
 			}
 			continue
@@ -312,7 +310,7 @@ func decodeResponsesWebSearchLifecycleWithDecisions(id string, rawAction json.Ra
 	return append(items, resultItem), nil
 }
 
-func decodeResponsesAnnotations(text string, raw json.RawMessage, sink compat.Sink, exchangeID string, subjectPrefix string) ([]canonical.WebCitation, error) {
+func decodeResponsesAnnotations(text string, raw json.RawMessage, changeLog *[]compat.Change, exchangeID string, occurrence canonical.Occurrence) ([]canonical.WebCitation, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil
 	}
@@ -321,13 +319,13 @@ func decodeResponsesAnnotations(text string, raw json.RawMessage, sink compat.Si
 		return nil, canonical.NewBackendError("responses", 0, "responses output annotations are invalid", "")
 	}
 	citations := make([]canonical.WebCitation, 0, len(annotations))
-	for index, annotation := range annotations {
+	for _, annotation := range annotations {
 		annotationType := strings.TrimSpace(annotation.Type) // swobu:io-string source=provider-wire
 		if err := admitResponsesProviderOutputChild(annotationType); err != nil {
 			return nil, err
 		}
 		if annotationType != "url_citation" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", subjectPrefix, index))); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, occurrence); err != nil {
 				return nil, err
 			}
 			continue

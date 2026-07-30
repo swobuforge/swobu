@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -22,7 +21,7 @@ func TestOpenRouterAutomaticReasoningIsExact(t *testing.T) {
 	reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute())})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Reasoning: reasoning})
 	backend := openRouterBackend(t, request.Model())
-	document, decisions, err := backend.Codec.Encode(provider.Request{
+	document, changes, err := backend.Codec.Encode(provider.Request{
 		Canonical: request, Delivery: delivery.BufferedDelivery(),
 	})
 	if err != nil {
@@ -31,10 +30,8 @@ func TestOpenRouterAutomaticReasoningIsExact(t *testing.T) {
 	if !strings.Contains(string(document.RawBytes()), `"reasoning":{"enabled":true}`) {
 		t.Fatalf("automatic reasoning = %s", document.RawBytes())
 	}
-	for _, decision := range decisions {
-		if decision.Feature == compat.RequestReasoning && decision.Outcome != compat.Exact {
-			t.Fatalf("reasoning decision = %#v, want exact", decision)
-		}
+	if len(changes) != 0 {
+		t.Fatalf("exact reasoning lowering changes = %#v", changes)
 	}
 }
 

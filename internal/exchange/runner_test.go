@@ -382,7 +382,7 @@ func (t testProviderTransport) Send(ctx context.Context, target provider.TargetS
 
 type testBackendCodec struct{ protocol protocolkind.ProtocolKind }
 
-func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Decision, error) {
+func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	input := wire.ProviderEncodeInput{Request: req.Canonical}
 	var result wire.ProviderEncodeResult
 	var err error
@@ -396,7 +396,7 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 	default:
 		return carrier.Document{}, nil, canonical.BadEndpoint("test protocol is unsupported")
 	}
-	return result.Document, result.Decisions, err
+	return result.Document, result.Changes, err
 }
 
 func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
@@ -413,7 +413,7 @@ func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, 
 		case protocolkind.Messages:
 			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
 		}
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	case provider.DocumentIngress:
 		var result wire.ProviderDecodeResult
 		var err error
@@ -425,7 +425,7 @@ func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, 
 		case protocolkind.Messages:
 			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
 		}
-		return provider.DecodedResponse{Stream: result.Stream, Decisions: result.Decisions, TerminalDecisions: result.TerminalDecisions}, err
+		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
 	}

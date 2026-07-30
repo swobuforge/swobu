@@ -12,7 +12,7 @@ import (
 )
 
 func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	cases := []struct {
 		name string
 		raw  string
@@ -48,7 +48,7 @@ func TestDecodeRequest_DecodesParallelToolCalls(t *testing.T) {
 }
 
 func TestDecodeRequest_RejectsParallelToolCallsWrongType(t *testing.T) {
-	codec := legacyClientRequestDecoder{}
+	codec := testClientRequestDecoder{}
 	_, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: []byte(`{"model":"gpt-4o-mini","input":"hi","parallel_tool_calls":"nope"}`)})
 	if err == nil {
 		t.Fatal("expected DecodeClientRequest to reject invalid parallel_tool_calls")

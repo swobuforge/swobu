@@ -1,7 +1,6 @@
 package messages
 
 import (
-	"context"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -11,9 +10,9 @@ import (
 // loweredMessagesInstructions makes the single-system-field approximation
 // explicit instead of presenting canonical role/order loss as domain text.
 type loweredMessagesInstructions struct {
-	Text      string
-	Exact     bool
-	Decisions []compat.Decision
+	Text    string
+	Exact   bool
+	Changes []compat.Change
 }
 
 func flattenInstructionsForMessages(items []canonical.CanonicalItem) loweredMessagesInstructions {
@@ -41,14 +40,7 @@ func flattenInstructionsForMessages(items []canonical.CanonicalItem) loweredMess
 	exact = exact && count <= 1
 	lowered := loweredMessagesInstructions{Text: out.String(), Exact: exact}
 	if !exact && count > 0 {
-		lowered.Decisions = []compat.Decision{{Feature: compat.RequestInstructions, Outcome: compat.Approx, Subject: compat.Subject("messages.system")}}
+		lowered.Changes = []compat.Change{compat.NewChange(canonical.RequestInstructions, compat.Approximation, canonical.Occurrence{})}
 	}
 	return lowered
-}
-
-func commitMessagesInstructionDecisions(sink compat.Sink, exchangeID string, lowered loweredMessagesInstructions) error {
-	if sink == nil || len(lowered.Decisions) == 0 {
-		return nil
-	}
-	return sink.Commit(context.Background(), exchangeID, lowered.Decisions)
 }

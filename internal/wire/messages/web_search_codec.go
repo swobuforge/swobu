@@ -2,7 +2,6 @@ package messages
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -11,18 +10,18 @@ import (
 )
 
 type messagesProjectionEvidence struct {
-	feature       compat.Feature
-	sink          compat.Sink
-	exchangeID    string
-	subjectPrefix string
+	feature    canonical.CapabilityPath
+	changeLog  *[]compat.Change
+	exchangeID string
+	occurrence canonical.Occurrence
 }
 
-func (e messagesProjectionEvidence) drop(index int) error {
-	return emitMessagesWireDecision(e.sink, e.exchangeID, e.feature, compat.Drop, compat.Subject(fmt.Sprintf("%s/%d/type", e.subjectPrefix, index)))
+func (e messagesProjectionEvidence) drop(_ int) error {
+	return appendMessagesOccurrenceChange(e.changeLog, e.exchangeID, e.feature, compat.Omission, e.occurrence)
 }
 
 func (e messagesProjectionEvidence) malformed(message string) error {
-	if e.feature == compat.ResponseItemsKind {
+	if e.feature == canonical.ResponseItemsKind {
 		return canonical.NewBackendError("messages", 0, message, "")
 	}
 	return canonical.BadRequest(message)
@@ -114,7 +113,7 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 		sources = append(sources, source)
 	}
 	if len(blocks) > 0 && len(sources) == 0 {
-		if evidence.feature == compat.ResponseItemsKind {
+		if evidence.feature == canonical.ResponseItemsKind {
 			return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages web-search result has no surviving sources", "")
 		}
 		return canonical.CanonicalItem{}, canonical.BadRequest("messages web-search result has no surviving sources")

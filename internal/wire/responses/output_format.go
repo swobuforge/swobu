@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-func decodeResponsesOutputFormat(text *responsesTextDTO, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
+func decodeResponsesOutputFormat(text *responsesTextDTO, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	if text == nil {
 		return canonical.OutputFormat{}, nil
 	}
@@ -74,6 +74,6 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 		}
 		return &responsesTextDTO{Format: dto}, nil
 	default:
-		return nil, provider.NewIncompatibleTarget("Responses cannot represent the canonical output format")
+		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Responses cannot represent the canonical output format")
 	}
 }

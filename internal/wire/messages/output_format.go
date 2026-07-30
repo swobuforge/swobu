@@ -22,7 +22,7 @@ type messagesJSONSchemaOutputFormat struct {
 	Strict      *bool           `json:"strict,omitempty"`
 }
 
-func decodeMessagesOutputFormat(raw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
+func decodeMessagesOutputFormat(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {
 		return canonical.OutputFormat{}, nil
@@ -65,7 +65,7 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat) (json.RawMessage,
 	}
 	switch format.Kind {
 	case canonical.OutputFormatJSONObject:
-		return nil, provider.NewIncompatibleTarget("Messages requires a schema for structured output and cannot represent json_object intent")
+		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Messages requires a schema for structured output and cannot represent json_object intent")
 	case canonical.OutputFormatJSONSchema:
 		dto := messagesNativeOutputFormatDTO{
 			Type:   "json_schema",
@@ -77,11 +77,11 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat) (json.RawMessage,
 		}
 		return raw, nil
 	default:
-		return nil, provider.NewIncompatibleTarget("Messages cannot represent the canonical output format")
+		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Messages cannot represent the canonical output format")
 	}
 }
 
-func decodeMessagesNativeOutputFormat(format *messagesNativeOutputFormatDTO, sink compat.Sink, exchangeID string) (canonical.OutputFormat, error) {
+func decodeMessagesNativeOutputFormat(format *messagesNativeOutputFormatDTO, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	if format == nil {
 		return canonical.OutputFormat{}, nil
 	}
@@ -92,12 +92,12 @@ func decodeMessagesNativeOutputFormat(format *messagesNativeOutputFormatDTO, sin
 	if formatType != "json_schema" {
 		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Messages", "output_config format type "+formatType)
 	}
-	if err := commitMessagesProjectionDecisions(sink, exchangeID, []compat.Decision{{
-		Feature: compat.RequestOutputFormat,
-		Outcome: compat.Approx,
-		Subject: compat.Subject("wire:/output_config/format"),
-	}}); err != nil {
-		return canonical.OutputFormat{}, err
+	if changeLog != nil {
+		*changeLog = append(*changeLog, compat.Change{
+			Capability: canonical.RequestOutputFormat,
+			Kind:       compat.Approximation,
+			Preserved:  canonical.RequestOutputFormat,
+		})
 	}
 	return canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:   canonical.OutputFormatJSONSchema,

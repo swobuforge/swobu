@@ -2,13 +2,13 @@ package responses
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
+	"github.com/swobuforge/swobu/internal/wire/reasoningprojection"
 )
 
 func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.GenerationControls, error) {
@@ -45,7 +45,7 @@ func decodeResponsesGenerationControls(dto responsesRequestDTO) (canonical.Gener
 	})
 }
 
-func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json.RawMessage, sink compat.Sink, exchangeID string) (canonical.ReasoningControls, error) {
+func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (canonical.ReasoningControls, error) {
 	params := canonical.ReasoningControlsParams{}
 	if dto != nil {
 		switch value := strings.TrimSpace(dto.Effort); value { // swobu:io-string source=boundary
@@ -55,7 +55,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 		case "minimal", "low", "medium", "high", "xhigh", "max":
 			params.Compute = canonical.Specify(canonical.NewAutomaticReasoningCompute())
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestReasoning, compat.Approx, compat.Subject("wire:/reasoning/effort")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestReasoning, compat.Approximation, canonical.Occurrence{}); err != nil {
 				return canonical.ReasoningControls{}, err
 			}
 		}
@@ -64,7 +64,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 		case "concise", "detailed", "auto":
 			params.Disclosure = canonical.Specify(canonical.ReasoningDisclosureSummary)
 		default:
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestReasoning, compat.Approx, compat.Subject("wire:/reasoning/summary")); err != nil {
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestReasoning, compat.Approximation, canonical.Occurrence{}); err != nil {
 				return canonical.ReasoningControls{}, err
 			}
 		}
@@ -77,7 +77,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 			params.ResponsesContext = canonical.Specify(contextValue)
 		}
 	}
-	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw, sink, exchangeID)
+	includeEncrypted, err := decodeResponsesReasoningInclude(includeRaw, changeLog, exchangeID)
 	if err != nil {
 		return canonical.ReasoningControls{}, err
 	}
@@ -85,7 +85,7 @@ func decodeResponsesReasoning(dto *responsesReasoningRequestDTO, includeRaw json
 	return canonical.NewReasoningControls(params)
 }
 
-func decodeResponsesReasoningInclude(raw json.RawMessage, sink compat.Sink, exchangeID string) (bool, error) {
+func decodeResponsesReasoningInclude(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (bool, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=provider-wire
 	if trimmed == "" || trimmed == "null" {
 		return false, nil
@@ -95,14 +95,11 @@ func decodeResponsesReasoningInclude(raw json.RawMessage, sink compat.Sink, exch
 		return false, canonical.BadRequest("responses include is invalid")
 	}
 	includeEncrypted := false
-	for index, value := range values {
+	for _, value := range values {
 		if value == "web_search_call.action.sources" {
 			continue
 		}
 		if value != "reasoning.encrypted_content" {
-			if err := emitResponsesCompatibilityDecision(sink, exchangeID, compat.RequestItemsKind, compat.Drop, compat.Subject("wire:/include/"+strconv.Itoa(index))); err != nil {
-				return false, err
-			}
 			continue
 		}
 		includeEncrypted = true
@@ -110,28 +107,22 @@ func decodeResponsesReasoningInclude(raw json.RawMessage, sink compat.Sink, exch
 	return includeEncrypted, nil
 }
 
-func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort]) error {
+func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], changeLog *[]compat.Change) error {
 	wireReasoning := map[string]any{}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return provider.NewIncompatibleTarget("Responses cannot represent disabled reasoning with readable disclosure")
-		}
-		switch compute.Kind() {
-		case canonical.ReasoningDisabled:
-			wireReasoning["effort"] = "none"
-		case canonical.ReasoningAutomatic:
-			if !effortField.IsSpecified() {
-				return provider.NewIncompatibleTarget("Responses target has no proof that omitted effort enables dynamic reasoning")
-			}
-		case canonical.ReasoningBudget:
-			return provider.NewIncompatibleTarget("Responses cannot represent a numeric reasoning budget")
+			return provider.IncompatibleCapability(canonical.RequestReasoning, canonical.Occurrence{}, "Responses cannot represent disabled reasoning with readable disclosure")
 		}
 	}
-	if effort, ok := effortField.Get(); ok {
-		if existing, disabled := wireReasoning["effort"]; disabled && existing == "none" {
-			return canonical.BadRequest("disabled reasoning conflicts with inference effort")
+
+	value, present, changes := reasoningprojection.ProjectOrdinalReasoning(reasoning, effortField)
+	if present {
+		wireReasoning["effort"] = value
+	}
+	if changeLog != nil {
+		for _, change := range changes {
+			*changeLog = compat.AppendUnique(*changeLog, change)
 		}
-		wireReasoning["effort"] = effort
 	}
 	if disclosure, ok := reasoning.DisclosureField().Get(); ok && disclosure == canonical.ReasoningDisclosureSummary {
 		wireReasoning["summary"] = "auto"
@@ -156,9 +147,7 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		payload["top_p"] = value
 	}
 	if len(controls.Limits.StopSequences) > 0 {
-		return provider.NewIncompatibleTarget(
-			"Responses target does not declare stop-sequence support",
-		)
+		return provider.IncompatibleCapability(canonical.RequestControlsStopSequences, canonical.Occurrence{}, "Responses target does not declare stop-sequence support")
 	}
 	return nil
 }

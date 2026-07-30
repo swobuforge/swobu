@@ -6,24 +6,24 @@ import (
 	"testing"
 )
 
-func TestStoreStoredSecret_ValidatesInputs(t *testing.T) {
-	err := StoreStoredSecret("", "openrouter/default", "token")
+func TestStoreMaterializedCredential_ValidatesInputs(t *testing.T) {
+	_, err := StoreMaterializedCredential("", "openrouter/default", "token", CredentialWritePolicyAuto)
 	if err == nil || !strings.Contains(err.Error(), "provider spec is required") {
 		t.Fatalf("err = %v, want provider-spec validation", err)
 	}
 
-	err = StoreStoredSecret("openrouter", "", "token")
+	_, err = StoreMaterializedCredential("openrouter", "", "token", CredentialWritePolicyAuto)
 	if err == nil || !strings.Contains(err.Error(), "stored secret name is required") {
 		t.Fatalf("err = %v, want key-name validation", err)
 	}
 
-	err = StoreStoredSecret("openrouter", "openrouter/default", "")
+	_, err = StoreMaterializedCredential("openrouter", "openrouter/default", "", CredentialWritePolicyAuto)
 	if err == nil || !strings.Contains(err.Error(), "stored secret value is required") {
 		t.Fatalf("err = %v, want key-value validation", err)
 	}
 }
 
-func TestStoreStoredSecret_WritesProviderScopedScope(t *testing.T) {
+func TestStoreMaterializedCredential_WritesProviderScopedScope(t *testing.T) {
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 
@@ -46,15 +46,15 @@ func TestStoreStoredSecret_WritesProviderScopedScope(t *testing.T) {
 		return nil
 	}
 
-	if err := StoreStoredSecret("openrouter", "openrouter/default", "token-123"); err != nil {
-		t.Fatalf("StoreStoredSecret returned error: %v", err)
+	if _, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyAuto); err != nil {
+		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
 	}
 	if !called {
 		t.Fatal("expected keyring write to be called")
 	}
 }
 
-func TestStoreStoredSecret_CustomUsesCanonicalProviderScope(t *testing.T) {
+func TestStoreMaterializedCredential_CustomUsesCanonicalProviderScope(t *testing.T) {
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 	keyringSet = func(scope, user, pass string) error {
@@ -63,12 +63,12 @@ func TestStoreStoredSecret_CustomUsesCanonicalProviderScope(t *testing.T) {
 		}
 		return nil
 	}
-	if err := StoreStoredSecret("custom", "custom/default", "token-123"); err != nil {
+	if _, err := StoreMaterializedCredential("custom", "custom/default", "token-123", CredentialWritePolicyAuto); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestStoreStoredSecret_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+func TestSecretReferenceDoesNotReadAutoFileFallback(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
@@ -82,19 +82,15 @@ func TestStoreStoredSecret_FallsBackToFileWhenKeyringUnavailable(t *testing.T) {
 		return "", fmt.Errorf("backend unavailable")
 	}
 
-	if err := StoreStoredSecret("openrouter", "openrouter/default", "token-123"); err != nil {
-		t.Fatalf("StoreStoredSecret returned error: %v", err)
-	}
-	raw, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default")
+	ref, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyAuto)
 	if err != nil {
-		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
+		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
 	}
-	bundle, _, err := DecodeTokenBundle(raw)
-	if err != nil {
-		t.Fatalf("decode fallback bundle: %v", err)
+	if ref != "secretfile:openrouter/default" {
+		t.Fatalf("ref = %q, want file authority", ref)
 	}
-	if bundle.AccessToken != "token-123" {
-		t.Fatalf("access_token=%q want token-123", bundle.AccessToken)
+	if _, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default"); err == nil {
+		t.Fatal("secret reference resolved through file fallback")
 	}
 }
 
@@ -133,7 +129,7 @@ func TestStoreMaterializedCredential_FileWritesWithoutKeyring(t *testing.T) {
 	}
 }
 
-func TestStoreSecretByRef_StoredSecretFallsBackToFileWhenKeyringUnavailable(t *testing.T) {
+func TestStoreSecretByRef_KeyringFailureDoesNotWriteShadowFile(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	origSet := keyringSet
 	t.Cleanup(func() { keyringSet = origSet })
@@ -151,14 +147,10 @@ func TestStoreSecretByRef_StoredSecretFallsBackToFileWhenKeyringUnavailable(t *t
 	if err != nil {
 		t.Fatalf("encode bundle: %v", err)
 	}
-	if err := StoreSecretByRef("openrouter", "secret:openrouter/default", raw); err != nil {
-		t.Fatalf("StoreSecretByRef returned error: %v", err)
+	if err := StoreSecretByRef("openrouter", "secret:openrouter/default", raw); err == nil {
+		t.Fatal("StoreSecretByRef succeeded through file fallback")
 	}
-	got, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default")
-	if err != nil {
-		t.Fatalf("ResolveStoredSecretByRef returned error: %v", err)
-	}
-	if got != raw {
-		t.Fatalf("resolved raw bundle mismatch: got %q want %q", got, raw)
+	if _, err := (&secretFileStore{}).ResolveRaw("openrouter/default"); err == nil {
+		t.Fatal("failed secret refresh wrote a shadow file")
 	}
 }

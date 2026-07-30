@@ -11,19 +11,14 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	deliverycompat "github.com/swobuforge/swobu/internal/wire/deliverycompat"
-	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, sink compat.Sink) *messagesEventReader {
-	recording := &compat.RecordingSink{Delegate: sink}
-	return &messagesEventReader{
+func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *messagesEventReader {
+	reader := &messagesEventReader{
 		exchangeID:     exchangeID,
 		responseID:     canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		sink:           recording,
-		recording:      recording,
 		reader:         core.NewSSEReader(stream.Body),
 		blocks:         map[int]*streamContentBlock{},
 		resolvedBlocks: map[int]struct{}{},
@@ -31,6 +26,8 @@ func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.Byt
 		latestUsage:    canonical.NewUnknownTokenUsage(),
 		request:        request.Clone(),
 	}
+	reader.changeLog = &reader.changes
+	return reader
 }
 
 type messagesResponseLifecycle uint8
@@ -44,8 +41,8 @@ const (
 type messagesEventReader struct {
 	exchangeID         string
 	responseID         canonical.EnvelopeID
-	sink               compat.Sink
-	recording          *compat.RecordingSink
+	changeLog          *[]compat.Change
+	changes            []compat.Change
 	reader             *core.SSEReaderCloser
 	resultID           string
 	model              string
@@ -66,11 +63,8 @@ type messagesEventReader struct {
 	request            canonical.CanonicalRequest
 }
 
-func (s *messagesEventReader) Decisions() []compat.Decision {
-	if s.recording == nil {
-		return nil
-	}
-	return s.recording.Decisions()
+func (s *messagesEventReader) Changes() []compat.Change {
+	return compat.CloneChanges(s.changes)
 }
 
 type streamContentBlock struct {
@@ -152,7 +146,6 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 				return canonical.Event{}, canonical.NewBackendError("messages", 0, "messages stream ended before message_start", "")
 			}
 			if err == io.EOF && s.lifecycle == messagesResponseStarted {
-				deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, false)
 				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
 				s.blocks = map[int]*streamContentBlock{}
 				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
@@ -172,14 +165,6 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		frameUsage := core.ExtractTokenUsage([]byte(frame.Data), tokenUsagePathSpec)
 		if !frameUsage.IsZero() {
 			s.latestUsage = mergeMessagesCumulativeUsage(s.latestUsage, frameUsage)
-			_, inputPresent := frameUsage.InputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, inputPresent, compat.ResponseUsageInputTokens, compat.Subject("wire:/usage/input_tokens"))
-			_, outputPresent := frameUsage.OutputTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, outputPresent, compat.ResponseUsageOutputTokens, compat.Subject("wire:/usage/output_tokens"))
-			_, cacheReadPresent := frameUsage.CacheReadTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheReadPresent, compat.ResponseUsageCacheReadTokens, compat.Subject("wire:/usage/cache_read_tokens"))
-			_, cacheWritePresent := frameUsage.CacheWriteTokens()
-			openaiwire.EmitUsageDecision(ctx, s.sink, s.exchangeID, cacheWritePresent, compat.ResponseUsageCacheWriteTokens, compat.Subject("wire:/usage/cache_write_tokens"))
 		}
 		var envelope streamEnvelope
 		if err := json.Unmarshal([]byte(frame.Data), &envelope); err != nil {
@@ -261,7 +246,7 @@ func (s *messagesEventReader) handleFrame(ctx context.Context, envelope streamEn
 			return nil
 		}
 		s.unknownEvents[key] = struct{}{}
-		return emitMessagesWireDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/events/%d/type", frameIndex)))
+		return nil
 	}
 }
 
@@ -349,7 +334,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	case "server_tool_use":
 		if strings.TrimSpace(payload.ContentBlock.Name) != "web_search" { // swobu:io-string source=provider-wire
 			s.erasedBlock = true
-			if err := emitMessagesWireDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content_blocks/%d/name", payload.Index))); err != nil {
+			if err := appendMessagesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(block.Ordinal)); err != nil {
 				return err
 			}
 			break
@@ -379,7 +364,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		// Retain the index until content_block_stop so deltas for an unknown
 		// additive block cannot affect known siblings.
 		s.erasedBlock = true
-		if err := emitMessagesWireDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content_blocks/%d/type", payload.Index))); err != nil {
+		if err := appendMessagesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(block.Ordinal)); err != nil {
 			return err
 		}
 	}
@@ -446,7 +431,7 @@ func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 			return nil
 		}
 		block.unknownDeltaRecorded = true
-		return emitMessagesWireDecision(s.sink, s.exchangeID, compat.ResponseItemsKind, compat.Drop, compat.Subject(fmt.Sprintf("wire:/content_blocks/%d/deltas/type", payload.Index)))
+		return appendMessagesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(block.Ordinal))
 	}
 	s.blocks[payload.Index] = block
 	return nil
@@ -503,8 +488,8 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	switch block.ItemKind {
 	case canonical.ItemKindMessage:
 		part, partErr := decodeMessagesCitedText(block.text.String(), block.citations, messagesProjectionEvidence{
-			feature: compat.ResponseItemsKind, sink: s.sink, exchangeID: s.exchangeID,
-			subjectPrefix: fmt.Sprintf("wire:/content_blocks/%d/citations", payload.Index),
+			feature: canonical.ResponseItemsKind, changeLog: s.changeLog, exchangeID: s.exchangeID,
+			occurrence: canonical.ResponseItemOccurrence(block.Ordinal),
 		})
 		if partErr != nil {
 			return partErr
@@ -517,8 +502,8 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 				raw = json.RawMessage(block.args.String())
 			}
 			item, err = decodeMessagesWebSearchCall(block.CallID.String(), raw, messagesProjectionEvidence{
-				feature: compat.ResponseItemsKind, sink: s.sink, exchangeID: s.exchangeID,
-				subjectPrefix: fmt.Sprintf("wire:/content_blocks/%d/input", payload.Index),
+				feature: canonical.ResponseItemsKind, changeLog: s.changeLog, exchangeID: s.exchangeID,
+				occurrence: canonical.ResponseItemOccurrence(block.Ordinal),
 			})
 			if err != nil {
 				return err
@@ -543,8 +528,8 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 		item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
 	case canonical.ItemKindToolResult:
 		item, err = decodeMessagesWebSearchResult(block.CallID.String(), block.searchResult, block.searchError, messagesProjectionEvidence{
-			feature: compat.ResponseItemsKind, sink: s.sink, exchangeID: s.exchangeID,
-			subjectPrefix: fmt.Sprintf("wire:/content_blocks/%d/content", payload.Index),
+			feature: canonical.ResponseItemsKind, changeLog: s.changeLog, exchangeID: s.exchangeID,
+			occurrence: canonical.ResponseItemOccurrence(block.Ordinal),
 		})
 		if err != nil {
 			return err
@@ -623,7 +608,6 @@ func (s *messagesEventReader) handleMessageStop(ctx context.Context) error {
 	if finishReason == "" {
 		finishReason = "completed"
 	}
-	deliverycompat.EmitTerminalUsagePresence(ctx, s.sink, s.exchangeID, !s.latestUsage.IsZero())
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: messagesCompletion(finishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
