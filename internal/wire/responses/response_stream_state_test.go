@@ -42,6 +42,20 @@ func TestDecodeResponseStreamReconcilesPartialMessageWithDoneAndTerminalSnapshot
 	}
 }
 
+func TestDecodeResponseStreamTreatsResponseFailedAsBackendFailure(t *testing.T) {
+	raw := responsesCreatedFrame() +
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"failed\",\"error\":{\"code\":\"model_error\",\"message\":\"review failed\"}}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
+	_, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
+	if err == nil {
+		t.Fatal("response.failed unexpectedly completed successfully")
+	}
+	if !strings.Contains(err.Error(), "model_error: review failed") {
+		t.Fatalf("response.failed error = %v, want provider code and message", err)
+	}
+}
+
 func TestDecodeResponseStreamReconcilesPartialFunctionInputWithDoneAndTerminalSnapshots(t *testing.T) {
 	request := responsesFunctionRequest(t)
 	for _, terminalOnly := range []bool{false, true} {

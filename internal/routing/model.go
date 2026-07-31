@@ -247,11 +247,11 @@ func (w Workspace) ResolveRoute(requested string) (Route, error) {
 	}
 	name, err := ParseRouteName(requested)
 	if err != nil {
-		return w.routes[w.defaultRoute].clone(), nil
+		return Route{}, fmt.Errorf("requested route %q is invalid: %w", requested, err)
 	}
 	route, ok := w.routes[name]
 	if !ok {
-		return w.routes[w.defaultRoute].clone(), nil
+		return Route{}, fmt.Errorf("requested route %q is not configured: %w", requested, ErrNotFound)
 	}
 	return route.clone(), nil
 }

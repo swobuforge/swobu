@@ -212,7 +212,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			Choices: []chatCompletionsChoiceDTO{{
 				Index:        0,
 				Delta:        &chatCompletionsDeltaDTO{},
-				FinishReason: sse.DefaultFinishReason(finishReason, "stop"),
+				FinishReason: chatClientFinishReason(finishReason, len(s.toolByID) > 0),
 			}},
 			Usage: chatUsageFromCanonical(event.Usage),
 		})

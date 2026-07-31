@@ -39,6 +39,10 @@ type streamFrame struct {
 		ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 		Output            []json.RawMessage              `json:"output,omitempty"`
 		OutputText        string                         `json:"output_text,omitempty"`
+		Error             struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	} `json:"response"`
 	Item struct {
 		ID               string                         `json:"id"`
@@ -192,6 +196,15 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 			return false, canonical.Event{}, err
 		}
 		return true, canonical.Event{}, nil
+	case "response.failed":
+		message := strings.TrimSpace(frame.Response.Error.Message) // swobu:io-string source=provider-wire
+		if message == "" {
+			message = "responses stream returned response.failed"
+		}
+		if code := strings.TrimSpace(frame.Response.Error.Code); code != "" { // swobu:io-string source=provider-wire
+			message = code + ": " + message
+		}
+		return false, canonical.Event{}, canonical.NewBackendError("responses", 0, message, "")
 	case "error":
 		message := strings.TrimSpace(frame.Message) // swobu:io-string source=provider-wire
 		if message == "" {

@@ -114,17 +114,17 @@ func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
 	}
 }
 
-func TestWorkspaceResolveRouteUsesDefaultForUnknownNonEmptyModel(t *testing.T) {
+func TestWorkspaceResolveRouteRequiresExactNameOrPublicDefault(t *testing.T) {
 	config := testConfig(t, testTarget(t, "a"))
 	slug, _ := ParseWorkspaceSlug("dev")
 	workspace, _ := config.Workspace(slug)
-	for _, requested := range []string{"chat", PublicDefaultRouteID, "upstream-a", "missing"} {
+	for _, requested := range []string{"chat", PublicDefaultRouteID} {
 		route, err := workspace.ResolveRoute(requested)
 		if err != nil || route.Name().String() != "chat" {
 			t.Fatalf("ResolveRoute(%q) = %q, %v", requested, route.Name().String(), err)
 		}
 	}
-	for _, requested := range []string{"", " \t"} {
+	for _, requested := range []string{"", " \t", "upstream-a", "missing", "INVALID"} {
 		if _, err := workspace.ResolveRoute(requested); err == nil {
 			t.Fatalf("ResolveRoute(%q) unexpectedly succeeded", requested)
 		}

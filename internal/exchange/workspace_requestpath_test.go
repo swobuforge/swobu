@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 		t.Fatalf("attempted targets=%v", refs)
 	}
 }
-func TestRequestPathUnknownModelAttemptsDefaultRoute(t *testing.T) {
+func TestRequestPathUnknownModelRejectsBeforeTargetAttempt(t *testing.T) {
 	workspace := requestpathWorkspace(t)
 	var refs []string
 	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
@@ -63,10 +64,30 @@ func TestRequestPathUnknownModelAttemptsDefaultRoute(t *testing.T) {
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
 	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "unknown", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"missing","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
+	if err == nil {
+		t.Fatal("unknown model unexpectedly succeeded")
+	}
+	if len(refs) != 0 {
+		t.Fatalf("unknown model attempted targets=%v", refs)
+	}
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
+		t.Fatalf("unknown model error=%v, want BAD_REQUEST", err)
+	}
+}
+
+func TestRequestPathPublicDefaultModelAttemptsConfiguredDefaultRoute(t *testing.T) {
+	workspace := requestpathWorkspace(t)
+	var refs []string
+	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		refs = append(refs, target.TargetID)
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
+	})}
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "default", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"default","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(refs) != 1 || refs[0] != "target-a" {
-		t.Fatalf("attempted targets=%v", refs)
+		t.Fatalf("default model attempted targets=%v, want target-a", refs)
 	}
 }

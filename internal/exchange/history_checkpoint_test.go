@@ -50,7 +50,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 	if err := store.Put(context.Background(), "dev", session.Checkpoint{HistoryFingerprint: &previousFingerprint, Request: previousRequest, Response: previousResponse, ResolvedMedia: previousMedia}); err != nil {
 		t.Fatal(err)
 	}
-	full := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{
+	full := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{
 		imageMessage,
 		testMessage(canonical.MessageRoleAssistant, "answer"),
 		testMessage(canonical.MessageRoleUser, "two"),
@@ -58,7 +58,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 	s := reducerTestState(t)
 	s.input.request = full
 	s.input.rebasedRequest = &wire.RebasedRequest{Previous: previousFingerprint, Request: canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
 	})}
 	s.input.requestFingerprint = testHistoryRequest([]byte("two"))
 	runner := reducerRuntime()
@@ -126,7 +126,7 @@ func TestImplicitFingerprintLookupPreservesFullHistoryAndAddsNativeContinuationD
 
 func TestImplicitFingerprintMissExecutesFullRequestAndRetainsCompositionBase(t *testing.T) {
 	missing := testExchangeHistoryFingerprint(t, "responses", "missing")
-	full := testCanonicalRequest("m")
+	full := testCanonicalRequest("a")
 	s := reducerTestState(t)
 	s.input.request = full
 	s.input.rebasedRequest = &wire.RebasedRequest{Previous: missing, Request: full.Clone()}
@@ -195,10 +195,10 @@ func TestExplicitPredecessorTakesPriorityOverImplicitFingerprint(t *testing.T) {
 	implicit := testExchangeHistoryFingerprint(t, "responses", "implicit")
 	s := reducerTestState(t)
 	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_explicit"},
 	})
-	s.input.rebasedRequest = &wire.RebasedRequest{Previous: implicit, Request: testCanonicalRequest("m")}
+	s.input.rebasedRequest = &wire.RebasedRequest{Previous: implicit, Request: testCanonicalRequest("a")}
 	started, err := reduceStarting(s, exchangeStarted{}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestExplicitSameSchemePredecessorCreatesCompleteHistoryAdvance(t *testing.T
 	currentRequest := testHistoryRequest([]byte("all-current-input"))
 	s := reducerTestState(t)
 	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current")},
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_explicit"},
 	})
 	s.input.requestFingerprint = currentRequest
@@ -272,7 +272,7 @@ func TestExplicitCrossSchemePredecessorStoresNoFalseFingerprintRoot(t *testing.T
 	}
 	s := reducerTestState(t)
 	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_explicit"},
 	})
 	s.input.requestFingerprint = testHistoryRequest([]byte("two"))
