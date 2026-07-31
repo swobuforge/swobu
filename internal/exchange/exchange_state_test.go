@@ -1224,7 +1224,7 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:        canonical.Specify("model-a"),
+		Model:        canonical.Specify("a"),
 		Items:        []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
 		OutputFormat: canonical.Specify(format),
 	})
@@ -1284,7 +1284,7 @@ func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:    canonical.Specify("model-a"),
+		Model:    canonical.Specify("a"),
 		Items:    []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "hi")},
 		Controls: controls,
 	})

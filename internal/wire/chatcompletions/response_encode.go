@@ -40,7 +40,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 		Choices: []chatCompletionsChoiceDTO{{
 			Index:        0,
 			Message:      message,
-			FinishReason: sse.DefaultFinishReason(output.Completion().Reason(), "stop"),
+			FinishReason: chatClientFinishReason(output.Completion().Reason(), len(message.ToolCalls) > 0),
 		}},
 		Usage: chatUsageFromCanonical(output.Usage()),
 	})
@@ -53,6 +53,15 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 		ResponseFingerprint: &responseFingerprint,
 	}
 	return result, nil
+}
+
+// chatClientFinishReason derives terminal meaning from canonical output while
+// the canonical completion retains the provider reason for diagnostics.
+func chatClientFinishReason(providerReason string, hasToolCalls bool) string {
+	if hasToolCalls {
+		return "tool_calls"
+	}
+	return sse.DefaultFinishReason(providerReason, "stop")
 }
 
 func chatItemsContainReasoning(items []canonical.CanonicalItem) bool {
