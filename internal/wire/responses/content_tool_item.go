@@ -13,10 +13,10 @@ func (e *ResponseStreamWireEncoder) ensureToolItem(itemID string, callID string,
 	if state := e.toolItems[itemID]; state != nil {
 		return nil, nil
 	}
-	return e.openToolItem(itemID, callID, name, toolType)
+	return e.openToolItem(itemID, callID, name, "", toolType)
 }
 
-func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, name string, toolType string) ([][]byte, error) {
+func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, name string, namespace string, toolType string) ([][]byte, error) {
 	if strings.TrimSpace(itemID) == "" { // swobu:io-string source=boundary
 		itemID = "fc_swobu_" + strconv.Itoa(e.nextOutputIndex)
 	}
@@ -26,6 +26,9 @@ func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, n
 		}
 		if state.name == "" {
 			state.name = name
+		}
+		if state.namespace == "" {
+			state.namespace = namespace
 		}
 		return nil, nil
 	}
@@ -38,6 +41,7 @@ func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, n
 		outputIndex: e.nextOutputIndex,
 		callID:      callID,
 		name:        name,
+		namespace:   namespace,
 		toolType:    normalizedType,
 	}
 	e.nextOutputIndex++
@@ -45,7 +49,7 @@ func (e *ResponseStreamWireEncoder) openToolItem(itemID string, callID string, n
 	added, err := json.Marshal(responsesOutputItemEventDTO{
 		Type:        "response.output_item.added",
 		OutputIndex: state.outputIndex,
-		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "in_progress", ""),
+		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.namespace, state.toolType, "in_progress", ""),
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
@@ -69,6 +73,7 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 		OutputIndex: state.outputIndex,
 		CallID:      state.callID,
 		Name:        state.name,
+		Namespace:   responsesClientNamespaceValue(state.namespace),
 	}
 	if state.toolType == canonical.ToolTypeCustom {
 		argsDoneType = "response.custom_tool_call_input.done"
@@ -86,12 +91,12 @@ func (e *ResponseStreamWireEncoder) closeToolItem(itemID string) ([][]byte, erro
 	itemDone, err := json.Marshal(responsesOutputItemEventDTO{
 		Type:        "response.output_item.done",
 		OutputIndex: state.outputIndex,
-		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "completed", args),
+		Item:        responsesWireToolItem(state.itemID, state.callID, state.name, state.namespace, state.toolType, "completed", args),
 	})
 	if err != nil {
 		return nil, canonical.InternalError("responses event encoding failed")
 	}
-	e.outputItems = append(e.outputItems, responsesWireToolItem(state.itemID, state.callID, state.name, state.toolType, "completed", args))
+	e.outputItems = append(e.outputItems, responsesWireToolItem(state.itemID, state.callID, state.name, state.namespace, state.toolType, "completed", args))
 	delete(e.toolItems, itemID)
 	return [][]byte{argsDoneBytes, itemDone}, nil
 }
@@ -118,7 +123,7 @@ func (e *ResponseStreamWireEncoder) flushOpenItems() ([][]byte, error) {
 	return frames, nil
 }
 
-func responsesWireToolItem(itemID string, callID string, name string, toolType string, status string, payload string) any {
+func responsesWireToolItem(itemID string, callID string, name string, namespace string, toolType string, status string, payload string) any {
 	normalizedType := strings.ToLower(strings.TrimSpace(toolType)) // swobu:io-string source=boundary
 	if normalizedType == canonical.ToolTypeWebSearch {
 		if strings.TrimSpace(callID) != "" { // swobu:io-string source=domain
@@ -142,6 +147,7 @@ func responsesWireToolItem(itemID string, callID string, name string, toolType s
 		Status:    status,
 		CallID:    callID,
 		Name:      name,
+		Namespace: responsesClientNamespaceValue(namespace),
 		Arguments: payload,
 	}
 }
