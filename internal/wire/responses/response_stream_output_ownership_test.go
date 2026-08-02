@@ -57,7 +57,7 @@ func TestDecodeResponseStreamRejectsDuplicatePendingToolCallIDs(t *testing.T) {
 		"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"item_id\":\"fc_shared\",\"call_id\":\"call_shared\",\"name\":\"lookup\",\"delta\":\"{\\\"x\\\":2}\"}\n\n" +
 		"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"fc_shared\",\"call_id\":\"call_shared\",\"name\":\"lookup\",\"delta\":\"{\\\"x\\\":1}\"}\n\n" +
 		responsesCompletedFrame(`[{"type":"function_call","id":"fc_shared","call_id":"call_shared","name":"lookup","status":"completed","arguments":"{\"x\":1}"},{"type":"function_call","id":"fc_shared","call_id":"call_shared","name":"lookup","status":"completed","arguments":"{\"x\":2}"}]`, "")
-	stream := decodeResponseStream(responsesFunctionRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(responsesFunctionRequest(t), testAttemptToolNames(responsesFunctionRequest(t)), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	_, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err == nil {
@@ -82,7 +82,7 @@ func TestDecodeResponseStreamFreezesErasedOutputLifecycle(t *testing.T) {
 			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_output\"}}\n\n" +
 			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"kept\"}]}}\n\n" +
 			responsesCompletedFrame("[]", "")
-		stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+		stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 		assertResponsesProviderOutputItems(t, stream, 1)
 		assertResponsesStreamDrop(t, stream, 1)
 	})
@@ -198,7 +198,7 @@ func TestDecodeResponseStreamRecordsErasurePerOutputIndex(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_output\"}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"future_output\"}}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	for {
 		_, err := stream.Next(context.Background())
 		if err != nil {

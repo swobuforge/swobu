@@ -19,4 +19,12 @@
 // attempts reject as target-incompatible until the canonical approval
 // request/response lifecycle exists. Malformed MCP syntax and unsolicited
 // provider-owned MCP effects still fail.
+//
+// Shared lowering implements official Responses with compatibility-oriented
+// representation choices: full materialized history, flat scope-qualified
+// ordinary tools, eagerly materialized known declarations, and metadata-light
+// replay. Exact provider codecs may add only positively owned wire details.
+// Text-only results split across several canonical parts concatenate into the
+// official string form with approximation evidence; image-bearing results retain
+// their rich array.
 package responses

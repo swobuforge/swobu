@@ -160,7 +160,8 @@ func (s *responsesResponseStream) completeWebSearchItem(frame streamFrame, state
 	if frame.OutputIndex != nil {
 		index = *frame.OutputIndex
 	}
-	lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(itemID, frame.Item.Action, state, s.changeLog, s.exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true)
+	refinement := responsesWebSearchRefinementFromID(itemID)
+	lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(itemID, frame.Item.Action, state, s.changeLog, s.exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true, refinement)
 	if err != nil {
 		return false, err
 	}
@@ -200,7 +201,23 @@ func decodeResponsesWebSearchLifecycleState(raw string) (responsesWebSearchLifec
 }
 
 func decodeResponsesWebSearchLifecycle(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState) ([]canonical.CanonicalItem, error) {
-	return decodeResponsesWebSearchLifecycleWithChanges(id, rawAction, state, nil, "", canonical.Occurrence{}, false)
+	return decodeResponsesWebSearchLifecycleWithChanges(id, rawAction, state, nil, "", canonical.Occurrence{}, false, nil)
+}
+
+// responsesWebSearchRefinementFromID preserves one provider item id as the exact
+// Responses refinement. A blank id yields nil: provider output that omits a
+// web_search_call id is rejected by the lifecycle decode (missing id), and the
+// refinement must never be minted from a synthetic correlation token.
+func responsesWebSearchRefinementFromID(id string) *canonical.ResponsesWebSearchRefinement {
+	trimmed := strings.TrimSpace(id) // swobu:io-string source=provider-wire
+	if trimmed == "" {
+		return nil
+	}
+	refinement, err := canonical.NewResponsesWebSearchRefinement(canonical.ResponsesItemID(trimmed))
+	if err != nil {
+		return nil
+	}
+	return &refinement
 }
 
 func responsesWebSearchMalformed(providerOutput bool, message string) error {
@@ -210,7 +227,7 @@ func responsesWebSearchMalformed(providerOutput bool, message string) error {
 	return canonical.BadRequest(message)
 }
 
-func decodeResponsesWebSearchLifecycleWithChanges(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState, changeLog *[]compat.Change, exchangeID string, occurrence canonical.Occurrence, providerOutput bool) ([]canonical.CanonicalItem, error) {
+func decodeResponsesWebSearchLifecycleWithChanges(id string, rawAction json.RawMessage, state responsesWebSearchLifecycleState, changeLog *[]compat.Change, exchangeID string, occurrence canonical.Occurrence, providerOutput bool, refinement *canonical.ResponsesWebSearchRefinement) ([]canonical.CanonicalItem, error) {
 	callID, err := canonical.NewToolCallID(strings.TrimSpace(id)) // swobu:io-string source=provider-wire
 	if err != nil {
 		return nil, responsesWebSearchMalformed(providerOutput, "responses web-search call is missing id")
@@ -242,7 +259,7 @@ func decodeResponsesWebSearchLifecycleWithChanges(id string, rawAction json.RawM
 	if err != nil {
 		return nil, canonical.InternalError("responses web-search action is invalid")
 	}
-	callItem, err := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	callItem, err := canonical.NewToolCallItemWithResponsesWebSearch(callID, canonical.WebSearchToolKey(), input, refinement)
 	if err != nil {
 		return nil, canonical.InternalError("responses web-search call is invalid")
 	}

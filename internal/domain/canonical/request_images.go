@@ -108,6 +108,7 @@ func requestWithRewrittenItems(request CanonicalRequest, items []CanonicalItem) 
 		Model: request.ModelField(), Items: items,
 		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
 		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
+		Responses: request.Responses(),
 	}
 	if previous, ok := request.PreviousResponse(); ok {
 		params.PreviousResponse = &previous

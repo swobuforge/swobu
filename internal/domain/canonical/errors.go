@@ -1,6 +1,7 @@
 package canonical
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -67,6 +68,32 @@ func UnsupportedEndpoint(message string) Error {
 
 func InternalError(message string) Error {
 	return newSwobuError(ErrorCodeInternal, message)
+}
+
+// TerminalErrorCode classifies a terminal request failure into the canonical
+// code reported on the request_outcome log line. It is the single boundary
+// where an untyped Swobu-owned failure resolves to ErrorCodeInternal: a typed
+// Swobu error reports its own code; a backend failure or a client cancellation
+// carry their own transport classification and resolve to no canonical code; any
+// other non-nil error is an unexpected internal failure. The raw cause is not
+// part of this classification — it is carried separately in traffic evidence,
+// never on this stable log surface — so the classifier inspects type only.
+func TerminalErrorCode(err error) ErrorCode {
+	if err == nil {
+		return ""
+	}
+	var swobuErr Error
+	if errors.As(err, &swobuErr) {
+		return swobuErr.Code
+	}
+	var backendErr BackendError
+	if errors.As(err, &backendErr) {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return ""
+	}
+	return ErrorCodeInternal
 }
 
 func BadEndpoint(message string) Error {

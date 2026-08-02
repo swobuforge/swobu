@@ -82,7 +82,8 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 	if err := decodeResponsesWebSearchInclude(dto.Include, changeLog, exchangeID); err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	if err := decodeResponsesStore(dto.Store); err != nil {
+	store, err := decodeResponsesStore(dto.Store)
+	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	supplied, err := decodeResponsesSuppliedFields(raw)
@@ -168,6 +169,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 		Reasoning:        reasoning,
 		PreviousResponse: previousResponse,
 	}
+	params.Responses = canonical.NewResponsesRequestRefinement(store)
 	if supplied.Model {
 		params.Model = canonical.Specify(strings.TrimSpace(dto.Model)) // swobu:io-string source=boundary
 	} // swobu:io-string source=boundary
@@ -239,19 +241,16 @@ func responsesNativeInputPresent(raw json.RawMessage) bool {
 	return json.Unmarshal(trimmed, &items) == nil && len(items) > 0
 }
 
-func decodeResponsesStore(raw json.RawMessage) error {
+func decodeResponsesStore(raw json.RawMessage) (canonical.Specified[bool], error) {
 	value := bytes.TrimSpace(raw)
 	if len(value) == 0 || bytes.Equal(value, []byte("null")) {
-		return nil
+		return canonical.Unspecified[bool](), nil
 	}
 	var storageIntent bool
 	if err := json.Unmarshal(value, &storageIntent); err != nil {
-		return canonical.BadRequest("responses store must be a boolean")
+		return canonical.Unspecified[bool](), canonical.BadRequest("responses store must be a boolean")
 	}
-	// `store` is a client wire hint, not authority over Swobu continuation
-	// truth. The exchange always checkpoints successfully encoded responses so
-	// opaque provider reasoning and resolved media survive client projection.
-	return nil
+	return canonical.Specify(storageIntent), nil
 }
 
 func decodeResponsesInstructions(raw json.RawMessage) (string, error) {

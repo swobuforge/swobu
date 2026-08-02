@@ -6,6 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Messages tool_choice variants.
@@ -66,7 +67,7 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclara
 	}
 }
 
-func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
@@ -108,7 +109,10 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.Too
 		if err != nil {
 			return nil, err
 		}
-		name := decl.Key().Name()
+		name, err := wire.EncodeToolName(names, decl.Key())
+		if err != nil {
+			return nil, err
+		}
 		return map[string]any{
 			"type": "tool",
 			"name": name,

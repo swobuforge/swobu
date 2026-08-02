@@ -20,7 +20,12 @@ func TestOpenAIRequestMutationPreservesRawJSONIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: canonicaltest.LargeIntegerRequest(t, "model"), Delivery: delivery.BufferedDelivery()})
+	request := canonicaltest.LargeIntegerRequest(t, "model")
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,5 +68,34 @@ func TestRuntimeOwnsOpenAIChatCompletionsTokenSpelling(t *testing.T) {
 	}
 	if _, exists := payload["max_tokens"]; exists {
 		t.Fatalf("standard spelling leaked through OpenAI dialect: %s", document.RawBytes())
+	}
+}
+
+func TestRuntimeUsesSharedOfficialResponsesToolLowering(t *testing.T) {
+	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
+	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "workspace")
+	namespace, _ := canonical.NewToolNamespace(namespaceKey, "Workspace", []canonical.ToolDeclaration{child})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, namespace), canonicaltest.Message(t, canonical.MessageRoleUser, "read")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.Responses, "", "responses")
+	target.Model = "model"
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireName, _ := names.WireName(childKey)
+	if raw := string(document.RawBytes()); bytes.Contains(document.RawBytes(), []byte(`"type":"namespace"`)) || !bytes.Contains(document.RawBytes(), []byte(`"name":"`+wireName+`"`)) {
+		t.Fatalf("OpenAI Responses document = %s", raw)
 	}
 }

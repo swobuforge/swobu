@@ -15,6 +15,7 @@ type CanonicalRequest struct {
 	controls         GenerationControls
 	reasoning        ReasoningControls
 	outputFormat     Specified[OutputFormat]
+	responses        ResponsesRequestRefinement
 }
 
 // RequestParams carries already-decoded request bands into canonical
@@ -28,6 +29,7 @@ type RequestParams struct {
 	Controls         GenerationControls
 	Reasoning        ReasoningControls
 	OutputFormat     Specified[OutputFormat]
+	Responses        ResponsesRequestRefinement
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -40,6 +42,7 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		controls:         params.Controls.Clone(),
 		reasoning:        params.Reasoning.Clone(),
 		outputFormat:     cloneSpecified(params.OutputFormat, OutputFormat.Clone),
+		responses:        params.Responses.Clone(),
 	}
 }
 
@@ -100,6 +103,7 @@ func (r CanonicalRequest) OutputFormatSpecified() bool  { return r.outputFormat.
 func (r CanonicalRequest) OutputFormatField() Specified[OutputFormat] {
 	return cloneSpecified(r.outputFormat, OutputFormat.Clone)
 }
+func (r CanonicalRequest) Responses() ResponsesRequestRefinement { return r.responses.Clone() }
 
 func (r CanonicalRequest) PreviousResponse() (ResponseRef, bool) {
 	if r.previousResponse == nil {
@@ -118,6 +122,7 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 		Controls:         r.controls,
 		Reasoning:        r.reasoning,
 		OutputFormat:     cloneSpecified(r.outputFormat, OutputFormat.Clone),
+		Responses:        r.responses,
 	})
 }
 
@@ -128,6 +133,7 @@ func (r CanonicalRequest) WithItems(items []CanonicalItem) CanonicalRequest {
 		Model: r.ModelField(), Items: items, ToolPolicy: r.ToolPolicyField(),
 		ToolCallBatch: r.ToolCallBatchField(), Controls: r.Controls(),
 		Reasoning: r.Reasoning(), OutputFormat: r.OutputFormatField(),
+		Responses: r.Responses(),
 	}
 	if previous, ok := r.PreviousResponse(); ok {
 		params.PreviousResponse = &previous

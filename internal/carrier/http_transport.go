@@ -10,7 +10,7 @@ type TransportRequest struct {
 	Method string
 	URL    string
 	Header http.Header
-	Body   io.ReadCloser
+	Body   []byte
 }
 
 // Response carries one HTTP-level client response to the inbound adapter.

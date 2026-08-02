@@ -34,6 +34,29 @@ func (id ResponsesResponseID) isBlank() bool {
 	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
 }
 
+// ResponsesItemID is one provider/dialect-owned item identity carried by a
+// Responses output item (for example a web_search_call id beginning with "ws").
+// It is not canonical call correlation: a ToolCallID pairs a call with its
+// later result, while a ResponsesItemID is the exact provider presentation id
+// that must be preserved verbatim on re-encode and may be absent when the
+// dialect omits it. It is never a Swobu checkpoint key, client id, or
+// correlation token.
+type ResponsesItemID string
+
+// NewResponsesItemID preserves one provider-issued item identity exactly. A
+// blank value is rejected so the type cannot carry an omitted id.
+func NewResponsesItemID(raw string) (ResponsesItemID, error) {
+	if raw == "" || strings.TrimSpace(raw) != raw { // swobu:io-string source=boundary
+		return "", errors.New("responses item id is blank")
+	}
+	return ResponsesItemID(raw), nil
+}
+
+func (id ResponsesItemID) String() string { return string(id) }
+func (id ResponsesItemID) IsZero() bool {
+	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
+}
+
 // ResponseRef is the shared identity of a completed response and a later
 // request that selects it. Provider-native handles remain optional typed children.
 type ResponseRef struct {

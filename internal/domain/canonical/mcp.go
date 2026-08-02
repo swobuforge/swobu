@@ -125,9 +125,9 @@ func (a MCPApproval) equivalent(other MCPApproval) bool {
 	return true
 }
 
-// MCPSource refines one namespace with known request-carried discovery,
-// approval, loading, and caller-authority semantics. Credentials and headers
-// remain in request-private mcp.Access, never in canonical history.
+// MCPSource is the request-carried connection, approval, loading, and
+// caller-authority contract owned by one MCPToolSource. Credentials and
+// headers remain in request-private mcp.Access, never in canonical history.
 type MCPSource struct {
 	kind           MCPSourceKind
 	reference      string

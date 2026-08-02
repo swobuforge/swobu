@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -33,8 +34,10 @@ func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
 		"edit files",
 		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
 
-	projectedFunctionName := namespacedFunctionTool.Key().Name()
-	projectedCustomName := namespacedCustomTool.Key().Name()
+	functionNames := toolChoiceNames(t, []canonical.ToolDeclaration{namespacedFunctionTool})
+	customNames := toolChoiceNames(t, []canonical.ToolDeclaration{namespacedCustomTool})
+	projectedFunctionName, _ := functionNames.WireName(namespacedFunctionTool.Key())
+	projectedCustomName, _ := customNames.WireName(namespacedCustomTool.Key())
 	webSearchTool := canonical.NewWebSearchDeclaration()
 
 	tests := []struct {
@@ -186,8 +189,10 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 		"edit files",
 		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
 
-	projectedFunctionName := namespacedFunctionTool.Key().Name()
-	projectedCustomName := namespacedCustomTool.Key().Name()
+	functionNames := toolChoiceNames(t, []canonical.ToolDeclaration{namespacedFunctionTool})
+	projectedFunctionName, _ := functionNames.WireName(namespacedFunctionTool.Key())
+	customNames := toolChoiceNames(t, []canonical.ToolDeclaration{namespacedCustomTool})
+	projectedCustomName, _ := customNames.WireName(namespacedCustomTool.Key())
 
 	tests := []struct {
 		name   string
@@ -228,7 +233,8 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := encodeToolChoice(tc.policy, tc.tools, nil, "")
+			names := toolChoiceNames(t, tc.tools)
+			got, err := encodeToolChoice(tc.policy, tc.tools, names, nil, "")
 			if err != nil {
 				t.Fatalf("encodeToolChoice returned error: %v", err)
 			}
@@ -240,7 +246,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 func TestEncodeToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, "")
+	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeToolChoice to reject required without tools")
 	}
@@ -251,6 +257,26 @@ func TestEncodeToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	if compatErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
 	}
+}
+
+func toolChoiceNames(t *testing.T, tools []canonical.ToolDeclaration) provider.AttemptToolNames {
+	t.Helper()
+	if len(tools) == 0 {
+		return provider.AttemptToolNames{}
+	}
+	set, err := canonical.NewToolSet(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, _, err := provider.BuildAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return names
 }
 
 func specificToolPolicy(id canonical.ToolKey, toolType string) canonical.ToolPolicy {

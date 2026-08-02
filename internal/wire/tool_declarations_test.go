@@ -57,3 +57,23 @@ func TestPrepareFlatToolSetRejectsTargetIdentityCollision(t *testing.T) {
 		t.Fatal("flat tool set accepted colliding target identities")
 	}
 }
+
+func TestPrepareFlatToolSetOmitsResidualMCPAndRetainsSibling(t *testing.T) {
+	function := canonicaltest.MustFunctionTool(
+		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"),
+		"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
+	)
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
+	source, _ := canonical.NewMCPConnectorSource("connector_mail", canonical.Unspecified[[]string](), canonical.NewMCPApprovalNever(), canonical.MCPLoadingEager, canonical.Unspecified[[]string]())
+	mcpDeclaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
+
+	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) string {
+		return tool.Key().Name()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OmittedMCP != 1 || len(got.Declarations) != 1 || got.Declarations[0].Key() != function.Key() {
+		t.Fatalf("flat projection = %#v", got)
+	}
+}

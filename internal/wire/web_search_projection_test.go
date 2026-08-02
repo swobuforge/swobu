@@ -51,7 +51,7 @@ func TestResponsesUnrepresentableLifecycleProjectsAtomicallyToMessages(t *testin
 
 func TestMessagesLifecycleProjectsToResponsesWithOriginalIdentity(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"model","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"ws_original","name":"web_search","input":{"query":"one"}},{"type":"web_search_tool_result","tool_use_id":"ws_original","content":[{"type":"web_search_result","url":"https://example.com/source","title":"Source"}]},{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://example.com/source","title":"Source"}]}]}`)
-	decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}), "exchange")
+	decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}), "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestMessagesLifecycleProjectsToResponsesWithOriginalIdentity(t *testing.T) 
 func decodeResponsesOutput(t *testing.T, raw []byte) canonical.CanonicalResponse {
 	t.Helper()
 	decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(
-		context.Background(), canonical.CanonicalRequest{}, carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}), "exchange",
+		context.Background(), canonical.CanonicalRequest{}, nil, carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}), "exchange",
 	)
 	if err != nil {
 		t.Fatal(err)

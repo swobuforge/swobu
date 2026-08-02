@@ -28,13 +28,14 @@ func TestResponsesTopLevelMCPSourceIsRequestScopedAndUsesServerDescription(t *te
 	items := decoded.Request.Request.Items()
 	declarations, ok := items[0].ToolDeclarations()
 	if !ok || declarations.Scope() != canonical.ContextScopeRequest {
-		t.Fatalf("MCP namespace = %#v", items)
+		t.Fatalf("MCP source = %#v", items)
 	}
 	sourceDeclaration := declarations.Tools().Declarations()[0]
-	source, ok := sourceDeclaration.Namespace()
-	remote, remoteOK := source.MCPSource()
+	source, ok := sourceDeclaration.MCP()
+	remote := source.Source()
+	remoteOK := ok
 	if !ok || !remoteOK {
-		t.Fatalf("remote namespace = %#v", sourceDeclaration)
+		t.Fatalf("remote MCP source = %#v", sourceDeclaration)
 	}
 	if source.Description() != "Docs" {
 		t.Fatalf("server description = %q", source.Description())
@@ -125,8 +126,9 @@ func TestResponsesKnownMCPDeclarationsSurviveIngressTyped(t *testing.T) {
 			if len(declarations) != 2 {
 				t.Fatalf("declarations = %#v", declarations)
 			}
-			namespace, ok := declarations[1].Namespace()
-			source, sourceOK := namespace.MCPSource()
+			namespace, ok := declarations[1].MCP()
+			source := namespace.Source()
+			sourceOK := ok
 			_, callersSet := source.AllowedCallers().Get()
 			if !ok || !sourceOK || source.Kind() != test.kind ||
 				source.Approval().Kind() != test.approval ||
@@ -257,7 +259,7 @@ func TestResponsesMCPAuthorizationIsDecodedWithItsDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "mcp/docs")
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	if _, err := decoded.Request.MCPAccess.WithBearer(key, "different"); err == nil {
 		t.Fatal("decoded MCP access did not retain the declaration's bearer")
 	}
@@ -274,7 +276,7 @@ func TestResponsesMCPAuthorizationHeaderIsTransientAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "mcp/docs")
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	if _, err := decoded.Request.MCPAccess.WithBearer(key, "different"); err == nil {
 		t.Fatal("decoded MCP access did not retain Authorization header bearer")
 	}
@@ -296,11 +298,11 @@ func TestResponsesMCPObjectAllowedToolsProjectsCanonicalSelection(t *testing.T) 
 	if !ok {
 		t.Fatalf("items = %#v, want MCP declaration", items)
 	}
-	namespace, ok := declarations.Tools().Declarations()[0].Namespace()
+	namespace, ok := declarations.Tools().Declarations()[0].MCP()
 	if !ok {
-		t.Fatal("MCP declaration is not a namespace")
+		t.Fatal("MCP declaration did not preserve source authority")
 	}
-	source, _ := namespace.MCPSource()
+	source := namespace.Source()
 	allowed, specified := source.AllowedTools().Get()
 	if !specified || len(allowed) != 1 || allowed[0] != "search" {
 		t.Fatalf("allowed tools = %#v specified=%t", allowed, specified)

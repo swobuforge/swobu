@@ -260,6 +260,65 @@ func TestHandler_LogsResponsesToolReferenceDetailsOnFailure(t *testing.T) {
 	}
 }
 
+// TestHandler_ClassifiesUntypedInternalFailureAsInternalError covers the real
+// production path that previously produced an anonymous 500: a terminal failure
+// that is NOT a typed canonical.Error (e.g. a bare fmt.Errorf from tool
+// preparation). The terminal classifier must label it error_code=INTERNAL_ERROR
+// on the request_outcome line, while the client body stays generic and the raw
+// cause never reaches either surface.
+func TestHandler_ClassifiesUntypedInternalFailureAsInternalError(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+
+	// A plain untyped error is what an unguarded internal failure looks like.
+	// Embed values that must never reach the log line or the client body.
+	const secretFragment = "AKIA-SECRET-TOKEN"
+	const toolName = "exec_command__bogus"
+	untyped := errors.New("provider request preparation failed at tool=" + toolName + " token=" + secretFragment)
+	handler := newTestHandler(staticRequestIngress{err: untyped})
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping"}`))
+	req.Header.Set("User-Agent", "Codex/1.0")
+	req.Header.Set("X-Request-Id", "req_untyped")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("failure status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	out := logs.String()
+	for _, want := range []string{
+		"event=request_outcome",
+		"request_id=req_untyped",
+		"result=swobu_error",
+		"error_origin=swobu",
+		"error_code=INTERNAL_ERROR",
+		"status_code=500",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
+		}
+	}
+	// Log privacy: the raw cause and any request-derived fragments it carries
+	// must not reach the compact request_outcome line.
+	for _, leak := range []string{secretFragment, toolName, "provider request preparation failed"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("internal cause reached logs (%q):\n%s", leak, out)
+		}
+	}
+	// Client-body privacy: the body is the generic envelope, never the cause.
+	body := rec.Body.String()
+	for _, leak := range []string{secretFragment, toolName, "provider request preparation failed"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("internal cause reached client body (%q):\n%s", leak, body)
+		}
+	}
+	if !strings.Contains(body, `"code":"INTERNAL_ERROR"`) || !strings.Contains(body, `"message":"internal server error"`) {
+		t.Fatalf("client body is not the generic INTERNAL_ERROR envelope:\n%s", body)
+	}
+}
+
 func TestHandler_ServesEndpointModels(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
@@ -1129,11 +1188,6 @@ func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest
 }
 
 func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.Document, error) {
-	raw, err := io.ReadAll(in.Request.Body)
-	if err != nil {
-		return carrier.Document{}, err
-	}
-	_ = in.Request.Body.Close()
 	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
 	if err != nil {
 		return carrier.Document{}, err
@@ -1146,21 +1200,16 @@ func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.Document, er
 			return carrier.Document{}, err
 		}
 	}
-	return carrier.NewDocument(family, "application/json", in.Request.Header, raw, carrier.Meta{}), nil
+	return carrier.NewDocument(family, "application/json", in.Request.Header, in.Request.Body, carrier.Meta{}), nil
 }
 
 func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]exchange.RequestInput, error) {
-	raw, err := io.ReadAll(in.Request.Body)
-	if err != nil {
-		return nil, err
-	}
-	_ = in.Request.Body.Close()
 	header := in.Request.Header.Clone()
 	out := make([]exchange.RequestInput, 0, copies)
 	for range copies {
 		out = append(out, exchange.RequestInput{
 			Workspace:       in.Workspace,
-			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, raw),
+			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, in.Request.Body),
 			ClientHandler:   in.ClientHandler,
 			ClientFamily:    in.ClientFamily,
 			ResponseFraming: in.ResponseFraming,

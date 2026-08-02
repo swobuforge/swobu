@@ -25,7 +25,7 @@ func TestChatCompletionsHoistsMidHistoryToolAdditionWithEvidence(t *testing.T) {
 		},
 	})
 	var changes []compat.Change
-	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), &changes, "exchange")
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}

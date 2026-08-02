@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -35,48 +36,53 @@ type ProviderRequestTool struct {
 	DeferLoading      *bool                 `json:"defer_loading,omitempty"`
 }
 
-func encodeResponsesTools(tools []canonical.ToolDeclaration, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+func encodeResponsesTools(tools []canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
+	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return nil, err
+	}
+	if flattened.RemovedNamespaces > 0 {
+		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
+			return nil, err
+		}
+	}
+	if flattened.OmittedMCP > 0 {
+		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission); err != nil {
+			return nil, err
+		}
+	}
+	tools = flattened.Declarations
 	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
-		wire, err := encodeResponsesTool(tool, access)
+		wireTool, err := encodeResponsesTool(tool, names, access)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, wire)
+		out = append(out, wireTool)
 	}
 	return out, nil
 }
 
-func encodeResponsesTool(tool canonical.ToolDeclaration, access mcp.Access) (ProviderRequestTool, error) {
+func encodeResponsesTool(tool canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access) (ProviderRequestTool, error) {
 	if tool.Kind() == "" {
 		return ProviderRequestTool{}, canonical.BadRequest("response request tool declarations are invalid")
 	}
 	if decl, ok := tool.Function(); ok {
-		return encodeResponsesFunctionTool(tool, decl)
+		return encodeResponsesFunctionTool(tool, decl, names)
 	}
 	if decl, ok := tool.Custom(); ok {
-		return encodeResponsesCustomTool(tool, decl)
+		return encodeResponsesCustomTool(tool, decl, names)
 	}
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
 	}
-	if namespace, ok := tool.Namespace(); ok {
-		if source, isMCP := namespace.MCPSource(); isMCP {
-			return encodeResponsesMCPTool(namespace, source, access)
-		}
-		children := make([]ProviderRequestTool, 0, len(namespace.Tools()))
-		for _, child := range namespace.Tools() {
-			wire, err := encodeResponsesTool(child, access)
-			if err != nil {
-				return ProviderRequestTool{}, err
-			}
-			wire.Name = responsesNamespaceLeafName(wire.Name)
-			children = append(children, wire)
-		}
-		return ProviderRequestTool{Type: "namespace", Name: responsesNamespaceLeafName(namespace.Key().Name()), Description: namespace.Description(), Tools: children}, nil
+	if source, ok := tool.MCP(); ok {
+		return encodeResponsesMCPTool(source, access)
 	}
 	if discovery, ok := tool.Discovery(); ok {
 		parameters, err := responsesToolParametersFromSchema(discovery.InputSchema())
@@ -92,14 +98,15 @@ func encodeResponsesTool(tool canonical.ToolDeclaration, access mcp.Access) (Pro
 	return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
 }
 
-func encodeResponsesMCPTool(namespace canonical.ToolNamespace, source canonical.MCPSource, access mcp.Access) (ProviderRequestTool, error) {
+func encodeResponsesMCPTool(declaration canonical.MCPToolSource, access mcp.Access) (ProviderRequestTool, error) {
+	source := declaration.Source()
 	if source.Approval().Kind() != canonical.MCPApprovalNever {
-		return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(namespace.Key()), "Responses MCP approval requires an approval request/response lifecycle")
+		return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()), "Responses MCP approval requires an approval request/response lifecycle")
 	}
 	wire := ProviderRequestTool{
 		Type:              "mcp",
-		ServerLabel:       namespace.Key().Name(),
-		ServerDescription: namespace.Description(),
+		ServerLabel:       declaration.Key().Name(),
+		ServerDescription: declaration.Description(),
 		RequireApproval:   "never",
 	}
 	switch source.Kind() {
@@ -124,7 +131,7 @@ func encodeResponsesMCPTool(namespace canonical.ToolNamespace, source canonical.
 		deferred := true
 		wire.DeferLoading = &deferred
 	}
-	private := access.ForSource(namespace.Key())
+	private := access.ForSource(declaration.Key())
 	wire.Authorization = private.Authorization
 	wire.Headers = private.Headers
 	return wire, nil
@@ -137,8 +144,26 @@ func responsesNamespaceLeafName(name string) string {
 	return name
 }
 
-func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
-	name, err := responsesToolWireName(declaration)
+func resolveResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, name string) (canonical.ToolDeclaration, error) {
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	if namespace == "" {
+		declaration, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeFunction)
+		return declaration, err
+	}
+	for _, tool := range tools {
+		group, ok := tool.Namespace()
+		if !ok || responsesNamespaceLeafName(group.Key().Name()) != namespace {
+			continue
+		}
+		declaration, _, err := canonical.ResolveToolDeclarationByName(group.Tools(), name, canonical.ToolTypeFunction)
+		return declaration, err
+	}
+	return canonical.ToolDeclaration{}, canonical.BadRequest("Responses function call references an unknown namespace")
+}
+
+func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {
+	name, err := responsesToolWireName(declaration, names)
 	if err != nil {
 		return ProviderRequestTool{}, err
 	}
@@ -162,8 +187,8 @@ func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl can
 	return wire, nil
 }
 
-func encodeResponsesCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool) (ProviderRequestTool, error) {
-	name, err := responsesToolWireName(declaration)
+func encodeResponsesCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool, names wire.ToolNames) (ProviderRequestTool, error) {
+	name, err := responsesToolWireName(declaration, names)
 	if err != nil {
 		return ProviderRequestTool{}, err
 	}
@@ -205,7 +230,7 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 	return json.RawMessage(raw), nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.ValidateForTools(tools); err != nil {
 		return nil, err
 	}
@@ -235,7 +260,7 @@ func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclara
 		if resolvedType == canonical.ToolTypeWebSearch {
 			return map[string]any{"type": canonical.ToolTypeWebSearch}, nil
 		}
-		name, err := responsesToolWireName(decl)
+		name, err := responsesToolWireName(decl, names)
 		if err != nil {
 			return nil, err
 		}

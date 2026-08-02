@@ -407,11 +407,11 @@ func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, 
 		var err error
 		switch c.protocol {
 		case protocolkind.ChatCompletions:
-			result, err = (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
+			result, err = (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, in.Stream, exchangeID)
 		case protocolkind.Responses:
-			result, err = (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
+			result, err = (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, in.Stream, exchangeID)
 		case protocolkind.Messages:
-			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, in.Stream, exchangeID)
+			result, err = (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, in.Stream, exchangeID)
 		}
 		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	case provider.DocumentIngress:
@@ -419,11 +419,11 @@ func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, 
 		var err error
 		switch c.protocol {
 		case protocolkind.ChatCompletions:
-			result, err = (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
+			result, err = (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, exchangeID)
 		case protocolkind.Responses:
-			result, err = (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
+			result, err = (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, exchangeID)
 		case protocolkind.Messages:
-			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, in.Document, exchangeID)
+			result, err = (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, exchangeID)
 		}
 		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	default:

@@ -18,8 +18,9 @@
 // JSONObject owns deterministic object-semantic values, while ToolSet owns
 // top-level declaration uniqueness and source order. ToolEnvironment is the
 // derived global lookup and declaration-ownership validator.
-// RewriteToolContributions owns the closed grammar of declaration-bearing
-// items so consumers transform contributions without duplicating item traversal.
+// TransformToolContributions owns the closed grammar of declaration-bearing
+// items. Structural transforms may change the graph, but surviving declarations
+// retain ToolKey identity and occurrence refinements survive by exact key.
 // Function and custom tools are caller-resolved. An MCP source refines its one
 // ToolNamespace authority with a URL, connector, or tunnel source plus
 // selection, approval, loading, and caller meaning; discovered children remain
@@ -74,7 +75,12 @@
 //
 // Wire presence and byte-equivalent round-trip are not sufficient reasons.
 //
-// A protocol-specific fact requires a named consumer and a behavioral test.
+// Ownership follows semantic readers. A fact is portable when another protocol
+// codec, runtime, exchange/session rule, or compatibility projection must
+// interpret it to preserve behavior. Clone/equality methods, serialization,
+// logging, evidence, and validators created only for an existing field are
+// plumbing rather than independent readers. A protocol-specific fact requires
+// a named consumer and a behavioral test.
 // Unknown members on known items are ignored. Unknown item kinds are rejected
 // unless a concrete continuation requirement justifies a narrowly typed
 // representation.
@@ -85,4 +91,6 @@
 // consumer needs them, such as encrypted reasoning replay and a target-bound
 // continuation handle. Independent protocol transcripts, provider wire names,
 // aliases, transport DTOs, and runtime mechanics remain outside this package.
+// Projection proceeds exact, bounded approximation, polyfill, then fail. Never
+// canonicalize a fact circularly merely because canonical plumbing can carry it.
 package canonical

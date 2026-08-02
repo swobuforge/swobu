@@ -28,7 +28,7 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 	if label == "" {
 		return fail(canonical.BadRequest("responses MCP source requires server_label"))
 	}
-	key, err := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "mcp/"+label)
+	key, err := canonical.NewToolKey("mcp", canonical.ToolKindMCP, label)
 	if err != nil {
 		return fail(canonical.BadRequest("responses MCP server_label is invalid"))
 	}
@@ -98,7 +98,7 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 	if err != nil {
 		return fail(err)
 	}
-	namespace, err := canonical.NewMCPToolNamespace(key, tool.ServerDescription, source, nil)
+	declaration, err := canonical.NewMCPToolSource(key, tool.ServerDescription, source, nil)
 	if err != nil {
 		return fail(err)
 	}
@@ -125,7 +125,7 @@ func decodeResponsesMCPNamespace(tool responsesToolDefinitionDTO, access mcp.Acc
 			return fail(err)
 		}
 	}
-	return responsesMCPProjection{declaration: namespace, access: access}, nil
+	return responsesMCPProjection{declaration: declaration, access: access}, nil
 }
 
 func decodeResponsesMCPNames(raw json.RawMessage, objectAllowed bool, field string) (canonical.Specified[[]string], error) {
@@ -255,6 +255,7 @@ func decodeResponsesMCPHeaders(raw json.RawMessage) (map[string]string, string, 
 func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope canonical.ContextScope, subjectPrefix string, changeLog *[]compat.Change, exchangeID string, access mcp.Access) ([]canonical.CanonicalItem, []canonical.ToolDeclaration, mcp.Access, error) {
 	declarations := make([]canonical.ToolDeclaration, 0, len(tools))
 	ordinary := make([]canonical.ToolDeclaration, 0, len(tools))
+	deferred := make([]canonical.ToolKey, 0)
 	for index, tool := range tools {
 		if strings.EqualFold(strings.TrimSpace(tool.Type), "mcp") {
 			projection, err := decodeResponsesMCPNamespace(tool, access)
@@ -265,7 +266,7 @@ func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope ca
 			declarations = append(declarations, projection.declaration)
 			continue
 		}
-		decoded, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: index}, canonical.RequestToolsKind, changeLog, exchangeID)
+		decoded, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: index}, canonical.RequestToolsKind, changeLog, exchangeID, &deferred)
 		if err != nil {
 			return nil, nil, access, err
 		}
@@ -279,7 +280,11 @@ func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope ca
 	if err != nil {
 		return nil, nil, access, err
 	}
-	item, err := canonical.NewToolDeclarationsItem(set, scope)
+	refinements, err := canonical.NewResponsesToolRefinements(set, deferred)
+	if err != nil {
+		return nil, nil, access, err
+	}
+	item, err := canonical.NewToolDeclarationsItemWithResponses(set, scope, refinements)
 	if err != nil {
 		return nil, nil, access, err
 	}

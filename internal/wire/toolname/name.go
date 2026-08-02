@@ -4,11 +4,14 @@ package toolname
 import (
 	"crypto/sha256"
 	"encoding/base32"
-	"fmt"
 	"strings"
 )
 
 const MaxLength = 64
+
+const GeneratedPrefix = "s__"
+
+const generatedHashLength = 16
 
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
@@ -25,16 +28,31 @@ func Safe(name string) bool {
 	return true
 }
 
-// Alias returns a bounded collision-resistant spelling. Collision ownership
-// remains with the attempt-local projection table.
-func Alias(identity, readable string, ordinal uint32) string {
-	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", identity, ordinal)))
-	encoded := strings.ToLower(encoding.EncodeToString(digest[:])) // swobu:io-string source=domain
-	prefix := normalize(readable)
-	if len(prefix) > 8 {
-		prefix = prefix[:8]
+func PreservableLiteral(name string) bool {
+	return Safe(name) && !strings.HasPrefix(name, GeneratedPrefix)
+}
+
+// Generated returns one stable bounded provider spelling for a semantic tool
+// identity. The returned digest is a collision guard; reverse routing remains
+// the responsibility of the attempt-scoped dictionary.
+func Generated(identity string, scope []string, leaf string) string {
+	parts := make([]string, 0, len(scope)+1)
+	for _, part := range append(append([]string(nil), scope...), leaf) {
+		if normalized := normalize(part); normalized != "" {
+			parts = append(parts, normalized)
+		}
 	}
-	return "s_" + prefix + "__" + encoded
+	readable := strings.Join(parts, "__")
+	if readable == "" {
+		readable = "tool"
+	}
+	digest := sha256.Sum256([]byte("swobu-tool-wire-v1\x00" + identity))
+	hash := strings.ToLower(encoding.EncodeToString(digest[:]))[:generatedHashLength] // swobu:io-string source=domain
+	limit := MaxLength - len(GeneratedPrefix) - 2 - len(hash)
+	if len(readable) > limit {
+		readable = readable[:limit]
+	}
+	return GeneratedPrefix + readable + "__" + hash
 }
 
 func normalize(value string) string {

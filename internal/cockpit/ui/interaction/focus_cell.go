@@ -40,15 +40,27 @@ func (c *FocusCell) UnbindApp() {
 }
 
 // OnFocus records that the mounted shell gained focus.
+//
+// go-tui's focusManager.refreshFromTree (focus.go) runs after every render and
+// re-calls Focus() on the focused element to repair the focus graph — re-renders
+// build fresh Element objects whose `focused` flag starts false, so Element.Focus's
+// own idempotency guard (element_focus.go) never short-circuits and this handler
+// fires every frame. Without the value guard below, that would Set(true) on the
+// persistent marker state every frame, and State.Set marks the app dirty
+// unconditionally — a self-sustaining render loop that re-layouts (re-measuring
+// every string width) at 60 fps even while idle. Skip the Set when the marker is
+// already correct: the persistent state only needs to change on genuine focus
+// transitions, which still route through here with the opposite value.
 func (c *FocusCell) OnFocus(*tui.Element) {
-	if c.focused != nil {
+	if c.focused != nil && !c.focused.Get() {
 		c.focused.Set(true)
 	}
 }
 
-// OnBlur records that the mounted shell lost focus.
+// OnBlur records that the mounted shell lost focus. See OnFocus: guarded against
+// the redundant per-frame Set that would otherwise sustain the idle render loop.
 func (c *FocusCell) OnBlur(*tui.Element) {
-	if c.focused != nil {
+	if c.focused != nil && c.focused.Get() {
 		c.focused.Set(false)
 	}
 }

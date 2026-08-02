@@ -16,7 +16,7 @@ func TestMessagesReasoningBudgetKeepsMaxTokensValid(t *testing.T) {
 	reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(compute)})
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("hi")})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude"), Items: []canonical.CanonicalItem{message}, Reasoning: reasoning})
-	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, "")
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestMessagesReasoningBudgetKeepsMaxTokensValid(t *testing.T) {
 	max := 2048
 	controls, _ := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &max})
 	request = canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude"), Items: []canonical.CanonicalItem{message}, Controls: controls, Reasoning: reasoning})
-	if _, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, ""); err == nil {
+	if _, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, ""); err == nil {
 		t.Fatal("max_tokens equal to budget_tokens was accepted")
 	}
 }
@@ -40,7 +40,7 @@ func TestMessagesDisclosureAloneDoesNotActivateOrRejectReasoning(t *testing.T) {
 	for _, disclosure := range []canonical.ReasoningDisclosure{canonical.ReasoningDisclosureNone, canonical.ReasoningDisclosureSummary} {
 		reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Disclosure: canonical.Specify(disclosure)})
 		request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude"), Items: []canonical.CanonicalItem{message}, Reasoning: reasoning})
-		document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, "")
+		document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, "")
 		if err != nil {
 			t.Fatalf("disclosure %q: %v", disclosure, err)
 		}
@@ -60,7 +60,7 @@ func TestMessagesReasoningRequestRoundTrip(t *testing.T) {
 	if !ok || compute.Kind() != canonical.ReasoningBudget {
 		t.Fatalf("compute = %#v", compute)
 	}
-	document, err := EncodeCarrierWithChanges(decoded.Request.Request, delivery.BufferedDelivery(), nil, "")
+	document, err := EncodeCarrierWithChanges(decoded.Request.Request, nil, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestMessagesOpaqueThinkingReplaysAndDisclosureProjectsWithoutMutation(t *te
 	part, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
 	item, _ := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude"), Items: []canonical.CanonicalItem{item}})
-	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, "")
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestMessagesOpaqueThinkingReplaysAndDisclosureProjectsWithoutMutation(t *te
 func TestMessagesBufferedAndStreamingReasoningAreAtomic(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude")})
 	bufferedRaw := []byte(`{"id":"msg","model":"claude","content":[{"type":"thinking","thinking":"brief","signature":"sig"}],"stop_reason":"end_turn"}`)
-	buffered, err := decodeResponseBuffered(context.Background(), request, bufferedRaw, "ex", nil)
+	buffered, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), bufferedRaw, "ex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,14 +119,14 @@ func TestMessagesBufferedAndStreamingReasoningAreAtomic(t *testing.T) {
 		`event: message_stop\ndata: {"type":"message_stop"}\n`,
 	}, "\n")
 	streamRaw = strings.ReplaceAll(streamRaw, `\n`, "\n")
-	stream := decodeResponseStream(request, carrier.ByteStream{Body: ioNopCloser{strings.NewReader(streamRaw)}}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{Body: ioNopCloser{strings.NewReader(streamRaw)}}, "ex", nil)
 	assertAtomicReasoning(t, stream)
 }
 
 func TestMessagesThinkingDefaultsToTrace(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude")})
 	raw := []byte(`{"id":"msg","model":"claude","content":[{"type":"thinking","thinking":"private","signature":"sig"}],"stop_reason":"end_turn"}`)
-	stream, err := decodeResponseBuffered(context.Background(), request, raw, "ex", nil)
+	stream, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), raw, "ex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

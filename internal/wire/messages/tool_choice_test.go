@@ -96,7 +96,6 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 		"codex/grep"),
 		"search text", canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
 
-	projectedFunctionName := functionTool.Key().Name()
 	baseRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude-haiku"),
 		Items: []canonical.CanonicalItem{
@@ -104,6 +103,7 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
 	})
+	projectedFunctionName, _ := testAttemptToolNames(baseRequest).WireName(functionTool.Key())
 
 	tests := []struct {
 		name     string

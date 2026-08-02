@@ -406,7 +406,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		return canonical.InternalError("responses web-search result has no prior call")
 	case canonical.ItemKindToolDiscoveryResult:
 		result, _ := item.ToolDiscoveryResult()
-		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), mcp.Access{}, nil, "")
+		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), nil, mcp.Access{}, nil, "")
 		if err != nil {
 			return err
 		}
@@ -418,10 +418,14 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		if result.Executor() == canonical.DiscoveryExecutorProvider {
 			execution = "server"
 		}
-		s.items = append(s.items, responsesHistoryItemDTO{
+		history := responsesHistoryItemDTO{
 			Type: "tool_search_output", CallID: result.CallID().String(),
 			Execution: execution, Tools: rawTools,
-		})
+		}
+		if result.ResponsesCallIDNull() {
+			history.CallID = ""
+		}
+		s.items = append(s.items, history)
 		return nil
 	case canonical.ItemKindReasoning:
 		reasoning, _ := item.Reasoning()

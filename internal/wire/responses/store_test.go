@@ -2,40 +2,63 @@ package responses
 
 import (
 	"errors"
-	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeClientRequest_StorageIntentDoesNotChangeCanonicalRequest(t *testing.T) {
+func TestResponsesStorePreservesOccurrenceThroughDecodeAndEncode(t *testing.T) {
 	t.Parallel()
 
-	decoder := ClientRequestDecoder{}
-	omitted, err := decoder.DecodeClientRequest(carrier.Document{
-		Family: protocolkind.Responses,
-		Media:  "application/json",
-		Raw:    []byte(`{"model":"m","input":"hi"}`),
-	})
-	if err != nil {
-		t.Fatalf("decode omitted store: %v", err)
+	tests := []struct {
+		name          string
+		field         string
+		wantValue     bool
+		wantSpecified bool
+		wantEncoded   string
+	}{
+		{name: "omitted"},
+		{name: "null", field: `,"store":null`},
+		{name: "false", field: `,"store":false`, wantSpecified: true, wantEncoded: `"store":false`},
+		{name: "true", field: `,"store":true`, wantValue: true, wantSpecified: true, wantEncoded: `"store":true`},
 	}
-	for _, value := range []string{"false", "true", "null"} {
-		t.Run(value, func(t *testing.T) {
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := decoder.DecodeClientRequest(carrier.Document{
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{
 				Family: protocolkind.Responses,
 				Media:  "application/json",
-				Raw:    []byte(`{"model":"m","input":"hi","store":` + value + `}`),
+				Raw:    []byte(`{"model":"m","input":"hi"` + test.field + `}`),
 			})
 			if err != nil {
-				t.Fatalf("decode store=%s: %v", value, err)
+				t.Fatalf("decode store %s: %v", test.name, err)
 			}
-			if !reflect.DeepEqual(got, omitted) {
-				t.Fatalf("store=%s changed canonical decode\n got: %#v\nwant: %#v", value, got, omitted)
+			gotValue, gotSpecified := decoded.Request.Request.Responses().Store()
+			if gotValue != test.wantValue || gotSpecified != test.wantSpecified {
+				t.Fatalf("decoded store = (%t,%t), want (%t,%t)", gotValue, gotSpecified, test.wantValue, test.wantSpecified)
+			}
+			document, err := EncodeCarrierWithChanges(
+				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
+				delivery.BufferedDelivery(),
+				nil,
+				"",
+				EncodeOptions{},
+			)
+			if err != nil {
+				t.Fatalf("encode store %s: %v", test.name, err)
+			}
+			raw := string(document.RawBytes())
+			if test.wantEncoded == "" && strings.Contains(raw, `"store"`) {
+				t.Fatalf("unspecified store encoded: %s", raw)
+			}
+			if test.wantEncoded != "" && !strings.Contains(raw, test.wantEncoded) {
+				t.Fatalf("encoded store %s = %s", test.name, raw)
 			}
 		})
 	}

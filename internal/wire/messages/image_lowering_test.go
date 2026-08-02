@@ -18,7 +18,7 @@ import (
 func TestDecodeMessagesProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"Here is the result"},{"type":"image","source":{"type":"url","url":"https://example.test/output.png"}}]}`)
 	var changes []compat.Change
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", &changes)
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDecodeMessagesProviderAssistantImageBesideTextDropsImage(t *testing.T) 
 
 func TestDecodeMessagesProviderImageOnlyFailsOutputContract(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"image","source":{"type":"url","url":"https://example.test/output.png"}}]}`)
-	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", nil)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", nil)
 	var backendErr canonical.BackendError
 	if !errors.As(err, &backendErr) || backendErr.Message != "backend produced no usable canonical output" {
 		t.Fatalf("image-only error = %T %v, want backend output-contract failure", err, err)
@@ -74,7 +74,7 @@ func TestEncodeMessagesImages_PreservesDirectURLAndNestedToolResultImages(t *tes
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message, result}})
 
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestEncodeMessagesImageDetailOmitsWithDecision(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
 	var changes []compat.Change
-	if _, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex"); err != nil {
+	if _, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), &changes, "ex"); err != nil {
 		t.Fatalf("Messages lowering failed: %v", err)
 	}
 	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsMessageImageDetail || changes[0].Kind != compat.Approximation {
@@ -162,7 +162,7 @@ func TestEncodeMessagesImages_URLCarrierUsesURLBlock(t *testing.T) {
 	image, _ := canonical.NewURLImage("https://example.test/bedrock.png", canonical.Unspecified[canonical.ImageDetail]())
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewImageMessagePart(image)})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "ex")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), nil, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestEncodeMessagesToolResult_MultipleTextPartsRemainAnArray(t *testing.T) {
 		canonical.NewTextToolResultPart("two"),
 	}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 		"usage":{"prompt_tokens":12,"completion_tokens":0}
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_content_filter", &recordingChanges{})
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_content_filter", &recordingChanges{})
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 	raw := "data: {\"created\":1781902359,\"id\":\"chatcmpl-b1a3544fdfaf41e3a3e812af05b1e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\",\"content_filter_result\":{\"error\":{\"code\":\"content_filter\",\"message\":\"ResponsibleAI result indicated block action.\"}}}]}\n\n"
 
 	changeLog := &recordingChanges{}
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", changeLog)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", changeLog)
 	defer func() { _ = reader.Close(context.Background()) }()
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)

@@ -54,8 +54,8 @@ type toolCustomBody struct {
 	Input string `json:"input"`
 }
 
-func EncodeCarrierWithChanges(req canonical.CanonicalRequest, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := LowerProviderRequestDocument(req, d, changeLog, exchangeID)
+func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
+	document, err := LowerProviderRequestDocument(req, names, d, changeLog, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -67,7 +67,7 @@ func EncodeCarrierWithChanges(req canonical.CanonicalRequest, d delivery.Deliver
 
 // LowerProviderRequestDocument produces the standard typed Chat Completions
 // document before any exact-provider dialect adaptation.
-func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
+func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -78,6 +78,11 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
+	if wire.HasDeferredResponsesTools(items) {
+		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	environment, err := canonical.ToolEnvironmentAt(items, len(items))
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -98,6 +103,23 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 			return ProviderRequestDocument{}, err
 		}
 	}
+	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if flatTools.RemovedNamespaces > 0 {
+		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	if flatTools.OmittedMCP > 0 {
+		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	tools = flatTools.Declarations
 	conversation := make([]canonical.CanonicalItem, 0, len(items))
 	historyStarted := false
 	for _, item := range items {
@@ -114,14 +136,14 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		}
 		conversation = append(conversation, item)
 	}
-	wireMessages, err := encodeItems(conversation, tools, changeLog, exchangeID)
+	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if contextErr != nil {
 		return ProviderRequestDocument{}, contextErr
 	}
-	wireTools, err := encodeChatCompletionsTools(tools, changeLog, exchangeID)
+	wireTools, err := encodeChatCompletionsTools(tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -129,7 +151,12 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeChatCompletionsToolChoice(policy, tools, changeLog, exchangeID)
+	if flatTools.OmittedMCP > 0 {
+		if err := wire.ValidateFlatToolPolicy(policy, tools); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	choice, err := encodeChatCompletionsToolChoice(policy, tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -304,7 +331,7 @@ func chatCompletionsWireToolChoiceShape(choice any) string {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestMessage, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestMessage, error) {
 	var err error
 	items, err = projectChatResponsesItems(items, changeLog, exchangeID)
 	if err != nil {
@@ -349,7 +376,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			callIDs := make([]canonical.ToolCallID, 0)
 			for i < len(items) && items[i].Kind() == canonical.ItemKindToolCall {
 				call, _ := items[i].ToolCall()
-				encoded, err := encodeChatToolCall(call, tools)
+				encoded, err := encodeChatToolCall(call, names)
 				if err != nil {
 					return nil, err
 				}
@@ -427,9 +454,12 @@ func appendChatRequestChange(changeLog *[]compat.Change, exchangeID string, feat
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into chat-completions wire variants.
-func encodeChatToolCall(call canonical.ToolCallItem, _ []canonical.ToolDeclaration) (toolCallBody, error) {
+func encodeChatToolCall(call canonical.ToolCallItem, names wire.ToolNames) (toolCallBody, error) {
 	tool := call.Tool()
-	name := tool.Name()
+	name, err := wire.EncodeToolName(names, tool)
+	if err != nil {
+		return toolCallBody{}, err
+	}
 	switch tool.Kind() {
 	case canonical.ToolKindFunction:
 		object, ok := call.Input().Object()

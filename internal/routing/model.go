@@ -246,14 +246,12 @@ func (w Workspace) ResolveRoute(requested string) (Route, error) {
 		return w.routes[w.defaultRoute].clone(), nil
 	}
 	name, err := ParseRouteName(requested)
-	if err != nil {
-		return Route{}, fmt.Errorf("requested route %q is invalid: %w", requested, err)
+	if err == nil {
+		if route, ok := w.routes[name]; ok {
+			return route.clone(), nil
+		}
 	}
-	route, ok := w.routes[name]
-	if !ok {
-		return Route{}, fmt.Errorf("requested route %q is not configured: %w", requested, ErrNotFound)
-	}
-	return route.clone(), nil
+	return w.routes[w.defaultRoute].clone(), nil
 }
 
 func (w Workspace) clone() Workspace {

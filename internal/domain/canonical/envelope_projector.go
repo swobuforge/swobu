@@ -96,11 +96,7 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 	if e == nil || e.Kind != EnvResponse {
 		return nil, fmt.Errorf("closed envelope is not a response")
 	}
-	assembler := newItemStreamAssembler()
-	usage := NewUnknownTokenUsage()
-	completion := Completion{}
-	response := ResponseRef{}
-	model := ""
+	fold := newResponseFold()
 	for _, event := range e.Events {
 		switch event.Kind {
 		case EventEnvelopeStart:
@@ -109,53 +105,19 @@ func (e *ClosedEnvelope) ProjectResponse() (*CanonicalResponse, error) {
 				return nil, fmt.Errorf("envelope.start payload type %T is unsupported", event.Payload)
 			}
 			if payload.Kind == EnvResponse {
-				model = payload.Model
+				if err := fold.start(payload); err != nil {
+					return nil, err
+				}
 			}
-		case EventResponseIdentity:
-			payload, ok := event.Payload.(ResponseIdentityPayload)
-			if !ok {
-				return nil, fmt.Errorf("response.identity payload type %T is unsupported", event.Payload)
-			}
-			response = payload.Response.Clone()
-		case EventItemStart, EventContentStart, EventTextDelta, EventArgsDelta, EventItemCompleted:
-			itemEvent, ok := event.Payload.(ItemEvent)
-			if !ok {
-				return nil, fmt.Errorf("%s payload type %T is unsupported", event.Kind, event.Payload)
-			}
-			if err := assembler.apply(event.Kind, itemEvent); err != nil {
+		case EventResponseIdentity, EventItemStart, EventContentStart, EventTextDelta, EventArgsDelta, EventItemCompleted, EventUsage, EventFinish, EventError:
+			if err := fold.apply(event); err != nil {
 				return nil, err
 			}
-		case EventUsage:
-			payload, ok := event.Payload.(UsagePayload)
-			if !ok {
-				return nil, fmt.Errorf("usage payload type %T is unsupported", event.Payload)
-			}
-			usage = payload.Usage
-		case EventFinish:
-			payload, ok := event.Payload.(FinishPayload)
-			if !ok {
-				return nil, fmt.Errorf("finish payload type %T is unsupported", event.Payload)
-			}
-			completion = payload.Completion
-		case EventError:
-			payload, ok := event.Payload.(ErrorPayload)
-			if !ok {
-				return nil, fmt.Errorf("error payload type %T is unsupported", event.Payload)
-			}
-			return nil, fmt.Errorf("canonical response stream error %s: %s", payload.Code, payload.Message)
 		case EventEnvelopeEnd:
 			// Progressive delivery evidence is intentionally not projection state.
 		default:
 			return nil, fmt.Errorf("response projection event kind %q is unsupported", event.Kind)
 		}
 	}
-	items, err := assembler.completedItems()
-	if err != nil {
-		return nil, err
-	}
-	output, err := NewCanonicalResponse(response, model, items, completion, usage)
-	if err != nil {
-		return nil, err
-	}
-	return &output, nil
+	return fold.responseOutput()
 }

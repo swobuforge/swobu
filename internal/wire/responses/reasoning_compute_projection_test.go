@@ -51,7 +51,7 @@ func TestResponsesProjectsOrdinalReasoningCompute(t *testing.T) {
 				Controls: controls, Reasoning: reasoning,
 			})
 			result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(
-				wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "",
+				wire.ProviderEncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), "",
 			)
 			if err != nil {
 				t.Fatal(err)

@@ -86,7 +86,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			case canonical.ToolTypeCustom:
 				call.Custom = &chatCompletionsResponseCustomDTO{Name: event.Name}
 			default:
-				return nil, canonical.InternalError("Chat Completions stream received an unprojected canonical tool-call kind")
+				return nil, canonical.InternalError("Chat Completions stream received an unsupported canonical tool-call kind")
 			}
 			s.sawVisibleOutput = true
 			raw, _ := json.Marshal(chatCompletionsResponseDTO{
@@ -269,7 +269,7 @@ func chatMessageFromItems(items []canonical.CanonicalItem) (chatCompletionsRespo
 			// the client projection never exposes backend dialect fields.
 			continue
 		default:
-			return chatCompletionsResponseMessageDTO{}, canonical.InternalError("Chat Completions output received an unprojected canonical item kind")
+			return chatCompletionsResponseMessageDTO{}, canonical.InternalError("Chat Completions output received an unsupported canonical item kind")
 		}
 	}
 	if content := text.String(); content != "" {

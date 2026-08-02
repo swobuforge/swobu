@@ -158,10 +158,10 @@ func TestHeaderTransportForwardsArbitraryHeadersOnlyToExactOrigin(t *testing.T) 
 }
 
 func TestMCPToolOutputSchemaIsApproximationEvidence(t *testing.T) {
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	remote, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
-	sourceDeclaration, _ := canonical.NewMCPToolNamespace(sourceKey, "", remote, nil)
-	source, _ := sourceDeclaration.Namespace()
+	sourceDeclaration, _ := canonical.NewMCPToolSource(sourceKey, "", remote, nil)
+	source, _ := sourceDeclaration.MCP()
 	declaration, changes, err := declarationFromSDKTool(source, &mcp.Tool{
 		Name: "structured", InputSchema: map[string]any{"type": "object"},
 		OutputSchema: map[string]any{"type": "object"},
@@ -226,12 +226,12 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	remote, _ := newTestMCPURL(
 		"https://mcp.example.test/rpc", canonical.Specify([]string{"fetch", "search"}),
 	)
-	sourceDeclaration, _ := canonical.NewMCPToolNamespace(sourceKey, "", remote, nil)
-	source, _ := sourceDeclaration.Namespace()
+	sourceDeclaration, _ := canonical.NewMCPToolSource(sourceKey, "", remote, nil)
+	source, _ := sourceDeclaration.MCP()
 	activeSession := &session{source: source, sdk: sdkSession}
 	defer activeSession.close()
 
@@ -285,7 +285,7 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	if !ok || result.CallID() != callID {
 		t.Fatalf("correlated MCP result = %#v", resultItem)
 	}
-	catalogDeclaration, err := canonical.NewMCPToolNamespace(
+	catalogDeclaration, err := canonical.NewMCPToolSource(
 		sourceKey, "", remote, declarations,
 	)
 	if err != nil {

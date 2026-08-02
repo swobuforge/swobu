@@ -18,14 +18,24 @@ func SelectPrevious(event tui.KeyEvent) {
 }
 
 // ActivateSelected returns the standard Enter/Space activation grammar.
+//
+// Activation is a user-initiated, user-observable transition: the Enter/Space
+// handler runs the product callback, and the next frame must reflect whatever it
+// changed. Unlike SelectNext/SelectPrevious (which dirty via go-tui's focus
+// change), an activate callback may mutate only a plain render-read field (e.g.
+// a row's Action label flipping "copy ↵" → "copied") without touching State, so
+// nothing else guarantees a re-render. Mark dirty here, once per keypress — a
+// single bounded render, never a steady loop.
 func ActivateSelected(fn func(Context)) tui.KeyMap {
+	run := func(event tui.KeyEvent) {
+		fn(contextFromEvent(event))
+		if app := event.App(); app != nil {
+			app.MarkDirty()
+		}
+	}
 	return tui.KeyMap{
-		tui.OnFocused(tui.KeyEnter, func(event tui.KeyEvent) {
-			fn(contextFromEvent(event))
-		}),
-		tui.OnFocused(tui.Rune(' '), func(event tui.KeyEvent) {
-			fn(contextFromEvent(event))
-		}),
+		tui.OnFocused(tui.KeyEnter, run),
+		tui.OnFocused(tui.Rune(' '), run),
 	}
 }
 

@@ -64,7 +64,11 @@ func executeProviderRequest(registry ProviderRegistry, ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	names, _, err := provider.BuildAttemptToolNames(req.Request)
+	if err != nil {
+		return nil, err
+	}
+	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, ToolNames: names, Delivery: req.Contract.ProviderDelivery})
 	if req.Changes != nil && len(changes) > 0 {
 		*req.Changes = append(*req.Changes, compat.CloneChanges(changes)...)
 	}

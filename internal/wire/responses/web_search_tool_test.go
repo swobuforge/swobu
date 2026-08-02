@@ -231,7 +231,7 @@ func TestDecodeStreamingMessageUsesTerminalCitationAnnotations(t *testing.T) {
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"£source\"}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"£source\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com/x\",\"start_index\":0,\"end_index\":0}]}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\"}}\n\n"
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":2,\"content_index\":0,\"delta\":\"Deadline\"}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Deadline\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com/rules\",\"title\":\"Rules\",\"start_index\":0,\"end_index\":7}]}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
-	decoded := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_web_search", nil)
+	decoded := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_web_search", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(decoded, canonical.ResponseBinding{SwobuID: "resp_test"})
 	validated := canonical.NewValidatedResponseStream(bound)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), validated, canonical.EnvResponse)
@@ -327,7 +327,7 @@ func TestEncodeRequestLowersStableWebSearchTool(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
-	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestDecodeBufferedWebSearchLifecycleAndUnicodeCitation(t *testing.T) {
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
 	raw := []byte(`{"id":"resp_provider","model":"model","status":"completed","output":[{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one","one"],"sources":[{"type":"url","url":"https://example.com/a","title":"A"}]}},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"£source","annotations":[{"type":"url_citation","url":"https://example.com/a","title":"A","start_index":0,"end_index":0}]}]}]}`)
-	stream, err := decodeResponseBuffered(context.Background(), request, raw, "exchange", nil)
+	stream, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), raw, "exchange", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,9 +453,7 @@ func TestDecodeCompletedResponsesClassifiesMalformedWebSearchProviderDataAsBacke
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := decodeCompletedResponsesItemSet(
-				context.Background(),
-				canonical.CanonicalRequest{},
-				[]json.RawMessage{json.RawMessage(test.item)},
+				context.Background(), canonical.CanonicalRequest{}, nil, []json.RawMessage{json.RawMessage(test.item)},
 				"",
 				"ex",
 				nil,
@@ -484,10 +482,9 @@ func TestDecodeResponsesStreamClassifiesMalformedWebSearchSourceAsBackend(t *tes
 	raw := responsesCreatedFrame() +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"q\"],\"sources\":[{\"type\":\"url\",\"url\":\"not-a-url\"}]}}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex",
-		nil,
+		nil, true,
 	)
 	var backendErr canonical.BackendError
 	if err := drainResponsesStream(stream); !errors.As(err, &backendErr) {
@@ -502,6 +499,10 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 		wantItems   int
 		wantStatus  string
 		wantSources int
+		// wantID is the exact Responses item id that must survive the round trip,
+		// or "" when the provider omitted it. An omitted id must re-encode with no
+		// id at all — never with the canonical correlation token minted into it.
+		wantID string
 	}{
 		{
 			name:        "completed with sources",
@@ -509,6 +510,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			wantItems:   2,
 			wantStatus:  "completed",
 			wantSources: 1,
+			wantID:      "ws_1",
 		},
 		{
 			name:        "unresolved with undisclosed sources",
@@ -516,6 +518,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			wantItems:   1,
 			wantStatus:  "in_progress",
 			wantSources: -1,
+			wantID:      "ws_2",
 		},
 		{
 			name:        "searching alias collapses to unresolved",
@@ -523,6 +526,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			wantItems:   1,
 			wantStatus:  "in_progress",
 			wantSources: -1,
+			wantID:      "ws_searching",
 		},
 		{
 			name:        "completed with undisclosed sources",
@@ -530,6 +534,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			wantItems:   2,
 			wantStatus:  "completed",
 			wantSources: 0,
+			wantID:      "ws_3",
 		},
 		{
 			name:        "idless completed Codex replay",
@@ -537,6 +542,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			wantItems:   2,
 			wantStatus:  "completed",
 			wantSources: 0,
+			wantID:      "",
 		},
 	}
 	for _, test := range tests {
@@ -564,7 +570,7 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			}
 
 			document, err := EncodeCarrierWithChanges(
-				EncodeInput{Request: decoded.Request.Request},
+				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
 			if err != nil {
@@ -583,25 +589,25 @@ func TestResponsesRequestWebSearchLifecycleRoundTripsThroughCanonical(t *testing
 			if err := json.Unmarshal(payload.Input[0], &item); err != nil {
 				t.Fatal(err)
 			}
-			if item.Type != "web_search_call" || item.ID != call.CallID().String() || item.Status != test.wantStatus {
+			if item.Type != "web_search_call" || item.Status != test.wantStatus {
 				t.Fatalf("folded item = %#v", item)
+			}
+			// The canonical correlation token is never a Responses item id: even
+			// when the call has no preserved refinement it must not appear as id.
+			if item.ID != test.wantID {
+				t.Fatalf("folded item id = %q, want %q (correlation %q must not leak): %s", item.ID, test.wantID, call.CallID().String(), payload.Input[0])
+			}
+			// Negative assertion: no synthetic canonical correlation ID may ever
+			// populate a Responses item.id, regardless of the input shape.
+			if strings.Contains(string(payload.Input[0]), "toolu_swobu_") {
+				t.Fatalf("synthetic canonical correlation leaked into responses item: %s", payload.Input[0])
 			}
 			var action responsesWebSearchActionDTO
 			if err := json.Unmarshal(item.Action, &action); err != nil {
 				t.Fatal(err)
 			}
-			if test.wantSources < 0 {
-				if len(action.Sources) != 0 {
-					t.Fatalf("unresolved action disclosed sources: %s", item.Action)
-				}
-				return
-			}
-			var sources []responsesWebSearchSourceDTO
-			if err := json.Unmarshal(action.Sources, &sources); err != nil {
-				t.Fatalf("completed action sources = %s: %v", action.Sources, err)
-			}
-			if len(sources) != test.wantSources {
-				t.Fatalf("sources = %#v", sources)
+			if len(action.Sources) != 0 {
+				t.Fatalf("replayed action disclosed sources: %s", item.Action)
 			}
 		})
 	}
@@ -625,7 +631,7 @@ func TestResponsesRequestWebSearchFoldSupportsNonAdjacentResult(t *testing.T) {
 		Items: []canonical.CanonicalItem{lifecycle[0], message, lifecycle[1]},
 	})
 	document, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -655,7 +661,7 @@ func TestResponsesFailedWebSearchHistoryPreservesTypedFailure(t *testing.T) {
 	assertResponsesFailedWebSearchItems(t, decoded.Request.Request.Items())
 
 	providerRaw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"web_search_call","id":"ws_failed","status":"failed","action":{"type":"search","queries":["deadline"]}}]}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, providerRaw, "ex", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, providerRaw, "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -720,14 +726,13 @@ func TestResponsesWebSearchFailedAndIncompleteBufferedStreamParity(t *testing.T)
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			buffered, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.buffered), "ex_buffered", nil)
+			buffered, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, []byte(test.buffered), "ex_buffered", nil, true)
 			if err != nil {
 				t.Fatal(err)
 			}
 			streamed := decodeResponseStream(
-				canonical.CanonicalRequest{},
-				carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(test.streamed))},
-				"ex_streamed", nil,
+				canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(test.streamed))},
+				"ex_streamed", nil, true,
 			)
 			for name, reader := range map[string]canonical.ResponseStream{"buffered": buffered, "streamed": streamed} {
 				closed, err := canonical.ReadClosedEnvelope(

@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -49,12 +50,13 @@ type customToolCallItem struct {
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
 // package does not import wire.
 type EncodeInput struct {
-	Request canonical.CanonicalRequest
-	Access  mcp.Access
+	Request   canonical.CanonicalRequest
+	ToolNames wire.ToolNames
+	Access    mcp.Access
 }
 
-// ProviderRequestDocument is the standard Responses lowering before an exact
-// provider owns any typed dialect adaptation.
+// ProviderRequestDocument is the typed official Responses request before an
+// exact provider owns any positive typed adaptation.
 type ProviderRequestDocument struct {
 	Payload        map[string]any
 	Input          any
@@ -85,6 +87,11 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	}
 
 	items := req.Items()
+	if wire.HasDeferredResponsesTools(items) {
+		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	fullEnvironment, err := canonical.ToolEnvironmentAt(items, len(items))
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -111,7 +118,7 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		}
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(req, input.Access, changeLog, exchangeID)
+	payloadInput, err := encodeInput(req, input.ToolNames, input.Access, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -119,7 +126,19 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeToolChoice(policy, tools, changeLog, exchangeID)
+	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	choiceTools := flatTools.Declarations
+	if flatTools.OmittedMCP > 0 {
+		if err := wire.ValidateFlatToolPolicy(policy, choiceTools); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	choice, err := encodeToolChoice(policy, choiceTools, input.ToolNames, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -134,7 +153,11 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" {
 		payload["instructions"] = instructions
 	}
-	wireTools, err := encodeResponsesTools(requestTools, input.Access, changeLog, exchangeID)
+	var store *bool
+	if storeValue, specified := req.Responses().Store(); specified {
+		store = &storeValue
+	}
+	wireTools, err := encodeResponsesTools(requestTools, input.ToolNames, input.Access, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -160,9 +183,8 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	// Stateless continuation capture is protocol state, not readable reasoning
-	// disclosure. Ask every Responses-compatible target for the encrypted state
-	// it may require; runtime rejection remains attempt evidence.
+	// Request encrypted reasoning state required to preserve official Responses
+	// reasoning continuity when Swobu manages conversation history manually.
 	payload["include"] = []string{"reasoning.encrypted_content"}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return ProviderRequestDocument{}, err
@@ -184,6 +206,7 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		Tools:          wireTools,
 		ToolsSpecified: toolsSpecified,
 		ToolChoice:     choice,
+		Store:          store,
 	}, nil
 }
 
@@ -307,7 +330,7 @@ func responsesWireToolChoiceShape(choice any) string {
 	return "other"
 }
 
-func encodeInput(req canonical.CanonicalRequest, access mcp.Access, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	items := req.Items()
 	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasResumptionInput(items) { // swobu:io-string source=boundary
 		return nil, nil
@@ -327,7 +350,7 @@ func encodeInput(req canonical.CanonicalRequest, access mcp.Access, changeLog *[
 		if err != nil {
 			return nil, err
 		}
-		return encodeConversation(req, items, environment.Declarations(), access, changeLog, exchangeID)
+		return encodeConversation(req, items, environment.Declarations(), names, access, changeLog, exchangeID)
 	}
 }
 
@@ -374,7 +397,7 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]any, error) {
+func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
 	pendingContentCalls := make(map[canonical.ToolCallID]canonical.ToolKind)
@@ -407,7 +430,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if declarations.Scope() == canonical.ContextScopeRequest {
 				continue
 			}
-			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), access, changeLog, exchangeID)
+			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), names, access, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -415,7 +438,10 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 		case canonical.ItemKindToolCall:
 			call, _ := current.ToolCall()
 			tool := call.Tool()
-			name := tool.Name()
+			name, err := wire.EncodeToolName(names, tool)
+			if err != nil {
+				return nil, err
+			}
 			switch tool.Kind() {
 			case canonical.ToolKindFunction:
 				if _, exists := pendingContentCalls[call.CallID()]; exists {
@@ -452,12 +478,20 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 					return nil, canonical.BadRequest("responses web-search action could not be encoded")
 				}
 				pendingWebSearch[call.CallID()] = len(encoded)
-				encoded = append(encoded, responsesWireOutputItemDTO{
-					ID:     call.CallID().String(),
+				searchItem := responsesWireOutputItemDTO{
 					Type:   "web_search_call",
 					Status: "in_progress",
 					Action: action,
-				})
+				}
+				// A Responses item id is provider-owned identity, not canonical
+				// correlation. It is emitted only when an exact refinement was
+				// preserved (client- or provider-supplied ws id); an idless replay
+				// (e.g. Codex under store:false) re-encodes with no id rather than
+				// minting the call's correlation token into item.id.
+				if refinement, ok := call.ResponsesWebSearch(); ok {
+					searchItem.ID = refinement.ItemID().String()
+				}
+				encoded = append(encoded, searchItem)
 			case canonical.ToolKindDiscovery:
 				object, ok := call.Input().Object()
 				if !ok {
@@ -471,13 +505,17 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				if executor == canonical.DiscoveryExecutorProvider {
 					execution = "server"
 				}
-				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": call.CallID().String(), "execution": execution, "arguments": json.RawMessage(object.String())})
+				var wireCallID any = call.CallID().String()
+				if call.ResponsesCallIDNull() {
+					wireCallID = nil
+				}
+				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": wireCallID, "execution": execution, "arguments": json.RawMessage(object.String())})
 			default:
 				return nil, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Responses cannot represent this canonical tool-call kind")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := current.ToolResult()
-			if search, ok := result.WebSearch(); ok {
+			if _, ok := result.WebSearch(); ok {
 				index, found := pendingWebSearch[result.CallID()]
 				if !found {
 					return nil, canonical.BadRequest("responses web-search result has no prior call")
@@ -486,11 +524,8 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				if !ok {
 					return nil, canonical.InternalError("responses web-search request fold is invalid")
 				}
-				action, err := encodeResponsesWebSearchSources(search, item.Action)
-				if err != nil {
-					return nil, canonical.BadRequest("responses web-search sources could not be encoded")
-				}
-				item.Action = action
+				// Compatibility replay carries executable call state only. Sources
+				// remain canonical-complete for client responses and citations.
 				item.Status = "completed"
 				encoded[index] = item
 				delete(pendingWebSearch, result.CallID())
@@ -501,7 +536,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 					return nil, err
 				}
 			}
-			content, err := encodeResponsesToolResultContent(result.Content())
+			content, err := encodeResponsesToolResultContent(result.Content(), changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -536,7 +571,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			encoded = append(encoded, item)
 		case canonical.ItemKindToolDiscoveryResult:
 			result, _ := current.ToolDiscoveryResult()
-			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), access, changeLog, exchangeID)
+			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), names, access, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -544,7 +579,11 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if result.Executor() == canonical.DiscoveryExecutorProvider {
 				execution = "server"
 			}
-			encoded = append(encoded, map[string]any{"type": "tool_search_output", "call_id": result.CallID().String(), "status": "completed", "execution": execution, "tools": wireTools})
+			var wireCallID any = result.CallID().String()
+			if result.ResponsesCallIDNull() {
+				wireCallID = nil
+			}
+			encoded = append(encoded, map[string]any{"type": "tool_search_output", "call_id": wireCallID, "status": "completed", "execution": execution, "tools": wireTools})
 		case canonical.ItemKindReasoning:
 			reasoning, _ := current.Reasoning()
 			item := map[string]any{"type": "reasoning"}
@@ -661,11 +700,27 @@ func responsesTextOnlyContent(parts []canonical.MessagePart, surface string) (st
 	return builder.String(), nil
 }
 
-func encodeResponsesToolResultContent(parts []canonical.ToolResultPart) (any, error) {
+func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if len(parts) == 1 {
 		if text, ok := parts[0].Text(); ok {
 			return text.Text(), nil
 		}
+	}
+	var text strings.Builder
+	textOnly := true
+	for _, part := range parts {
+		value, ok := part.Text()
+		if !ok {
+			textOnly = false
+			break
+		}
+		text.WriteString(value.Text())
+	}
+	if textOnly {
+		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestItemsToolResultContent, compat.Approximation); err != nil {
+			return nil, err
+		}
+		return text.String(), nil
 	}
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {

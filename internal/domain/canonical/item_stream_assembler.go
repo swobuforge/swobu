@@ -3,6 +3,7 @@ package canonical
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 type itemStreamState struct {
@@ -14,7 +15,12 @@ type itemStreamState struct {
 
 type itemStreamPartState struct {
 	kind PartKind
-	text string
+	// text accumulates streamed text deltas for one part. A strings.Builder
+	// keeps accumulation O(n) in total delta bytes rather than O(n^2): Go's
+	// `+=` on a string reallocates and copies the whole growing prefix on every
+	// delta, which dominates memory for long streamed responses (epic-50). The
+	// accumulated value is only read once, at EventItemCompleted validation.
+	text strings.Builder
 }
 
 // itemStreamAssembler validates progressive start/delta facts against the
@@ -82,7 +88,7 @@ func (a *itemStreamAssembler) apply(kind EventKind, event ItemEvent) error {
 			if part == nil || !part.acceptsText() {
 				return fmt.Errorf("text.delta item ordinal %d part ordinal %d has no open text content", event.Position.Item, event.Position.Part)
 			}
-			part.text += delta.Text
+			part.text.WriteString(delta.Text)
 		}
 	case EventItemCompleted:
 		completed, ok := event.Payload.(ItemCompletedPayload)
@@ -155,7 +161,7 @@ func validateCompletedItem(state *itemStreamState, item CanonicalItem) error {
 			if streamed == nil || completedPart.Kind() != streamed.kind {
 				return fmt.Errorf("completed content part %d kind does not match streamed content", ordinal)
 			}
-			if text, ok := completedPart.Text(); ok && text.Text() != streamed.text {
+			if text, ok := completedPart.Text(); ok && text.Text() != streamed.text.String() {
 				return fmt.Errorf("completed content part %d text does not match streamed text", ordinal)
 			}
 		}

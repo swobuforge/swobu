@@ -41,7 +41,7 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 }
 
 func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
-	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, "")
+	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
 
 func TestDecodeResponseBufferedPreservesWebSearchLifecycle(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"web_search_result","url":"https://example.com/x","title":"Example"}]},{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://example.com/x","title":"Example"}]}]}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDecodeResponseBufferedErasesUnknownWebSearchChildren(t *testing.T) {
 		]}
 	]}`)
 	var changes []compat.Change
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &changes)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestDecodeResponseBufferedRejectsMissingNestedWebSearchDiscriminators(t *te
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var changes []compat.Change
-			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", &changes)
+			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, []byte(test.raw), "ex", &changes)
 			var backendErr canonical.BackendError
 			if !errors.As(err, &backendErr) {
 				t.Fatalf("error = %v, want backend error", err)
@@ -191,7 +191,7 @@ func TestDecodeResponseBufferedClassifiesMalformedWebSearchProviderDataAsBackend
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(test.raw), "ex", nil)
+			_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, []byte(test.raw), "ex", nil)
 			var backendErr canonical.BackendError
 			if !errors.As(err, &backendErr) {
 				t.Fatalf("error = %T %v, want backend error", err, err)
@@ -244,7 +244,7 @@ func TestDecodeResponseBufferedRejectsAllErasedWebSearchResult(t *testing.T) {
 		{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},
 		{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"future_result"}]}
 	]}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil); err == nil ||
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil); err == nil ||
 		!strings.Contains(err.Error(), "backend error from messages") {
 		t.Fatalf("error = %v, want backend-origin all-erased result", err)
 	}
@@ -252,7 +252,7 @@ func TestDecodeResponseBufferedRejectsAllErasedWebSearchResult(t *testing.T) {
 
 func TestDecodeResponseBufferedPreservesWebSearchFailure(t *testing.T) {
 	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","tool_use_id":"s","content":{"type":"web_search_tool_result_error","error_code":"unavailable"}}]}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestDecodeResponseStreamSkipsUnknownBlockUntilStopAndPreservesKnownSibling(
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestDecodeResponseStreamPreservesWebSearchLifecycle(t *testing.T) {
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -352,8 +352,7 @@ func TestDecodeResponseStreamClassifiesMalformedWebSearchSourceAsBackend(t *test
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"s\",\"content\":[{\"type\":\"web_search_result\",\"url\":\"not-a-url\"}]}}\n\n" +
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
 	reader := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex",
 		nil,
 	)
@@ -378,7 +377,7 @@ func TestDecodeResponseStreamPreservesWebSearchFailure(t *testing.T) {
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)

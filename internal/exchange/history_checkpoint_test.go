@@ -413,9 +413,10 @@ func TestCompletedResponseWithoutHistoryFingerprintStillCommitsExplicitCheckpoin
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &checkpointCaptureResponseStream{result: checkpointCaptureSnapshot{
+	capture := newCheckpointCaptureResponseStream(nil, canonical.ResponseBinding{})
+	capture.result = checkpointCaptureSnapshot{
 		state: checkpointCaptureCompleted, response: response,
-	}}
+	}
 	committer := &checkpointCommitter{
 		exchangeID: "no_history", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"), advance: &historyAdvance{Request: testHistoryRequest([]byte("request"))},

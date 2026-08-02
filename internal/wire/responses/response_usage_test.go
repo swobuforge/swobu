@@ -17,7 +17,7 @@ func TestDecodeResponseBuffered_MapsInputOutputAndCacheUsage(t *testing.T) {
 		"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
 		"usage":{"input_tokens":91,"output_tokens":6,"output_tokens_details":{"reasoning_tokens":4},"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":3}}
 	}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_usage", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_usage", nil, true)
 	if err != nil {
 		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
 
-	reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_fallback", nil)
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_fallback", nil, true)
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
 	if err != nil {

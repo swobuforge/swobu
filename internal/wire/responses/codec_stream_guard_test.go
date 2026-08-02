@@ -21,7 +21,7 @@ func TestDecodeProviderEnvelope_InvalidWireCarrierFailsImmediately(t *testing.T)
 	codec := ProviderEnvelopeDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, decodeErr := codec.DecodeProviderEnvelope(canonical.CanonicalRequest{}, tt.wire, "ex_guard")
+			_, decodeErr := codec.DecodeProviderEnvelope(canonical.CanonicalRequest{}, nil, tt.wire, "ex_guard")
 			if decodeErr == nil {
 				t.Fatal("expected decode stream guard error, got nil")
 			}

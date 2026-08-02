@@ -13,10 +13,11 @@ import (
 type Request struct {
 	// ExchangeID correlates progressive response events for this invocation. It
 	// is execution context, not part of canonical request semantics.
-	ExchangeID     string
-	Canonical      canonical.CanonicalRequest
-	Delivery       delivery.Delivery
-	ToolProjection ToolProjectionTable
+	ExchangeID string
+	Canonical  canonical.CanonicalRequest
+	Delivery   delivery.Delivery
+	// ToolNames is transient provider-attempt representation state.
+	ToolNames AttemptToolNames
 	// MCPAccess is request-private and may be consumed only by an exact native
 	// MCP request projection. It never enters canonical history.
 	MCPAccess mcp.Access

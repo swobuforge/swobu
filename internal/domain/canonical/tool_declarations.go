@@ -12,6 +12,7 @@ type ToolDeclaration struct {
 	custom    *CustomTool
 	namespace *ToolNamespace
 	discovery *ToolDiscoveryTool
+	mcp       *MCPToolSource
 	// builtIn discriminates only payload-free built-ins. Function and custom
 	// identity is derived from the branch that already owns their payload.
 	builtIn ToolKind
@@ -37,7 +38,15 @@ type ToolNamespace struct {
 	key         ToolKey
 	description string
 	tools       []ToolDeclaration
-	mcp         *MCPSource
+}
+
+// MCPToolSource is portable remote execution authority plus its resolved
+// callable catalog. It is not an ordinary model-presentation namespace.
+type MCPToolSource struct {
+	key         ToolKey
+	description string
+	source      MCPSource
+	tools       []ToolDeclaration
 }
 
 // FunctionTool is an ordinary JSON-schema callable declaration.
@@ -87,46 +96,56 @@ func NewToolDiscoveryTool(description string, inputSchema ToolSchema, executor D
 }
 
 func NewToolNamespace(key ToolKey, description string, tools []ToolDeclaration) (ToolDeclaration, error) {
-	return newToolNamespace(key, description, tools, nil)
+	return newToolNamespace(key, description, tools)
 }
 
-func NewMCPToolNamespace(key ToolKey, description string, source MCPSource, tools []ToolDeclaration) (ToolDeclaration, error) {
-	return newToolNamespace(key, description, tools, &source)
-}
-
-func newToolNamespace(key ToolKey, description string, tools []ToolDeclaration, source *MCPSource) (ToolDeclaration, error) {
+func newToolNamespace(key ToolKey, description string, tools []ToolDeclaration) (ToolDeclaration, error) {
 	if key.IsZero() || key.Kind() != ToolKindNamespace {
 		return ToolDeclaration{}, fmt.Errorf("canonical tool namespace declaration is invalid")
-	}
-	for _, child := range tools {
-		if namespace, ok := child.Namespace(); ok {
-			if _, isMCP := namespace.MCPSource(); isMCP {
-				return ToolDeclaration{}, fmt.Errorf("canonical remote tool namespace cannot be nested")
-			}
-		}
 	}
 	children, err := NewToolSet(tools)
 	if err != nil {
 		return ToolDeclaration{}, fmt.Errorf("canonical tool namespace declaration is invalid: %w", err)
 	}
-	namespace := ToolNamespace{key: key.Clone(), description: strings.TrimSpace(description), tools: children.Declarations()}
-	if source != nil {
-		cloned := source.Clone()
-		namespace.mcp = &cloned
+	for _, child := range children.Declarations() {
+		if child.Kind() == ToolKindMCP {
+			return ToolDeclaration{}, fmt.Errorf("canonical MCP tool source cannot be nested")
+		}
 	}
+	namespace := ToolNamespace{key: key.Clone(), description: strings.TrimSpace(description), tools: children.Declarations()}
 	return ToolDeclaration{namespace: &namespace}, nil
+}
+
+// NewMCPToolSource constructs remote MCP authority with an optional resolved
+// callable catalog.
+func NewMCPToolSource(key ToolKey, description string, source MCPSource, tools []ToolDeclaration) (ToolDeclaration, error) {
+	if key.IsZero() || key.Kind() != ToolKindMCP {
+		return ToolDeclaration{}, fmt.Errorf("canonical MCP tool source requires an MCP key")
+	}
+	children, err := NewToolSet(tools)
+	if err != nil {
+		return ToolDeclaration{}, fmt.Errorf("canonical MCP tool source catalog is invalid: %w", err)
+	}
+	for _, child := range children.Declarations() {
+		if child.Kind() != ToolKindFunction {
+			return ToolDeclaration{}, fmt.Errorf("canonical MCP tool source catalog requires function tools")
+		}
+	}
+	return ToolDeclaration{mcp: &MCPToolSource{key: key.Clone(), description: strings.TrimSpace(description), source: source.Clone(), tools: children.Declarations()}}, nil
 }
 
 func (d ToolDeclaration) Kind() ToolKind {
 	switch {
-	case d.function != nil && d.custom == nil && d.namespace == nil && d.discovery == nil && d.builtIn == "":
+	case d.function != nil && d.custom == nil && d.namespace == nil && d.discovery == nil && d.mcp == nil && d.builtIn == "":
 		return ToolKindFunction
-	case d.function == nil && d.custom != nil && d.namespace == nil && d.discovery == nil && d.builtIn == "":
+	case d.function == nil && d.custom != nil && d.namespace == nil && d.discovery == nil && d.mcp == nil && d.builtIn == "":
 		return ToolKindCustom
-	case d.function == nil && d.custom == nil && d.namespace != nil && d.discovery == nil && d.builtIn == "":
+	case d.function == nil && d.custom == nil && d.namespace != nil && d.discovery == nil && d.mcp == nil && d.builtIn == "":
 		return ToolKindNamespace
-	case d.function == nil && d.custom == nil && d.namespace == nil && d.discovery != nil && d.builtIn == "":
+	case d.function == nil && d.custom == nil && d.namespace == nil && d.discovery != nil && d.mcp == nil && d.builtIn == "":
 		return ToolKindDiscovery
+	case d.function == nil && d.custom == nil && d.namespace == nil && d.discovery == nil && d.mcp != nil && d.builtIn == "":
+		return ToolKindMCP
 	case d.function == nil && d.custom == nil && d.namespace == nil && d.discovery == nil && d.builtIn == ToolKindWebSearch:
 		return ToolKindWebSearch
 	default:
@@ -149,6 +168,9 @@ func (d ToolDeclaration) Key() ToolKey {
 	}
 	if d.Kind() == ToolKindDiscovery {
 		return ToolDiscoveryKey()
+	}
+	if d.Kind() == ToolKindMCP {
+		return d.mcp.key.Clone()
 	}
 	return ToolKey{}
 }
@@ -181,6 +203,13 @@ func (d ToolDeclaration) Discovery() (ToolDiscoveryTool, bool) {
 	return d.discovery.Clone(), true
 }
 
+func (d ToolDeclaration) MCP() (MCPToolSource, bool) {
+	if d.Kind() != ToolKindMCP {
+		return MCPToolSource{}, false
+	}
+	return d.mcp.Clone(), true
+}
+
 func (d ToolDeclaration) Clone() ToolDeclaration {
 	if f, ok := d.Function(); ok {
 		return ToolDeclaration{function: &f}
@@ -196,6 +225,9 @@ func (d ToolDeclaration) Clone() ToolDeclaration {
 	}
 	if discovery, ok := d.Discovery(); ok {
 		return ToolDeclaration{discovery: &discovery}
+	}
+	if source, ok := d.MCP(); ok {
+		return ToolDeclaration{mcp: &source}
 	}
 	return ToolDeclaration{}
 }
@@ -228,11 +260,6 @@ func (d ToolDeclaration) Equivalent(other ToolDeclaration) bool {
 		if !rightOK || left.Description() != right.Description() || len(left.Tools()) != len(right.Tools()) {
 			return false
 		}
-		leftMCP, leftMCPSet := left.MCPSource()
-		rightMCP, rightMCPSet := right.MCPSource()
-		if leftMCPSet != rightMCPSet || leftMCPSet && !leftMCP.Equivalent(rightMCP) {
-			return false
-		}
 		leftTools := left.Tools()
 		rightTools := right.Tools()
 		for index := range leftTools {
@@ -248,6 +275,18 @@ func (d ToolDeclaration) Equivalent(other ToolDeclaration) bool {
 			left.InputSchema().RawObject() == right.InputSchema().RawObject() &&
 			left.Executor() == right.Executor()
 	}
+	if left, ok := d.MCP(); ok {
+		right, rightOK := other.MCP()
+		if !rightOK || left.Description() != right.Description() || !left.Source().Equivalent(right.Source()) || len(left.Tools()) != len(right.Tools()) {
+			return false
+		}
+		for index := range left.Tools() {
+			if !left.Tools()[index].Equivalent(right.Tools()[index]) {
+				return false
+			}
+		}
+		return true
+	}
 	return d.Kind() == ToolKindWebSearch
 }
 
@@ -255,18 +294,14 @@ func (n ToolNamespace) Key() ToolKey             { return n.key.Clone() }
 func (n ToolNamespace) Description() string      { return n.description }
 func (n ToolNamespace) Tools() []ToolDeclaration { return cloneToolDeclarations(n.tools) }
 func (n ToolNamespace) Clone() ToolNamespace {
-	cloned := ToolNamespace{key: n.key.Clone(), description: n.description, tools: cloneToolDeclarations(n.tools)}
-	if n.mcp != nil {
-		source := n.mcp.Clone()
-		cloned.mcp = &source
-	}
-	return cloned
+	return ToolNamespace{key: n.key.Clone(), description: n.description, tools: cloneToolDeclarations(n.tools)}
 }
-func (n ToolNamespace) MCPSource() (MCPSource, bool) {
-	if n.mcp == nil {
-		return MCPSource{}, false
-	}
-	return n.mcp.Clone(), true
+func (s MCPToolSource) Key() ToolKey             { return s.key.Clone() }
+func (s MCPToolSource) Description() string      { return s.description }
+func (s MCPToolSource) Source() MCPSource        { return s.source.Clone() }
+func (s MCPToolSource) Tools() []ToolDeclaration { return cloneToolDeclarations(s.tools) }
+func (s MCPToolSource) Clone() MCPToolSource {
+	return MCPToolSource{key: s.key.Clone(), description: s.description, source: s.source.Clone(), tools: cloneToolDeclarations(s.tools)}
 }
 func (d ToolDiscoveryTool) Description() string         { return d.description }
 func (d ToolDiscoveryTool) InputSchema() ToolSchema     { return d.inputSchema.Clone() }

@@ -178,7 +178,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		if tool.Kind() == canonical.ToolKindWebSearch {
 			search, ok := call.Input().WebSearch()
 			if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-				return canonical.InternalError("Messages response history admitted an unprojected web-search call")
+				return canonical.InternalError("Messages response history admitted an unsupported web-search call")
 			}
 			input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 			if err != nil {
@@ -188,7 +188,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 			return nil
 		}
 		if tool.Kind() != canonical.ToolKindFunction {
-			return canonical.InternalError("Messages response history received an unprojected canonical tool-call kind")
+			return canonical.InternalError("Messages response history received an unsupported canonical tool-call kind")
 		}
 		object, ok := call.Input().Object()
 		if !ok {

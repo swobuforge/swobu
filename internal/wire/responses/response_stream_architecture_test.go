@@ -13,7 +13,7 @@ import (
 
 func TestResponsesBufferedAndStreamedMessageSemanticsConverge(t *testing.T) {
 	bufferedRaw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"hello"}]}]}`)
-	bufferedStream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, bufferedRaw, "buffered", nil)
+	bufferedStream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, bufferedRaw, "buffered", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestResponsesTerminalFormsHaveOneTerminalOutcome(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := responsesCreatedFrame() + itemDone + test.terminal
-			stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 			ends := 0
 			var status canonical.EnvelopeStatus
 			for {
@@ -83,7 +83,7 @@ func BenchmarkResponsesStreamCheckpointRetention(b *testing.B) {
 			raw := frames.String()
 			b.ReportAllocs()
 			for b.Loop() {
-				stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "bench", nil)
+				stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "bench", nil, true)
 				if _, err := canonical.ReadClosedEnvelope(context.Background(), stream, canonical.EnvResponse); err != nil {
 					b.Fatal(err)
 				}

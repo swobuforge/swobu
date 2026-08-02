@@ -35,6 +35,7 @@ type streamFrame struct {
 		ID                string                         `json:"id"`
 		Model             string                         `json:"model"`
 		Status            string                         `json:"status"`
+		Store             *bool                          `json:"store"`
 		IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 		ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 		Output            []json.RawMessage              `json:"output,omitempty"`
@@ -298,7 +299,11 @@ func (s *responsesResponseStream) handleResponseCreated(ctx context.Context, fra
 		model = strings.TrimSpace(frame.Response.Model) // swobu:io-string source=boundary
 	}
 	s.enqueueEnvelopeStart(s.responseEnvID, "", canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: model}, canonical.EventMetadataFields{})
-	s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseEnvID, Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(providerResponseID)}}}})
+	ref := canonical.ResponseRef{}
+	if s.continuationEligible && frame.Response.Store != nil && *frame.Response.Store {
+		ref.Responses = &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(providerResponseID)}
+	}
+	s.enqueue(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: s.responseEnvID, Payload: canonical.ResponseIdentityPayload{Response: ref}})
 	return nil
 }
 
@@ -440,6 +445,7 @@ func (s *responsesResponseStream) handleOutputItemDone(ctx context.Context, fram
 		items, err := decodeCompletedResponsesItemSetAtIndexes(
 			ctx,
 			s.request,
+			s.toolNames,
 			[]json.RawMessage{frame.RawItem},
 			"",
 			[]int{index},
@@ -602,7 +608,7 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 				if state := s.outputAt(index); state.erased && state.erasureRecorded {
 					projectionSink = nil
 				}
-				items, err := decodeCompletedResponsesItemSetAtIndexes(ctx, s.request, []json.RawMessage{raw}, "", []int{index}, true, terminalStatus, s.exchangeID, projectionSink)
+				items, err := decodeCompletedResponsesItemSetAtIndexes(ctx, s.request, s.toolNames, []json.RawMessage{raw}, "", []int{index}, true, terminalStatus, s.exchangeID, projectionSink)
 				if err != nil {
 					return err
 				}
@@ -670,7 +676,7 @@ func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Con
 		changeLog = nil
 	}
 	terminalItems, err := decodeCompletedResponsesItemSetAtIndexes(
-		ctx, s.request, []json.RawMessage{raw}, "", []int{index}, true,
+		ctx, s.request, s.toolNames, []json.RawMessage{raw}, "", []int{index}, true,
 		responseStatus, s.exchangeID, changeLog,
 	)
 	if err != nil {
@@ -687,14 +693,14 @@ func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Con
 
 func (s *responsesResponseStream) validateDeferredTerminalOutput(ctx context.Context, index int, deferred json.RawMessage, terminal json.RawMessage, responseStatus string) error {
 	deferredItems, err := decodeCompletedResponsesItemSetAtIndexes(
-		ctx, s.request, []json.RawMessage{deferred}, "", []int{index}, true,
+		ctx, s.request, s.toolNames, []json.RawMessage{deferred}, "", []int{index}, true,
 		responseStatus, s.exchangeID, nil,
 	)
 	if err != nil {
 		return err
 	}
 	terminalItems, err := decodeCompletedResponsesItemSetAtIndexes(
-		ctx, s.request, []json.RawMessage{terminal}, "", []int{index}, true,
+		ctx, s.request, s.toolNames, []json.RawMessage{terminal}, "", []int{index}, true,
 		responseStatus, s.exchangeID, nil,
 	)
 	if err != nil {

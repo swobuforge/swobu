@@ -73,6 +73,10 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name       string
 		providerID profile.ProviderID
@@ -88,12 +92,56 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(string(document.RawBytes()), `"web_search_options":{}`) {
 				t.Fatalf("%s target did not inherit protocol web search: %s", tc.name, document.RawBytes())
+			}
+		})
+	}
+}
+
+func TestCommodityResponsesTargetsUseFlatNamespaceGrammar(t *testing.T) {
+	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
+	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "workspace")
+	namespace, _ := canonical.NewToolNamespace(namespaceKey, "Workspace", []canonical.ToolDeclaration{child})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, namespace), canonicaltest.Message(t, canonical.MessageRoleUser, "read")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name     string
+		provider profile.ProviderID
+		policy   ProviderRoutePolicy
+		baseURL  string
+	}{
+		{name: "ollama", provider: profile.ProviderSpecOllama, policy: NewOllamaPolicy(), baseURL: "http://127.0.0.1:11434/v1"},
+		{name: "custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8080/v1"},
+		{name: "lm_studio_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
+		{name: "llama_cpp_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8081/v1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot(test.name, string(test.provider), test.baseURL, "", protocolkind.Responses, "", "responses")
+			target.Model = "model"
+			backend, err := NewExecutor(nil, nil, test.policy).ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := string(document.RawBytes())
+			wireName, _ := names.WireName(childKey)
+			if strings.Contains(raw, `"type":"namespace"`) || !strings.Contains(raw, `"name":"`+wireName+`"`) {
+				t.Fatalf("flat Responses document = %s", raw)
 			}
 		})
 	}
@@ -251,6 +299,10 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
 	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name       string
 		providerID profile.ProviderID
@@ -267,7 +319,7 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 			if err != nil {
 				t.Fatal(err)
 			}

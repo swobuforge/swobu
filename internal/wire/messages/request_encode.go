@@ -48,8 +48,8 @@ type ProviderRequestDocument struct {
 	Tools   []ProviderRequestTool
 }
 
-func EncodeCarrierWithChanges(req canonical.CanonicalRequest, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := LowerProviderRequestDocument(req, d, changeLog, exchangeID)
+func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
+	document, err := LowerProviderRequestDocument(req, names, d, changeLog, exchangeID)
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -58,7 +58,7 @@ func EncodeCarrierWithChanges(req canonical.CanonicalRequest, d delivery.Deliver
 
 // LowerProviderRequestDocument produces a typed Messages document without
 // crossing the JSON boundary.
-func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
+func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -69,6 +69,11 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
+	if wire.HasDeferredResponsesTools(items) {
+		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	environment, err := canonical.ToolEnvironmentAt(items, len(items))
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -96,11 +101,28 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 			return ProviderRequestDocument{}, err
 		}
 	}
+	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
+		return strings.TrimSpace(tool.Key().Name())
+	})
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if flatTools.RemovedNamespaces > 0 {
+		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	if flatTools.OmittedMCP > 0 {
+		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	tools = flatTools.Declarations
 	conversation, err := lowerMessagesContextPrefix(items, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireMessages, err := encodeItems(conversation, tools, changeLog, exchangeID)
+	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -118,7 +140,7 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	if loweredInstructions.Text != "" {
 		payload["system"] = loweredInstructions.Text
 	}
-	wireTools, err := encodeMessagesTools(tools, changeLog, exchangeID)
+	wireTools, err := encodeMessagesTools(tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -151,7 +173,12 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, d delivery.Del
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeMessagesToolChoice(policy, tools, changeLog, exchangeID)
+	if flatTools.OmittedMCP > 0 {
+		if err := wire.ValidateFlatToolPolicy(policy, tools); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	choice, err := encodeMessagesToolChoice(policy, tools, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -228,7 +255,7 @@ func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Do
 	), nil
 }
 
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) ([]messageBody, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]messageBody, error) {
 	if len(items) == 0 {
 		return nil, canonical.BadRequest("messages protocol requires at least one canonical item")
 	}
@@ -246,7 +273,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		wire := messageBody{Role: string(owner)}
 		for i < len(items) && items[i].Owner() == owner {
 			var err error
-			wire.Content, err = appendMessagesItemBlocks(wire.Content, items[i], tools, owner, changeLog, exchangeID)
+			wire.Content, err = appendMessagesItemBlocks(wire.Content, items[i], tools, names, owner, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -274,7 +301,7 @@ func projectMessagesResponsesItems(items []canonical.CanonicalItem, changeLog *[
 	return projected, nil
 }
 
-func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, owner canonical.TurnOwner, changeLog *[]compat.Change, exchangeID string) ([]contentID, error) {
+func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, owner canonical.TurnOwner, changeLog *[]compat.Change, exchangeID string) ([]contentID, error) {
 	if message, ok := item.Message(); ok {
 		for _, part := range message.Content() {
 			if text, ok := part.Text(); ok {
@@ -301,7 +328,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		return blocks, nil
 	}
 	if item.Kind() == canonical.ItemKindToolCall {
-		block, err := encodeMessagesToolCall(item, tools)
+		block, err := encodeMessagesToolCall(item, names)
 		if err != nil {
 			return nil, err
 		}
@@ -335,7 +362,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 	return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent this canonical item kind")
 }
 
-func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDeclaration) (contentID, error) {
+func encodeMessagesToolCall(item canonical.CanonicalItem, names wire.ToolNames) (contentID, error) {
 	call, ok := item.ToolCall()
 	if !ok {
 		return contentID{}, canonical.InternalError("messages tool-call item is invalid")
@@ -355,7 +382,10 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, _ []canonical.ToolDecl
 	if tool.Kind() != canonical.ToolKindFunction {
 		return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Messages cannot represent this canonical tool-call kind")
 	}
-	name := tool.Name()
+	name, err := wire.EncodeToolName(names, tool)
+	if err != nil {
+		return contentID{}, err
+	}
 	object, ok := call.Input().Object()
 	if !ok {
 		return contentID{}, canonical.BadRequest("messages function tool calls require object input")
@@ -428,19 +458,7 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 	return nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
-		return strings.TrimSpace(tool.Key().Name())
-	})
-	if err != nil {
-		return nil, err
-	}
-	for range flattened.RemovedNamespaces {
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
-			return nil, err
-		}
-	}
-	tools = flattened.Declarations
+func encodeMessagesTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -457,11 +475,11 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, changeLog *[]compat.
 	out := make([]ProviderRequestTool, 0, len(tools))
 	for _, tool := range tools {
 		if decl, ok := tool.Function(); ok {
-			wire, err := encodeMessagesFunctionTool(tool, decl)
+			wireTool, err := encodeMessagesFunctionTool(tool, decl, names)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, wire)
+			out = append(out, wireTool)
 			continue
 		}
 		if tool.Kind() == canonical.ToolKindWebSearch {
@@ -477,12 +495,15 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, changeLog *[]compat.
 	return out, nil
 }
 
-func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool) (ProviderRequestTool, error) {
+func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {
 	schema, err := messagesToolSchema(decl.InputSchema())
 	if err != nil {
 		return ProviderRequestTool{}, err
 	}
-	name := declaration.Key().Name()
+	name, err := wire.EncodeToolName(names, declaration.Key())
+	if err != nil {
+		return ProviderRequestTool{}, err
+	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
 		return ProviderRequestTool{}, canonical.BadRequest("messages protocol tool declarations require a name")

@@ -15,7 +15,9 @@ type backendCodec struct {
 }
 
 func newBackendCodec(_ string) backendCodec {
-	return backendCodec{Codec: protocolcodec.Codec{Protocol: protocolkind.Responses}}
+	return backendCodec{Codec: protocolcodec.Codec{
+		Protocol: protocolkind.Responses,
+	}}
 }
 
 func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
@@ -28,7 +30,7 @@ func (c backendCodec) Encode(req provider.Request) (carrier.Document, []compat.C
 	var changes []compat.Change
 	document, err := func(sink *[]compat.Change) (responses.ProviderRequestDocument, error) {
 		return responses.LowerProviderRequestDocument(
-			responses.EncodeInput{Request: req.Canonical},
+			responses.EncodeInput{Request: req.Canonical, ToolNames: req.ToolNames},
 			req.Delivery,
 			sink,
 			req.ExchangeID,

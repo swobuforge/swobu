@@ -6,6 +6,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -44,7 +45,7 @@ func admitChatToolCallUnion(rawType string, hasFunction, hasCustom, complete boo
 	}
 }
 
-func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.RawMessage, toolCalls []toolCallBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
+func decodeResponseOutputItems(request canonical.CanonicalRequest, names wire.ToolNames, content json.RawMessage, toolCalls []toolCallBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
 	message, hasMessage, err := decodeOpenAIContentMessage(content, changeLog, exchangeID)
 	if err != nil {
 		return nil, canonical.InternalError("chat completions response content is unsupported")
@@ -53,7 +54,6 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 	if err != nil {
 		return nil, canonical.InternalError("chat completions tool environment is ambiguous")
 	}
-	tools := environment.Declarations()
 	out := make([]canonical.CanonicalItem, 0, 1+len(toolCalls))
 	if hasMessage {
 		out = append(out, message)
@@ -82,7 +82,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			if functionName == "" {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function tool call is missing a name", "")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, functionName, canonical.ToolTypeFunction)
+			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, functionName)
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response references an unknown or ambiguous function tool", "")
 			}
@@ -90,7 +90,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function arguments are invalid", "")
 			}
-			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			item, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function call is invalid", "")
 			}
@@ -103,11 +103,11 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, content json.
 			if customName == "" {
 				return nil, canonical.NewBackendError("", 0, "chat completions response custom tool call is missing a name", "")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, customName, canonical.ToolTypeCustom)
+			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindCustom, customName)
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response references an unknown or ambiguous custom tool", "")
 			}
-			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewTextToolInput(call.Custom.Input))
+			item, err := canonical.NewToolCallItem(callID, key, canonical.NewTextToolInput(call.Custom.Input))
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response custom call is invalid", "")
 			}

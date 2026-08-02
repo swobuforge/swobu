@@ -28,10 +28,11 @@ func TestChatCompatibilityRehomesClosedBatchToolResultImage(t *testing.T) {
 		canonical.NewTextToolResultPart("after"),
 	)
 	changeLog := &recordingChanges{}
-	document, err := EncodeCarrierWithChanges(canonical.NewCanonicalRequest(canonical.RequestParams{
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{call, result},
-	}), delivery.BufferedDelivery(), changeLog, "exchange_1")
+	})
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "exchange_1")
 	if err != nil {
 		t.Fatalf("closed compatibility projection rejected: %v", err)
 	}
@@ -85,8 +86,7 @@ func TestChatToolResultImageProjectionRequiresClosedActiveBatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var changes []compat.Change
 			_, err := EncodeCarrierWithChanges(
-				canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: tc.items}),
-				delivery.BufferedDelivery(), &changes, "exchange_reject",
+				canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: tc.items}), nil, delivery.BufferedDelivery(), &changes, "exchange_reject",
 			)
 			if err == nil {
 				t.Fatalf("error = %v changes = %#v", err, changes)
@@ -110,10 +110,11 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 	)
 	resultB := mustChatProjectionResult(t, "call_b", canonical.NewTextToolResultPart("done"))
 	changeLog := &recordingChanges{}
-	document, err := LowerProviderRequestDocument(canonical.NewCanonicalRequest(canonical.RequestParams{
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{callA, callB, resultA, resultB},
-	}), delivery.BufferedDelivery(), changeLog, "exchange_parallel")
+	})
+	document, err := LowerProviderRequestDocument(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "exchange_parallel")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,9 +142,10 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 		mustChatProjectionCall(t, "call_prefix"),
 		mustChatProjectionResult(t, "call_prefix", canonical.NewImageToolResultPart(image)),
 	}
-	base, err := LowerProviderRequestDocument(canonical.NewCanonicalRequest(canonical.RequestParams{
+	baseRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"), Items: history,
-	}), delivery.BufferedDelivery(), nil, "")
+	})
+	base, err := LowerProviderRequestDocument(baseRequest, testAttemptToolNames(baseRequest), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,10 +155,11 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 	user, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{
 		canonical.NewTextMessagePart("next"),
 	})
-	extended, err := LowerProviderRequestDocument(canonical.NewCanonicalRequest(canonical.RequestParams{
+	extendedRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: append(append([]canonical.CanonicalItem(nil), history...), assistant, user),
-	}), delivery.BufferedDelivery(), nil, "")
+	})
+	extended, err := LowerProviderRequestDocument(extendedRequest, testAttemptToolNames(extendedRequest), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,20 +27,18 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &checkpointCaptureResponseStream{
-		upstream: canonical.NewSliceEventReader([]canonical.Event{
-			{
-				ExchangeID: "gate_order", Seq: 1, EnvID: "response",
-				Kind: canonical.EventFinish, Payload: canonical.FinishPayload{Completion: canonical.Completed("completed")},
-			},
-			{
-				ExchangeID: "gate_order", Seq: 2, EnvID: "response",
-				Kind:    canonical.EventEnvelopeEnd,
-				Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted},
-			},
-		}),
-		result: checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: response},
-	}
+	capture := newCheckpointCaptureResponseStream(canonical.NewSliceEventReader([]canonical.Event{
+		{
+			ExchangeID: "gate_order", Seq: 1, EnvID: "response",
+			Kind: canonical.EventFinish, Payload: canonical.FinishPayload{Completion: canonical.Completed("completed")},
+		},
+		{
+			ExchangeID: "gate_order", Seq: 2, EnvID: "response",
+			Kind:    canonical.EventEnvelopeEnd,
+			Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted},
+		},
+	}), canonical.ResponseBinding{})
+	capture.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: response}
 	store := session.NewMemoryStore()
 	committer := &checkpointCommitter{
 		exchangeID: "gate_order", workspaceSlug: "alpha", store: store,

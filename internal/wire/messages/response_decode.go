@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
@@ -64,7 +65,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("messages response is invalid JSON")
@@ -119,11 +120,11 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			if err != nil {
 				return nil, canonical.InternalError("messages tool environment is ambiguous")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), strings.TrimSpace(block.Name), canonical.ToolTypeFunction) // swobu:io-string source=boundary
+			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, strings.TrimSpace(block.Name)) // swobu:io-string source=boundary
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use references an unknown or ambiguous tool")
 			}
-			item, err := canonical.NewToolCallItem(callID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			item, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use is invalid")
 			}

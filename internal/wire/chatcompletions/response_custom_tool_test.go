@@ -18,7 +18,7 @@ func TestCustomToolResponseRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader, err := decodeResponseBuffered(context.Background(), request, encoded.Document.RawBytes(), "ex", nil)
+	reader, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), encoded.Document.RawBytes(), "ex", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

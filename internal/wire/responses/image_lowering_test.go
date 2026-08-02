@@ -18,7 +18,7 @@ import (
 func TestDecodeResponsesProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Here is the result"},{"type":"output_image","image_url":"https://example.test/output.png"}]}]}`)
 	changeLog := &recordingChanges{}
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", changeLog)
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", changeLog, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDecodeResponsesProviderAssistantImageBesideTextDropsImage(t *testing.T)
 
 func TestDecodeResponsesProviderImageOnlyFailsOutputContract(t *testing.T) {
 	raw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_image","image_url":"https://example.test/output.png"}]}]}`)
-	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", nil)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", nil, true)
 	var backendErr canonical.BackendError
 	if !errors.As(err, &backendErr) || backendErr.Message != "backend produced no usable canonical output" {
 		t.Fatalf("image-only error = %T %v, want backend output-contract failure", err, err)
@@ -146,7 +146,7 @@ func TestDecodeResponsesImages_PreservesToolResultArrayOrder(t *testing.T) {
 	}
 }
 
-func TestEncodeResponsesToolResult_MultipleTextPartsRemainAnArray(t *testing.T) {
+func TestEncodeResponsesToolResult_MultipleTextPartsUseNormalFormString(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("call_texts")
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
 		canonical.NewTextToolResultPart("one"),
@@ -166,8 +166,26 @@ func TestEncodeResponsesToolResult_MultipleTextPartsRemainAnArray(t *testing.T) 
 	if err := json.Unmarshal(doc.Raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := payload.Input[0].Output.([]any); !ok {
-		t.Fatalf("multiple text parts collapsed to %#v", payload.Input[0].Output)
+	if payload.Input[0].Output != "onetwo" {
+		t.Fatalf("multiple text parts = %#v, want official string representation", payload.Input[0].Output)
+	}
+}
+
+func TestEncodeResponsesNormalFormToolResult_MultipleTextPartsBecomeString(t *testing.T) {
+	parts := []canonical.ToolResultPart{
+		canonical.NewTextToolResultPart("one"),
+		canonical.NewTextToolResultPart("two"),
+	}
+	var changes []compat.Change
+	output, err := encodeResponsesToolResultContent(parts, &changes, "exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "onetwo" {
+		t.Fatalf("lowered output = %#v, want concatenated string", output)
+	}
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsToolResultContent || changes[0].Kind != compat.Approximation {
+		t.Fatalf("flat output changes = %#v", changes)
 	}
 }
 

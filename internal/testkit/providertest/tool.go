@@ -19,13 +19,13 @@ func ProjectedToolName(t testing.TB, declaration canonical.ToolDeclaration) stri
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
-	projected, _, _, err := provider.ProjectAttemptTools(request)
+	names, _, err := provider.BuildAttemptToolNames(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	environment, err := canonical.ToolEnvironmentAt(projected.Items(), len(projected.Items()))
+	wireName, err := names.WireName(declaration.Key())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return environment.Declarations()[0].Key().Name()
+	return wireName
 }

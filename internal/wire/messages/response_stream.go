@@ -11,11 +11,12 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for messages streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *messagesEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, names wire.ToolNames, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *messagesEventReader {
 	reader := &messagesEventReader{
 		exchangeID:     exchangeID,
 		responseID:     canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
@@ -25,6 +26,7 @@ func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.Byt
 		unknownEvents:  map[string]struct{}{},
 		latestUsage:    canonical.NewUnknownTokenUsage(),
 		request:        request.Clone(),
+		toolNames:      names,
 	}
 	reader.changeLog = &reader.changes
 	return reader
@@ -61,6 +63,7 @@ type messagesEventReader struct {
 	completedToolCalls uint32
 	seq                int64
 	request            canonical.CanonicalRequest
+	toolNames          wire.ToolNames
 }
 
 func (s *messagesEventReader) Changes() []compat.Change {
@@ -308,12 +311,12 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		if err != nil {
 			return canonical.InternalError("messages stream tool environment is ambiguous")
 		}
-		resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), payload.ContentBlock.Name, canonical.ToolTypeFunction)
+		key, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKindFunction, payload.ContentBlock.Name)
 		if err != nil {
 			return canonical.InternalError("messages stream tool_use references an unknown or ambiguous tool")
 		}
 		block.CallID = callID
-		block.Tool = resolved.Key()
+		block.Tool = key
 		block.initialInput = append(json.RawMessage(nil), payload.ContentBlock.Input...)
 		start, err := canonical.NewToolCallStart(callID, block.Tool)
 		if err != nil {

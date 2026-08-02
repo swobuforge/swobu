@@ -19,7 +19,7 @@ func TestDecodeResponseBuffered_MapsAnthropicCacheReadWriteUsage(t *testing.T) {
 		"usage":{"input_tokens":40,"output_tokens":5,"cache_read_input_tokens":28,"cache_creation_input_tokens":12}
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_usage", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_usage", nil)
 	if err != nil {
 		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}
@@ -57,8 +57,7 @@ func TestDecodeResponseStreamMergesCumulativeUsageAcrossStartAndDelta(t *testing
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":15}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 	reader := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_usage", nil,
 	)
 	closed, err := canonical.ReadClosedEnvelope(

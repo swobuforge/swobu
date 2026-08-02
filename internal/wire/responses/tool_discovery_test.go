@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -58,14 +59,22 @@ func TestToolDiscoveryLifecycleLoadsDeclarationsInOrder(t *testing.T) {
 		t.Fatalf("loaded environment cannot resolve %q", call.Tool())
 	}
 
-	document, err := EncodeCarrier(decoded.Request.Request, delivery.BufferedDelivery())
+	names, _, err := provider.BuildAttemptToolNames(decoded.Request.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{`"type":"tool_search"`, `"type":"tool_search_call"`, `"type":"tool_search_output"`, `"type":"namespace"`} {
+	wireName, _ := names.WireName(call.Tool())
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request, ToolNames: names}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`"type":"tool_search"`, `"type":"tool_search_call"`, `"type":"tool_search_output"`, `"name":"` + wireName + `"`} {
 		if !strings.Contains(string(document.RawBytes()), marker) {
 			t.Fatalf("encoded discovery lifecycle lost %s: %s", marker, document.RawBytes())
 		}
+	}
+	if strings.Contains(string(document.RawBytes()), `"type":"namespace"`) {
+		t.Fatalf("eager lowering retained discovery namespace container: %s", document.RawBytes())
 	}
 }
 
@@ -107,7 +116,7 @@ func TestProviderToolDiscoveryOutputDecodesSemantically(t *testing.T) {
 	]`), &wireItems); err != nil {
 		t.Fatal(err)
 	}
-	items, err := decodeCompletedResponsesItemSet(t.Context(), request, wireItems, "", "", nil)
+	items, err := decodeCompletedResponsesItemSet(t.Context(), request, nil, wireItems, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

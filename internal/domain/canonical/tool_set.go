@@ -14,6 +14,28 @@ func NewToolSet(declarations []ToolDeclaration) (ToolSet, error) {
 		return ToolSet{}, nil
 	}
 	ordered := cloneToolDeclarations(declarations)
+	return buildToolSet(ordered)
+}
+
+// newToolSetOwned adopts a slice that the caller has already detached from
+// canonical state without re-cloning. The single intended caller is
+// ToolEnvironmentAt, which builds its ordered slice from boundary accessors
+// (ToolSet.Declarations, ToolNamespace.Tools, MCPToolSource.Tools) that already
+// return independent clones; re-cloning there is pure waste (epic-50 task 070:
+// this path was the #1 allocator on the live daemon profile).
+//
+// Invariant the caller must hold: ordered contains declarations already
+// detached from canonical item state, never aliasing it. buildToolSet performs
+// the same validation as NewToolSet (invalid kind, duplicate key) so a stale
+// or aliased slice cannot slip through undetected.
+func newToolSetOwned(ordered []ToolDeclaration) (ToolSet, error) {
+	return buildToolSet(ordered)
+}
+
+func buildToolSet(ordered []ToolDeclaration) (ToolSet, error) {
+	if ordered == nil {
+		return ToolSet{}, nil
+	}
 	byKey := make(map[string]int, len(ordered))
 	for index, declaration := range ordered {
 		key := declaration.Key().String()
