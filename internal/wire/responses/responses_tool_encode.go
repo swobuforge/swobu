@@ -144,6 +144,17 @@ func responsesNamespaceLeafName(name string) string {
 	return name
 }
 
+func responsesClientNamespace(tool canonical.ToolKey) string {
+	return responsesClientNamespaceValue(tool.Namespace())
+}
+
+func responsesClientNamespaceValue(namespace string) string {
+	if namespace == canonical.ToolNamespaceRequest {
+		return ""
+	}
+	return responsesNamespaceLeafName(namespace)
+}
+
 func resolveResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, name string) (canonical.ToolDeclaration, error) {
 	namespace = strings.TrimSpace(namespace)
 	name = strings.TrimSpace(name)

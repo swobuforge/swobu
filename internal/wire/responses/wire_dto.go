@@ -237,6 +237,7 @@ type responsesOutputItemFunctionCallDTO struct {
 	Status    string `json:"status"`
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments"`
 }
 
@@ -321,6 +322,7 @@ type responsesToolArgumentsDoneEventDTO struct {
 	OutputIndex int    `json:"output_index"`
 	CallID      string `json:"call_id"`
 	Name        string `json:"name"`
+	Namespace   string `json:"namespace,omitempty"`
 	// OpenAI-style function_call_arguments.done events carry `arguments`.
 	// Custom tool input events use `input`; the encoder sets the matching field.
 	Arguments string `json:"arguments,omitempty"`

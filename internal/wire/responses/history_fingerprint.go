@@ -25,6 +25,7 @@ type responsesHistoryItemDTO struct {
 	Content          json.RawMessage                `json:"content,omitempty"`
 	CallID           string                         `json:"call_id,omitempty"`
 	Name             string                         `json:"name,omitempty"`
+	Namespace        string                         `json:"namespace,omitempty"`
 	Arguments        json.RawMessage                `json:"arguments,omitempty"`
 	Input            string                         `json:"input,omitempty"`
 	Output           json.RawMessage                `json:"output,omitempty"`
@@ -332,6 +333,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		tool := call.Tool()
 		history := responsesHistoryItemDTO{
 			ID: call.CallID().String(), CallID: call.CallID().String(), Name: tool.Name(),
+			Namespace: responsesClientNamespace(tool),
 		}
 		switch tool.Kind() {
 		case canonical.ToolKindFunction:

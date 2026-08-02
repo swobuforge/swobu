@@ -112,6 +112,7 @@ func (a *EnvelopeEventAdapter) translateItemStart(ev canonical.Event, emitted *[
 	if toolStart, ok := start.ToolCall(); ok {
 		streamEvent.ToolUseID = toolStart.CallID.String()
 		streamEvent.Name = toolStart.Tool.Name()
+		streamEvent.Namespace = toolStart.Tool.Namespace()
 		streamEvent.ToolType = string(toolStart.Tool.Kind())
 	}
 	*emitted = append(*emitted, streamEvent)

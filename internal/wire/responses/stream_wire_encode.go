@@ -37,6 +37,7 @@ type responsesToolItemState struct {
 	outputIndex int
 	callID      string
 	name        string
+	namespace   string
 	toolType    string
 	arguments   strings.Builder
 	webAction   json.RawMessage
@@ -185,7 +186,7 @@ func (e *ResponseStreamWireEncoder) encodeItemStarted(event sse.StreamEvent) ([]
 		}
 		return append(frames, opened...), nil
 	case canonical.ItemKindToolCall:
-		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name, event.ToolType)
+		return e.openToolItem(event.ItemID, event.ToolUseID, event.Name, event.Namespace, event.ToolType)
 	case canonical.ItemKindReasoning:
 		return nil, nil
 	default:

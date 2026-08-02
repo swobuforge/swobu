@@ -50,6 +50,21 @@ func TestAdapterProjectsResolvedToolIdentityBeforeArgs(t *testing.T) {
 	}
 }
 
+func TestAdapterPreservesNamespacedToolIdentity(t *testing.T) {
+	adapter := NewEnvelopeEventAdapter()
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse, Model: "m"}})
+	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventResponseIdentity, EnvID: "r", Payload: canonical.ResponseIdentityPayload{Response: canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID("resp_1")}}})
+	callID, _ := canonical.NewToolCallID("call_1")
+	tool, _ := canonical.NewToolKey("mcp__microsoft_docs__", canonical.ToolKindFunction, "microsoft_docs_search")
+	started, err := adapter.Translate(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonicaltest.MustToolCallStart(callID, tool)}})
+	if err != nil || len(started) != 1 {
+		t.Fatalf("tool start = %#v, err=%v", started, err)
+	}
+	if started[0].Name != "microsoft_docs_search" || started[0].Namespace != "mcp__microsoft_docs__" {
+		t.Fatalf("tool identity = (%q, %q)", started[0].Namespace, started[0].Name)
+	}
+}
+
 func TestAdapterProjectsHistoricalToolWithoutCurrentDeclaration(t *testing.T) {
 	adapter := NewEnvelopeEventAdapter()
 	_, _ = adapter.Translate(canonical.Event{Kind: canonical.EventEnvelopeStart, EnvID: "r", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}})
