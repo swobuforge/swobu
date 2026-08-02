@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestAttemptRequestPreservesDeferredFunctionWithLocalMCPSource(t *testing.T) {
+func TestAttemptRequestPreservesDeferredFunctionAndInlineImageBesideLocalMCPExpansion(t *testing.T) {
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	schema := canonical.NewToolSchemaObject(schemaObject)
 
@@ -35,7 +35,22 @@ func TestAttemptRequestPreservesDeferredFunctionWithLocalMCPSource(t *testing.T)
 	if err != nil {
 		t.Fatalf("item construction = %v", err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
+	image, err := canonical.NewInlineImage(
+		canonical.ImageMediaPNG,
+		[]byte("\x89PNG\r\n\x1a\n"),
+		canonical.Unspecified[canonical.ImageDetail](),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := canonical.NewMessageItem(
+		canonical.MessageRoleUser,
+		[]canonical.MessagePart{canonical.NewImageMessagePart(image)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item, message}})
 
 	// A fully opened runtime: the source is local and expands to its two tools.
 	run := &Run{
@@ -62,5 +77,19 @@ func TestAttemptRequestPreservesDeferredFunctionWithLocalMCPSource(t *testing.T)
 	}
 	if !occ.Responses().Deferred(deferredKey) {
 		t.Fatalf("deferred refinement for %q was lost even though the rewrite succeeded", deferredKey.String())
+	}
+	declarations := occ.Tools().Declarations()
+	if len(declarations) != 3 || declarations[0].Key() != remoteA || declarations[1].Key() != remoteB || declarations[2].Key() != deferredKey {
+		t.Fatalf("attempt declarations = %#v", declarations)
+	}
+	if len(attempt.Items()) != 2 {
+		t.Fatal("inline image item was lost beside MCP expansion")
+	}
+	messageItem, ok := attempt.Items()[1].Message()
+	if !ok || len(messageItem.Content()) != 1 {
+		t.Fatal("inline image message was lost beside MCP expansion")
+	}
+	if _, ok := messageItem.Content()[0].Image(); !ok {
+		t.Fatal("inline image part was lost beside MCP expansion")
 	}
 }

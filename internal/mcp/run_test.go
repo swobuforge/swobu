@@ -500,6 +500,96 @@ func TestRunDerivesOrdinaryAttemptFunctionsFromFrozenCatalog(t *testing.T) {
 	}
 }
 
+func TestSuccessfulEmptyMCPCatalogLeavesNoAttemptToolAndHonorsPolicy(t *testing.T) {
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
+	for _, test := range []struct {
+		name    string
+		policy  canonical.ToolPolicy
+		wantErr bool
+	}{
+		{name: "auto continues", policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil)},
+		{name: "none continues", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)},
+		{name: "required fails", policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wantErr: true},
+		{name: "specific fails", policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, &sourceKey), wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := runtimeTestRequestWithAllowedTools(t, canonical.Unspecified[[]string]())
+			request = canonical.NewCanonicalRequest(canonical.RequestParams{
+				Items: request.Items(), ToolPolicy: canonical.Specify(test.policy),
+			})
+			prepared, run, _, err := openWith(
+				context.Background(), request, Access{},
+				func(_ context.Context, source canonical.MCPToolSource, _ SourceAccess) (sourceResolution, error) {
+					empty, emptyErr := canonical.NewMCPToolSource(
+						source.Key(), source.Description(), source.Source(), nil,
+					)
+					if emptyErr != nil {
+						return sourceResolution{}, emptyErr
+					}
+					catalog, _ := empty.MCP()
+					return sourceResolution{session: &session{}, catalog: catalog}, nil
+				},
+			)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("empty MCP catalog satisfied a mandatory tool policy")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer run.Close()
+			attempt, err := run.AttemptRequest(prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			environment, err := canonical.EffectiveTools(attempt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(environment.Declarations()) != 0 || run.CanExecute() {
+				t.Fatalf("empty catalog attempt = %#v, executable=%t", environment.Declarations(), run.CanExecute())
+			}
+		})
+	}
+}
+
+func TestLocalMCPExpansionDoesNotReinterpretSpecificSourceAsChild(t *testing.T) {
+	request, childKey, _ := runtimeTestRequest(t)
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
+	request = canonical.NewCanonicalRequest(canonical.RequestParams{
+		Items: request.Items(),
+		ToolPolicy: canonical.Specify(
+			canonical.NewToolPolicy(canonical.ToolPolicySpecific, &sourceKey),
+		),
+	})
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, _ := environment.Lookup(sourceKey)
+	source, _ := declaration.MCP()
+	_, run, _, err := openWith(
+		context.Background(), request, Access{},
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
+			return sourceResolution{
+				session: &session{},
+				catalog: runtimeTestCatalog(t, sourceKey, childKey, "", ""),
+			}, nil
+		},
+	)
+	if run != nil {
+		defer run.Close()
+	}
+	if err == nil {
+		t.Fatal("specific MCP source was reinterpreted as its expanded child")
+	}
+	if source.Key() != sourceKey {
+		t.Fatalf("resolved source = %q, want %q", source.Key(), sourceKey)
+	}
+}
+
 func TestRunDropsUnavailableMCPSourceOnlyFromAttempt(t *testing.T) {
 	request, _, localKey := runtimeTestRequest(t)
 	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")

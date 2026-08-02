@@ -43,11 +43,13 @@ func HasDeferredResponsesTools(items []canonical.CanonicalItem) bool {
 
 // PrepareFlatToolSet removes namespace containers while retaining
 // their callable descendants in declaration order. The target supplies the
-// identity used by every later declaration, choice, call, and result reference;
-// collisions reject the candidate instead of inventing inverse alias state.
+// exact wire identity used by every later declaration, choice, call, and result
+// reference. This check runs after attempt-local name allocation so equal leaf
+// names in different namespaces remain distinct; true wire collisions still
+// reject the candidate instead of inventing inverse alias state.
 func PrepareFlatToolSet(
 	declarations []canonical.ToolDeclaration,
-	targetName func(canonical.ToolDeclaration) string,
+	targetIdentity func(canonical.ToolDeclaration) (string, error),
 ) (FlatToolSet, error) {
 	var flattened []canonical.ToolDeclaration
 	flattenedNamespaces := 0
@@ -81,7 +83,11 @@ func PrepareFlatToolSet(
 	}
 	seen := make(map[string]struct{}, len(flattened))
 	for _, declaration := range flattened {
-		wireIdentity := strings.TrimSpace(targetName(declaration))
+		wireIdentity, err := targetIdentity(declaration)
+		if err != nil {
+			return FlatToolSet{}, err
+		}
+		wireIdentity = strings.TrimSpace(wireIdentity)
 		if _, duplicate := seen[wireIdentity]; duplicate {
 			return FlatToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsName, canonical.Occurrence{}, "flat provider tool declarations require unique target identities")
 		}

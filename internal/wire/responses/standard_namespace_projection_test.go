@@ -11,13 +11,23 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestOfficialResponsesLoweringFlattensFunctionNamespace(t *testing.T) {
+func TestFlatResponsesFlattensNamespaceInsteadOfDroppingCallableChildren(t *testing.T) {
 	request := responsesFunctionNamespaceRequest(t)
+	topLevelTools := canonicaltest.Tools(request)
+	topLevelFunctions := 0
+	for _, declaration := range topLevelTools {
+		if declaration.Kind() == canonical.ToolKindFunction {
+			topLevelFunctions++
+		}
+	}
+	if topLevelFunctions != 0 {
+		t.Fatalf("top-level function count = %d, want 0 before namespace flattening", topLevelFunctions)
+	}
 	names, _, err := provider.BuildAttemptToolNames(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := canonicaltest.Tools(request)[0]
+	child := topLevelTools[0]
 	namespace, _ := child.Namespace()
 	wireName, _ := names.WireName(namespace.Tools()[0].Key())
 	document, err := LowerProviderRequestDocument(
@@ -32,6 +42,39 @@ func TestOfficialResponsesLoweringFlattensFunctionNamespace(t *testing.T) {
 	}
 	if len(document.Tools) != 1 || document.Tools[0].Type != "function" || document.Tools[0].Name != wireName {
 		t.Fatalf("Responses tools = %#v, want flat %s function", document.Tools, wireName)
+	}
+}
+
+func TestOfficialResponsesLoweringKeepsDuplicateNamespaceLeavesDistinct(t *testing.T) {
+	request := responsesDuplicateLeafNamespacesRequest(t)
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := LowerProviderRequestDocument(
+		EncodeInput{Request: request, ToolNames: names},
+		delivery.BufferedDelivery(),
+		nil,
+		"exchange",
+		EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tools) != 2 {
+		t.Fatalf("Responses tools = %#v, want two functions", document.Tools)
+	}
+	if document.Tools[0].Name == document.Tools[1].Name {
+		t.Fatalf("duplicate namespace leaves share wire name %q", document.Tools[0].Name)
+	}
+	wireItems := []json.RawMessage{json.RawMessage(`{"type":"function_call","call_id":"call_alpha","name":"` + document.Tools[0].Name + `","arguments":"{}"}`)}
+	items, err := decodeCompletedResponsesItemSet(t.Context(), request, names, wireItems, "", "exchange", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := items[0].ToolCall()
+	if !ok || call.Tool().Namespace() != "alpha" || call.Tool().Name() != "read_marker" {
+		t.Fatalf("decoded call = %#v, want alpha/read_marker", items[0])
 	}
 }
 
@@ -119,6 +162,43 @@ func responsesFunctionNamespaceRequest(t *testing.T) canonical.CanonicalRequest 
 		Items: []canonical.CanonicalItem{
 			canonicaltest.ToolDeclarations(t, namespace),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "Read the file"),
+		},
+	})
+}
+
+func responsesDuplicateLeafNamespacesRequest(t *testing.T) canonical.CanonicalRequest {
+	t.Helper()
+	schema, err := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := make([]canonical.ToolDeclaration, 0, 2)
+	for _, namespaceName := range []string{"alpha", "beta"} {
+		childKey, err := canonical.NewToolKey(namespaceName, canonical.ToolKindFunction, "read_marker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := canonicaltest.MustFunctionTool(
+			childKey,
+			"Read the namespace marker",
+			canonical.NewToolSchemaObject(schema),
+			canonical.Unspecified[bool](),
+		)
+		namespace, err := canonical.NewToolNamespace(
+			canonicaltest.MustRequestToolKey(canonical.ToolKindNamespace, namespaceName),
+			namespaceName+" tools",
+			[]canonical.ToolDeclaration{child},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declarations = append(declarations, namespace)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, declarations...),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "Read alpha marker"),
 		},
 	})
 }

@@ -40,8 +40,8 @@ func encodeResponsesTools(tools []canonical.ToolDeclaration, names wire.ToolName
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
-		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
+		return responsesFlatToolIdentity(tool, names)
 	})
 	if err != nil {
 		return nil, err
@@ -66,6 +66,18 @@ func encodeResponsesTools(tools []canonical.ToolDeclaration, names wire.ToolName
 		out = append(out, wireTool)
 	}
 	return out, nil
+}
+
+func responsesFlatToolIdentity(tool canonical.ToolDeclaration, names wire.ToolNames) (string, error) {
+	switch tool.Kind() {
+	case canonical.ToolKindFunction, canonical.ToolKindCustom:
+		name, err := responsesToolWireName(tool, names)
+		return string(tool.Kind()) + "\x00" + strings.TrimSpace(name), err
+	case canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
+		return string(tool.Kind()), nil
+	default:
+		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
+	}
 }
 
 func encodeResponsesTool(tool canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access) (ProviderRequestTool, error) {

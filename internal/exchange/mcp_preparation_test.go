@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,7 +10,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
@@ -117,5 +121,85 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	}
 	if _, ok := environment.Lookup(key); !ok {
 		t.Fatal("current full discovery result is absent from provider decode context")
+	}
+}
+
+func TestProviderPreparationRebuildsSameToolNamesForFullHistoryNativeDeltaAndImageResume(t *testing.T) {
+	currentKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "search")
+	historicalKey, _ := canonical.NewToolKey("history/legacy", canonical.ToolKindCustom, "apply")
+	current := canonicaltest.MustFunctionTool(
+		currentKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
+	)
+	declarations := canonicaltest.ToolDeclarations(t, current)
+	callID, _ := canonical.NewToolCallID("call_historical")
+	historicalCall, _ := canonical.NewToolCallItem(callID, historicalKey, canonical.NewTextToolInput("old"))
+	imageRequest, imageBytes := testURLImageRequest(t, "https://example.test/current.png")
+	imageItem := imageRequest.Items()[0]
+	full := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{declarations, historicalCall, imageItem},
+	})
+
+	target := requestpathTarget(t, "stable-tool-names")
+	path, err := resolveProviderPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{imageItem},
+		PreviousResponse: &canonical.ResponseRef{
+			SwobuID: "resp_previous",
+			Responses: &canonical.ResponsesContinuation{
+				ProviderResponseID: canonical.NewResponsesResponseID("provider_previous"),
+				TargetID:           path.target.TargetID, TargetVersion: path.target.TargetVersion,
+			},
+		},
+	})
+	prepared := session.ResolvedRequest{Full: full, Delta: delta}
+	state := reducerTestState(t)
+	state.input.request = delta
+	state.prepared = &prepared
+	state.route = routePlan{targets: []routing.Target{target}}
+	runner := withRuntime(bufferedProviderTransport(nil))
+	runner.ImageFetcher = &fixedImageFetcher{fetched: provider.FetchedImageResult{
+		DeclaredMediaType: canonical.ImageMediaPNG, Bytes: imageBytes,
+	}}
+
+	aliases := make(map[providerRequestChoice]map[canonical.ToolKey]string)
+	for _, choice := range []providerRequestChoice{providerRequestFullHistory, providerRequestPreferred} {
+		selection := providerCallSelection{candidateIndex: 0, requestChoice: choice}
+		_, _, _, deferred, err := prepareProviderCall(state, selection, runner, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		materialize, ok := deferred.(materializeAttemptImagesCommand)
+		if !ok {
+			t.Fatalf("choice %d preparation = %T, want image materialization", choice, deferred)
+		}
+		event, ok := executeCommand(context.Background(), materialize).(attemptImagesMaterialized)
+		if !ok || event.err != nil {
+			t.Fatalf("choice %d materialization = %#v", choice, event)
+		}
+		call, _, _, next, err := prepareProviderCall(state, selection, runner, &event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next != nil {
+			t.Fatalf("choice %d preparation deferred twice: %T", choice, next)
+		}
+		aliases[choice] = make(map[canonical.ToolKey]string)
+		for _, key := range []canonical.ToolKey{currentKey, historicalKey} {
+			name, err := call.request.ToolNames.WireName(key)
+			if err != nil {
+				t.Fatalf("choice %d key %q: %v", choice, key, err)
+			}
+			aliases[choice][key] = name
+		}
+	}
+	for _, key := range []canonical.ToolKey{currentKey, historicalKey} {
+		if aliases[providerRequestFullHistory][key] != aliases[providerRequestPreferred][key] {
+			t.Fatalf("tool %q changed between full history and native delta: %#v", key, aliases)
+		}
 	}
 }
