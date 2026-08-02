@@ -205,6 +205,16 @@ For security vulnerabilities, do not report in public issues. Read [`SECURITY.md
 
 ---
 
+## Development history
+
+Swobu was reimplemented from the ground up during OpenAI Build Week using Codex with GPT-5.6. An earlier prototype established the idea, but none of its implementation remains.
+
+During the hackathon, the daemon and Cockpit were rebuilt around a clean architecture, tiered routing and capability-aware fallback were added, and testing, linting, and visual verification were strengthened.
+
+Codex and GPT-5.6 completed much of the code implementation while product semantics and architectural rails were defined in RFCs.
+
+---
+
 ## License
 
 Swobu uses the AGPL-3.0-only license. Read [`LICENSE`](./LICENSE).
