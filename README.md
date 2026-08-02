@@ -24,14 +24,6 @@ Swobu is beta. Behavior can change between releases.
 
 ---
 
-## Cockpit tour
-
-![Swobu Cockpit demo](./assets/readme/swobu-cli-demo.gif)
-
-*Swobu Cockpit in a terminal.*
-
----
-
 ## Install
 
 Install the release:
@@ -116,9 +108,8 @@ If a client needs an API key field, use a non-secret placeholder such as `swobu`
 
 These are the interfaces Swobu currently exposes. An interface being available
 does not imply that every protocol-specific semantic can be translated across
-every client/backend pair. Cross-family support claims come from the executed
-[conformance suites](../test/integration/conformance/README.md); unsupported
-whole-output contracts and unresolved provider effects fail explicitly.
+every client/backend pair. Unsupported whole-output contracts and unresolved
+provider effects fail explicitly.
 
 ### Tested clients
 
@@ -169,7 +160,7 @@ Swobu does not make providers or deployments the same. Model behavior, protocol 
 
 ## Security and privacy
 
-Swobu is local-first: it binds to loopback by default (`127.0.0.1:7926`), keeps control traffic on your machine, and sends only anonymous aggregate telemetry (counts — no prompts, completions, auth, or identifiers). Turn it off with `swobu telemetry off` or `DO_NOT_TRACK`. Local-first is not offline-only; if you route to a hosted backend, the request still goes to that backend.
+Swobu is local-first: it binds to loopback by default (`127.0.0.1:7926`) and keeps control traffic on your machine. It sends minimal operational telemetry — aggregate counts tied to a random installation id (not your account or machine) and the client product token, such as `claude-code/1.0.0`. It never sends prompts, completions, credentials, model output, or request bodies. Turn it off with `swobu telemetry off` or `DO_NOT_TRACK`. Local-first is not offline-only; if you route to a hosted backend, the request still goes to that backend.
 
 ---
 
