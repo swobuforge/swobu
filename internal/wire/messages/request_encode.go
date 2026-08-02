@@ -101,8 +101,9 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 			return ProviderRequestDocument{}, err
 		}
 	}
-	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
-		return strings.TrimSpace(tool.Key().Name())
+	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
+		name, err := wire.EncodeToolName(names, tool.Key())
+		return strings.TrimSpace(name), err
 	})
 	if err != nil {
 		return ProviderRequestDocument{}, err

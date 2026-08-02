@@ -23,8 +23,12 @@ func TestMessagesRejectsSpecificChoiceAmbiguousAcrossFunctionAndBuiltin(t *testi
 		},
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key)),
 	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, err := LowerProviderRequestDocument(request, nil, delivery.BufferedDelivery(), nil, "")
+	_, err = LowerProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "")
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)

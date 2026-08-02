@@ -383,7 +383,7 @@ func (t testProviderTransport) Send(ctx context.Context, target provider.TargetS
 type testBackendCodec struct{ protocol protocolkind.ProtocolKind }
 
 func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	input := wire.ProviderEncodeInput{Request: req.Canonical}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, ToolNames: req.ToolNames}
 	var result wire.ProviderEncodeResult
 	var err error
 	switch c.protocol {

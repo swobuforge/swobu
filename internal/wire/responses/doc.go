@@ -29,5 +29,7 @@
 // their rich array.
 // Client response projection preserves a resolved function call's namespace in
 // buffered and streaming output. Flat provider aliases are attempt-local only;
-// they must reverse to the exact client-executable namespace and leaf identity.
+// their allocated wire identities, rather than canonical leaf names, define
+// flat declaration uniqueness and must reverse to the exact client-executable
+// namespace and leaf identity.
 package responses

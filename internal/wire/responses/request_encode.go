@@ -126,8 +126,8 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) string {
-		return string(tool.Kind()) + "\x00" + strings.TrimSpace(tool.Key().Name())
+	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
+		return responsesFlatToolIdentity(tool, input.ToolNames)
 	})
 	if err != nil {
 		return ProviderRequestDocument{}, err

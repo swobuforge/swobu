@@ -26,6 +26,13 @@ type wireToolRef struct {
 // context. Ordinary namespace children and historical calls participate;
 // residual native MCP catalogs and fixed built-ins do not.
 func BuildAttemptToolNames(semantic canonical.CanonicalRequest) (AttemptToolNames, []compat.Change, error) {
+	return buildAttemptToolNames(semantic, toolname.Generated)
+}
+
+func buildAttemptToolNames(
+	semantic canonical.CanonicalRequest,
+	generated func(string, []string, string) string,
+) (AttemptToolNames, []compat.Change, error) {
 	names := AttemptToolNames{
 		byCanonical: make(map[canonical.ToolKey]string),
 		byWire:      make(map[wireToolRef]canonical.ToolKey),
@@ -44,16 +51,12 @@ func BuildAttemptToolNames(semantic canonical.CanonicalRequest) (AttemptToolName
 			keys = appendUniqueToolKey(keys, call.Tool())
 		}
 	}
-	if key, ok := semantic.ToolPolicy().SpecificID(); ok && attemptCallable(key) {
-		keys = appendUniqueToolKey(keys, key)
-	}
-
 	changes := make([]compat.Change, 0)
 	for _, key := range keys {
 		wireName := key.Name()
 		if key.Namespace() != canonical.ToolNamespaceRequest || !toolname.PreservableLiteral(wireName) {
 			scope := readableScope(key.Namespace())
-			wireName = toolname.Generated(key.String(), scope, key.Name())
+			wireName = generated(key.String(), scope, key.Name())
 		}
 		ref := wireToolRef{kind: key.Kind(), name: wireName}
 		if prior, exists := names.byWire[ref]; exists && prior != key {

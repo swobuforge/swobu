@@ -27,8 +27,8 @@ func TestPrepareFlatToolSetPreservesNestedOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{parent}, func(tool canonical.ToolDeclaration) string {
-		return string(tool.Kind()) + "\x00" + tool.Key().Name()
+	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{parent}, func(tool canonical.ToolDeclaration) (string, error) {
+		return string(tool.Kind()) + "\x00" + tool.Key().Name(), nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +51,8 @@ func TestPrepareFlatToolSetRejectsTargetIdentityCollision(t *testing.T) {
 		"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
 	)
 
-	if _, err := PrepareFlatToolSet([]canonical.ToolDeclaration{first, second}, func(canonical.ToolDeclaration) string {
-		return "lookup"
+	if _, err := PrepareFlatToolSet([]canonical.ToolDeclaration{first, second}, func(canonical.ToolDeclaration) (string, error) {
+		return "lookup", nil
 	}); err == nil {
 		t.Fatal("flat tool set accepted colliding target identities")
 	}
@@ -67,8 +67,8 @@ func TestPrepareFlatToolSetOmitsResidualMCPAndRetainsSibling(t *testing.T) {
 	source, _ := canonical.NewMCPConnectorSource("connector_mail", canonical.Unspecified[[]string](), canonical.NewMCPApprovalNever(), canonical.MCPLoadingEager, canonical.Unspecified[[]string]())
 	mcpDeclaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
 
-	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) string {
-		return tool.Key().Name()
+	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) (string, error) {
+		return tool.Key().Name(), nil
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -42,6 +42,78 @@ func TestAttemptToolNamesAreOrderIndependentAndReversible(t *testing.T) {
 	}
 }
 
+func TestAttemptToolNamesAreSetIndependent(t *testing.T) {
+	stable, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "search")
+	unrelated, _ := canonical.NewToolKey("mcp/github", canonical.ToolKindFunction, "lookup")
+	one, _, err := BuildAttemptToolNames(toolNamesTestRequest(t, stable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, _, err := BuildAttemptToolNames(toolNamesTestRequest(t, unrelated, stable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := one.WireName(stable)
+	second, _ := two.WireName(stable)
+	if first != second {
+		t.Fatalf("wire name changed after unrelated declaration: %q != %q", first, second)
+	}
+}
+
+func TestAttemptToolNamesKeepSameNameAcrossCallableKindsDistinct(t *testing.T) {
+	function, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "apply")
+	custom, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindCustom, "apply")
+	names, _, err := BuildAttemptToolNames(toolNamesTestRequest(t, function, custom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	functionName, _ := names.WireName(function)
+	customName, _ := names.WireName(custom)
+	for _, test := range []struct {
+		kind canonical.ToolKind
+		name string
+		want canonical.ToolKey
+	}{
+		{kind: canonical.ToolKindFunction, name: functionName, want: function},
+		{kind: canonical.ToolKindCustom, name: customName, want: custom},
+	} {
+		got, ok := names.CanonicalKey(test.kind, test.name)
+		if !ok || got != test.want {
+			t.Fatalf("reverse lookup (%s, %q) = %q, %t", test.kind, test.name, got, ok)
+		}
+	}
+}
+
+func TestAttemptToolNamesRejectInjectedGeneratedCollisionWithoutOrdinalFallback(t *testing.T) {
+	left, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "search")
+	right, _ := canonical.NewToolKey("mcp/github", canonical.ToolKindFunction, "search")
+	_, _, err := buildAttemptToolNames(
+		toolNamesTestRequest(t, left, right),
+		func(string, []string, string) string { return "s__forced__collision" },
+	)
+	if err == nil {
+		t.Fatal("attempt names accepted an injected generated-name collision")
+	}
+}
+
+func TestAttemptToolNamesRebuildIdenticallyAfterRestart(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp/документы", canonical.ToolKindFunction, strings.Repeat("поиск ", 20))
+	request := toolNamesTestRequest(t, key)
+	before, _, err := BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _, err := BuildAttemptToolNames(request.Clone())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := before.WireName(key)
+	second, _ := after.WireName(key)
+	if first != second || len(first) > toolname.MaxLength || !toolname.Safe(first) {
+		t.Fatalf("restart names = %q and %q", first, second)
+	}
+}
+
 func TestAttemptToolNamesPreserveOnlySafeUnreservedRequestLiterals(t *testing.T) {
 	plain, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
 	reserved, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "s__literal")
@@ -76,8 +148,44 @@ func TestAttemptToolNamesIncludeHistoricalCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := names.WireName(historical); err != nil {
+	wireName, err := names.WireName(historical)
+	if err != nil {
 		t.Fatalf("historical call missing: %v", err)
+	}
+	rebuilt, _, err := BuildAttemptToolNames(request.Clone())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuiltName, _ := rebuilt.WireName(historical)
+	if rebuiltName != wireName {
+		t.Fatalf("historical wire name changed after rebuild: %q != %q", wireName, rebuiltName)
+	}
+}
+
+func TestAttemptToolNamesDoNotFlattenSpecificChildUnderResidualMCP(t *testing.T) {
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
+	childKey, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "search")
+	child := canonicaltest.MustFunctionTool(childKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	source, _ := canonical.NewMCPConnectorSource(
+		"connector_docs", canonical.Unspecified[[]string](), canonical.NewMCPApprovalNever(),
+		canonical.MCPLoadingDeferred, canonical.Unspecified[[]string](),
+	)
+	declaration, _ := canonical.NewMCPToolSource(sourceKey, "", source, []canonical.ToolDeclaration{child})
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
+	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Items: []canonical.CanonicalItem{item},
+		ToolPolicy: canonical.Specify(
+			canonical.NewToolPolicy(canonical.ToolPolicySpecific, &childKey),
+		),
+	})
+
+	names, _, err := BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := names.WireName(childKey); err == nil {
+		t.Fatal("residual native MCP child received a flat callable alias")
 	}
 }
 
@@ -100,7 +208,14 @@ func toolNamesTestRequest(t *testing.T, keys ...canonical.ToolKey) canonical.Can
 	t.Helper()
 	declarations := make([]canonical.ToolDeclaration, len(keys))
 	for index, key := range keys {
-		declarations[index] = canonicaltest.MustFunctionTool(key, "", canonical.NewToolSchemaObject(canonicaltest.Object(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
+		switch key.Kind() {
+		case canonical.ToolKindFunction:
+			declarations[index] = canonicaltest.MustFunctionTool(key, "", canonical.NewToolSchemaObject(canonicaltest.Object(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
+		case canonical.ToolKindCustom:
+			declarations[index] = canonicaltest.MustCustomTool(key, "", canonical.EmptyToolFormat())
+		default:
+			t.Fatalf("unsupported test tool kind %q", key.Kind())
+		}
 	}
 	set, err := canonical.NewToolSet(declarations)
 	if err != nil {
