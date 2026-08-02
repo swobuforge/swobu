@@ -33,6 +33,13 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 			return provider.Backend{}, fmt.Errorf("OpenAI chat completions backend has codec %T, want protocolcodec.Codec", backend.Codec)
 		}
 		backend.Codec = chatCompletionsCodec{Codec: standard}
+	} else if target.ProtocolKind == protocolkind.Responses {
+		standard, ok := backend.Codec.(protocolcodec.Codec)
+		if !ok {
+			return provider.Backend{}, fmt.Errorf("OpenAI responses backend has codec %T, want protocolcodec.Codec", backend.Codec)
+		}
+		standard.CaptureResponsesContinuation = true
+		backend.Codec = standard
 	}
 	return backend, backend.Validate()
 }
@@ -48,6 +55,7 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 	document, err := func(sink *[]compat.Change) (chatcompletions.ProviderRequestDocument, error) {
 		document, err := chatcompletions.LowerProviderRequestDocument(
 			req.Canonical,
+			req.ToolNames,
 			req.Delivery,
 			sink,
 			req.ExchangeID,

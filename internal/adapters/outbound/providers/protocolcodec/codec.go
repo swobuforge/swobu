@@ -21,6 +21,10 @@ import (
 // Codec lowers canonical semantics through one standard protocol family.
 type Codec struct {
 	Protocol protocolkind.ProtocolKind
+	// CaptureResponsesContinuation is positive exact-provider authority to turn
+	// a provider response ID into reusable previous_response_id continuation.
+	// The zero value keeps generic Responses stateless and self-contained.
+	CaptureResponsesContinuation bool
 }
 
 // Encode implements provider.Codec.
@@ -33,7 +37,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical, MCPAccess: req.MCPAccess}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, ToolNames: req.ToolNames, MCPAccess: req.MCPAccess}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
@@ -54,7 +58,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 }
 
 // LowerChatCompletionsRequest owns the single standard typed lowering sequence
-// used by both the protocol codec and exact-provider dialect decorators.
+// used by both the protocol codec and exact-provider decorators.
 func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.ProviderRequestDocument, []compat.Change, error) {
 	if err := ValidateEncodeRequest(req); err != nil {
 		return chatcompletions.ProviderRequestDocument{}, nil, err
@@ -63,6 +67,7 @@ func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.Provider
 	document, err := func(sink *[]compat.Change) (chatcompletions.ProviderRequestDocument, error) {
 		document, err := chatcompletions.LowerProviderRequestDocument(
 			req.Canonical,
+			req.ToolNames,
 			req.Delivery,
 			sink,
 			req.ExchangeID,
@@ -113,11 +118,12 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, doc, exchangeID)
+		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
 	case protocolkind.Responses:
-		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
+		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.Responses().PersistenceEligible()
+		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocumentWithCapture(ctx, request.Canonical, request.ToolNames, doc, exchangeID, continuationEligible)
 	case protocolkind.Messages:
-		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, doc, exchangeID)
+		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
 	default:
 		return wire.ProviderDecodeResult{}, canonical.InternalError("selected provider protocol has no document codec")
 	}
@@ -127,11 +133,12 @@ func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request)
 	exchangeID := request.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
-		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, stream, exchangeID)
+		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, request.ToolNames, stream, exchangeID)
 	case protocolkind.Responses:
-		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
+		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.Responses().PersistenceEligible()
+		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithCapture(request.Canonical, request.ToolNames, stream, exchangeID, continuationEligible)
 	case protocolkind.Messages:
-		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, stream, exchangeID)
+		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, stream, exchangeID)
 	default:
 		return wire.ProviderDecodeResult{}, canonical.InternalError("selected provider protocol has no stream codec")
 	}

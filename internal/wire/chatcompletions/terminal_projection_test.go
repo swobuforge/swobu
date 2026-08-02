@@ -72,7 +72,7 @@ func TestChatResponseTextPreservesProviderStopTerminal(t *testing.T) {
 
 func TestChatResponseEmptyToolCallsRemainTextStop(t *testing.T) {
 	raw := []byte(`{"id":"chatcmpl_1","model":"m","choices":[{"message":{"role":"assistant","content":"done","tool_calls":[]},"finish_reason":"stop"}]}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_empty_tools", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_empty_tools", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

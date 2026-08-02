@@ -25,7 +25,7 @@ func TestDecodeProviderDocument_InvalidWireCarrierFailsImmediately(t *testing.T)
 	codec := ProviderDocumentDecoder{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := codec.DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, tt.doc, "ex_guard")
+			_, err := codec.DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, tt.doc, "ex_guard")
 			if err == nil {
 				t.Fatal("expected decode document guard error, got nil")
 			}

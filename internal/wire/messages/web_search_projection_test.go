@@ -215,7 +215,7 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 
 	completed := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable, resultItem, message}})
 	var changes []compat.Change
-	_, err := EncodeCarrierWithChanges(completed, delivery.BufferedDelivery(), &changes, "exchange")
+	_, err := EncodeCarrierWithChanges(completed, nil, delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 	}
 
 	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
-	_, err = EncodeCarrierWithChanges(unresolved, delivery.BufferedDelivery(), nil, "")
+	_, err = EncodeCarrierWithChanges(unresolved, nil, delivery.BufferedDelivery(), nil, "")
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
@@ -251,7 +251,7 @@ func TestMessagesSingleQuerySearchPreservesOriginalCallID(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("search_original")
 	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"one"}}))
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{call}})
-	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), nil, "")
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestMessagesWebSearchBufferedAndStreamedSemanticsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	bufferedReader, err := decodeResponseBuffered(
-		context.Background(), canonical.CanonicalRequest{}, buffered.Document.RawBytes(), "buffered", nil,
+		context.Background(), canonical.CanonicalRequest{}, nil, buffered.Document.RawBytes(), "buffered", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -320,8 +320,7 @@ func TestMessagesWebSearchBufferedAndStreamedSemanticsAgree(t *testing.T) {
 		}
 	}
 	streamReader := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(bytes.NewReader(raw))},
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(bytes.NewReader(raw))},
 		"streamed", nil,
 	)
 	assertMessagesWebSearchSemantics(t, streamReader, callID)

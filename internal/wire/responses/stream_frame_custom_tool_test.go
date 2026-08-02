@@ -12,12 +12,14 @@ import (
 func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	t.Parallel()
 
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`))))}})
 	s := &responsesResponseStream{
 		exchangeID:      "ex",
 		responseEnvID:   "ex:response:0",
 		providerOutputs: map[int]*pendingResponseOutput{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
-		request:         canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustCustomTool(canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "apply_patch"), "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar"}`))))}}),
+		request:         request,
+		toolNames:       testAttemptToolNames(request),
 	}
 	outputIndex := 0
 

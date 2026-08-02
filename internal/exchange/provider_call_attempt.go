@@ -31,7 +31,7 @@ const (
 	providerReplayUnsafe
 )
 
-// providerReplaySafetyFor classifies the final projected canonical attempt.
+// providerReplaySafetyFor classifies the final semantic provider attempt.
 // Ordinary inference and caller-executed tools are safe to repeat. A remaining
 // native MCP source can execute outside Swobu, so uncertain delivery fails
 // closed without a parallel effect registry.
@@ -46,13 +46,12 @@ func providerReplaySafetyFor(request canonical.CanonicalRequest) (providerReplay
 		case canonical.ToolKindFunction, canonical.ToolKindCustom,
 			canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
 			return providerReplaySafe, nil
+		case canonical.ToolKindMCP:
+			return providerReplayUnsafe, nil
 		case canonical.ToolKindNamespace:
 			namespace, ok := declaration.Namespace()
 			if !ok {
 				return 0, fmt.Errorf("canonical tool namespace branch is invalid")
-			}
-			if _, native := namespace.MCPSource(); native {
-				return providerReplayUnsafe, nil
 			}
 			for _, child := range namespace.Tools() {
 				safety, err := inspect(child)

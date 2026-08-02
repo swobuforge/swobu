@@ -14,7 +14,7 @@ import (
 func TestDecodeChatProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"Here is the result"},{"type":"image_url","image_url":{"url":"https://example.test/output.png"}}]},"finish_reason":"stop"}]}`)
 	var changes []compat.Change
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", &changes)
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", &changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestDecodeChatProviderAssistantImageBesideTextDropsImage(t *testing.T) {
 
 func TestDecodeChatProviderImageOnlyFailsOutputContract(t *testing.T) {
 	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":[{"type":"image_url","image_url":{"url":"https://example.test/output.png"}}]},"finish_reason":"stop"}]}`)
-	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_image", nil)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_image", nil)
 	var backendErr canonical.BackendError
 	if !errors.As(err, &backendErr) || backendErr.Message != "backend produced no usable canonical output" {
 		t.Fatalf("image-only error = %T %v, want backend output-contract failure", err, err)
@@ -62,7 +62,7 @@ func TestEncodeChatImageOriginalMapsHighWithDecision(t *testing.T) {
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
 
 	var changes []compat.Change
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), &changes, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestEncodeChatToolResultImageRejectsWithoutClosedCallBatch(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("must not escape"), canonical.NewImageToolResultPart(image)}, false)
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
 	var changes []compat.Change
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), &changes, "ex")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), &changes, "ex")
 	if err == nil {
 		t.Fatal("Chat Completions accepted a tool-result image")
 	}
@@ -96,7 +96,7 @@ func TestEncodeChatUserImages_PreservesURLAndInlineSources(t *testing.T) {
 		canonical.NewImageMessagePart(urlImage), canonical.NewImageMessagePart(inlineImage),
 	})
 	req := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message}})
-	doc, err := EncodeCarrierWithChanges(req, delivery.BufferedDelivery(), nil, "")
+	doc, err := EncodeCarrierWithChanges(req, testAttemptToolNames(req), delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

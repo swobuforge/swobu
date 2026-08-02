@@ -13,7 +13,7 @@ import (
 
 func TestResponsesDocumentAllUnknownMessagePartsRejectEmptyResidual(t *testing.T) {
 	raw := []json.RawMessage{json.RawMessage(`{"type":"message","role":"assistant","content":[{"type":"future_content"}]}`)}
-	if _, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "", nil); err == nil {
+	if _, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "", nil); err == nil {
 		t.Fatal("all-erased message output was reported as successful")
 	}
 }
@@ -28,7 +28,7 @@ func TestResponsesDocumentRejectsMissingOutputItemType(t *testing.T) {
 			{"type":"message","status":"completed","content":[{"type":"output_text","text":"visible"}]}
 		]
 	}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil); err == nil {
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true); err == nil {
 		t.Fatal("missing output item type was erased as an additive variant")
 	}
 }
@@ -44,7 +44,7 @@ func TestResponsesDocumentRejectsActiveOutputItemStatus(t *testing.T) {
 					{"type":"message","status":"` + status + `","content":[{"type":"output_text","text":"partial"}]}
 				]
 			}`)
-			if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil); err == nil {
+			if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true); err == nil {
 				t.Fatal("invalid output item status was accepted in a terminal response")
 			}
 		})
@@ -84,7 +84,7 @@ func TestResponsesProviderOutputRejectsMissingNestedDiscriminators(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := []json.RawMessage{json.RawMessage(test.item)}
-			if _, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", nil); err == nil {
+			if _, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", nil); err == nil {
 				t.Fatal("missing provider-output child type was erased as an additive variant")
 			}
 		})
@@ -97,7 +97,7 @@ func TestResponsesProviderDiscoveryResultRejectsAllErasedDeclarations(t *testing
 		json.RawMessage(`{"type":"tool_search_call","call_id":"search_1","status":"completed","execution":"server","arguments":{}}`),
 		json.RawMessage(`{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"server","tools":[{"type":"future_tool"}]}`),
 	}
-	if _, err := decodeCompletedResponsesItemSet(context.Background(), request, raw, "", "ex", nil); err == nil {
+	if _, err := decodeCompletedResponsesItemSet(context.Background(), request, nil, raw, "", "ex", nil); err == nil {
 		t.Fatal("all-erased provider discovery result fabricated an empty result")
 	}
 }
@@ -131,7 +131,7 @@ func TestResponsesCompletedResponseRejectsUnsuccessfulEffectItems(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[` + test.item + `]}`)
-			if _, err := decodeResponseBuffered(context.Background(), test.request, raw, "ex", nil); err == nil {
+			if _, err := decodeResponseBuffered(context.Background(), test.request, testAttemptToolNames(test.request), raw, "ex", nil, true); err == nil {
 				t.Fatal("unsuccessful item became successful canonical output")
 			}
 		})
@@ -147,7 +147,7 @@ func TestResponsesIncompleteResponsePreservesPermittedPartialMessage(t *testing.
 			{"type":"message","status":"incomplete","content":[{"type":"output_text","text":"partial"}]}
 		]
 	}`)
-	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
+	stream, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestResponsesFailedWebSearchProjectsTypedFailure(t *testing.T) {
 			"action":{"type":"search","queries":["q"],"sources":[]}
 		}]
 	}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestResponsesFailedResponseCannotCarrySuccessfulItems(t *testing.T) {
 			{"type":"message","status":"completed","content":[{"type":"output_text","text":"not successful"}]}
 		]
 	}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil); err == nil {
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true); err == nil {
 		t.Fatal("failed response carried a successful canonical message")
 	}
 }
@@ -251,7 +251,7 @@ func TestResponsesProviderDiscoveryValidationErrorsRemainBackendOrigin(t *testin
 				"execution":"server",
 				"tools":[` + test.tool + `]
 			}`)}
-			_, err := decodeCompletedResponsesItemSet(context.Background(), responsesDiscoveryRequest(t), raw, "", "ex", nil)
+			_, err := decodeCompletedResponsesItemSet(context.Background(), responsesDiscoveryRequest(t), nil, raw, "", "ex", nil)
 			if err == nil {
 				t.Fatal("malformed provider declaration was accepted")
 			}
@@ -274,7 +274,7 @@ func TestResponsesDiscoveryResultUsesProviderItemCompatibilityFeature(t *testing
 		]
 	}`)}
 	changeLog := &recordingChanges{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestResponsesDiscoveryWebSearchFieldsUseProviderItemCompatibilityFeature(t 
 		]
 	}`)}
 	changeLog := &recordingChanges{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestResponsesDiscoveryClassifiesFutureWebSearchEnumsLocally(t *testing.T) {
 				"tools":[` + test.tool + `]
 			}`)}
 			changeLog := &recordingChanges{}
-			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 			var backendErr canonical.BackendError
 			if test.wantError && !errors.As(err, &backendErr) {
 				t.Fatalf("error = %T %v, want backend error", err, err)
@@ -376,7 +376,7 @@ func TestResponsesDiscoveryDropsUnrepresentedImageSearchOperation(t *testing.T) 
 				"tools":[` + test.tool + `]
 			}`)}
 			changeLog := &recordingChanges{}
-			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+			_, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 			var backendErr canonical.BackendError
 			if !errors.As(err, &backendErr) {
 				t.Fatalf("error = %v, want all-erased discovery backend error", err)
@@ -394,7 +394,7 @@ func TestResponsesDocumentPreservesWebSearchCallWhenStatusIsUnknown(t *testing.T
 		json.RawMessage(`{"type":"message","status":"completed","content":[{"type":"output_text","text":"kept"}]}`),
 	}
 	changeLog := &recordingChanges{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestResponsesDocumentUnknownWebSearchStatusDefersFailureToSettlement(t *tes
 		json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"future_status","action":{"type":"search","queries":["q"]}}`),
 	}
 	changeLog := &recordingChanges{}
-	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, raw, "", "ex", changeLog)
+	items, err := decodeCompletedResponsesItemSet(context.Background(), canonical.CanonicalRequest{}, nil, raw, "", "ex", changeLog)
 	if err != nil {
 		t.Fatal(err)
 	}

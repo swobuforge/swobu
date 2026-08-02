@@ -251,21 +251,21 @@ func (callProviderCommand) isCommand() {}
 // providerCall is the complete immutable data needed to issue and finish one
 // provider call. It contains no alternative request or retry state.
 type providerCall struct {
-	backend                provider.Backend
-	request                provider.Request
-	document               carrier.Document
-	clientCodec            ClientCodec
-	clientDelivery         delivery.Delivery
-	exchangeID             string
-	workspaceSlug          string
-	fullRequest            canonical.CanonicalRequest
-	projectedDecodeContext canonical.CanonicalRequest
-	inputSegment           canonical.CanonicalRequest
-	resolvedMedia          session.ResolvedMedia
-	advance                *historyAdvance
-	delayClientHandoff     bool
-	providerRound          int
-	replaySafety           providerReplaySafety
+	backend            provider.Backend
+	request            provider.Request
+	document           carrier.Document
+	clientCodec        ClientCodec
+	clientDelivery     delivery.Delivery
+	exchangeID         string
+	workspaceSlug      string
+	fullRequest        canonical.CanonicalRequest
+	decodeContext      canonical.CanonicalRequest
+	inputSegment       canonical.CanonicalRequest
+	resolvedMedia      session.ResolvedMedia
+	advance            *historyAdvance
+	delayClientHandoff bool
+	providerRound      int
+	replaySafety       providerReplaySafety
 }
 
 type reducerOutcome struct {

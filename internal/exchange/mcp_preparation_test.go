@@ -13,7 +13,7 @@ import (
 )
 
 func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
-	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	access, err := (mcp.Access{}).WithBearer(source, "incident-secret-bearer")
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
 }
 
 func TestMCPAccessIsOpaqueInsideExchangeContainers(t *testing.T) {
-	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	const bearer = "nested-exchange-secret"
 	access, err := (mcp.Access{}).WithBearer(source, bearer)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	if preparation != nil {
 		t.Fatalf("provider preparation unexpectedly deferred: %T", preparation)
 	}
-	environment, err := canonical.EffectiveTools(call.projectedDecodeContext)
+	environment, err := canonical.EffectiveTools(call.decodeContext)
 	if err != nil {
 		t.Fatal(err)
 	}

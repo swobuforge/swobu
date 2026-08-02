@@ -115,10 +115,17 @@ func ToolEnvironmentAt(items []CanonicalItem, before int) (ToolEnvironment, erro
 			return nil
 		}
 		resolved := resolvedTool{
-			declaration: declaration.Clone(),
-			parent:      parent.Clone(),
+			declaration: declaration,
+			parent:      parent,
 		}
 		byKey[key] = resolved
+		if source, ok := declaration.MCP(); ok {
+			for _, child := range source.Tools() {
+				if err := observe(child, source.Key()); err != nil {
+					return err
+				}
+			}
+		}
 		if namespace, ok := declaration.Namespace(); ok {
 			for _, child := range namespace.Tools() {
 				if err := observe(child, namespace.Key()); err != nil {
@@ -140,7 +147,11 @@ func ToolEnvironmentAt(items []CanonicalItem, before int) (ToolEnvironment, erro
 			if err := observe(declaration, ToolKey{}); err != nil {
 				return err
 			}
-			ordered = append(ordered, declaration.Clone())
+			// declaration is already detached by set.Declarations() above and is
+			// the same value observe stored in byKey. Share it read-only rather
+			// than re-cloning: the types are immutable (no setters), so a single
+			// detach at the boundary accessor is sufficient. epic-50 task 070.
+			ordered = append(ordered, declaration)
 		}
 		return nil
 	}
@@ -156,7 +167,7 @@ func ToolEnvironmentAt(items []CanonicalItem, before int) (ToolEnvironment, erro
 			}
 		}
 	}
-	declarations, err := NewToolSet(ordered)
+	declarations, err := newToolSetOwned(ordered)
 	if err != nil {
 		return ToolEnvironment{}, err
 	}
@@ -170,42 +181,65 @@ func EffectiveTools(request CanonicalRequest) (ToolEnvironment, error) {
 	return ToolEnvironmentAt(items, len(items))
 }
 
-// RewriteToolContributions applies one declaration-set transformation to every
-// canonical item that contributes tools while preserving carrier metadata.
-// Canonical owns this closed grammar so consumers do not duplicate item-kind
-// traversal when another contribution carrier is added.
-func RewriteToolContributions(
+// TransformToolContributions applies one structural declaration transformation
+// to every declaration-bearing occurrence while preserving carrier metadata.
+// Surviving declarations retain their ToolKey. Occurrence refinements survive
+// only for exact callable keys present after the transformation.
+func TransformToolContributions(
 	request CanonicalRequest,
-	rewrite func(ToolSet) (ToolSet, error),
+	transform func(ToolSet) (ToolSet, error),
 ) (CanonicalRequest, error) {
-	if rewrite == nil {
-		return CanonicalRequest{}, fmt.Errorf("canonical tool contribution rewrite is nil")
+	if transform == nil {
+		return CanonicalRequest{}, fmt.Errorf("canonical tool contribution transform is nil")
 	}
 	items := request.Items()
 	for index, item := range items {
 		if occurrence, ok := item.ToolDeclarations(); ok {
-			tools, err := rewrite(occurrence.Tools())
+			tools, err := transform(occurrence.Tools())
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			items[index], err = NewToolDeclarationsItem(tools, occurrence.Scope())
+			responses, err := retainResponsesToolRefinements(tools, occurrence.Responses())
+			if err != nil {
+				return CanonicalRequest{}, err
+			}
+			items[index], err = NewToolDeclarationsItemWithResponses(tools, occurrence.Scope(), responses)
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
 			continue
 		}
 		if result, ok := item.ToolDiscoveryResult(); ok {
-			tools, err := rewrite(result.Tools())
+			tools, err := transform(result.Tools())
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			items[index], err = NewToolDiscoveryResultItem(result.CallID(), tools, result.Executor())
+			responses, err := retainResponsesToolRefinements(tools, result.Responses())
+			if err != nil {
+				return CanonicalRequest{}, err
+			}
+			items[index], err = NewToolDiscoveryResultItemWithResponsesWireID(result.CallID(), tools, result.Executor(), responses, result.ResponsesCallIDNull())
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
 		}
 	}
 	return request.WithItems(items), nil
+}
+
+func retainResponsesToolRefinements(after ToolSet, refinements ResponsesToolRefinements) (ResponsesToolRefinements, error) {
+	deferred := refinements.DeferredKeys()
+	if len(deferred) == 0 {
+		return ResponsesToolRefinements{}, nil
+	}
+	known := callableToolKeys(after)
+	retained := make([]ToolKey, 0, len(deferred))
+	for _, key := range deferred {
+		if _, ok := known[key]; ok {
+			retained = append(retained, key)
+		}
+	}
+	return NewResponsesToolRefinements(after, retained)
 }
 
 func itemScope(item CanonicalItem) ContextScope {

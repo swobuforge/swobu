@@ -12,12 +12,19 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestBackendCodecPreservesRawJSONIntegers(t *testing.T) {
+	request := canonicaltest.LargeIntegerRequest(t, "gpt-5.4-mini")
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
-		Canonical: canonicaltest.LargeIntegerRequest(t, "gpt-5.4-mini"),
+		Canonical: request,
+		ToolNames: names,
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	})
 	if err != nil {
@@ -77,7 +84,38 @@ func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 	}
 }
 
-func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testing.T) {
+func TestBackendCodecUsesSharedOfficialResponsesToolLowering(t *testing.T) {
+	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
+	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "workspace")
+	namespace, _ := canonical.NewToolNamespace(namespaceKey, "Workspace", []canonical.ToolDeclaration{child})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, namespace), canonicaltest.Message(t, canonical.MessageRoleUser, "read")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireName, _ := names.WireName(childKey)
+	if bytes.Contains(document.RawBytes(), []byte(`"type":"namespace"`)) || !bytes.Contains(document.RawBytes(), []byte(`"name":"`+wireName+`"`)) {
+		t.Fatalf("ChatGPT Responses document = %s", document.RawBytes())
+	}
+}
+
+// TestChatGPTResponseIDDoesNotBecomeNativeContinuation proves the Codex
+// regression fix: ChatGPT/Codex is stateless under store:false and rejects
+// previous_response_id, so a ChatGPT provider response ID must decode as
+// identity-only (ResponseRef.Responses == nil). It must never become a reusable
+// ResponsesContinuation, which would make session routing select the Delta
+// representation and emit previous_response_id on the next turn.
+func TestChatGPTResponseIDDoesNotBecomeNativeContinuation(t *testing.T) {
+	t.Parallel()
+
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_789\",\"model\":\"gpt-5.4-mini\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"completed\",\"output\":[]}}\n\n"
 	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{ExchangeID: "ex_store_false"}, provider.StreamIngress{Stream: carrier.ByteStream{
@@ -97,24 +135,332 @@ func TestBackendInternalStoreFalseDoesNotSuppressNativeResponseCapture(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	responsesRef := output.Response().Responses
-	if responsesRef == nil || responsesRef.ProviderResponseID != "provider_resp_789" {
-		t.Fatalf("native response refinement = %#v", responsesRef)
+	if responsesRef := output.Response().Responses; responsesRef != nil {
+		t.Fatalf("ChatGPT response ID must stay identity-only, got native continuation %#v", responsesRef)
 	}
-	next := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            canonical.Specify("gpt-5.4-mini"),
-		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
-		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_test", Responses: responsesRef},
+}
+
+// TestChatGPTWebSearchReplayOmitsSyntheticItemID proves the second release
+// blocker is fixed: a replayed idless web_search_call (Codex durable rollout
+// under store:false) must round-trip through canonical and re-encode with no
+// item.id at all. The canonical call correlation token (a synthetic
+// "toolu_swobu_*" minted only for call↔result pairing) must never become a
+// Responses item.id. Provider-owned item identity and canonical correlation are
+// distinct identities; only an exact preserved refinement may be emitted as id.
+func TestChatGPTWebSearchReplayOmitsSyntheticItemID(t *testing.T) {
+	t.Parallel()
+
+	// An idless Codex replay decodes to a web-search call carrying a synthetic
+	// request-local correlation id and no Responses refinement, plus its result.
+	searchInput, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{
+		Action:  canonical.WebSearchActionSearch,
+		Queries: []string{"site:openai.com Build Week submission deadline"},
 	})
-	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: next, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	correlation, err := canonical.NewToolCallID("toolu_swobu_66_0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No refinement: this is the idless case. Passing nil (not the correlation)
+	// is the only faithful representation of an omitted provider id.
+	call, err := canonical.NewToolCallItemWithResponsesWebSearch(correlation, canonical.WebSearchToolKey(), searchInput, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchResult, _ := canonical.NewWebSearchResult(nil)
+	result, err := canonical.NewWebSearchResultItem(correlation, searchResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "find the deadline"),
+			call,
+			result,
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "July 21"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "verify it"),
+		},
+	})
+
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: request,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.RawBytes())
+
+	// The web_search_call item must survive replay intact.
+	if !strings.Contains(wire, `"type":"web_search_call"`) {
+		t.Fatalf("web_search_call dropped from replayed history: %s", wire)
+	}
+	// The synthetic canonical correlation id must never leak onto the wire as a
+	// Responses item.id (or anywhere else).
+	if strings.Contains(wire, "toolu_swobu_") {
+		t.Fatalf("synthetic canonical correlation leaked into ChatGPT wire: %s", wire)
+	}
+
+	// The replayed web_search_call must carry no id field at all.
+	var payload struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range payload.Input {
+		if !strings.Contains(string(raw), `"type":"web_search_call"`) {
+			continue
+		}
+		var item struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.ID != "" {
+			t.Fatalf("idless web_search_call replay gained an item id %q: %s", item.ID, raw)
+		}
+	}
+
+	// store:false remains the ChatGPT/Codex provider contract.
+	var fullPayload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &fullPayload); err != nil {
+		t.Fatal(err)
+	}
+	if store, ok := fullPayload["store"].(bool); !ok || store {
+		t.Fatalf("store=%#v, want false (ChatGPT/Codex requires store:false)", fullPayload["store"])
+	}
+}
+
+// TestChatGPTWebSearchReplayOmitsActionSources proves the third release blocker
+// in this provider contract is fixed: ChatGPT/Codex request input rejects
+// web_search_call action.sources ("Unknown parameter: input[N].action.sources").
+// A completed web-search call from turn one replays into the turn-two request as
+// call state only — action type + query preserved, status completed, the exact
+// provider ws id retained — but action.sources omitted. The discovered sources
+// stay canonical-complete for client responses and citations; they only leave
+// the Codex request grammar.
+func TestChatGPTWebSearchReplayOmitsActionSources(t *testing.T) {
+	t.Parallel()
+
+	// Turn-one provider output: a completed web search with a real provider item
+	// id and discovered sources.
+	searchInput, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{
+		Action:  canonical.WebSearchActionSearch,
+		Queries: []string{"deadline"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correlation, err := canonical.NewToolCallID("ws_123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refinement, err := canonical.NewResponsesWebSearchRefinement(canonical.ResponsesItemID("ws_123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItemWithResponsesWebSearch(correlation, canonical.WebSearchToolKey(), searchInput, &refinement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceURL, err := canonical.NewWebURL("https://example.test/rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := canonical.NewWebSource(sourceURL, canonical.Specify("Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchResult, err := canonical.NewWebSearchResult([]canonical.WebSource{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewWebSearchResultItem(correlation, searchResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn two: full materialized history (store:false ⇒ no continuation).
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "what is the deadline"),
+			call,
+			result,
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "July 21"),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "verify it"),
+		},
+	})
+
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: request,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.RawBytes())
+
+	var payload struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	// Locate the one web_search_call in the replayed input and assert its shape.
+	var found bool
+	for _, raw := range payload.Input {
+		if !strings.Contains(string(raw), `"type":"web_search_call"`) {
+			continue
+		}
+		found = true
+		var item struct {
+			ID     string          `json:"id"`
+			Status string          `json:"status"`
+			Action json.RawMessage `json:"action"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.ID != "ws_123" {
+			t.Fatalf("web_search_call id = %q, want exact provider id ws_123: %s", item.ID, raw)
+		}
+		if item.Status != "completed" {
+			t.Fatalf("web_search_call status = %q, want completed: %s", item.Status, raw)
+		}
+		// The replayable call state — action type + query — is preserved.
+		var action struct {
+			Type    string `json:"type"`
+			Query   string `json:"query"`
+			Sources json.RawMessage
+		}
+		if err := json.Unmarshal(item.Action, &action); err != nil {
+			t.Fatal(err)
+		}
+		if action.Type != "search" || action.Query != "deadline" {
+			t.Fatalf("replayable action state lost: %#v", action)
+		}
+		// The Codex-rejected field must be entirely absent, not just empty.
+		if strings.Contains(string(item.Action), `"sources"`) {
+			t.Fatalf("action.sources leaked into ChatGPT request input: %s", item.Action)
+		}
+	}
+	if !found {
+		t.Fatalf("web_search_call dropped from replayed history: %s", wire)
+	}
+
+	// The discovered source URL must NOT cross the Codex request boundary. (It
+	// still exists in the canonical result for client responses and citations.)
+	if strings.Contains(wire, "https://example.test/rules") {
+		t.Fatalf("web-search source URL leaked into ChatGPT request input: %s", wire)
+	}
+
+	// The remaining ChatGPT/Codex provider invariants hold alongside this one.
+	if strings.Contains(wire, "previous_response_id") {
+		t.Fatalf("ChatGPT wire must omit previous_response_id: %s", wire)
+	}
+	if strings.Contains(wire, "toolu_swobu_") {
+		t.Fatalf("synthetic canonical correlation leaked into ChatGPT wire: %s", wire)
+	}
+	var fullPayload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &fullPayload); err != nil {
+		t.Fatal(err)
+	}
+	if store, ok := fullPayload["store"].(bool); !ok || store {
+		t.Fatalf("store=%#v, want false (ChatGPT/Codex requires store:false)", fullPayload["store"])
+	}
+}
+
+// regression fix at the session + codec seam (no live backend required). Because
+// the ChatGPT decoder produces an identity-only ResponseRef (Responses == nil),
+// session routing must select the fully materialized request for the second
+// turn, never the Delta. The resulting wire request then carries the complete
+// turn history and no previous_response_id — the exact shape ChatGPT/Codex
+// (stateless under store:false) accepts.
+func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
+	t.Parallel()
+
+	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", "responses", "", "responses")
+	target.Model = "gpt-5.4-mini"
+
+	turnOne := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn one")},
+	})
+	rawTurnOne := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_previous\",\"model\":\"gpt-5.4-mini\",\"status\":\"in_progress\",\"store\":false}}\n\n" +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer one\"}]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_previous\",\"model\":\"gpt-5.4-mini\",\"status\":\"completed\",\"store\":false,\"output\":[]}}\n\n"
+	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{ExchangeID: "ex_turn_one", Canonical: turnOne}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream",
+		Body:      io.NopCloser(strings.NewReader(rawTurnOne)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnOneResponse, err := canonical.ProjectStream(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{
+		SwobuID:       "resp_previous",
+		TargetID:      target.TargetID,
+		TargetVersion: target.TargetVersion,
+	}), canonical.ResponseBinding{SwobuID: "resp_previous"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turnOneResponse.Response().Responses != nil {
+		t.Fatal("ChatGPT decoder minted native continuation during turn-one checkpoint commit")
+	}
+	store := session.NewMemoryStore()
+	if err := store.Put(context.Background(), "dev", session.Checkpoint{Request: turnOne, Response: *turnOneResponse}); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, found, err := store.Get(context.Background(), "dev", "resp_previous")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("turn-one checkpoint was not available for client continuation")
+	}
+	turnTwo := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")},
+		PreviousResponse: &canonical.ResponseRef{
+			SwobuID: "resp_previous",
+		},
+	})
+	prepared, err := session.Resume(turnTwo, checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hydration reconstructs Full and an identity-only Delta. ForTarget must
+	// select Full because ChatGPT responses never mint native continuation.
+	selected := prepared.ForTarget(target)
+	if _, ok := selected.PreviousResponse(); ok {
+		t.Fatal("ChatGPT identity-only handle must not select Delta continuation")
+	}
+
+	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: selected, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.RawBytes())
+	if strings.Contains(wire, "previous_response_id") {
+		t.Fatalf("ChatGPT wire must omit previous_response_id: %s", wire)
+	}
+	if !strings.Contains(wire, "turn one") || !strings.Contains(wire, "answer one") || !strings.Contains(wire, "turn two") {
+		t.Fatalf("ChatGPT wire must carry the full materialized history: %s", wire)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["previous_response_id"] != "provider_resp_789" {
-		t.Fatalf("native continuation payload = %s", document.RawBytes())
+	if store, ok := payload["store"].(bool); !ok || store {
+		t.Fatalf("store=%#v, want false (ChatGPT/Codex requires store:false)", payload["store"])
 	}
 }

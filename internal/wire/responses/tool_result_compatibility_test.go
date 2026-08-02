@@ -13,7 +13,7 @@ func TestResponsesToolResultErrorRecordsApproximation(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("denied")}, true)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
 	changeLog := &recordingChanges{}
-	if _, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), changeLog, "ex", EncodeOptions{}); err != nil {
+	if _, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), changeLog, "ex", EncodeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(*changeLog) != 1 || (*changeLog)[0].Capability != canonical.RequestItemsToolResultIsError || (*changeLog)[0].Kind != compat.Approximation {

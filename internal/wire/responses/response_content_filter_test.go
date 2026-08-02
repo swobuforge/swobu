@@ -24,7 +24,7 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 		"output":[]
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_content_filter", &recordingChanges{})
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_content_filter", &recordingChanges{}, true)
 	if err != nil {
 		t.Fatalf("decodeResponseBuffered returned error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDecodeResponseBuffered_PromptContentFilterReturnsBackendError(t *testin
 		"output":[]
 	}`)
 
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_prompt_content_filter", &recordingChanges{})
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_prompt_content_filter", &recordingChanges{}, true)
 	if err == nil {
 		t.Fatal("decodeResponseBuffered returned nil error, want backend error")
 	}
@@ -97,7 +97,7 @@ func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T)
 				"event: " + tc.eventType + "\ndata: {\"type\":\"" + tc.eventType + "\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"" + tc.status + "\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"content_filters\":[{\"source_type\":\"completion\",\"blocked\":true}],\"output\":[]}}\n\n"
 
 			changeLog := &recordingChanges{}
-			reader := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", changeLog)
+			reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", changeLog, true)
 			defer func() { _ = reader.Close(context.Background()) }()
 
 			closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)

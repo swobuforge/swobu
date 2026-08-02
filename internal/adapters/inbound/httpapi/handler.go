@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -243,7 +242,7 @@ func newTransportRequest(method string, url string, header http.Header, body []b
 		Method: method,
 		URL:    url,
 		Header: header.Clone(),
-		Body:   io.NopCloser(bytes.NewReader(append([]byte(nil), body...))),
+		Body:   body,
 	}
 }
 
@@ -296,10 +295,11 @@ func logRequestOutcome(
 				}
 			} else {
 				statusCode = statusCodeForExchangeError(err)
-				var swobuErr canonical.Error
-				if errors.As(err, &swobuErr) {
-					errorCode = string(swobuErr.Code)
-				}
+				// TerminalErrorCode is the single classifier for an unexpected
+				// Swobu-owned failure: a typed error reports its own code, an
+				// untyped one resolves to INTERNAL_ERROR. It inspects type only;
+				// the raw cause stays in traffic evidence, never on this line.
+				errorCode = string(canonical.TerminalErrorCode(err))
 			}
 		}
 	}

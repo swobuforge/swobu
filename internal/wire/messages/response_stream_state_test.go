@@ -27,7 +27,7 @@ func TestMessagesAllErasedToolResultDoesNotClosePendingCall(t *testing.T) {
 }
 
 func TestMessagesBufferedRejectsMissingBlockType(t *testing.T) {
-	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, []byte(`{
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, []byte(`{
 		"id":"msg_1","model":"m","stop_reason":"end_turn","content":[
 			{"text":"hidden"},
 			{"type":"text","text":"visible"}
@@ -96,7 +96,7 @@ func TestMessagesStreamRejectsIncompatibleKnownDeltaBeforeEmission(t *testing.T)
 			raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 				"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":" + test.block + "}\n\n" +
 				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":" + test.delta + "}\n\n"
-			stream := decodeResponseStream(test.request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(test.request, testAttemptToolNames(test.request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			for {
 				event, err := stream.Next(context.Background())
 				if event.Kind == test.forbidden {
@@ -176,14 +176,14 @@ func TestMessagesStreamRejectsMissingDeltaDiscriminatorWithoutDrop(t *testing.T)
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n" +
 		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"text\":\"hidden\"}}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertMessagesReaderBackendErrorWithoutDrop(t, stream)
 }
 
 func TestMessagesStreamRejectsMissingTopLevelDataDiscriminatorWithoutDrop(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
 		"event: future_delta\ndata: {\"index\":0,\"value\":\"hidden\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertMessagesReaderBackendErrorWithoutDrop(t, stream)
 }
 
@@ -218,7 +218,7 @@ func messagesStreamFunctionRequest(t *testing.T) canonical.CanonicalRequest {
 
 func assertMessagesStreamBackendError(t *testing.T, raw string) {
 	t.Helper()
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == nil {
@@ -272,7 +272,7 @@ func TestMessagesStreamRejectsInvalidResponseLifecycle(t *testing.T) {
 
 func TestMessagesStreamEOFBeforeMessageStopIsTerminalError(t *testing.T) {
 	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	var sawError, sawErrorEnd bool
 	for {
 		event, err := stream.Next(context.Background())
@@ -307,7 +307,7 @@ func TestMessagesStreamUnknownBlockCannotSatisfyToolUseStop(t *testing.T) {
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err != nil {
@@ -353,7 +353,7 @@ func TestMessagesStreamRejectsDuplicateOrReusedBlockIndex(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" + test.frames
-			stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			for {
 				_, err := stream.Next(context.Background())
 				if err == nil {
@@ -386,7 +386,7 @@ func TestMessagesStreamUnknownBlockAdvancesProviderIndexWithoutCanonicalOrdinal(
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	var completed *canonical.ItemEvent
 	for {
 		event, err := stream.Next(context.Background())
@@ -417,7 +417,7 @@ func TestMessagesStreamToolUseFinishRequiresCompletedToolCall(t *testing.T) {
 		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"search\",\"input\":{}}}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == nil {
@@ -438,7 +438,7 @@ func TestMessagesStreamRecordsUnknownDeltaKindOncePerKnownBlock(t *testing.T) {
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == io.EOF {
@@ -467,7 +467,7 @@ func TestMessagesStreamIgnoresUnknownTopLevelWireEvents(t *testing.T) {
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"index\":4,\"value\":\"other block\"}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == io.EOF {
@@ -488,7 +488,7 @@ func TestMessagesStreamIgnoresUnknownTopLevelEventIDs(t *testing.T) {
 		"event: future_delta\ndata: {\"type\":\"future_delta\",\"id\":\"event_2\",\"value\":\"two\"}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == io.EOF {

@@ -76,7 +76,11 @@ func TestSendProviderRequest_UsesContractDeliveryForStreamingRequests(t *testing
 	if err != nil {
 		t.Fatalf("ResolveBackend returned error: %v", err)
 	}
-	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatalf("BuildAttemptToolNames returned error: %v", err)
+	}
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
@@ -153,7 +157,11 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBackend returned error: %v", err)
 	}
-	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatalf("BuildAttemptToolNames returned error: %v", err)
+	}
+	doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}

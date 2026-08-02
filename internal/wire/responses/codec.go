@@ -74,7 +74,7 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 		if label == "" {
 			return canonical.ToolPolicy{}, canonical.BadRequest("responses request MCP tool_choice requires server_label")
 		}
-		specific, err := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "mcp/"+label)
+		specific, err := canonical.NewToolKey("mcp", canonical.ToolKindMCP, label)
 		if err != nil {
 			return canonical.ToolPolicy{}, canonical.BadRequest("responses request MCP tool_choice server_label is invalid")
 		}

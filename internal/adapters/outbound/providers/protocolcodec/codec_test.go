@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -54,6 +55,33 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 	}
 }
 
+func TestResponsesCodecUsesSharedOfficialToolLowering(t *testing.T) {
+	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
+	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "workspace")
+	namespace, _ := canonical.NewToolNamespace(namespaceKey, "Workspace", []canonical.ToolDeclaration{child})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, namespace), canonicaltest.Message(t, canonical.MessageRoleUser, "read")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, changes, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(document.RawBytes())
+	wireName, _ := names.WireName(childKey)
+	if strings.Contains(raw, `"type":"namespace"`) || !strings.Contains(raw, `"name":"`+wireName+`"`) {
+		t.Fatalf("flat Responses document = %s", raw)
+	}
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestTools {
+		t.Fatalf("flat Responses changes = %#v", changes)
+	}
+}
+
 func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -72,14 +100,14 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	}
 }
 
-func TestNativeMCPProjectsOnlyToResponsesAndPreservesTransientAccess(t *testing.T) {
-	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+func TestFlatProtocolCodecsOmitResidualMCPForOptionalPolicy(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
 	source, _ := canonical.NewMCPConnectorSource(
 		"connector_gmail", canonical.Specify([]string{"search", "send"}),
 		canonical.NewMCPApprovalNever(), canonical.MCPLoadingDeferred,
 		canonical.Specify([]string{"direct"}),
 	)
-	declaration, _ := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	declaration, _ := canonical.NewMCPToolSource(key, "Mail", source, nil)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -100,36 +128,30 @@ func TestNativeMCPProjectsOnlyToResponsesAndPreservesTransientAccess(t *testing.
 		Canonical: request, Delivery: delivery.BufferedDelivery(), MCPAccess: access,
 	}
 
-	document, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(providerRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(document.RawBytes())
-	for _, want := range []string{
-		`"type":"mcp"`, `"connector_id":"connector_gmail"`,
-		`"allowed_tools":["search","send"]`, `"allowed_callers":["direct"]`,
-		`"require_approval":"never"`,
-		`"authorization":"oauth-token"`, `"headers":{"X-Tenant":"tenant-a"}`,
-		`"defer_loading":true`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Responses MCP projection missing %s in %s", want, body)
-		}
-	}
-
 	for _, protocol := range []protocolkind.ProtocolKind{
-		protocolkind.ChatCompletions, protocolkind.Messages,
+		protocolkind.Responses, protocolkind.ChatCompletions, protocolkind.Messages,
 	} {
-		_, _, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(encodeErr, &incompatible) {
-			t.Fatalf("%s error = %T %v, want target incompatibility", protocol, encodeErr, encodeErr)
+		document, changes, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
+		if encodeErr != nil {
+			t.Fatalf("%s encode: %v", protocol, encodeErr)
+		}
+		if strings.Contains(string(document.RawBytes()), `"type":"mcp"`) {
+			t.Fatalf("%s leaked residual MCP: %s", protocol, document.RawBytes())
+		}
+		found := false
+		for _, change := range changes {
+			if change.Capability == canonical.RequestToolsKind && change.Kind == compat.Omission {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s changes = %#v, want residual MCP omission", protocol, changes)
 		}
 	}
 }
 
-func TestResponsesApprovalPolicyFailsCandidateBeforeTransportUntilLifecycleExists(t *testing.T) {
-	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
 	filter, _ := canonical.NewMCPToolFilter(
 		canonical.Specify([]string{"send"}), canonical.Unspecified[bool](),
 	)
@@ -138,21 +160,24 @@ func TestResponsesApprovalPolicyFailsCandidateBeforeTransportUntilLifecycleExist
 		"connector_gmail", canonical.Unspecified[[]string](), approval,
 		canonical.MCPLoadingEager, canonical.Unspecified[[]string](),
 	)
-	declaration, _ := canonical.NewMCPToolNamespace(key, "", source, nil)
+	declaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{
-			item, canonicaltest.Message(t, canonical.MessageRoleUser, "send"),
-		},
-	})
-	_, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
-		Canonical: request, Delivery: delivery.BufferedDelivery(),
-	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("approval error = %T %v, want target incompatibility", err, err)
+	for _, policy := range []canonical.ToolPolicy{
+		canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key),
+	} {
+		request := canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"), ToolPolicy: canonical.Specify(policy),
+			Items: []canonical.CanonicalItem{item, canonicaltest.Message(t, canonical.MessageRoleUser, "send")},
+		})
+		_, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+			Canonical: request, Delivery: delivery.BufferedDelivery(),
+		})
+		var incompatible provider.IncompatibleTargetError
+		if !errors.As(err, &incompatible) {
+			t.Fatalf("policy %s error = %T %v, want target incompatibility", policy.Mode, err, err)
+		}
 	}
 }
 
@@ -228,6 +253,98 @@ func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("protocol codec stream ignored cancellation")
+	}
+}
+
+func TestResponsesContinuationCaptureRequiresPersistenceEligibleRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		requestStore  canonical.Specified[bool]
+		responseStore string
+		streaming     bool
+		wantCapture   bool
+	}{
+		{name: "buffered request omitted response true", requestStore: canonical.Unspecified[bool](), responseStore: `,"store":true`, wantCapture: true},
+		{name: "buffered request true response true", requestStore: canonical.Specify(true), responseStore: `,"store":true`, wantCapture: true},
+		{name: "buffered request false response true", requestStore: canonical.Specify(false), responseStore: `,"store":true`},
+		{name: "buffered request omitted response false", requestStore: canonical.Unspecified[bool](), responseStore: `,"store":false`},
+		{name: "buffered request true response false", requestStore: canonical.Specify(true), responseStore: `,"store":false`},
+		{name: "buffered response store absent", requestStore: canonical.Unspecified[bool]()},
+		{name: "streamed request omitted response true", requestStore: canonical.Unspecified[bool](), responseStore: `,"store":true`, streaming: true, wantCapture: true},
+		{name: "streamed request true response true", requestStore: canonical.Specify(true), responseStore: `,"store":true`, streaming: true, wantCapture: true},
+		{name: "streamed request false response true", requestStore: canonical.Specify(false), responseStore: `,"store":true`, streaming: true},
+		{name: "streamed request omitted response false", requestStore: canonical.Unspecified[bool](), responseStore: `,"store":false`, streaming: true},
+		{name: "streamed request true response false", requestStore: canonical.Specify(true), responseStore: `,"store":false`, streaming: true},
+		{name: "streamed response store absent", requestStore: canonical.Unspecified[bool](), streaming: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			request := provider.Request{
+				ExchangeID: "exchange-store-policy",
+				Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+					Model:     canonical.Specify("model"),
+					Responses: canonical.NewResponsesRequestRefinement(test.requestStore),
+				}),
+			}
+			codec := Codec{Protocol: protocolkind.Responses, CaptureResponsesContinuation: true}
+			buffered := `{"id":"resp_store","model":"model","status":"completed","output":[]` + test.responseStore + `}`
+			var ingress provider.Ingress = provider.DocumentIngress{Document: carrier.NewDocument(
+				protocolkind.Responses,
+				"application/json",
+				nil,
+				[]byte(buffered),
+				carrier.Meta{},
+			)}
+			if test.streaming {
+				ingress = provider.StreamIngress{Stream: carrier.ByteStream{
+					Header:    http.Header{"Content-Type": {"text/event-stream"}},
+					MediaType: "text/event-stream",
+					Body: io.NopCloser(strings.NewReader(
+						"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_store\",\"model\":\"model\",\"status\":\"in_progress\"" + test.responseStore + "}}\n\n" +
+							"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_store\",\"model\":\"model\",\"status\":\"completed\",\"output\":[]}}\n\n",
+					)),
+				}}
+			}
+			decoded, err := codec.Decode(context.Background(), request, ingress)
+			if err != nil {
+				t.Fatal(err)
+			}
+			captured := responsesContinuationCaptured(t, decoded.Stream)
+			if captured != test.wantCapture {
+				t.Fatalf("continuation captured = %t, want %t", captured, test.wantCapture)
+			}
+		})
+	}
+}
+
+func responsesContinuationCaptured(t *testing.T, stream canonical.ResponseStream) bool {
+	t.Helper()
+	defer func() {
+		if err := stream.Close(context.Background()); err != nil {
+			t.Fatalf("close response stream: %v", err)
+		}
+	}()
+	for {
+		event, err := stream.Next(context.Background())
+		if errors.Is(err, io.EOF) {
+			return false
+		}
+		if err != nil {
+			t.Fatalf("read response stream: %v", err)
+		}
+		if event.Kind != canonical.EventResponseIdentity {
+			continue
+		}
+		identity, ok := event.Payload.(canonical.ResponseIdentityPayload)
+		if !ok {
+			t.Fatalf("response identity payload = %T", event.Payload)
+		}
+		return identity.Response.Responses != nil
 	}
 }
 

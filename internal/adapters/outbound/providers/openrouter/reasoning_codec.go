@@ -29,7 +29,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 		return carrier.Document{}, nil, err
 	}
 	var changes []compat.Change
-	document, err := chatcompletions.LowerProviderRequestDocument(req.Canonical, req.Delivery, &changes, "")
+	document, err := chatcompletions.LowerProviderRequestDocument(req.Canonical, req.ToolNames, req.Delivery, &changes, "")
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
@@ -513,7 +513,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 	var changes []compat.Change
 	document, err := func(sink *[]compat.Change) (responses.ProviderRequestDocument, error) {
 		return responses.LowerProviderRequestDocument(
-			responses.EncodeInput{Request: req.Canonical},
+			responses.EncodeInput{Request: req.Canonical, ToolNames: req.ToolNames},
 			req.Delivery,
 			sink,
 			req.ExchangeID,

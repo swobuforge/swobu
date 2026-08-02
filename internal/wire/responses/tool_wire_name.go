@@ -6,17 +6,26 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // responsesToolWireName returns the Responses wire token for one function or
 // custom tool declaration.
 //
 // Attempt preparation has already projected every provider-facing key.
-func responsesToolWireName(tool canonical.ToolDeclaration) (string, error) {
+func responsesToolWireName(tool canonical.ToolDeclaration, names wire.ToolNames) (string, error) {
 	if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
 		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
 	}
-	trimmedName := strings.TrimSpace(tool.Key().Name()) // swobu:io-string source=boundary
+	wireName := tool.Key().Name()
+	if names != nil {
+		var err error
+		wireName, err = wire.EncodeToolName(names, tool.Key())
+		if err != nil {
+			return "", err
+		}
+	}
+	trimmedName := strings.TrimSpace(wireName) // swobu:io-string source=boundary
 	if trimmedName == "" {
 		return "", canonical.BadRequest("response request tool declarations require a name")
 	}

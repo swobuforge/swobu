@@ -10,7 +10,7 @@ import (
 )
 
 func TestMCPAccessIsOpaqueInsideClientRequestResult(t *testing.T) {
-	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	const bearer = "nested-wire-secret"
 	access, err := (mcp.Access{}).WithBearer(source, bearer)
 	if err != nil {

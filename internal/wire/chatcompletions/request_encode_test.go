@@ -7,11 +7,16 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func EncodeCarrier(req canonical.CanonicalRequest, d delivery.Delivery) (carrier.Document, error) {
-	return EncodeCarrierWithChanges(req, d, nil, "")
+	names, _, err := provider.BuildAttemptToolNames(req)
+	if err != nil {
+		return carrier.Document{}, err
+	}
+	return EncodeCarrierWithChanges(req, names, d, nil, "")
 }
 
 func TestEncodeCarrier_LowersInstructionsToLeadingSystemMessage(t *testing.T) {

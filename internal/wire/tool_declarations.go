@@ -13,6 +13,32 @@ import (
 type FlatToolSet struct {
 	Declarations      []canonical.ToolDeclaration
 	RemovedNamespaces int
+	OmittedMCP        int
+}
+
+// ValidateFlatToolPolicy proves that declaration erasure left the caller's
+// selection constraint executable. A dependency on an erased declaration is
+// target incompatibility, not malformed client intent.
+func ValidateFlatToolPolicy(policy canonical.ToolPolicy, declarations []canonical.ToolDeclaration) error {
+	if err := policy.ValidateForTools(declarations); err != nil {
+		return provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "flat tool projection cannot preserve the canonical tool-selection constraint")
+	}
+	return nil
+}
+
+// HasDeferredResponsesTools reports whether any declaration contribution or
+// loaded discovery result carries Responses-only deferred visibility. Static
+// codecs use this semantic fact only to report eager materialization.
+func HasDeferredResponsesTools(items []canonical.CanonicalItem) bool {
+	for _, item := range items {
+		if declarations, ok := item.ToolDeclarations(); ok && len(declarations.Responses().DeferredKeys()) > 0 {
+			return true
+		}
+		if result, ok := item.ToolDiscoveryResult(); ok && len(result.Responses().DeferredKeys()) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // PrepareFlatToolSet removes namespace containers while retaining
@@ -25,15 +51,20 @@ func PrepareFlatToolSet(
 ) (FlatToolSet, error) {
 	var flattened []canonical.ToolDeclaration
 	flattenedNamespaces := 0
+	omittedMCP := 0
 	var appendDeclaration func(canonical.ToolDeclaration) error
 	appendDeclaration = func(declaration canonical.ToolDeclaration) error {
+		if declaration.Kind() == canonical.ToolKindMCP {
+			// Residual provider-native MCP is not user-healable on flat targets.
+			// Drop only its declaration; the caller validates selection policy
+			// against the surviving surface before dispatch.
+			omittedMCP++
+			return nil
+		}
 		namespace, ok := declaration.Namespace()
 		if !ok {
 			flattened = append(flattened, declaration.Clone())
 			return nil
-		}
-		if _, isMCP := namespace.MCPSource(); isMCP {
-			return provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.Occurrence{}, "flat provider protocols cannot represent native MCP declarations")
 		}
 		flattenedNamespaces++
 		for _, child := range namespace.Tools() {
@@ -56,5 +87,5 @@ func PrepareFlatToolSet(
 		}
 		seen[wireIdentity] = struct{}{}
 	}
-	return FlatToolSet{Declarations: flattened, RemovedNamespaces: flattenedNamespaces}, nil
+	return FlatToolSet{Declarations: flattened, RemovedNamespaces: flattenedNamespaces, OmittedMCP: omittedMCP}, nil
 }

@@ -14,7 +14,7 @@ func TestDecodeResponseBuffered_MapsUsageAndCacheFields(t *testing.T) {
 		"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
 		"usage":{"prompt_tokens":120,"completion_tokens":8,"completion_tokens_details":{"reasoning_tokens":5},"prompt_tokens_details":{"cached_tokens":80,"cache_write_tokens":4}}
 	}`)
-	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex_usage", nil)
+	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex_usage", nil)
 	if err != nil {
 		t.Fatalf("DecodeResponseBuffered returned error: %v", err)
 	}

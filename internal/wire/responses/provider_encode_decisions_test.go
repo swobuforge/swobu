@@ -11,7 +11,7 @@ import (
 
 func TestExactProviderEncodeReturnsNoCompatibilityChanges(t *testing.T) {
 	request := responsesRequestWithStrictToolAndJSONSchema(t)
-	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request}, delivery.BufferedDelivery(), "exchange")
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}

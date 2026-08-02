@@ -8,6 +8,7 @@ const (
 	ToolTypeWebSearch    = "web_search"
 	ToolTypeNamespace    = "namespace"
 	ToolTypeDiscovery    = "tool_search"
+	ToolTypeMCP          = "mcp"
 	ToolNamespaceRequest = "request"
 )
 
@@ -20,6 +21,7 @@ const (
 	ToolKindWebSearch ToolKind = "web_search"
 	ToolKindNamespace ToolKind = "namespace"
 	ToolKindDiscovery ToolKind = "tool_search"
+	ToolKindMCP       ToolKind = "mcp"
 )
 
 // ToolKey is the single canonical identity shared by a declaration and calls
@@ -38,7 +40,7 @@ func NewToolKey(namespace string, kind ToolKind, name string) (ToolKey, error) {
 	if namespace == "" || name == "" {
 		return ToolKey{}, BadRequest("canonical tool key requires namespace and name")
 	}
-	if kind != ToolKindFunction && kind != ToolKindCustom && kind != ToolKindWebSearch && kind != ToolKindNamespace && kind != ToolKindDiscovery {
+	if kind != ToolKindFunction && kind != ToolKindCustom && kind != ToolKindWebSearch && kind != ToolKindNamespace && kind != ToolKindDiscovery && kind != ToolKindMCP {
 		return ToolKey{}, BadRequest("canonical tool key kind is invalid")
 	}
 	if strings.Contains(namespace, "//") || strings.Contains(name, "/") {
@@ -255,10 +257,12 @@ func resolvePlainToolDeclarationByName(tools []ToolDeclaration, name string, spe
 func callableToolDeclarations(tools []ToolDeclaration) []ToolDeclaration {
 	var out []ToolDeclaration
 	for _, tool := range tools {
+		if source, ok := tool.MCP(); ok {
+			out = append(out, tool)
+			out = append(out, callableToolDeclarations(source.Tools())...)
+			continue
+		}
 		if namespace, ok := tool.Namespace(); ok {
-			if _, isMCP := namespace.MCPSource(); isMCP {
-				out = append(out, tool)
-			}
 			out = append(out, callableToolDeclarations(namespace.Tools())...)
 			continue
 		}

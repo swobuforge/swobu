@@ -14,7 +14,7 @@ func TestChatToolResultLossesRecordApproximation(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}})
 
 	changeLog := &recordingChanges{}
-	if _, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), changeLog, "ex"); err != nil {
+	if _, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "ex"); err != nil {
 		t.Fatal(err)
 	}
 	if len(*changeLog) != 2 || (*changeLog)[0].Capability != canonical.RequestItemsToolResultIsError || (*changeLog)[0].Kind != compat.Approximation || (*changeLog)[1].Capability != canonical.RequestItemsToolResultContentBoundaries || (*changeLog)[1].Kind != compat.Approximation {

@@ -15,13 +15,13 @@ import (
 
 func TestDecodeOutputItemsRejectsMCPCallWithoutAdmittedConsumer(t *testing.T) {
 	items := []responsesWireOutputItemDTO{{Type: "mcp_call", ID: "mcp_1", Name: "Read", Arguments: json.RawMessage(`{"path":"workspace/file.txt"}`)}}
-	_, err := decodeOutputItems(context.Background(), canonical.CanonicalRequest{}, items, "", "ex", nil)
+	_, err := decodeOutputItems(context.Background(), canonical.CanonicalRequest{}, nil, items, "", "ex", nil)
 	assertResponsesBackendError(t, err)
 }
 
 func TestDecodeResponseBufferedRejectsMCPCallWithoutAdmittedConsumer(t *testing.T) {
 	raw := []byte(`{"id":"resp_1","model":"m","output":[{"type":"mcp_call","id":"mcp_1","name":"Read","arguments":"{\"path\":\"workspace/file.txt\"}"}]}`)
-	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", nil)
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil, true)
 	assertResponsesBackendError(t, err)
 }
 
@@ -33,9 +33,8 @@ func TestDecodeResponseStreamIgnoresUnknownOutputWithoutLosingKnownOutput(t *tes
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"program_output\",\"id\":\"po_1\",\"future\":true},{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 	assertResponsesStreamDrop(t, stream, 1)
@@ -46,9 +45,8 @@ func TestDecodeResponseStreamAllUnknownMessageContentRejectsEmptyResidual(t *tes
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"future_content\",\"value\":\"ignored\"}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	if err := drainResponsesStream(stream); err == nil {
 		t.Fatal("all-erased streamed message was reported as successful output")
@@ -60,9 +58,8 @@ func TestDecodeResponseStreamUsesTerminalFallbackWhenNoOutputLifecycleWasObserve
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"program_output\",\"id\":\"po_1\"},{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 }
@@ -72,9 +69,8 @@ func TestDecodeResponseStreamIgnoredOutputDoesNotSuppressTerminalFallback(t *tes
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"program_output\",\"id\":\"po_1\"}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"program_output\",\"id\":\"po_1\"},{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 	assertResponsesStreamDrop(t, stream, 1)
@@ -85,9 +81,8 @@ func TestDecodeResponseStreamUnknownLifecyclePreservesTerminalOutputText(t *test
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"future_output\",\"id\":\"future_1\"}}\n\n" +
 		responsesCompletedFrame(`[{"type":"future_output","id":"future_1"}]`, "visible answer")
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
@@ -118,9 +113,8 @@ func TestDecodeResponseStreamCompletedMessageDoesNotDuplicateTerminalOutputText(
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible answer\"}]}}\n\n" +
 		responsesCompletedFrame(`[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"visible answer"}]}]`, "visible answer")
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 }
@@ -131,9 +125,8 @@ func TestDecodeResponseStreamRejectsProviderMCPDeltaDespiteKnownSibling(t *testi
 		"event: response.mcp_call_arguments.done\ndata: {\"type\":\"response.mcp_call_arguments.done\",\"output_index\":0,\"item_id\":\"mcp_1\",\"arguments\":\"one\"}\n\n" +
 		responsesCompletedFrame(`[{"type":"mcp_call","id":"mcp_1","name":"Read","arguments":"one"},{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"visible"}]}]`, "")
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesBackendError(t, drainResponsesStream(stream))
 }
@@ -143,9 +136,8 @@ func TestDecodeResponseStreamAddedMessageRecoversFromTerminalOutput(t *testing.T
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 }
@@ -161,9 +153,8 @@ func TestDecodeResponseStreamAddedFunctionCallRecoversFromTerminalOutput(t *test
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"status\":\"completed\",\"arguments\":\"{}\"}]}}\n\n"
 	stream := decodeResponseStream(
-		request,
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 }
@@ -174,9 +165,8 @@ func TestDecodeResponseStreamDeduplicatesUnknownEventsByTypeAndItem(t *testing.T
 		"event: response.future.delta\ndata: {\"type\":\"response.future.delta\",\"item_id\":\"item_1\",\"delta\":\"b\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesProviderOutputItems(t, stream, 1)
 	if len(stream.Changes()) != 0 {
@@ -192,9 +182,8 @@ func TestDecodeResponseStreamRejectsProviderMCPCallDespiteKnownSibling(t *testin
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible\"}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 	stream := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-		"ex", nil,
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		"ex", nil, true,
 	)
 	assertResponsesBackendError(t, drainResponsesStream(stream))
 }

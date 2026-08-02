@@ -45,7 +45,7 @@ func TestDecodeResponseStreamReconcilesPartialMessageWithDoneAndTerminalSnapshot
 func TestDecodeResponseStreamTreatsResponseFailedAsBackendFailure(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"failed\",\"error\":{\"code\":\"model_error\",\"message\":\"review failed\"}}}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	_, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err == nil {
@@ -316,7 +316,7 @@ func TestDecodeResponseStreamDoesNotCompletePastUnresolvedFrontier(t *testing.T)
 	raw := responsesCreatedFrame() +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"message\",\"id\":\"msg_2\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"third\"}]}}\n\n" +
 		responsesCompletedFrame("[]", "")
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	for {
 		event, err := stream.Next(context.Background())
 		if err != nil {
@@ -433,7 +433,7 @@ func TestDecodeResponseStreamRecordsUnknownPartBeforeStreamedKnownPart(t *testin
 			`[{"type":"message","id":"msg_0","status":"completed","content":[{"type":"future_content"},{"type":"output_text","text":"after"}]}]`,
 			"",
 		)
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err != nil {
@@ -449,7 +449,7 @@ func TestDecodeResponseStreamRecordsUnknownPartBeforeStreamedKnownPart(t *testin
 
 func assertResponsesStreamFailsBeforeCompletion(t *testing.T, request canonical.CanonicalRequest, raw string) {
 	t.Helper()
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	completed := 0
 	for {
 		event, err := stream.Next(context.Background())
@@ -470,7 +470,7 @@ func assertResponsesStreamFailsBeforeCompletion(t *testing.T, request canonical.
 
 func assertResponsesDecoderBackendError(t *testing.T, request canonical.CanonicalRequest, raw string) {
 	t.Helper()
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == nil {
@@ -504,7 +504,7 @@ func TestDecodeResponseStreamRejectsPartialTextAtDoneSentinel(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n" +
 		"data: [DONE]\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err == nil {
@@ -535,7 +535,7 @@ func TestDecodeResponseStreamPreservesWebSearchCallWhenStatusIsUnknown(t *testin
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"kept\"}]}}\n\n" +
 		responsesCompletedFrame("[]", "")
 	changeLog := &recordingChanges{}
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", changeLog)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", changeLog, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_1", TargetID: "target", TargetVersion: 1})
 	envelope, err := canonical.ReadClosedEnvelope(context.Background(), bound, canonical.EnvResponse)
 	if err != nil {
@@ -574,7 +574,7 @@ func TestDecodeResponseStreamUnknownWebSearchStatusFailsAtSettlement(t *testing.
 	raw := responsesCreatedFrame() +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"future_status\",\"action\":{\"type\":\"search\",\"queries\":[\"q\"]}}}\n\n" +
 		responsesCompletedFrame("[]", "")
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_1", TargetID: "target", TargetVersion: 1})
 	_, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err == nil || !strings.Contains(err.Error(), "web-search call has no provider result") {
@@ -620,7 +620,7 @@ func TestDecodeResponseStreamRejectsMessageCheckpointForDifferentOpenIndexBefore
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_0\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n" +
 		responsesCompletedFrame("[]", "")
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	completed := 0
 	for {
 		event, err := stream.Next(context.Background())
@@ -763,7 +763,7 @@ func responsesCompletedFrame(output string, outputText string) string {
 
 func readResponsesStreamResponse(t *testing.T, request canonical.CanonicalRequest, raw string) *canonical.CanonicalResponse {
 	t.Helper()
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err != nil {
@@ -778,7 +778,7 @@ func readResponsesStreamResponse(t *testing.T, request canonical.CanonicalReques
 
 func assertResponsesStreamFails(t *testing.T, request canonical.CanonicalRequest, raw string) {
 	t.Helper()
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
 	if _, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse); err == nil {
 		t.Fatal("Responses stream completed successfully")

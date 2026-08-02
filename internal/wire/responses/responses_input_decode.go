@@ -32,6 +32,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 		return nil, canonical.BadRequest("responses request input is invalid")
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(items))
+	pendingHostedDiscovery := make([]canonical.ToolCallID, 0)
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
@@ -120,7 +121,14 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, err
 			}
-			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, item.Name, canonical.ToolKindFunction)
+			var toolKey canonical.ToolKey
+			if strings.TrimSpace(item.Namespace) == "" {
+				toolKey, err = canonical.ResolveHistoricalToolKeyByName(tools, item.Name, canonical.ToolKindFunction)
+			} else {
+				var resolved canonical.ToolDeclaration
+				resolved, err = resolveResponsesFunctionCall(tools, item.Namespace, item.Name)
+				toolKey = resolved.Key()
+			}
 			if err != nil {
 				return nil, canonical.BadRequest("responses request function_call has an invalid tool identity")
 			}
@@ -195,7 +203,15 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if !ok {
 				return nil, canonical.BadRequest("responses tool_search_call execution is invalid")
 			}
-			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			wireIDNull := strings.TrimSpace(item.CallID) == ""
+			if wireIDNull && executor != canonical.DiscoveryExecutorProvider {
+				return nil, canonical.BadRequest("responses client tool_search_call requires call_id")
+			}
+			callIDText := strings.TrimSpace(item.CallID)
+			if wireIDNull {
+				callIDText = fmt.Sprintf("responses_hosted_%d", idx)
+			}
+			callID, err := canonical.NewToolCallID(callIDText)
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_call requires call_id")
 			}
@@ -203,11 +219,14 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_call arguments are invalid")
 			}
-			call, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(arguments), executor)
+			call, err := canonical.NewToolDiscoveryCallItemWithResponses(callID, canonical.NewJSONObjectToolInput(arguments), executor, wireIDNull)
 			if err != nil {
 				return nil, err
 			}
 			decoded = append(decoded, call)
+			if wireIDNull {
+				pendingHostedDiscovery = append(pendingHostedDiscovery, callID)
+			}
 		case "tool_search_output":
 			executor, ok := decodeResponsesToolExecutor(item.Execution)
 			if !ok {
@@ -216,7 +235,19 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if strings.TrimSpace(item.Status) != "completed" {
 				return nil, canonical.BadRequest("responses tool_search_output must be completed")
 			}
-			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			wireIDNull := strings.TrimSpace(item.CallID) == ""
+			if wireIDNull && executor != canonical.DiscoveryExecutorProvider {
+				return nil, canonical.BadRequest("responses client tool_search_output requires call_id")
+			}
+			callIDText := strings.TrimSpace(item.CallID)
+			if wireIDNull {
+				if len(pendingHostedDiscovery) == 0 {
+					return nil, canonical.BadRequest("responses hosted tool_search_output has no prior call")
+				}
+				callIDText = pendingHostedDiscovery[0].String()
+				pendingHostedDiscovery = pendingHostedDiscovery[1:]
+			}
+			callID, err := canonical.NewToolCallID(callIDText)
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output requires call_id")
 			}
@@ -231,7 +262,11 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output tools are invalid")
 			}
-			result, err := canonical.NewToolDiscoveryResultItem(callID, set, executor)
+			refinements, err := canonical.NewResponsesToolRefinements(set, projected.deferred)
+			if err != nil {
+				return nil, canonical.BadRequest("responses tool_search_output deferred tools are invalid")
+			}
+			result, err := canonical.NewToolDiscoveryResultItemWithResponsesWireID(callID, set, executor, refinements, wireIDNull)
 			if err != nil {
 				return nil, err
 			}
@@ -265,16 +300,29 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				continue
 			}
 			callID := strings.TrimSpace(item.ID) // swobu:io-string source=boundary
+			var refinement *canonical.ResponsesWebSearchRefinement
 			if callID == "" {
 				// Codex durable rollouts omit provider presentation IDs when they
 				// replay completed search items after a client or daemon restart.
-				// Canonical pairing still needs a request-local stable identity.
+				// Canonical pairing still needs a request-local stable identity, but
+				// that synthetic correlation must stay internal: it is never emitted
+				// as a Responses item.id. The refinement stays nil so re-encode omits
+				// id, matching the idless form Codex originally sent.
 				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsToolCallCallID, compat.Approximation, responsesInputSubject(idx, "id")); err != nil {
 					return nil, err
 				}
 				callID = openaiwire.GeneratedToolUseID(idx, 0)
+			} else {
+				// A client-supplied id is the exact Responses item identity. It is
+				// preserved verbatim on re-encode and is distinct from the canonical
+				// correlation token; when both are present they carry the same value.
+				preserved, err := canonical.NewResponsesWebSearchRefinement(canonical.ResponsesItemID(callID))
+				if err != nil {
+					return nil, canonical.BadRequest("responses web-search item id is invalid")
+				}
+				refinement = &preserved
 			}
-			lifecycle, err := decodeResponsesWebSearchLifecycle(callID, rawAction, state)
+			lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(callID, rawAction, state, changeLog, exchangeID, canonical.RequestItemOccurrence(uint32(idx)), false, refinement)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request web-search history is invalid")
 			}
@@ -332,6 +380,7 @@ func mergeResponsesToolDeclarations(current, added []canonical.ToolDeclaration) 
 
 type responsesAdditionalToolsProjection struct {
 	declarations []canonical.ToolDeclaration
+	deferred     []canonical.ToolKey
 	wireCount    int
 }
 
@@ -348,12 +397,13 @@ func decodeResponsesAdditionalTools(raw json.RawMessage, subjectPrefix string, f
 	if err := json.Unmarshal(trimmed, &wireTools); err != nil {
 		return responsesAdditionalToolsProjection{}, canonical.BadRequest("responses request additional_tools tools are invalid")
 	}
-	decoded, err := decodeResponsesTools(wireTools, subjectPrefix, feature, changeLog, exchangeID)
+	decoded, deferred, err := decodeResponsesTools(wireTools, subjectPrefix, feature, changeLog, exchangeID)
 	if err != nil {
 		return responsesAdditionalToolsProjection{}, err
 	}
 	return responsesAdditionalToolsProjection{
 		declarations: append([]canonical.ToolDeclaration(nil), decoded...),
+		deferred:     append([]canonical.ToolKey(nil), deferred...),
 		wireCount:    len(wireTools),
 	}, nil
 }

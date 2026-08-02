@@ -30,7 +30,7 @@ func TestResponsesReasoningContextDecodesAndEncodesExactly(t *testing.T) {
 			if !present || got != value {
 				t.Fatalf("decoded context = (%q,%t), want (%q,true)", got, present, value)
 			}
-			document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+			document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,7 +38,7 @@ func TestResponsesReasoningContextDecodesAndEncodesExactly(t *testing.T) {
 				t.Fatalf("encoded = %s", document.RawBytes())
 			}
 			result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(
-				wire.ProviderEncodeInput{Request: decoded.Request.Request},
+				wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 				delivery.BufferedDelivery(),
 				"exchange",
 			)
@@ -102,7 +102,7 @@ func TestResponsesReasoningRequestNormalizesToMinimalControls(t *testing.T) {
 	if !ok || compute.Kind() != canonical.ReasoningAutomatic {
 		t.Fatalf("compute = %#v", compute)
 	}
-	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestResponsesPreservesClientEncryptedContinuation(t *testing.T) {
 func TestResponsesReasoningSummaryIsAtomic(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
 	raw := []byte(`{"id":"resp","model":"gpt","status":"completed","output":[{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"brief"}]}]}`)
-	stream, err := decodeResponseBuffered(context.Background(), request, raw, "ex", nil)
+	stream, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), raw, "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestResponsesReasoningSummaryIsAtomic(t *testing.T) {
 
 func TestResponsesEmptyReasoningArtifactsAreIgnored(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
-	buffered, err := decodeResponseBuffered(context.Background(), request, []byte(`{"id":"resp","model":"gpt","status":"completed","output":[{"type":"reasoning","id":"rs_1","status":"completed","summary":[]}]}`), "ex", nil)
+	buffered, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), []byte(`{"id":"resp","model":"gpt","status":"completed","output":[{"type":"reasoning","id":"rs_1","status":"completed","summary":[]}]}`), "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestResponsesEmptyReasoningArtifactsAreIgnored(t *testing.T) {
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"in_progress\",\"summary\":[]}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\",\"summary\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"completed\",\"output\":[]}}\n\n"
-	assertNoReasoningItem(t, decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil))
+	assertNoReasoningItem(t, decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true))
 }
 
 func assertNoReasoningItem(t *testing.T, stream canonical.ResponseStream) {
@@ -213,7 +213,7 @@ func TestResponsesContinuationUsesProviderHandle(t *testing.T) {
 			SwobuID: "resp", Responses: &canonical.ResponsesContinuation{ProviderResponseID: "provider_resp", TargetID: "target", TargetVersion: 1},
 		},
 	})
-	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

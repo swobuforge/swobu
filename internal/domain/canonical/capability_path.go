@@ -38,6 +38,7 @@ const (
 	RequestToolsDescription                 CapabilityPath = "request.tools.description"
 	RequestToolsSchema                      CapabilityPath = "request.tools.schema"
 	RequestToolsSchemaStrict                CapabilityPath = "request.tools.schema.strict"
+	RequestToolsVisibility                  CapabilityPath = "request.tools.visibility"
 	RequestToolPolicy                       CapabilityPath = "request.tool_policy"
 	RequestToolCallBatch                    CapabilityPath = "request.tool_call_batch"
 	RequestOutputFormat                     CapabilityPath = "request.output_format"

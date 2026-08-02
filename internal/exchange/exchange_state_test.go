@@ -317,7 +317,7 @@ func TestReducerRetriesOnceBeforeRouteFailover(t *testing.T) {
 }
 
 func TestReducerDoesNotReplayNativeEffectAfterAmbiguousDelivery(t *testing.T) {
-	key, err := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	key, err := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestReducerDoesNotReplayNativeEffectAfterAmbiguousDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	namespace, err := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	namespace, err := canonical.NewMCPToolSource(key, "Mail", source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestProviderReplaySafetyUsesFinalCanonicalToolOwnership(t *testing.T) {
 		t.Fatalf("web-search safety = %d, %v", safety, err)
 	}
 
-	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "mail")
+	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
 	source, _ := canonical.NewMCPConnectorSource(
 		"connector_mail",
 		canonical.Unspecified[[]string](),
@@ -437,7 +437,7 @@ func TestProviderReplaySafetyUsesFinalCanonicalToolOwnership(t *testing.T) {
 		canonical.MCPLoadingEager,
 		canonical.Unspecified[[]string](),
 	)
-	namespace, _ := canonical.NewMCPToolNamespace(key, "Mail", source, nil)
+	namespace, _ := canonical.NewMCPToolSource(key, "Mail", source, nil)
 	nativeTools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
 	nativeRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),

@@ -246,6 +246,7 @@ func replaceRequestItems(request canonical.CanonicalRequest, items []canonical.C
 		Model: request.ModelField(), Items: items, PreviousResponse: previousPointer,
 		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
 		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
+		Responses: request.Responses(),
 	})
 }
 
@@ -268,7 +269,7 @@ func replaceComputeControls(request canonical.CanonicalRequest, controls canonic
 		Model: request.ModelField(), Items: request.Items(),
 		PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(), Controls: controls, Reasoning: reasoning,
-		OutputFormat: request.OutputFormatField(),
+		OutputFormat: request.OutputFormatField(), Responses: request.Responses(),
 	})
 }
 
@@ -285,6 +286,7 @@ func withoutPreviousResponse(request canonical.CanonicalRequest) (canonical.Cano
 		Controls:      request.Controls(),
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  canonical.Specify(request.OutputFormat()),
+		Responses:     request.Responses(),
 	}), nil
 }
 
@@ -297,6 +299,7 @@ func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonica
 		Controls:      request.Controls(),
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  request.OutputFormatField(),
+		Responses:     request.Responses(),
 	})
 }
 
@@ -310,6 +313,7 @@ func nativeDelta(previous canonical.CanonicalRequest, current canonical.Canonica
 		Controls:         current.Controls(),
 		Reasoning:        current.Reasoning(),
 		OutputFormat:     current.OutputFormatField(),
+		Responses:        current.Responses(),
 	})
 }
 
@@ -331,6 +335,7 @@ func materialize(previous Checkpoint, current canonical.CanonicalRequest) (canon
 		Controls:      current.Controls(),
 		Reasoning:     current.Reasoning(),
 		OutputFormat:  current.OutputFormatField(),
+		Responses:     current.Responses(),
 	}), nil
 }
 

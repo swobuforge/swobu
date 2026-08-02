@@ -9,31 +9,32 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix string, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix string, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, []canonical.ToolKey, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
+	deferred := make([]canonical.ToolKey, 0)
 	seen := map[string]struct{}{}
 	for idx, tool := range tools {
-		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: idx}, feature, changeLog, exchangeID)
+		decls, err := decodeResponsesToolNode(tool, responsesToolNamespaceContext{subjectPrefix: subjectPrefix, index: idx}, feature, changeLog, exchangeID, &deferred)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, decl := range decls {
 			id := decl.Key().String()
 			if _, ok := seen[id]; ok {
-				return nil, canonical.BadRequest("responses request tool declarations are ambiguous")
+				return nil, nil, canonical.BadRequest("responses request tool declarations are ambiguous")
 			}
 			seen[id] = struct{}{}
 			out = append(out, decl)
 		}
 	}
-	return out, nil
+	return out, deferred, nil
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes Responses tool variants.
-func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string, deferred *[]canonical.ToolKey) ([]canonical.ToolDeclaration, error) {
 	kind := strings.ToLower(strings.TrimSpace(tool.Type)) // swobu:io-string source=domain
 	if feature == canonical.ResponseItemsKind {
 		if err := admitResponsesProviderOutputChild(kind); err != nil {
@@ -52,12 +53,15 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 	}
 	switch kind {
 	case "namespace":
-		return decodeResponsesNamespaceTool(tool, ctx, feature, changeLog, exchangeID)
+		return decodeResponsesNamespaceTool(tool, ctx, feature, changeLog, exchangeID, deferred)
 	case "function":
 		if len(ctx.path) > 0 {
 			decl, err := decodeResponsesNestedFunctionTool(tool, ctx)
 			if err != nil {
 				return nil, err
+			}
+			if tool.DeferLoading != nil && *tool.DeferLoading {
+				*deferred = append(*deferred, decl.Key())
 			}
 			return []canonical.ToolDeclaration{decl}, nil
 		}
@@ -65,8 +69,14 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 		if err != nil {
 			return nil, err
 		}
+		if tool.DeferLoading != nil && *tool.DeferLoading {
+			*deferred = append(*deferred, decl.Key())
+		}
 		return []canonical.ToolDeclaration{decl}, nil
 	case "custom":
+		if tool.DeferLoading != nil && *tool.DeferLoading {
+			return nil, canonical.BadRequest("responses custom tools cannot defer loading")
+		}
 		if len(ctx.path) > 0 {
 			decl, err := decodeResponsesNestedCustomTool(tool, ctx)
 			if err != nil {
@@ -179,7 +189,7 @@ func dropResponsesWebSearchOperation(ctx responsesToolNamespaceContext, feature 
 	return canonical.ToolDeclaration{}, false, nil
 }
 
-func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string, deferred *[]canonical.ToolKey) ([]canonical.ToolDeclaration, error) {
 	name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
 	if name == "" {
 		return nil, canonical.BadRequest("responses request tool namespace declarations require a name")
@@ -193,7 +203,7 @@ func decodeResponsesNamespaceTool(tool responsesToolDefinitionDTO, ctx responses
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tool.Tools))
 	for idx, child := range tool.Tools {
-		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, subjectPrefix: nextCtx.subjectPrefix, index: idx}, feature, changeLog, exchangeID)
+		decls, err := decodeResponsesToolNode(child, responsesToolNamespaceContext{path: nextCtx.path, subjectPrefix: nextCtx.subjectPrefix, index: idx}, feature, changeLog, exchangeID, deferred)
 		if err != nil {
 			return nil, err
 		}

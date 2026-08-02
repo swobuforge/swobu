@@ -37,8 +37,12 @@ func TestOpenRouterAutomaticReasoningIsExact(t *testing.T) {
 
 func TestOpenRouterRequestMutationPreservesRawJSONIntegers(t *testing.T) {
 	request := canonicaltest.LargeIntegerRequest(t, "model")
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend := openRouterBackend(t, request.Model())
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +85,31 @@ func TestOpenRouterOwnsFinalWebSearchDialectAcrossProtocols(t *testing.T) {
 				t.Fatalf("OpenRouter-specific choice missing from JSON = %s", document.RawBytes())
 			}
 		})
+	}
+}
+
+func TestOpenRouterResponsesUsesFlatNamespaceGrammar(t *testing.T) {
+	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
+	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	namespaceKey, _ := canonical.NewRequestToolKey(canonical.ToolKindNamespace, "workspace")
+	namespace, _ := canonical.NewToolNamespace(namespaceKey, "Workspace", []canonical.ToolDeclaration{child})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, namespace), canonicaltest.Message(t, canonical.MessageRoleUser, "read")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := openRouterBackendForProtocol(t, "model", protocolkind.Responses)
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(document.RawBytes())
+	wireName, _ := names.WireName(childKey)
+	if strings.Contains(raw, `"type":"namespace"`) || !strings.Contains(raw, `"name":"`+wireName+`"`) {
+		t.Fatalf("OpenRouter flat Responses document = %s", raw)
 	}
 }
 
@@ -131,8 +160,12 @@ func TestOpenRouterCodecOwnsReasoningRequestAndOpaqueReplay(t *testing.T) {
 		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{reasoning, assistant},
 		Controls: controls, Reasoning: reasoningControls,
 	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend := openRouterBackend(t, request.Model())
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,8 +208,12 @@ func TestOpenRouterOpaqueReplayFollowsMixedAssistantTextAndToolTurns(t *testing.
 			result, reasoningTwo, messageItem(t, canonical.MessageRoleAssistant, "second answer"),
 		},
 	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend := openRouterBackend(t, request.Model())
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

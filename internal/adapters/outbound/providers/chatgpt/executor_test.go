@@ -111,7 +111,11 @@ func executeTestProviderRequest(ctx context.Context, exec BackendAdapter, req te
 	if err != nil {
 		return nil, err
 	}
-	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, Delivery: req.Contract.ProviderDelivery})
+	names, _, err := provider.BuildAttemptToolNames(req.Request)
+	if err != nil {
+		return nil, err
+	}
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: req.Request, ToolNames: names, Delivery: req.Contract.ProviderDelivery})
 	if err != nil {
 		return nil, err
 	}

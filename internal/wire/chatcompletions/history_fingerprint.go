@@ -145,7 +145,7 @@ func (s *chatCompletionsResponseHistoryState) appendItem(item canonical.Canonica
 		// contract and therefore absent from its reconstructed history value.
 		return nil
 	default:
-		return canonical.InternalError("Chat Completions response history received an unprojected canonical item kind")
+		return canonical.InternalError("Chat Completions response history received an unsupported canonical item kind")
 	}
 }
 

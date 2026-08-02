@@ -86,6 +86,42 @@ type RebasedRequest struct {
 	Request  canonical.CanonicalRequest
 }
 
+// ToolNames is one provider attempt's immutable mapping between semantic tool
+// identity and provider-facing labels. Wire codecs consume it only at final
+// encode and initial decode boundaries.
+type ToolNames interface {
+	WireName(canonical.ToolKey) (string, error)
+	CanonicalKey(canonical.ToolKind, string) (canonical.ToolKey, bool)
+}
+
+// EncodeToolName projects one model-referenceable callable at the wire edge.
+func EncodeToolName(names ToolNames, key canonical.ToolKey) (string, error) {
+	if key.Kind() == canonical.ToolKindWebSearch || key.Kind() == canonical.ToolKindDiscovery {
+		return key.Name(), nil
+	}
+	if names == nil {
+		return "", canonical.InternalError("provider wire encoder is missing attempt tool names")
+	}
+	return names.WireName(key)
+}
+
+// DecodeToolKey resolves one provider-returned callable label and validates
+// that the referenced declaration is available in the semantic decode context.
+func DecodeToolKey(names ToolNames, environment canonical.ToolEnvironment, kind canonical.ToolKind, name string) (canonical.ToolKey, error) {
+	if names == nil {
+		return canonical.ToolKey{}, canonical.InternalError("provider wire decoder is missing attempt tool names")
+	}
+	key, ok := names.CanonicalKey(kind, name)
+	if !ok {
+		return canonical.ToolKey{}, canonical.NewBackendError("", 0, "provider response references an unknown tool name", "")
+	}
+	declaration, ok := environment.Lookup(key)
+	if !ok || declaration.Kind() != kind {
+		return canonical.ToolKey{}, canonical.NewBackendError("", 0, "provider response references a tool unavailable in the decode context", "")
+	}
+	return key, nil
+}
+
 // CompletionState is the write-once lifecycle of streamed response
 // fingerprinting.
 type CompletionState uint8
@@ -198,6 +234,8 @@ func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 // ProviderEncodeInput is the declarative canonical input for provider encoders.
 type ProviderEncodeInput struct {
 	Request canonical.CanonicalRequest
+	// ToolNames is transient representation state for this provider attempt.
+	ToolNames ToolNames
 	// MCPAccess is transient request state for native MCP projection.
 	MCPAccess mcp.Access
 }

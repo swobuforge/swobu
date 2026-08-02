@@ -19,8 +19,11 @@
 // legal inline carriers, remain pure, and solely own exact target-grammar
 // projection. Successful projection returns non-exact semantic changes as
 // values; target-local incompatibility remains a typed error for exchange.
-// Attempt-local tool allocation reserves legal literal names before
-// assigning salted bounded aliases, so every valid tool set is projectable.
+// AttemptToolNames owns one immutable canonical-key to wire-name bijection for
+// an attempt. It preserves safe request-level literals and gives every generated
+// alias a readable semantic prefix plus a stable digest of the complete canonical
+// identity. Generic naming never infers transport provenance from namespace
+// text; typed transformations remove transport-only structure before this edge.
 // Protocol-specific response identity stays in typed canonical native handles.
 // Session resolution materializes unfinished tool-turn compute continuity into
 // the effective canonical request before this boundary. Routing-owned target

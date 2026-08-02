@@ -17,7 +17,7 @@ import (
 func TestChatResponseUnknownOnlyCallCannotSatisfyToolCallsFinish(t *testing.T) {
 	var changes []compat.Change
 	raw := []byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"type":"future_call","id":""}]},"finish_reason":"tool_calls"}]}`)
-	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, raw, "ex", &changes); err == nil {
+	if _, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", &changes); err == nil {
 		t.Fatal("unknown-only tool call satisfied tool_calls finish reason")
 	}
 	if len(changes) != 1 || changes[0].Kind != compat.Omission {
@@ -34,7 +34,7 @@ func TestChatStreamRejectsContradictoryTypeAfterToolAdmission(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\"}}]}}]}\n\n" +
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"future_call\"}]}}]}\n\n"
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == nil {
@@ -68,7 +68,7 @@ func TestChatStreamRejectsReclassifiedUnknownToolOccurrence(t *testing.T) {
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"future_call\"}]}}]}\n\n" +
 				"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"visible\",\"tool_calls\":[{\"index\":0,\"type\":\"" + test.lateType + "\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"stop\"}]}\n\n"
-			stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			for {
 				_, err := stream.Next(context.Background())
 				if err == nil {
@@ -89,7 +89,7 @@ func TestChatStreamRejectsReclassifiedUnknownToolOccurrence(t *testing.T) {
 func TestChatStreamKeepsExactUnknownToolOccurrenceErased(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"future_call\"}]}}]}\n\n" +
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"visible\",\"tool_calls\":[{\"index\":0,\"type\":\"future_call\",\"id\":\"ignored\"}]},\"finish_reason\":\"stop\"}]}\n\n"
-	stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	for {
 		_, err := stream.Next(context.Background())
 		if err == io.EOF {
@@ -112,7 +112,8 @@ func TestChatStreamKeepsExactUnknownToolOccurrenceErased(t *testing.T) {
 
 func TestChatStreamDoesNotEraseKnownCustomToolCall(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"visible\",\"tool_calls\":[{\"index\":0,\"type\":\"custom\",\"id\":\"call_1\",\"custom\":{\"name\":\"shell\",\"input\":\"echo hi\"}}]},\"finish_reason\":\"stop\"}]}\n\n"
-	stream := decodeResponseStream(chatStreamCustomRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	request := chatStreamCustomRequest(t)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	found := false
 	for {
 		event, err := stream.Next(context.Background())
@@ -143,7 +144,7 @@ func TestChatStreamDoesNotEraseKnownCustomToolCall(t *testing.T) {
 
 func TestChatStreamingCustomDeclarationReachesExactFragmentedCall(t *testing.T) {
 	request := chatStreamCustomRequest(t)
-	document, err := LowerProviderRequestDocument(request, delivery.StreamingDelivery(delivery.FramingSSE), nil, "ex")
+	document, err := LowerProviderRequestDocument(request, testAttemptToolNames(request), delivery.StreamingDelivery(delivery.FramingSSE), nil, "ex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestChatBufferedRejectsIncompleteOrContradictoryToolCallUnion(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw := `{"id":"chat_1","model":"m","choices":[{"message":{"content":"visible","tool_calls":[` + test.call + `]},"finish_reason":"stop"}]}`
-			if _, err := decodeResponseBuffered(context.Background(), request, []byte(raw), "ex", nil); err == nil || !strings.Contains(err.Error(), "backend error") {
+			if _, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), []byte(raw), "ex", nil); err == nil || !strings.Contains(err.Error(), "backend error") {
 				t.Fatalf("buffered error = %v, want backend-origin malformed union", err)
 			}
 		})
@@ -242,7 +243,7 @@ func TestChatStreamRejectsConflictingToolIdentity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\"}}]}}]}\n\n" +
 				"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[" + test.second + "]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-			stream := decodeResponseStream(chatStreamFunctionRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(chatStreamFunctionRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			assertChatStreamBackendError(t, stream)
 		})
 	}
@@ -269,7 +270,7 @@ func TestChatStreamRejectsConflictingResponseIdentity(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[]}\n\n" +
 				"data: " + test.second[:len(test.second)-1] + ",\"choices\":[]}\n\n"
-			stream := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			assertChatStreamBackendError(t, stream)
 		})
 	}
@@ -295,7 +296,7 @@ func TestChatStreamCompletesPreviouslyAbsentResponseIdentity(t *testing.T) {
 
 func TestChatStreamRejectsTerminallyUnresolvedToolCall(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"visible\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\"}]},\"finish_reason\":\"stop\"}]}\n\n"
-	stream := decodeResponseStream(chatStreamFunctionRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(chatStreamFunctionRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertChatStreamBackendError(t, stream)
 }
 
@@ -320,7 +321,7 @@ func TestChatStreamRejectsBodyBranchChangeWithoutExplicitType(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[" + test.first + "]}}]}\n\n" +
 				"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[" + test.second + "]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-			stream := decodeResponseStream(chatStreamMixedToolRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(chatStreamMixedToolRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			assertChatStreamBackendError(t, stream)
 		})
 	}
@@ -328,13 +329,13 @@ func TestChatStreamRejectsBodyBranchChangeWithoutExplicitType(t *testing.T) {
 
 func TestChatStreamRejectsUnobservedToolIndexGap(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-	stream := decodeResponseStream(chatStreamFunctionRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(chatStreamFunctionRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertChatStreamBackendError(t, stream)
 }
 
 func TestChatStreamRejectsNegativeToolIndex(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":-1,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-	stream := decodeResponseStream(chatStreamFunctionRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(chatStreamFunctionRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	assertChatStreamBackendError(t, stream)
 }
 
@@ -425,13 +426,13 @@ func TestChatBufferedAndStreamedCustomCallsAreSemanticallyEquivalent(t *testing.
 			"finish_reason":"tool_calls"
 		}]
 	}`)
-	buffered, err := decodeResponseBuffered(context.Background(), request, bufferedRaw, "ex-buffered", nil)
+	buffered, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), bufferedRaw, "ex-buffered", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	streamedRaw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"custom\",\"id\":\"call_1\",\"custom\":{\"name\":\"shell\",\"input\":\" \\t\"}}]}}]}\n\n" +
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"visible\",\"tool_calls\":[{\"index\":0,\"custom\":{\"input\":\"patch\\n \"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-	streamed := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamedRaw))}, "ex-streamed", nil)
+	streamed := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamedRaw))}, "ex-streamed", nil)
 	bufferedItems := drainChatCompletedItems(t, buffered)
 	streamedItems := drainChatCompletedItems(t, streamed)
 	assertEquivalentChatResponseItems(t, bufferedItems, streamedItems)
@@ -456,7 +457,7 @@ func TestChatStreamRejectsEveryToolKindReclassification(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"" + test.firstType + "\"" + test.firstBody + "}]}}]}\n\n" +
 				"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"" + test.secondType + "\"}]}}]}\n\n"
-			stream := decodeResponseStream(chatStreamMixedToolRequest(t), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(chatStreamMixedToolRequest(t), nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			assertChatStreamBackendError(t, stream)
 		})
 	}
@@ -481,7 +482,7 @@ func TestChatMalformedKnownToolCallsAreBackendErrors(t *testing.T) {
 		`{"id":"chat_1","model":"m","choices":[{"message":{"tool_calls":[{"type":"function","id":"call_1","function":{"name":"search","arguments":"{"}}]},"finish_reason":"tool_calls"}]}`,
 	}
 	for _, raw := range bufferedCases {
-		if _, err := decodeResponseBuffered(context.Background(), request, []byte(raw), "ex", nil); err == nil || !strings.Contains(err.Error(), "backend error") {
+		if _, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), []byte(raw), "ex", nil); err == nil || !strings.Contains(err.Error(), "backend error") {
 			t.Fatalf("buffered error = %v, want backend-origin malformed known call", err)
 		}
 	}
@@ -490,7 +491,7 @@ func TestChatMalformedKnownToolCallsAreBackendErrors(t *testing.T) {
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
 	}
 	for _, raw := range streamCases {
-		stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+		stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 		assertChatStreamBackendError(t, stream)
 	}
 }
@@ -525,7 +526,7 @@ func TestChatStreamCompactsOrdinalsAfterErasedToolCalls(t *testing.T) {
 			survivingIndex := strings.Count(test.erasedCalls, `"index"`)
 			raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{" + test.firstDelta + "\"tool_calls\":[" + test.erasedCalls + "]}}]}\n\n" +
 				fmt.Sprintf("data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":%d,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n", survivingIndex)
-			stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+			stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 			var ordinals []uint32
 			for {
 				event, err := stream.Next(context.Background())
@@ -580,7 +581,7 @@ func TestChatStreamCompactsUnknownAndKnownCallsInProviderIndexOrder(t *testing.T
 	request := chatStreamFunctionRequests(t, "a", "b")
 	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"future_call\"},{\"index\":2,\"type\":\"function\",\"id\":\"call_b\",\"function\":{\"name\":\"b\",\"arguments\":\"{}\"}}]}}]}\n\n" +
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"type\":\"function\",\"id\":\"call_a\",\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	var completed []chatCompletedItem
 	for {
 		event, err := stream.Next(context.Background())
@@ -640,7 +641,7 @@ func drainChatCompletedItems(t *testing.T, stream canonical.ResponseStream) []ch
 
 func drainChatStreamCompletedItems(t *testing.T, request canonical.CanonicalRequest, raw string) []chatCompletedItem {
 	t.Helper()
-	stream := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
 	return drainChatCompletedItems(t, stream)
 }
 

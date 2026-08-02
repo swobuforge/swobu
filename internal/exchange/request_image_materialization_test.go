@@ -417,7 +417,7 @@ func TestMaterializeRequestImagesKeepsSourceRequestAndProducesInlineCarrier(t *t
 	if resolved.BindingCount() != 1 || resolved.AssetCount() != 1 {
 		t.Fatalf("resolved media = %#v", resolved)
 	}
-	document, err := messages.EncodeCarrierWithChanges(prepared, delivery.BufferedDelivery(), nil, "")
+	document, err := messages.EncodeCarrierWithChanges(prepared, nil, delivery.BufferedDelivery(), nil, "")
 	if err != nil {
 		t.Fatalf("Bedrock-compatible Messages encoding rejected prepared URL image: %v", err)
 	}

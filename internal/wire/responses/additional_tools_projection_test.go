@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -56,7 +57,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	}
 
 	responsesDocument, err := responses.EncodeCarrierWithChanges(
-		responses.EncodeInput{Request: request}, delivery.BufferedDelivery(), nil, "", responses.EncodeOptions{},
+		responses.EncodeInput{Request: request, ToolNames: mustAttemptNames(t, request)}, delivery.BufferedDelivery(), nil, "", responses.EncodeOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	}
 
 	chatDocument, err := chatcompletions.EncodeCarrierWithChanges(
-		request, delivery.BufferedDelivery(), nil, "",
+		request, mustAttemptNames(t, request), delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -75,12 +76,21 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	assertProjectedToolCarrier(t, chatDocument.RawBytes(), "tools")
 
 	messagesDocument, err := messages.EncodeCarrierWithChanges(
-		request, delivery.BufferedDelivery(), nil, "",
+		request, mustAttemptNames(t, request), delivery.BufferedDelivery(), nil, "",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertProjectedToolCarrier(t, messagesDocument.RawBytes(), "tools")
+}
+
+func mustAttemptNames(t *testing.T, request canonical.CanonicalRequest) provider.AttemptToolNames {
+	t.Helper()
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return names
 }
 
 func assertProjectedToolCarrier(t *testing.T, raw []byte, field string) {

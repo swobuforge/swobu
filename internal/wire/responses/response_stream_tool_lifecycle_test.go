@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -29,7 +30,7 @@ func TestDecodeResponseStream_PreservesMultiDeltaMessageAfterExpandedWebSearch(t
 	providerWire.WriteString("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":4,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"first second\",\"annotations\":[]}]}}\n\n")
 	providerWire.WriteString("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_provider\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n")
 
-	decoded := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(providerWire.String()))}, "exchange", nil)
+	decoded := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(providerWire.String()))}, "exchange", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(decoded, canonical.ResponseBinding{SwobuID: "resp_client"})
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
 	if err != nil {
@@ -56,18 +57,24 @@ func TestDecodeResponseStream_PreservesMultiDeltaMessageAfterExpandedWebSearch(t
 func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t *testing.T) {
 	t.Parallel()
 
-	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"store\":true,\"output\":[]}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"call_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"Bash\"}}\n\n" +
 		"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"item_id\":\"call_1\",\"call_id\":\"call_1\",\"name\":\"Bash\",\"delta\":\"{\\\"command\\\":\\\"cat fixture\\\"}\"}\n\n" +
 		"event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"item_id\":\"call_1\",\"call_id\":\"call_1\",\"name\":\"Bash\",\"arguments\":\"{\\\"command\\\":\\\"cat fixture\\\"}\"}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"call_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"cat fixture\\\"}\"}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Bash"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))}})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
 	reader := decodeResponseStream(
-		canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "Bash"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))}}),
+		request,
+		names,
 		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_stream_tool_lifecycle",
-		nil,
+		nil, true,
 	)
 
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
@@ -95,15 +102,14 @@ func TestDecodeResponseStream_DoesNotReopenAnonymousToolCallOnSecondDoneFrame(t 
 func TestDecodeResponseStream_IgnoresDuplicateResponseCreated(t *testing.T) {
 	t.Parallel()
 
-	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"store\":true,\"output\":[]}}\n\n" +
 		"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 
 	reader := decodeResponseStream(
-		canonical.CanonicalRequest{},
-		carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+		canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
 		"ex_stream_duplicate_created",
-		nil,
+		nil, true,
 	)
 
 	starts := 0
@@ -166,7 +172,7 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bufferedReader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, buffered.Document.RawBytes(), "buffered", nil)
+	bufferedReader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, buffered.Document.RawBytes(), "buffered", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +204,7 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 		t.Fatalf("web search was projected as a function call: %s", wire)
 	}
 
-	decoded := decodeResponseStream(canonical.CanonicalRequest{}, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(wire))}, "replay", nil)
+	decoded := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(wire))}, "replay", nil, true)
 	assertResponsesWebSearchSemantics(t, decoded, callID)
 }
 
@@ -251,7 +257,7 @@ func TestResponsesRoundTripCompletesSourceUndisclosedSearchBeforeAnswer(t *testi
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"delta\":\"Answer\"}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Answer\",\"annotations\":[]}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_provider\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
-	decoded := decodeResponseStream(request, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(providerWire))}, "exchange", nil)
+	decoded := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(providerWire))}, "exchange", nil, true)
 	bound := canonical.NewBoundResponseIdentityStream(decoded, canonical.ResponseBinding{SwobuID: "resp_client"})
 	validated := canonical.NewValidatedResponseStream(bound)
 	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), request, validated, delivery.StreamingDelivery(delivery.FramingSSE))

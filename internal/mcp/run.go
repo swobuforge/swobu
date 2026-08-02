@@ -26,12 +26,12 @@ type binding struct {
 
 type sourceResolution struct {
 	session      *session
-	catalog      canonical.ToolNamespace
+	catalog      canonical.MCPToolSource
 	catalogBytes int
 	changes      []compat.Change
 }
 
-type sourceResolver func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error)
+type sourceResolver func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error)
 
 // Run is one exchange's fully opened MCP aggregate. It privately owns source
 // availability, SDK sessions, execution bindings, the attempt transformation, and
@@ -82,7 +82,7 @@ func openWith(
 	}
 	activeSources := 0
 	for _, source := range sources {
-		remote, _ := source.MCPSource()
+		remote := source.Source()
 		allowed, selected := remote.AllowedTools().Get()
 		if policy.Mode != canonical.ToolPolicyNone && (!selected || len(allowed) > 0) {
 			activeSources++
@@ -99,13 +99,13 @@ func openWith(
 		attemptTools: make(map[canonical.ToolKey][]canonical.ToolDeclaration),
 		localSources: make(map[canonical.ToolKey]struct{}, len(sources)),
 	}
-	catalogs := make(map[canonical.ToolKey]canonical.ToolNamespace, len(sources))
+	catalogs := make(map[canonical.ToolKey]canonical.MCPToolSource, len(sources))
 	var changes []compat.Change
 	catalogBytes := 0
 	for _, source := range sources {
 		key := source.Key()
 		run.localSources[key] = struct{}{}
-		remote, _ := source.MCPSource()
+		remote := source.Source()
 		allowed, selected := remote.AllowedTools().Get()
 		if policy.Mode == canonical.ToolPolicyNone || (selected && len(allowed) == 0) {
 			continue
@@ -195,7 +195,7 @@ func openWith(
 
 func resolveRemoteSource(
 	ctx context.Context,
-	source canonical.ToolNamespace,
+	source canonical.MCPToolSource,
 	access SourceAccess,
 ) (sourceResolution, error) {
 	opened, err := openSession(ctx, source, access)
@@ -211,14 +211,14 @@ func resolveRemoteSource(
 			return sourceResolution{}, dependencyError(source, err)
 		}
 	}
-	declaration, err := canonical.NewMCPToolNamespace(
-		source.Key(), source.Description(), mustMCPSource(source), children,
+	declaration, err := canonical.NewMCPToolSource(
+		source.Key(), source.Description(), source.Source(), children,
 	)
 	if err != nil {
 		_ = opened.close()
 		return sourceResolution{}, dependencyError(source, err)
 	}
-	catalog, _ := declaration.Namespace()
+	catalog, _ := declaration.MCP()
 	return sourceResolution{
 		session: opened, catalog: catalog,
 		catalogBytes: retainedCatalogBytes(catalog),
@@ -226,27 +226,27 @@ func resolveRemoteSource(
 	}, nil
 }
 
-func localMCPSources(environment canonical.ToolEnvironment) []canonical.ToolNamespace {
-	var sources []canonical.ToolNamespace
+func localMCPSources(environment canonical.ToolEnvironment) []canonical.MCPToolSource {
+	var sources []canonical.MCPToolSource
 	seen := make(map[canonical.ToolKey]struct{})
 	for _, declaration := range environment.Declarations() {
-		namespace, ok := declaration.Namespace()
+		sourceDeclaration, ok := declaration.MCP()
 		if !ok {
 			continue
 		}
-		source, ok := namespace.MCPSource()
-		if !ok || source.Kind() != canonical.MCPSourceURL ||
+		source := sourceDeclaration.Source()
+		if source.Kind() != canonical.MCPSourceURL ||
 			source.Approval().Kind() != canonical.MCPApprovalNever {
 			continue
 		}
 		if _, restricted := source.AllowedCallers().Get(); restricted {
 			continue
 		}
-		if _, duplicate := seen[namespace.Key()]; duplicate {
+		if _, duplicate := seen[sourceDeclaration.Key()]; duplicate {
 			continue
 		}
-		seen[namespace.Key()] = struct{}{}
-		sources = append(sources, namespace)
+		seen[sourceDeclaration.Key()] = struct{}{}
+		sources = append(sources, sourceDeclaration)
 	}
 	return sources
 }
@@ -254,9 +254,9 @@ func localMCPSources(environment canonical.ToolEnvironment) []canonical.ToolName
 func requiredSourcesFirst(
 	request canonical.CanonicalRequest,
 	environment canonical.ToolEnvironment,
-	sources []canonical.ToolNamespace,
-) []canonical.ToolNamespace {
-	ordered := make([]canonical.ToolNamespace, 0, len(sources))
+	sources []canonical.MCPToolSource,
+) []canonical.MCPToolSource {
+	ordered := make([]canonical.MCPToolSource, 0, len(sources))
 	for _, required := range []bool{true, false} {
 		for _, source := range sources {
 			if requestRequiresSource(request, environment, source) == required {
@@ -267,7 +267,7 @@ func requiredSourcesFirst(
 	return ordered
 }
 
-func bindingsForCatalog(catalog canonical.ToolNamespace) (
+func bindingsForCatalog(catalog canonical.MCPToolSource) (
 	map[canonical.ToolKey]binding,
 	[]canonical.ToolDeclaration,
 	[]compat.Change,
@@ -394,23 +394,19 @@ func (r *Run) AttemptRequest(request canonical.CanonicalRequest) (canonical.Cano
 }
 
 func (r *Run) rewriteAttempt(request canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
-	return canonical.RewriteToolContributions(request, func(set canonical.ToolSet) (canonical.ToolSet, error) {
+	return canonical.TransformToolContributions(request, func(set canonical.ToolSet) (canonical.ToolSet, error) {
 		projected := make([]canonical.ToolDeclaration, 0, len(set.Declarations()))
 		for _, declaration := range set.Declarations() {
-			namespace, ok := declaration.Namespace()
+			source, ok := declaration.MCP()
 			if !ok {
 				projected = append(projected, declaration.Clone())
 				continue
 			}
-			if _, isMCP := namespace.MCPSource(); !isMCP {
+			if _, local := r.localSources[source.Key()]; !local {
 				projected = append(projected, declaration.Clone())
 				continue
 			}
-			if _, local := r.localSources[namespace.Key()]; !local {
-				projected = append(projected, declaration.Clone())
-				continue
-			}
-			for _, tool := range r.attemptTools[namespace.Key()] {
+			for _, tool := range r.attemptTools[source.Key()] {
 				projected = append(projected, tool.Clone())
 			}
 		}
@@ -481,22 +477,21 @@ func (r *Run) Close() error {
 
 func applyCatalogs(
 	request canonical.CanonicalRequest,
-	catalogs map[canonical.ToolKey]canonical.ToolNamespace,
+	catalogs map[canonical.ToolKey]canonical.MCPToolSource,
 ) (canonical.CanonicalRequest, error) {
-	return canonical.RewriteToolContributions(request, func(set canonical.ToolSet) (canonical.ToolSet, error) {
+	return canonical.TransformToolContributions(request, func(set canonical.ToolSet) (canonical.ToolSet, error) {
 		declarations := set.Declarations()
 		for index, declaration := range declarations {
-			namespace, ok := declaration.Namespace()
+			source, ok := declaration.MCP()
 			if !ok {
 				continue
 			}
-			catalog, found := catalogs[namespace.Key()]
+			catalog, found := catalogs[source.Key()]
 			if !found {
 				continue
 			}
-			source, _ := catalog.MCPSource()
-			replacement, err := canonical.NewMCPToolNamespace(
-				catalog.Key(), catalog.Description(), source, catalog.Tools(),
+			replacement, err := canonical.NewMCPToolSource(
+				catalog.Key(), catalog.Description(), catalog.Source(), catalog.Tools(),
 			)
 			if err != nil {
 				return canonical.ToolSet{}, err
@@ -510,7 +505,7 @@ func applyCatalogs(
 func requestRequiresSource(
 	request canonical.CanonicalRequest,
 	environment canonical.ToolEnvironment,
-	source canonical.ToolNamespace,
+	source canonical.MCPToolSource,
 ) bool {
 	if specific, ok := request.ToolPolicy().SpecificID(); ok {
 		return sourceOwnsTool(source, specific)
@@ -536,11 +531,11 @@ func requestRequiresSource(
 	return false
 }
 
-func sourceOwnsTool(source canonical.ToolNamespace, tool canonical.ToolKey) bool {
+func sourceOwnsTool(source canonical.MCPToolSource, tool canonical.ToolKey) bool {
 	return tool.Namespace() == source.Key().Namespace()+"/"+source.Key().Name()
 }
 
-func retainedCatalogBytes(catalog canonical.ToolNamespace) int {
+func retainedCatalogBytes(catalog canonical.MCPToolSource) int {
 	sourceDescription := catalog.Description()
 	total := len(sourceDescription)
 	for _, declaration := range catalog.Tools() {
@@ -578,15 +573,7 @@ func sourceFailureIsInvariant(err error) bool {
 		canonicalError.Code == canonical.ErrorCodeInternal
 }
 
-func mustMCPSource(namespace canonical.ToolNamespace) canonical.MCPSource {
-	source, ok := namespace.MCPSource()
-	if !ok {
-		panic("MCP runtime received a non-MCP namespace")
-	}
-	return source
-}
-
-func sourceError(source canonical.ToolNamespace, err error) error {
+func sourceError(source canonical.MCPToolSource, err error) error {
 	var canonicalError canonical.Error
 	if errors.As(err, &canonicalError) {
 		return err
@@ -594,7 +581,7 @@ func sourceError(source canonical.ToolNamespace, err error) error {
 	return dependencyError(source, err)
 }
 
-func dependencyError(source canonical.ToolNamespace, err error) error {
+func dependencyError(source canonical.MCPToolSource, err error) error {
 	var canonicalError canonical.Error
 	if errors.As(err, &canonicalError) {
 		if canonicalError.Code == canonical.ErrorCodeNotImplemented ||

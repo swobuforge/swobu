@@ -13,7 +13,7 @@ import (
 func TestChatResponsesReasoningContextIsTargetLocalCompatibility(t *testing.T) {
 	request := chatRequestWithResponsesReasoningContext(t)
 	var changes []compat.Change
-	document, err := EncodeCarrierWithChanges(request, delivery.BufferedDelivery(), &changes, "exchange")
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}

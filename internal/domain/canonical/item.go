@@ -69,8 +69,9 @@ type MessageItem struct {
 // ToolDeclarationsItem is one ordered contribution to the model-visible tool
 // environment. Its scope belongs to this occurrence, not to the ToolSet.
 type ToolDeclarationsItem struct {
-	tools ToolSet
-	scope ContextScope
+	tools     ToolSet
+	scope     ContextScope
+	responses ResponsesToolRefinements
 }
 
 // ToolCallID is the canonical correlation identity shared by one tool call and
@@ -94,13 +95,42 @@ func (id ToolCallID) String() string { return id.value }
 // IsZero reports whether no validated token is present.
 func (id ToolCallID) IsZero() bool { return id.value == "" }
 
+// ResponsesWebSearchRefinement preserves the exact Responses item identity of a
+// web_search_call when the dialect supplied one. It is distinct from ToolCallID:
+// correlation pairs a call with its result across the canonical graph, while the
+// refinement is the provider-owned presentation id that must round-trip verbatim
+// or be omitted entirely. Its absence is meaningful — a dialect that replayed a
+// completed search with no id (notably Codex under store:false) must re-encode
+// with no id, never with a synthetic correlation token minted into item.id.
+type ResponsesWebSearchRefinement struct {
+	itemID ResponsesItemID
+}
+
+// NewResponsesWebSearchRefinement validates one exact Responses item id as a
+// web-search refinement. The zero ResponsesWebSearchRefinement means "no id was
+// preserved" and is the only way to represent an omitted id.
+func NewResponsesWebSearchRefinement(itemID ResponsesItemID) (ResponsesWebSearchRefinement, error) {
+	if itemID.IsZero() {
+		return ResponsesWebSearchRefinement{}, fmt.Errorf("responses web-search refinement requires a non-empty item id")
+	}
+	return ResponsesWebSearchRefinement{itemID: itemID}, nil
+}
+
+// ItemID returns the preserved Responses item identity.
+func (r ResponsesWebSearchRefinement) ItemID() ResponsesItemID { return r.itemID }
+
+// Clone returns an independent copy. The wrapped id is immutable.
+func (r ResponsesWebSearchRefinement) Clone() ResponsesWebSearchRefinement { return r }
+
 // ToolCallItem is one ordered tool invocation. CallID correlates a later result
 // while Tool is sufficient to interpret and re-encode this historical call.
 type ToolCallItem struct {
-	callID            ToolCallID
-	tool              ToolKey
-	input             ToolInput
-	discoveryExecutor DiscoveryExecutor
+	callID              ToolCallID
+	tool                ToolKey
+	input               ToolInput
+	discoveryExecutor   DiscoveryExecutor
+	responsesNullCallID bool
+	responsesWebSearch  *ResponsesWebSearchRefinement
 }
 
 // ToolResultItem is one ordered correlated result with ordered content.
@@ -113,9 +143,72 @@ type ToolResultItem struct {
 // ToolDiscoveryResultItem correlates one discovery call with the declarations
 // it loaded. Those declarations become available only after this item.
 type ToolDiscoveryResultItem struct {
-	callID   ToolCallID
-	tools    ToolSet
-	executor DiscoveryExecutor
+	callID              ToolCallID
+	tools               ToolSet
+	executor            DiscoveryExecutor
+	responses           ResponsesToolRefinements
+	responsesNullCallID bool
+}
+
+// ResponsesToolRefinements owns Responses-only visibility facts for one
+// declaration occurrence. Keys must name declarations inside that occurrence;
+// permanent callable contracts remain protocol-neutral.
+type ResponsesToolRefinements struct {
+	deferred map[ToolKey]struct{}
+}
+
+// NewResponsesToolRefinements validates one occurrence-local deferred set.
+func NewResponsesToolRefinements(tools ToolSet, deferred []ToolKey) (ResponsesToolRefinements, error) {
+	known := callableToolKeys(tools)
+	refinement := ResponsesToolRefinements{deferred: make(map[ToolKey]struct{}, len(deferred))}
+	for _, key := range deferred {
+		if key.IsZero() || (key.Kind() != ToolKindFunction && key.Kind() != ToolKindCustom) {
+			return ResponsesToolRefinements{}, fmt.Errorf("Responses deferred tool refinement requires a callable key")
+		}
+		if _, ok := known[key]; !ok {
+			return ResponsesToolRefinements{}, fmt.Errorf("Responses deferred tool refinement references an undeclared tool")
+		}
+		refinement.deferred[key.Clone()] = struct{}{}
+	}
+	return refinement, nil
+}
+
+func callableToolKeys(tools ToolSet) map[ToolKey]struct{} {
+	known := make(map[ToolKey]struct{})
+	var observe func([]ToolDeclaration)
+	observe = func(declarations []ToolDeclaration) {
+		for _, declaration := range declarations {
+			if declaration.Kind() == ToolKindFunction || declaration.Kind() == ToolKindCustom {
+				known[declaration.Key()] = struct{}{}
+			}
+			if namespace, ok := declaration.Namespace(); ok {
+				observe(namespace.Tools())
+			}
+		}
+	}
+	observe(tools.Declarations())
+	return known
+}
+
+func (r ResponsesToolRefinements) Deferred(key ToolKey) bool {
+	_, ok := r.deferred[key]
+	return ok
+}
+
+func (r ResponsesToolRefinements) DeferredKeys() []ToolKey {
+	keys := make([]ToolKey, 0, len(r.deferred))
+	for key := range r.deferred {
+		keys = append(keys, key.Clone())
+	}
+	return keys
+}
+
+func (r ResponsesToolRefinements) Clone() ResponsesToolRefinements {
+	cloned := ResponsesToolRefinements{deferred: make(map[ToolKey]struct{}, len(r.deferred))}
+	for key := range r.deferred {
+		cloned.deferred[key.Clone()] = struct{}{}
+	}
+	return cloned
 }
 
 // ToolContentResult is the ordinary caller-resolved function/custom result
@@ -188,10 +281,20 @@ func NewScopedMessageItem(role MessageRole, content []MessagePart, scope Context
 
 // NewToolDeclarationsItem constructs one ordered declaration contribution.
 func NewToolDeclarationsItem(tools ToolSet, scope ContextScope) (CanonicalItem, error) {
+	return NewToolDeclarationsItemWithResponses(tools, scope, ResponsesToolRefinements{})
+}
+
+// NewToolDeclarationsItemWithResponses constructs a declaration contribution
+// with occurrence-local Responses refinements.
+func NewToolDeclarationsItemWithResponses(tools ToolSet, scope ContextScope, responses ResponsesToolRefinements) (CanonicalItem, error) {
 	if !validContextScope(scope) {
 		return CanonicalItem{}, fmt.Errorf("canonical tool declaration context scope is invalid")
 	}
-	item := ToolDeclarationsItem{tools: tools.Clone(), scope: scope}
+	validated, err := NewResponsesToolRefinements(tools, responses.DeferredKeys())
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	item := ToolDeclarationsItem{tools: tools.Clone(), scope: scope, responses: validated}
 	return CanonicalItem{toolDeclarations: &item}, nil
 }
 
@@ -228,18 +331,43 @@ func NewToolCallItem(callID ToolCallID, tool ToolKey, input ToolInput) (Canonica
 	return CanonicalItem{toolCall: &call}, nil
 }
 
+// NewToolCallItemWithResponsesWebSearch constructs one web-search call that also
+// preserves the exact Responses item id the dialect supplied. The refinement is
+// the provider-owned presentation identity; callID remains the canonical
+// correlation token that pairs this call with its result. Pass a nil refinement
+// when the dialect omitted the id (e.g. a Codex replay under store:false), in
+// which case re-encode emits no item.id rather than minting callID into it.
+func NewToolCallItemWithResponsesWebSearch(callID ToolCallID, tool ToolKey, input ToolInput, refinement *ResponsesWebSearchRefinement) (CanonicalItem, error) {
+	item, err := NewToolCallItem(callID, tool, input)
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	call := item.toolCall
+	call.responsesWebSearch = refinement
+	return CanonicalItem{toolCall: call}, nil
+}
+
 // NewToolDiscoveryCallItem constructs one discovery call with the execution
 // owner needed for replay, projection, and result ownership.
 func NewToolDiscoveryCallItem(callID ToolCallID, input ToolInput, executor DiscoveryExecutor) (CanonicalItem, error) {
+	return NewToolDiscoveryCallItemWithResponses(callID, input, executor, false)
+}
+
+// NewToolDiscoveryCallItemWithResponses preserves whether a hosted Responses
+// lifecycle omitted its wire call ID while portable matching uses callID.
+func NewToolDiscoveryCallItemWithResponses(callID ToolCallID, input ToolInput, executor DiscoveryExecutor, wireCallIDNull bool) (CanonicalItem, error) {
 	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
 		return CanonicalItem{}, fmt.Errorf("canonical tool discovery call is invalid")
+	}
+	if wireCallIDNull && executor != DiscoveryExecutorProvider {
+		return CanonicalItem{}, fmt.Errorf("only provider-executed Responses discovery may omit its wire call id")
 	}
 	if _, ok := input.Object(); !ok {
 		return CanonicalItem{}, fmt.Errorf("canonical tool discovery call requires object input")
 	}
 	call := ToolCallItem{
 		callID: callID, tool: ToolDiscoveryKey(), input: input.Clone(),
-		discoveryExecutor: executor,
+		discoveryExecutor: executor, responsesNullCallID: wireCallIDNull,
 	}
 	return CanonicalItem{toolCall: &call}, nil
 }
@@ -261,10 +389,29 @@ func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool
 // NewToolDiscoveryResultItem constructs one correlated declaration-loading
 // result. The loaded declarations are historical facts at this position.
 func NewToolDiscoveryResultItem(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor) (CanonicalItem, error) {
+	return NewToolDiscoveryResultItemWithResponses(callID, tools, executor, ResponsesToolRefinements{})
+}
+
+// NewToolDiscoveryResultItemWithResponses constructs one loaded declaration
+// occurrence with its exact Responses visibility refinements.
+func NewToolDiscoveryResultItemWithResponses(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, responses ResponsesToolRefinements) (CanonicalItem, error) {
+	return NewToolDiscoveryResultItemWithResponsesWireID(callID, tools, executor, responses, false)
+}
+
+// NewToolDiscoveryResultItemWithResponsesWireID preserves an absent hosted
+// Responses wire ID without weakening portable correlation.
+func NewToolDiscoveryResultItemWithResponsesWireID(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, responses ResponsesToolRefinements, wireCallIDNull bool) (CanonicalItem, error) {
 	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
 		return CanonicalItem{}, fmt.Errorf("canonical tool discovery result requires a call id")
 	}
-	result := ToolDiscoveryResultItem{callID: callID, tools: tools.Clone(), executor: executor}
+	if wireCallIDNull && executor != DiscoveryExecutorProvider {
+		return CanonicalItem{}, fmt.Errorf("only provider-executed Responses discovery may omit its wire call id")
+	}
+	validated, err := NewResponsesToolRefinements(tools, responses.DeferredKeys())
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	result := ToolDiscoveryResultItem{callID: callID, tools: tools.Clone(), executor: executor, responses: validated, responsesNullCallID: wireCallIDNull}
 	return CanonicalItem{toolDiscoveryResult: &result}, nil
 }
 
@@ -465,10 +612,11 @@ func (m MessageItem) Clone() MessageItem {
 	return MessageItem{role: m.role, content: cloneMessageParts(m.content), scope: m.scope}
 }
 
-func (d ToolDeclarationsItem) Tools() ToolSet      { return d.tools.Clone() }
-func (d ToolDeclarationsItem) Scope() ContextScope { return d.scope }
+func (d ToolDeclarationsItem) Tools() ToolSet                      { return d.tools.Clone() }
+func (d ToolDeclarationsItem) Scope() ContextScope                 { return d.scope }
+func (d ToolDeclarationsItem) Responses() ResponsesToolRefinements { return d.responses.Clone() }
 func (d ToolDeclarationsItem) Clone() ToolDeclarationsItem {
-	return ToolDeclarationsItem{tools: d.tools.Clone(), scope: d.scope}
+	return ToolDeclarationsItem{tools: d.tools.Clone(), scope: d.scope, responses: d.responses.Clone()}
 }
 
 func (c ToolCallItem) CallID() ToolCallID { return c.callID }
@@ -481,11 +629,28 @@ func (c ToolCallItem) DiscoveryExecutor() (DiscoveryExecutor, bool) {
 	}
 	return c.discoveryExecutor, true
 }
-func (c ToolCallItem) Clone() ToolCallItem {
-	return ToolCallItem{
-		callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone(),
-		discoveryExecutor: c.discoveryExecutor,
+func (c ToolCallItem) ResponsesCallIDNull() bool { return c.responsesNullCallID }
+
+// ResponsesWebSearch returns the exact Responses item id preserved for this
+// web-search call, or false when the dialect omitted one. It is the only legal
+// source of a web_search_call item.id on re-encode; callID must never be used.
+func (c ToolCallItem) ResponsesWebSearch() (ResponsesWebSearchRefinement, bool) {
+	if c.responsesWebSearch == nil {
+		return ResponsesWebSearchRefinement{}, false
 	}
+	return c.responsesWebSearch.Clone(), true
+}
+func (c ToolCallItem) Clone() ToolCallItem {
+	cloned := ToolCallItem{
+		callID: c.callID, tool: c.tool.Clone(), input: c.input.Clone(),
+		discoveryExecutor:   c.discoveryExecutor,
+		responsesNullCallID: c.responsesNullCallID,
+	}
+	if c.responsesWebSearch != nil {
+		ref := c.responsesWebSearch.Clone()
+		cloned.responsesWebSearch = &ref
+	}
+	return cloned
 }
 func (r ToolResultItem) CallID() ToolCallID { return r.callID }
 func (r ToolResultItem) Content() []ToolResultPart {
@@ -515,11 +680,13 @@ func (r ToolResultItem) Clone() ToolResultItem {
 	}
 	return ToolResultItem{}
 }
-func (r ToolDiscoveryResultItem) CallID() ToolCallID          { return r.callID }
-func (r ToolDiscoveryResultItem) Tools() ToolSet              { return r.tools.Clone() }
-func (r ToolDiscoveryResultItem) Executor() DiscoveryExecutor { return r.executor }
+func (r ToolDiscoveryResultItem) CallID() ToolCallID                  { return r.callID }
+func (r ToolDiscoveryResultItem) Tools() ToolSet                      { return r.tools.Clone() }
+func (r ToolDiscoveryResultItem) Executor() DiscoveryExecutor         { return r.executor }
+func (r ToolDiscoveryResultItem) Responses() ResponsesToolRefinements { return r.responses.Clone() }
+func (r ToolDiscoveryResultItem) ResponsesCallIDNull() bool           { return r.responsesNullCallID }
 func (r ToolDiscoveryResultItem) Clone() ToolDiscoveryResultItem {
-	return ToolDiscoveryResultItem{callID: r.callID, tools: r.tools.Clone(), executor: r.executor}
+	return ToolDiscoveryResultItem{callID: r.callID, tools: r.tools.Clone(), executor: r.executor, responses: r.responses.Clone(), responsesNullCallID: r.responsesNullCallID}
 }
 func (p ReasoningPart) Kind() ReasoningPartKind { return p.kind }
 func (p ReasoningPart) Text() string            { return p.text }

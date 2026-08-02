@@ -62,43 +62,34 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		}
 		return providerCall{}, path.target, nil, command, nil
 	}
-	projectionFull := resolved.Full.Clone()
-	projectionRequest := canonicalRequest.Clone()
+	semanticFull := resolved.Full.Clone()
+	attemptRequest := canonicalRequest.Clone()
 	if s.mcp != nil {
-		projectionFull, err = s.mcp.AttemptRequest(projectionFull)
+		semanticFull, err = s.mcp.AttemptRequest(semanticFull)
 		if err != nil {
-			return providerCall{}, path.target, nil, nil, fmt.Errorf("MCP provider full attempt view: %w", err)
+			return providerCall{}, path.target, nil, nil, err
 		}
-		projectionRequest, err = s.mcp.AttemptRequest(projectionRequest)
+		attemptRequest, err = s.mcp.AttemptRequest(attemptRequest)
 		if err != nil {
-			return providerCall{}, path.target, nil, nil, fmt.Errorf("MCP provider attempt view: %w", err)
+			return providerCall{}, path.target, nil, nil, err
 		}
 	}
-	projection, err := provider.BuildToolProjection(projectionFull)
+	toolNames, namingChanges, err := provider.BuildAttemptToolNames(semanticFull)
 	if err != nil {
-		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider tool projection: %w", err)
+		return providerCall{}, path.target, nil, nil, err
 	}
-	attemptRequest, projectionDecisions, err := projection.Rewrite(projectionRequest)
-	if err != nil {
-		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider attempt tool projection: %w", err)
-	}
-	projectedDecodeContext, _, err := projection.Rewrite(projectionFull)
-	if err != nil {
-		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider decode-context tool projection: %w", err)
-	}
-	toolProjection := projection.Table()
 	replaySafety, err := providerReplaySafetyFor(attemptRequest)
 	if err != nil {
 		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider attempt replay safety: %w", err)
 	}
 	providerRequest := provider.Request{
-		ExchangeID:     s.input.exchangeID,
-		Canonical:      bindRequestToTarget(attemptRequest, path.target.Model),
-		Delivery:       path.delivery,
-		ToolProjection: toolProjection,
-		MCPAccess:      s.input.mcpAccess,
+		ExchangeID: s.input.exchangeID,
+		Canonical:  bindRequestToTarget(attemptRequest, path.target.Model),
+		Delivery:   path.delivery,
+		ToolNames:  toolNames,
+		MCPAccess:  s.input.mcpAccess,
 	}
-	requestChanges := compat.CloneChanges(projectionDecisions)
+	requestChanges := compat.CloneChanges(namingChanges)
 	workspaceSlug := s.input.workspace.Slug().String()
 	if err := validateCheckpointInput(runner, workspaceSlug); err != nil {
 		return providerCall{}, path.target, nil, nil, err
@@ -118,8 +109,8 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
-		projectedDecodeContext: bindRequestToTarget(projectedDecodeContext, path.target.Model),
-		clientDelivery:         s.input.clientDelivery, exchangeID: s.input.exchangeID,
+		decodeContext:  bindRequestToTarget(semanticFull, path.target.Model),
+		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: s.prepared.Full.Clone(),
 		resolvedMedia:      resolvedMedia,
 		advance:            s.advance,
@@ -185,7 +176,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	if err != nil {
 		return nil, nil, compatibility, err
 	}
-	var events canonical.ResponseStream = newCanonicalToolProjectionStream(decoded.Stream, call.request.ToolProjection)
+	var events canonical.ResponseStream = decoded.Stream
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
@@ -247,7 +238,7 @@ func decodeProviderIngress(ctx context.Context, call providerCall, ingress provi
 	var decoded provider.DecodedResponse
 	var err error
 	decodeRequest := call.request
-	decodeRequest.Canonical = call.projectedDecodeContext.Clone()
+	decodeRequest.Canonical = call.decodeContext.Clone()
 	switch resolved := ingress.(type) {
 	case provider.StreamIngress:
 		if call.request.Delivery.Mode != delivery.Streaming {

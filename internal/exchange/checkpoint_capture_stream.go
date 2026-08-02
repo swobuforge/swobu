@@ -26,15 +26,22 @@ type checkpointCaptureSnapshot struct {
 // checkpointCaptureResponseStream records the canonical response pulled toward
 // client encoding. It projects one draft at terminal success and never writes
 // storage; checkpointTerminalGate owns publication gating.
+//
+// It folds each event incrementally into a canonical.ResponseProjector as the
+// stream is read — it does NOT retain the event slice. Per-response memory
+// therefore scales with completed item count, not with streamed delta count
+// (epic-50 task 010). The terminal snapshot is materialized once from the
+// folded state, producing the same projection the prior retain-and-reproject
+// path did.
 type checkpointCaptureResponseStream struct {
-	upstream canonical.ResponseStream
-	binding  canonical.ResponseBinding
-	events   []canonical.Event
-	result   checkpointCaptureSnapshot
+	upstream  canonical.ResponseStream
+	binding   canonical.ResponseBinding
+	projector *canonical.ResponseProjector
+	result    checkpointCaptureSnapshot
 }
 
 func newCheckpointCaptureResponseStream(upstream canonical.ResponseStream, binding canonical.ResponseBinding) *checkpointCaptureResponseStream {
-	return &checkpointCaptureResponseStream{upstream: upstream, binding: binding}
+	return &checkpointCaptureResponseStream{upstream: upstream, binding: binding, projector: canonical.NewResponseProjector(binding)}
 }
 
 func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.Event, error) {
@@ -58,7 +65,11 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 			return canonical.Event{}, err
 		}
 	}
-	s.events = append(s.events, event)
+	// Fold the event into projection state; the event itself is not retained.
+	if foldErr := s.projector.Apply(event); foldErr != nil && s.result.state == checkpointCapturePending {
+		s.fail(fmt.Errorf("projecting checkpoint response: %w", foldErr))
+		return event, nil
+	}
 	status, terminal := responseTerminalStatus(event)
 	if !terminal {
 		return event, nil
@@ -67,17 +78,12 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 		s.fail(errors.New("canonical response did not complete successfully"))
 		return event, nil
 	}
-	closed, projectionErr := canonical.ReadClosedEnvelope(ctx, canonical.NewSliceEventReader(append([]canonical.Event(nil), s.events...)), canonical.EnvResponse)
-	if projectionErr != nil {
-		s.fail(fmt.Errorf("projecting checkpoint response: %w", projectionErr))
-		return event, nil
-	}
-	response, projectionErr := closed.ProjectResponse()
-	if projectionErr != nil {
-		s.fail(fmt.Errorf("projecting checkpoint response: %w", projectionErr))
-		return event, nil
-	}
 	if s.result.state == checkpointCapturePending {
+		response, projectionErr := s.projector.Done()
+		if projectionErr != nil {
+			s.fail(fmt.Errorf("projecting checkpoint response: %w", projectionErr))
+			return event, nil
+		}
 		s.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: *response}
 	}
 	return event, nil

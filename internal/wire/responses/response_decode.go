@@ -12,6 +12,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -20,6 +21,7 @@ type responseEnvelope struct {
 	ID                string                         `json:"id"`
 	Model             string                         `json:"model"`
 	Status            string                         `json:"status"`
+	Store             *bool                          `json:"store"`
 	OutputText        string                         `json:"output_text"`
 	Output            []json.RawMessage              `json:"output"`
 	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
@@ -72,7 +74,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change, continuationEligible bool) (canonical.ResponseStream, error) {
 	var dto responseEnvelope
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("responses output is invalid JSON")
@@ -89,13 +91,20 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		if err := admitResponsesProjectableResponseStatus(responseStatus); err != nil {
 			return nil, err
 		}
-		items, err := decodeOutputItemsForResponse(ctx, request, dto.Output, dto.OutputText, responseStatus, exchangeID, changeLog)
+		items, err := decodeOutputItemsForResponse(ctx, request, names, dto.Output, dto.OutputText, responseStatus, exchangeID, changeLog)
 		if err != nil {
 			return nil, err
 		}
+		// A provider response ID is identity only. It becomes reusable native
+		// continuation only when the exact codec and request permit it and the
+		// provider explicitly confirms effective store:true.
+		ref := canonical.ResponseRef{}
+		if continuationEligible && dto.Store != nil && *dto.Store {
+			ref.Responses = &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(dto.ID)}
+		}
 		return canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
 			exchangeID,
-			canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(dto.ID)}},
+			ref,
 			dto.Model,
 			items,
 			responsesCompletion(responseStatus, terminalReason),
@@ -113,25 +122,26 @@ func admitResponsesProjectableResponseStatus(status string) error {
 	}
 }
 
-func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, changeLog)
+func decodeOutputItems(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, names, wireItems, outputText, "completed", exchangeID, changeLog)
 }
 
-func decodeOutputItemsForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, responseStatus, exchangeID, changeLog)
+func decodeOutputItemsForResponse(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, names, wireItems, outputText, responseStatus, exchangeID, changeLog)
 }
 
-func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetForResponse(ctx, request, wireItems, outputText, "completed", exchangeID, changeLog)
+func decodeCompletedResponsesItemSet(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, wireItems any, outputText string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetForResponse(ctx, request, names, wireItems, outputText, "completed", exchangeID, changeLog)
 }
 
-func decodeCompletedResponsesItemSetForResponse(ctx context.Context, request canonical.CanonicalRequest, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
-	return decodeCompletedResponsesItemSetAtIndexes(ctx, request, wireItems, outputText, nil, false, responseStatus, exchangeID, changeLog)
+func decodeCompletedResponsesItemSetForResponse(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, wireItems any, outputText string, responseStatus string, exchangeID string, changeLog *[]compat.Change) ([]canonical.CanonicalItem, error) {
+	return decodeCompletedResponsesItemSetAtIndexes(ctx, request, names, wireItems, outputText, nil, false, responseStatus, exchangeID, changeLog)
 }
 
 func decodeCompletedResponsesItemSetAtIndexes(
 	ctx context.Context,
 	request canonical.CanonicalRequest,
+	names wire.ToolNames,
 	wireItems any,
 	outputText string,
 	originalIndexes []int,
@@ -153,6 +163,7 @@ func decodeCompletedResponsesItemSetAtIndexes(
 	}
 	tools := environment.Declarations()
 	output := make([]canonical.CanonicalItem, 0, len(items))
+	pendingHostedDiscovery := make([]canonical.ToolCallID, 0)
 	erasedSemantic := false
 	for position, rawItem := range items {
 		index := position
@@ -196,12 +207,21 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if callID == "" {
 				return nil, canonical.InternalError("responses tool call is missing call_id")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeFunction)
-			if err != nil {
-				return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
+			var key canonical.ToolKey
+			if strings.TrimSpace(item.Namespace) != "" {
+				resolved, err := resolveResponsesFunctionCall(tools, item.Namespace, name)
+				if err != nil {
+					return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
+				}
+				key = resolved.Key()
+			} else {
+				key, err = wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, name)
+				if err != nil {
+					return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
+				}
 			}
 			canonicalCallID, _ := canonical.NewToolCallID(callID)
-			call, err := canonical.NewToolCallItem(canonicalCallID, resolved.Key(), canonical.NewJSONObjectToolInput(object))
+			call, err := canonical.NewToolCallItem(canonicalCallID, key, canonical.NewJSONObjectToolInput(object))
 			if err != nil {
 				return nil, canonical.InternalError("responses tool call is invalid")
 			}
@@ -215,7 +235,15 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if declaration, ok := environment.Lookup(canonical.ToolDiscoveryKey()); !ok || declaration.Kind() != canonical.ToolKindDiscovery {
 				return nil, canonical.InternalError("responses tool discovery call was not available to the provider attempt")
 			}
-			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			wireIDNull := strings.TrimSpace(item.CallID) == ""
+			if wireIDNull && executor != canonical.DiscoveryExecutorProvider {
+				return nil, canonical.NewBackendError("responses", 0, "client tool discovery call is missing call_id", "")
+			}
+			callIDText := strings.TrimSpace(item.CallID)
+			if wireIDNull {
+				callIDText = fmt.Sprintf("responses_hosted_%d", index)
+			}
+			callID, err := canonical.NewToolCallID(callIDText)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery call is missing call_id")
 			}
@@ -223,17 +251,32 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery call arguments are invalid")
 			}
-			call, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(arguments), executor)
+			call, err := canonical.NewToolDiscoveryCallItemWithResponses(callID, canonical.NewJSONObjectToolInput(arguments), executor, wireIDNull)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery call is invalid")
 			}
 			output = append(output, call)
+			if wireIDNull {
+				pendingHostedDiscovery = append(pendingHostedDiscovery, callID)
+			}
 		case "tool_search_output":
 			executor, ok := decodeResponsesToolExecutor(item.Execution)
 			if !ok {
 				return nil, canonical.InternalError("responses tool discovery output has invalid execution")
 			}
-			callID, err := canonical.NewToolCallID(strings.TrimSpace(item.CallID))
+			wireIDNull := strings.TrimSpace(item.CallID) == ""
+			if wireIDNull && executor != canonical.DiscoveryExecutorProvider {
+				return nil, canonical.NewBackendError("responses", 0, "client tool discovery output is missing call_id", "")
+			}
+			callIDText := strings.TrimSpace(item.CallID)
+			if wireIDNull {
+				if len(pendingHostedDiscovery) == 0 {
+					return nil, canonical.NewBackendError("responses", 0, "hosted tool discovery output has no prior call", "")
+				}
+				callIDText = pendingHostedDiscovery[0].String()
+				pendingHostedDiscovery = pendingHostedDiscovery[1:]
+			}
+			callID, err := canonical.NewToolCallID(callIDText)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output is missing call_id")
 			}
@@ -248,7 +291,11 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output tools are ambiguous")
 			}
-			result, err := canonical.NewToolDiscoveryResultItem(callID, set, executor)
+			refinements, err := canonical.NewResponsesToolRefinements(set, projected.deferred)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool discovery output deferred tools are invalid")
+			}
+			result, err := canonical.NewToolDiscoveryResultItemWithResponsesWireID(callID, set, executor, refinements, wireIDNull)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output is invalid")
 			}
@@ -259,12 +306,16 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if callID == "" {
 				return nil, canonical.InternalError("responses custom tool call is missing call_id")
 			}
-			resolved, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeCustom)
+			environment, err := canonical.EffectiveTools(request)
+			if err != nil {
+				return nil, canonical.InternalError("responses tool environment is ambiguous")
+			}
+			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindCustom, name)
 			if err != nil {
 				return nil, canonical.InternalError("responses custom tool call references an unknown or ambiguous tool")
 			}
 			canonicalCallID, _ := canonical.NewToolCallID(callID)
-			call, err := canonical.NewToolCallItem(canonicalCallID, resolved.Key(), canonical.NewTextToolInput(item.Input))
+			call, err := canonical.NewToolCallItem(canonicalCallID, key, canonical.NewTextToolInput(item.Input))
 			if err != nil {
 				return nil, canonical.InternalError("responses custom tool call is invalid")
 			}
@@ -291,7 +342,8 @@ func decodeCompletedResponsesItemSetAtIndexes(
 				}
 				state = responsesWebSearchUnknown
 			}
-			lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(item.ID, item.Action, state, changeLog, exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true)
+			refinement := responsesWebSearchRefinementFromID(item.ID)
+			lifecycle, err := decodeResponsesWebSearchLifecycleWithChanges(item.ID, item.Action, state, changeLog, exchangeID, canonical.ResponseItemOccurrence(uint32(index)), true, refinement)
 			if err != nil {
 				return nil, err
 			}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
@@ -22,7 +23,12 @@ func TestEncodeItemsGroupsMaximalAssistantOwnedSequence(t *testing.T) {
 		nil,
 		{canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "other"), "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())},
 	} {
-		messages, err := encodeItems([]canonical.CanonicalItem{before, call, after}, currentTools, nil, "")
+		request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{before, call, after}})
+		names, _, err := provider.BuildAttemptToolNames(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, err := encodeItems(request.Items(), currentTools, names, nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +60,12 @@ func TestEncodeItemsPreservesMultipleToolCallsBeforeAssistantText(t *testing.T) 
 	callB, _ := canonical.NewToolCallItem(callIDB, declB.Key(), canonical.NewJSONObjectToolInput(input))
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("done")})
 
-	messages, err := encodeItems([]canonical.CanonicalItem{callA, callB, message}, nil, nil, "")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{callA, callB, message}})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := encodeItems(request.Items(), nil, names, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +79,7 @@ func TestEncodeItemsGroupsToolResultWithFollowingUserText(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("sunny")}, false)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("thanks")})
 
-	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, "")
+	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

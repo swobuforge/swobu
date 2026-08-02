@@ -1,8 +1,22 @@
 # Swobu
 
-**Local AI gateway for routing clients across providers, regions, accounts, and local models.**
+![Swobu](./assets/readme/swobu-readme-hero.png)
 
-Connect AI clients once. Then route, balance, and fail over across providers, regions, accounts, and local models from one local control point.
+## Keep the client. Swap the backend.
+
+Swobu is a local compatibility boundary for Claude Code, Codex, and other AI
+clients. Route across providers without silently losing tools, reasoning, or
+session state.
+
+<p align="center">
+  <a href="https://swobu.com">
+    <video src="./assets/readme/swobu-failover-demo.mp4" controls muted playsinline width="640"></video>
+  </a>
+</p>
+
+*One backend lacks a capability the request needs. Swobu skips it and runs the other — the coding session continues.*
+
+Point Claude Code, Codex, or another AI client at one local endpoint. Keep provider URLs, credentials, and routing at the boundary — not in the client. Swap the backend without accepting the provider's default boundary.
 
 > The client names the route. Swobu selects the target.
 
@@ -10,7 +24,7 @@ Swobu is beta. Behavior can change between releases.
 
 ---
 
-## Demo
+## Cockpit tour
 
 ![Swobu Cockpit demo](./assets/readme/swobu-cli-demo.gif)
 
@@ -162,8 +176,10 @@ Swobu is local-first: it binds to loopback by default (`127.0.0.1:7926`), keeps 
 ## Known gaps
 
 - Protocol-specific behavior varies by client and backend. Swobu preserves
-  portable semantics, records deliberate approximations or drops, and rejects
-  operations whose authority or result contract cannot be preserved.
+  portable semantics, skips a target that cannot represent the request, and
+  rejects operations whose authority or result contract cannot be preserved.
+  Surfacing the per-target reason for a skip is direction, not shipped; today
+  only the terminal outcome is visible.
 - Some clients need specific environment variables.
 - Token and cache fields that providers report are not uniform.
 - Swobu changes candidate target order; it does not read live provider quota, remaining TPM, or latency.
@@ -195,16 +211,6 @@ We welcome contributions. Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before you
 Swobu uses a Contributor License Agreement (`CLA.md`). When you submit a contribution, you agree to the terms in [`CLA.md`](./CLA.md).
 
 For security vulnerabilities, do not report in public issues. Read [`SECURITY.md`](./SECURITY.md) before reporting.
-
----
-
-## Development history
-
-Swobu was reimplemented from the ground up during OpenAI Build Week using Codex with GPT-5.6. An earlier prototype established the idea, but none of its implementation remains.
-
-During the hackathon, the daemon and Cockpit were rebuilt around a clean architecture, tiered routing and capability-aware fallback were added, and testing, linting, and visual verification were strengthened.
-
-Codex and GPT-5.6 completed much of the code implementation while product semantics and architectural rails were defined in RFCs.
 
 ---
 

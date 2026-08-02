@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
@@ -140,7 +141,13 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := encodeChatCompletionsToolChoice(tc.policy, tc.tools, nil, "")
+			var names provider.AttemptToolNames
+			if len(tc.tools) > 0 {
+				set, _ := canonical.NewToolSet(tc.tools)
+				item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+				names = testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
+			}
+			got, err := encodeChatCompletionsToolChoice(tc.policy, tc.tools, names, nil, "")
 			if err != nil {
 				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
 			}
@@ -152,7 +159,7 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 func TestEncodeChatCompletionsToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, "")
+	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeChatCompletionsToolChoice to reject required without tools")
 	}
@@ -186,7 +193,7 @@ func TestEncodeChatCompletionsToolChoice_OmitsEmptySurfaceChoices(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := encodeChatCompletionsToolChoice(tc.policy, nil, nil, "")
+			got, err := encodeChatCompletionsToolChoice(tc.policy, nil, nil, nil, "")
 			if err != nil {
 				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
 			}

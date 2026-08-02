@@ -1,11 +1,9 @@
 package exchange
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -372,9 +370,11 @@ func requestOutcomeDiagnostics(err error) []string {
 }
 
 func newClientRequestDocument(family canonical.ClientFamily, req carrier.TransportRequest, maxBytes int64, exchangeID string) (carrier.Document, error) {
-	body, err := readTransportRequestBody(req.Body, maxBytes)
-	if err != nil {
-		return carrier.Document{}, canonical.BadRequest("request body could not be read")
+	if maxBytes <= 0 {
+		maxBytes = DefaultRuntimeLimits().MaxRequestBytes
+	}
+	if int64(len(req.Body)) > maxBytes {
+		return carrier.Document{}, canonical.BadRequest("request body exceeds workspace limit")
 	}
 	mediaType := strings.TrimSpace(req.Header.Get("Content-Type")) // swobu:io-string source=boundary
 	if mediaType == "" {
@@ -384,27 +384,9 @@ func newClientRequestDocument(family canonical.ClientFamily, req carrier.Transpo
 		family,
 		mediaType,
 		cloneHeader(req.Header),
-		body,
+		req.Body,
 		carrier.Meta{Opaque: map[string]string{"exchange_id": strings.TrimSpace(exchangeID)}},
 	), nil
-}
-
-func readTransportRequestBody(body io.ReadCloser, maxBytes int64) ([]byte, error) {
-	if body == nil {
-		return nil, nil
-	}
-	defer func() { _ = body.Close() }()
-	if maxBytes <= 0 {
-		maxBytes = DefaultRuntimeLimits().MaxRequestBytes
-	}
-	raw, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(raw)) > maxBytes {
-		return nil, fmt.Errorf("request body exceeds workspace limit")
-	}
-	return raw, nil
 }
 
 func NewTransportRequest(method string, url string, header http.Header, body []byte) carrier.TransportRequest {
@@ -412,7 +394,7 @@ func NewTransportRequest(method string, url string, header http.Header, body []b
 		Method: method,
 		URL:    url,
 		Header: cloneHeader(header),
-		Body:   io.NopCloser(bytes.NewReader(append([]byte(nil), body...))),
+		Body:   body,
 	}
 }
 

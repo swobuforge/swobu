@@ -25,7 +25,7 @@ func TestResponsesKnownItemPresentationMetadataDoesNotEnterReplay(t *testing.T) 
 		t.Fatalf("canonical item count = %d, want request declarations plus 4 history items", len(items))
 	}
 	document, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: decoded.Request.Request},
+		EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestDecodeClientRequest_AcceptsHistoricalCustomToolCall(t *testing.T) {
 	}
 
 	encoded, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: got},
+		EncodeInput{Request: got, ToolNames: testAttemptToolNames(got)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {

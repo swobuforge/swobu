@@ -64,7 +64,7 @@ func TestToolEnvironmentRejectsEquivalentDeclarationWithContradictoryOwner(t *te
 	}
 }
 
-func TestRewriteToolContributionsPreservesEveryCarrierMetadata(t *testing.T) {
+func TestTransformToolContributionsPreservesEveryCarrierMetadata(t *testing.T) {
 	first := testFunctionTool(testRequestToolKey(ToolKindFunction, "first"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
 	replacement := testFunctionTool(testRequestToolKey(ToolKindFunction, "replacement"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
 	firstSet, _ := NewToolSet([]ToolDeclaration{first})
@@ -74,7 +74,7 @@ func TestRewriteToolContributionsPreservesEveryCarrierMetadata(t *testing.T) {
 	discovery, _ := NewToolDiscoveryResultItem(callID, firstSet, DiscoveryExecutorProvider)
 	request := NewCanonicalRequest(RequestParams{Items: []CanonicalItem{declarations, discovery}})
 
-	rewritten, err := RewriteToolContributions(request, func(ToolSet) (ToolSet, error) {
+	rewritten, err := TransformToolContributions(request, func(ToolSet) (ToolSet, error) {
 		return replacementSet, nil
 	})
 	if err != nil {
@@ -89,5 +89,72 @@ func TestRewriteToolContributionsPreservesEveryCarrierMetadata(t *testing.T) {
 	if !ok || result.CallID() != callID || result.Executor() != DiscoveryExecutorProvider ||
 		result.Tools().Declarations()[0].Key() != replacement.Key() {
 		t.Fatalf("discovery contribution = %#v", items[1])
+	}
+}
+
+func TestTransformToolContributionsRetainsResponsesRefinementsByExactCallableKey(t *testing.T) {
+	removedKey, _ := NewToolKey("request/workspace", ToolKindFunction, "removed")
+	survivingKey := testRequestToolKey(ToolKindFunction, "surviving")
+	plainKey, _ := NewToolKey("request/workspace", ToolKindFunction, "plain")
+	addedKey := testRequestToolKey(ToolKindCustom, "added")
+	removed := testFunctionTool(removedKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	surviving := testFunctionTool(survivingKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	plain := testFunctionTool(plainKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	formatObject, err := ParseJSONObject([]byte(`{"type":"text"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := NewCustomTool(addedKey, "", NewToolFormatObject(formatObject))
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespaceKey := testRequestToolKey(ToolKindNamespace, "workspace")
+	namespace, err := NewToolNamespace(namespaceKey, "", []ToolDeclaration{removed, plain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := NewToolSet([]ToolDeclaration{namespace, surviving})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refinements, err := NewResponsesToolRefinements(before, []ToolKey{removedKey, survivingKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := NewToolDeclarationsItemWithResponses(before, ContextScopeRequest, refinements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := NewCanonicalRequest(RequestParams{Items: []CanonicalItem{declarations}})
+	afterNamespace, err := NewToolNamespace(namespaceKey, "", []ToolDeclaration{plain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := NewToolSet([]ToolDeclaration{surviving, added, afterNamespace})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	transformed, err := TransformToolContributions(request, func(ToolSet) (ToolSet, error) {
+		return after, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	occurrence, ok := transformed.Items()[0].ToolDeclarations()
+	if !ok {
+		t.Fatalf("transformed item = %#v, want tool declarations", transformed.Items()[0])
+	}
+	got := occurrence.Responses()
+	if !got.Deferred(survivingKey) {
+		t.Fatal("surviving exact key lost its Responses refinement")
+	}
+	for _, key := range []ToolKey{removedKey, plainKey, addedKey} {
+		if got.Deferred(key) {
+			t.Fatalf("Responses refinement leaked to %q", key)
+		}
+	}
+	if keys := got.DeferredKeys(); len(keys) != 1 {
+		t.Fatalf("retained deferred keys = %#v, want only %q", keys, survivingKey)
 	}
 }

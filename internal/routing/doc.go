@@ -1,5 +1,5 @@
 // Package routing owns the immutable workspace/route/tier/target aggregate,
-// whole-value invariants, semantic edits, exact route resolution, and
+// whole-value invariants, semantic edits, default-compatible route resolution, and
 // deterministic ordered target-plan construction. Daemon startup
 // preferences, including daemon address, remain outside this aggregate.
 //
@@ -12,6 +12,12 @@
 // A target's position in a built plan is possible work, not provider I/O.
 // Exchange owns the issued provider-call attempt lifecycle, and one position
 // may produce zero or more calls without changing routing order.
+//
+// Route resolution gives exact configured names precedence. Any other
+// non-empty client model token selects the explicitly configured workspace
+// default route. This supports clients that cannot emit Swobu route names while
+// keeping provider inference and runtime alias creation out of routing. Missing
+// or blank tokens, and unmatched tokens in a workspace without a default, fail.
 //
 // Each target has one durable ID and one process-local monotonic version. Its
 // protocol records the provider whose catalog admitted it and must match the

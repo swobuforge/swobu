@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -105,7 +106,7 @@ func chatCompletion(reason string) canonical.Completion {
 	}
 }
 
-func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
+func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("chat completions response is invalid JSON")
@@ -116,7 +117,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	choice := dto.Choices[0]
 	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
 	if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
-		items, err := decodeChatChoiceItems(request, choice, changeLog, exchangeID)
+		items, err := decodeChatChoiceItems(request, names, choice, changeLog, exchangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +130,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			usage,
 		)), nil
 	}
-	items, err := decodeChatChoiceItems(request, choice, changeLog, exchangeID)
+	items, err := decodeChatChoiceItems(request, names, choice, changeLog, exchangeID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 }
 
 // DecodeResponseStream returns canonical envelope events directly for chat completions streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *chatCompletionsEventReader {
+func decodeResponseStream(request canonical.CanonicalRequest, names wire.ToolNames, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *chatCompletionsEventReader {
 	reader := &chatCompletionsEventReader{
 		exchangeID:      exchangeID,
 		responseID:      canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
@@ -156,6 +157,7 @@ func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.Byt
 		toolOccurrences: map[int]streamToolOccurrence{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
 		request:         request.Clone(),
+		toolNames:       names,
 	}
 	reader.changeLog = &reader.changes
 	return reader
@@ -181,11 +183,12 @@ type chatCompletionsEventReader struct {
 	latestUsage     canonical.TokenUsage
 	seq             int64
 	request         canonical.CanonicalRequest
+	toolNames       wire.ToolNames
 }
 
-func decodeChatChoiceItems(request canonical.CanonicalRequest, choice streamChoiceBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
+func decodeChatChoiceItems(request canonical.CanonicalRequest, names wire.ToolNames, choice streamChoiceBody, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
 	items := make([]canonical.CanonicalItem, 0, 2+len(choice.Message.ToolCalls))
-	output, err := decodeResponseOutputItems(request, choice.Message.Content, choice.Message.ToolCalls, changeLog, exchangeID)
+	output, err := decodeResponseOutputItems(request, names, choice.Message.Content, choice.Message.ToolCalls, changeLog, exchangeID)
 	if err != nil {
 		return nil, err
 	}
@@ -567,12 +570,12 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool environment is ambiguous")
 		}
-		declaration, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), state.WireName, state.Kind)
+		key, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKind(state.Kind), state.WireName)
 		if err != nil {
 			return canonical.NewBackendError("", 0, "chat completions streamed tool name cannot be resolved against the effective request", "")
 		}
 		state.CallID = callID
-		state.Tool = declaration.Key()
+		state.Tool = key
 		state.Started = true
 	}
 	for _, delta := range state.PendingArgs {

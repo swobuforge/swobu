@@ -20,7 +20,7 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 		t.Fatal(err)
 	}
 	document, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: decoded.Request.Request},
+		EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 	}
 
 	document, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: decoded.Request.Request},
+		EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatal("custom output did not participate in the Responses history fingerprint")
 	}
 
-	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, mcp.Access{}, nil, "")
+	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, testAttemptToolNames(decoded.Request.Request), mcp.Access{}, nil, "")
 	if err != nil {
 		t.Fatalf("encode result-only segment: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestCanonicalResponsesReplayPreservesEmptyCustomToolOutput(t *testing.T) {
 	}
 
 	document, err := EncodeCarrierWithChanges(
-		EncodeInput{Request: decoded.Request.Request},
+		EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 	)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 			}
 
 			document, err := EncodeCarrierWithChanges(
-				EncodeInput{Request: decoded.Request.Request},
+				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
 			if err != nil {
@@ -297,7 +297,7 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 	items := []canonical.CanonicalItem{functionCall, functionResult, customCall, customResult}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: items})
 
-	encoded, err := encodeConversation(request, items, nil, mcp.Access{}, nil, "")
+	encoded, err := encodeConversation(request, items, nil, testAttemptToolNames(request), mcp.Access{}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -92,7 +92,7 @@ func TestRunClassifiesOnlyUnresolvedCallerWorkAsMixedWithMCP(t *testing.T) {
 }
 
 func TestBindingsRetainOnlyLinearPerToolIdentityAtCatalogLimit(t *testing.T) {
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	source, _ := newTestMCPURL(
 		"https://mcp.example.test/rpc", canonical.Unspecified[[]string](),
 	)
@@ -111,11 +111,11 @@ func TestBindingsRetainOnlyLinearPerToolIdentityAtCatalogLimit(t *testing.T) {
 		}
 		tools = append(tools, declaration)
 	}
-	declaration, err := canonical.NewMCPToolNamespace(sourceKey, "", source, tools)
+	declaration, err := canonical.NewMCPToolSource(sourceKey, "", source, tools)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, _ := declaration.Namespace()
+	catalog, _ := declaration.MCP()
 	bindings, attemptTools, _, err := bindingsForCatalog(catalog)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestRunCanExecuteRequiresAtLeastOneUsableBinding(t *testing.T) {
 }
 
 func TestAccessRejectsContradictoryBearerWithoutExposingValues(t *testing.T) {
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	const bearer = "incident-secret-bearer"
 	access, err := (Access{}).WithBearer(sourceKey, bearer)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestOpenSkipsResolutionWhenToolPolicyDisablesMCP(t *testing.T) {
 	resolutions := 0
 	prepared, run, _, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			resolutions++
 			return sourceResolution{}, errors.New("resolver must not run")
 		},
@@ -237,7 +237,7 @@ func TestOpenSkipsResolutionForExplicitlyEmptyAllowedTools(t *testing.T) {
 	resolutions := 0
 	prepared, run, _, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			resolutions++
 			return sourceResolution{}, errors.New("resolver must not run")
 		},
@@ -276,7 +276,7 @@ func TestOpenDoesNotApplySourceLimitToDisabledMCP(t *testing.T) {
 			resolutions := 0
 			prepared, run, _, err := openWith(
 				context.Background(), request, Access{},
-				func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+				func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 					resolutions++
 					return sourceResolution{}, errors.New("resolver must not run")
 				},
@@ -297,7 +297,7 @@ func TestOpenResolvesRequiredSourcesBeforeOptionalSources(t *testing.T) {
 	var resolved []canonical.ToolKey
 	_, run, _, err := openWith(
 		context.Background(), request, Access{},
-		func(_ context.Context, source canonical.ToolNamespace, _ SourceAccess) (sourceResolution, error) {
+		func(_ context.Context, source canonical.MCPToolSource, _ SourceAccess) (sourceResolution, error) {
 			resolved = append(resolved, source.Key())
 			return sourceResolution{session: &session{}, catalog: source}, nil
 		},
@@ -324,7 +324,7 @@ func TestExplicitEmptyAllowedToolsWithRequiredPolicyIsBadRequest(t *testing.T) {
 	})
 	_, run, _, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{}, errors.New("resolver must not run")
 		},
 	)
@@ -345,7 +345,7 @@ func TestOpenRejectsAggregateCatalogBytesPerRun(t *testing.T) {
 	)
 	prepared, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(_ context.Context, source canonical.ToolNamespace, _ SourceAccess) (sourceResolution, error) {
+		func(_ context.Context, source canonical.MCPToolSource, _ SourceAccess) (sourceResolution, error) {
 			catalog := runtimeTestCatalogWithDescription(
 				t, source, strings.Repeat("x", MaxCatalogBytesPerSource/2-2048),
 			)
@@ -426,9 +426,9 @@ func TestLocalRuntimeClaimsOnlyAuthorityItCanHonor(t *testing.T) {
 	declarations := make([]canonical.ToolDeclaration, 0, len(sources))
 	for index, source := range sources {
 		key, _ := canonical.NewToolKey(
-			"mcp", canonical.ToolKindNamespace, fmt.Sprintf("source_%d", index),
+			"mcp", canonical.ToolKindMCP, fmt.Sprintf("source_%d", index),
 		)
-		declaration, _ := canonical.NewMCPToolNamespace(key, "", source, nil)
+		declaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
 		declarations = append(declarations, declaration)
 	}
 	set, _ := canonical.NewToolSet(declarations)
@@ -444,7 +444,7 @@ func TestLocalRuntimeClaimsOnlyAuthorityItCanHonor(t *testing.T) {
 	if len(local) != 1 {
 		t.Fatalf("local sources = %#v", local)
 	}
-	source, _ := local[0].MCPSource()
+	source := local[0].Source()
 	if source.Kind() != canonical.MCPSourceURL ||
 		source.Loading() != canonical.MCPLoadingDeferred ||
 		source.Approval().Kind() != canonical.MCPApprovalNever {
@@ -458,7 +458,7 @@ func TestRunDerivesOrdinaryAttemptFunctionsFromFrozenCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	run := &Run{
 		sessions:     map[canonical.ToolKey]*session{sourceKey: {}},
 		localSources: map[canonical.ToolKey]struct{}{sourceKey: {}},
@@ -472,7 +472,7 @@ func TestRunDerivesOrdinaryAttemptFunctionsFromFrozenCatalog(t *testing.T) {
 		},
 	}
 	source, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
-	unresolved, _ := canonical.NewMCPToolNamespace(sourceKey, "", source, nil)
+	unresolved, _ := canonical.NewMCPToolSource(sourceKey, "", source, nil)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{unresolved})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	delta := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
@@ -495,15 +495,14 @@ func TestRunDerivesOrdinaryAttemptFunctionsFromFrozenCatalog(t *testing.T) {
 
 	canonicalEnvironment, _ := canonical.EffectiveTools(full)
 	canonicalSource, _ := canonicalEnvironment.Lookup(sourceKey)
-	namespace, _ := canonicalSource.Namespace()
-	if _, ok := namespace.MCPSource(); !ok {
+	if _, ok := canonicalSource.MCP(); !ok {
 		t.Fatal("attempt derivation mutated canonical MCP history")
 	}
 }
 
 func TestRunDropsUnavailableMCPSourceOnlyFromAttempt(t *testing.T) {
 	request, _, localKey := runtimeTestRequest(t)
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	run := &Run{
 		sessions:     map[canonical.ToolKey]*session{},
 		localSources: map[canonical.ToolKey]struct{}{sourceKey: {}},
@@ -528,7 +527,7 @@ func TestOpenOptionalFailurePreservesCanonicalHistoryAndDropsOnlyAttempt(t *test
 	request, remoteKey, localKey := runtimeTestRequest(t)
 	prepared, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{}, canonical.NewBackendError("mcp:docs", http.StatusBadGateway, "unavailable", "")
 		},
 	)
@@ -554,10 +553,10 @@ func TestOpenOptionalFailurePreservesCanonicalHistoryAndDropsOnlyAttempt(t *test
 }
 
 func TestOpenResolvesMCPSourceContributedByDiscoveryResult(t *testing.T) {
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	remoteKey, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "search")
 	source, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
-	unresolved, _ := canonical.NewMCPToolNamespace(sourceKey, "Docs", source, nil)
+	unresolved, _ := canonical.NewMCPToolSource(sourceKey, "Docs", source, nil)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{unresolved})
 	callID, _ := canonical.NewToolCallID("discovery_1")
 	input, _ := canonical.ParseJSONObject([]byte(`{}`))
@@ -568,7 +567,7 @@ func TestOpenResolvesMCPSourceContributedByDiscoveryResult(t *testing.T) {
 
 	prepared, run, _, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{session: &session{}, catalog: catalog}, nil
 		},
 	)
@@ -594,7 +593,7 @@ func TestOpenRequiredUnavailableSourceFails(t *testing.T) {
 	})
 	_, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{}, canonical.NewBackendError("mcp:docs", http.StatusBadGateway, "unavailable", "")
 		},
 	)
@@ -609,7 +608,7 @@ func TestOpenPendingCallToUnavailableSourceFails(t *testing.T) {
 	request = request.WithItems(append(request.Items(), call))
 	_, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{}, canonical.NewBackendError("mcp:docs", http.StatusBadGateway, "unavailable", "")
 		},
 	)
@@ -623,10 +622,8 @@ func TestOpenRequiredPolicyFailsWhenUnavailableSourcesLeaveNoTools(t *testing.T)
 	environment, _ := canonical.EffectiveTools(request)
 	var remote canonical.ToolDeclaration
 	for _, declaration := range environment.Declarations() {
-		if namespace, ok := declaration.Namespace(); ok {
-			if _, ok := namespace.MCPSource(); ok {
-				remote = declaration
-			}
+		if _, ok := declaration.MCP(); ok {
+			remote = declaration
 		}
 	}
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{remote})
@@ -637,7 +634,7 @@ func TestOpenRequiredPolicyFailsWhenUnavailableSourcesLeaveNoTools(t *testing.T)
 	})
 	_, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{}, canonical.NewBackendError("mcp:docs", http.StatusBadGateway, "unavailable", "")
 		},
 	)
@@ -667,11 +664,11 @@ func TestOpenWithoutMCPReturnsNoRuntime(t *testing.T) {
 
 func TestOpenComposesNamespaceDescriptionIntoAttemptFunctions(t *testing.T) {
 	request, remoteKey, _ := runtimeTestRequest(t)
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	catalog := runtimeTestCatalog(t, sourceKey, remoteKey, "Docs server", "Search")
 	prepared, run, changes, err := openWith(
 		context.Background(), request, Access{},
-		func(context.Context, canonical.ToolNamespace, SourceAccess) (sourceResolution, error) {
+		func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
 			return sourceResolution{session: &session{}, catalog: catalog}, nil
 		},
 	)
@@ -701,7 +698,7 @@ func TestOpenComposesNamespaceDescriptionIntoAttemptFunctions(t *testing.T) {
 
 func runtimeTestRequest(t *testing.T) (canonical.CanonicalRequest, canonical.ToolKey, canonical.ToolKey) {
 	t.Helper()
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	remoteKey, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "search")
 	localKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "local")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
@@ -709,7 +706,7 @@ func runtimeTestRequest(t *testing.T) (canonical.CanonicalRequest, canonical.Too
 	remoteFunction, _ := canonical.NewFunctionTool(remoteKey, "", schema, canonical.Unspecified[bool]())
 	localFunction, _ := canonical.NewFunctionTool(localKey, "", schema, canonical.Unspecified[bool]())
 	source, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
-	namespace, _ := canonical.NewMCPToolNamespace(sourceKey, "", source, []canonical.ToolDeclaration{remoteFunction})
+	namespace, _ := canonical.NewMCPToolSource(sourceKey, "", source, []canonical.ToolDeclaration{remoteFunction})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace, localFunction})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}), remoteKey, localKey
@@ -717,7 +714,7 @@ func runtimeTestRequest(t *testing.T) (canonical.CanonicalRequest, canonical.Too
 
 func runtimeTestRun(t *testing.T, request canonical.CanonicalRequest, remoteKey canonical.ToolKey) *Run {
 	t.Helper()
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	return &Run{
 		bindings: map[canonical.ToolKey]binding{
 			remoteKey: {
@@ -732,12 +729,12 @@ func runtimeTestRequestWithAllowedTools(
 	allowed canonical.Specified[[]string],
 ) canonical.CanonicalRequest {
 	t.Helper()
-	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, "docs")
+	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	source, err := newTestMCPURL("https://mcp.example.test/rpc", allowed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	namespace, err := canonical.NewMCPToolNamespace(sourceKey, "", source, nil)
+	namespace, err := canonical.NewMCPToolSource(sourceKey, "", source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +755,7 @@ func runtimeTestManySources(
 	declarations := make([]canonical.ToolDeclaration, 0, count)
 	for index := 0; index < count; index++ {
 		sourceKey, _ := canonical.NewToolKey(
-			"mcp", canonical.ToolKindNamespace, fmt.Sprintf("source_%02d", index),
+			"mcp", canonical.ToolKindMCP, fmt.Sprintf("source_%02d", index),
 		)
 		source, err := newTestMCPURL(
 			fmt.Sprintf("https://mcp-%02d.example.test/rpc", index), allowed,
@@ -766,7 +763,7 @@ func runtimeTestManySources(
 		if err != nil {
 			t.Fatal(err)
 		}
-		namespace, err := canonical.NewMCPToolNamespace(sourceKey, "", source, nil)
+		namespace, err := canonical.NewMCPToolSource(sourceKey, "", source, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -793,7 +790,7 @@ func runtimeTestRequiredSourceRequest(
 	var sourceKeys []canonical.ToolKey
 	var requiredTool canonical.ToolKey
 	for _, name := range []string{"optional", "required"} {
-		sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindNamespace, name)
+		sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, name)
 		toolKey, _ := canonical.NewToolKey(
 			"mcp/"+name, canonical.ToolKindFunction, "call",
 		)
@@ -804,7 +801,7 @@ func runtimeTestRequiredSourceRequest(
 			"https://"+name+".example.test/rpc",
 			canonical.Unspecified[[]string](),
 		)
-		namespace, _ := canonical.NewMCPToolNamespace(
+		namespace, _ := canonical.NewMCPToolSource(
 			sourceKey, "", source, []canonical.ToolDeclaration{tool},
 		)
 		declarations = append(declarations, namespace)
@@ -825,9 +822,9 @@ func runtimeTestRequiredSourceRequest(
 
 func runtimeTestCatalogWithDescription(
 	t *testing.T,
-	source canonical.ToolNamespace,
+	source canonical.MCPToolSource,
 	description string,
-) canonical.ToolNamespace {
+) canonical.MCPToolSource {
 	t.Helper()
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	key, _ := canonical.NewToolKey(
@@ -842,15 +839,15 @@ func runtimeTestCatalogWithDescription(
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote, _ := source.MCPSource()
-	declaration, err := canonical.NewMCPToolNamespace(
+	remote := source.Source()
+	declaration, err := canonical.NewMCPToolSource(
 		source.Key(), source.Description(), remote,
 		[]canonical.ToolDeclaration{tool},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, _ := declaration.Namespace()
+	catalog, _ := declaration.MCP()
 	return catalog
 }
 
@@ -860,7 +857,7 @@ func runtimeTestCatalog(
 	remoteKey canonical.ToolKey,
 	sourceDescription string,
 	toolDescription string,
-) canonical.ToolNamespace {
+) canonical.MCPToolSource {
 	t.Helper()
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	function, err := canonical.NewFunctionTool(
@@ -871,14 +868,14 @@ func runtimeTestCatalog(
 		t.Fatal(err)
 	}
 	source, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
-	declaration, err := canonical.NewMCPToolNamespace(
+	declaration, err := canonical.NewMCPToolSource(
 		sourceKey, sourceDescription, source, []canonical.ToolDeclaration{function},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	namespace, _ := declaration.Namespace()
-	return namespace
+	sourceDeclaration, _ := declaration.MCP()
+	return sourceDeclaration
 }
 
 func mustRuntimeTool(t *testing.T, environment canonical.ToolEnvironment, key canonical.ToolKey) canonical.ToolDeclaration {

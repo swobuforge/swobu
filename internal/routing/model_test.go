@@ -114,19 +114,36 @@ func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
 	}
 }
 
-func TestWorkspaceResolveRouteRequiresExactNameOrPublicDefault(t *testing.T) {
-	config := testConfig(t, testTarget(t, "a"))
+func TestWorkspaceResolveRouteUsesExactNameThenConfiguredDefault(t *testing.T) {
+	defaultName, _ := ParseRouteName("chat")
+	exactName, _ := ParseRouteName("exact")
+	defaultTier, _ := NewTier([]Target{testTarget(t, "default-target")})
+	exactTier, _ := NewTier([]Target{testTarget(t, "exact-target")})
+	defaultRoute, _ := NewRoute(defaultName, []Tier{defaultTier})
+	exactRoute, _ := NewRoute(exactName, []Tier{exactTier})
 	slug, _ := ParseWorkspaceSlug("dev")
-	workspace, _ := config.Workspace(slug)
-	for _, requested := range []string{"chat", PublicDefaultRouteID} {
-		route, err := workspace.ResolveRoute(requested)
-		if err != nil || route.Name().String() != "chat" {
-			t.Fatalf("ResolveRoute(%q) = %q, %v", requested, route.Name().String(), err)
+	workspace, err := NewWorkspace(slug, defaultName, []Route{defaultRoute, exactRoute})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		requested string
+		want      string
+	}{
+		{requested: "exact", want: "exact"},
+		{requested: PublicDefaultRouteID, want: "chat"},
+		{requested: "fixed-client-model", want: "chat"},
+		{requested: "provider/model:not-a-route", want: "chat"},
+	} {
+		route, err := workspace.ResolveRoute(test.requested)
+		if err != nil || route.Name().String() != test.want {
+			t.Fatalf("ResolveRoute(%q) = %q, %v, want %q", test.requested, route.Name().String(), err, test.want)
 		}
 	}
-	for _, requested := range []string{"", " \t", "upstream-a", "missing", "INVALID"} {
-		if _, err := workspace.ResolveRoute(requested); err == nil {
-			t.Fatalf("ResolveRoute(%q) unexpectedly succeeded", requested)
+	for _, requested := range []string{"", " \t"} {
+		if _, err := workspace.ResolveRoute(requested); !errors.Is(err, ErrEmptyRequestedRoute) {
+			t.Fatalf("ResolveRoute(%q) error = %v, want ErrEmptyRequestedRoute", requested, err)
 		}
 	}
 }

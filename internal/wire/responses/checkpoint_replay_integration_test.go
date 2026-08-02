@@ -65,7 +65,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 				t.Fatal("different target retained previous_response_id")
 			}
 			document, err := EncodeCarrierWithChanges(
-				EncodeInput{Request: stateless}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+				EncodeInput{Request: stateless, ToolNames: testAttemptToolNames(stateless)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -136,14 +136,13 @@ func decodeReplayFixtureResponse(t *testing.T, request canonical.CanonicalReques
 			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":4,\"item\":{\"id\":\"ct_1\",\"type\":\"custom_tool_call\",\"status\":\"completed\",\"call_id\":\"call_custom\",\"name\":\"shell\",\"input\":\"echo exact\"}}\n\n" +
 			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_turn_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
 		reader = decodeResponseStream(
-			request,
-			carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
-			"ex", nil,
+			request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))},
+			"ex", nil, true,
 		)
 	} else {
 		raw := []byte(`{"id":"provider_turn_1","model":"m","status":"completed","output":` + output + `}`)
 		var err error
-		reader, err = decodeResponseBuffered(context.Background(), request, raw, "ex", nil)
+		reader, err = decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), raw, "ex", nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,7 +187,6 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 		`"call_id":"call_1"`,
 		`"id":"ws_lifecycle"`,
 		`"query":"deadline"`,
-		`"url":"https://example.test/rules"`,
 		`"call_id":"call_custom"`,
 		`"input":"echo exact"`,
 		`turn two`,
@@ -196,5 +194,8 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 		if !strings.Contains(string(raw), token) {
 			t.Fatalf("stateless replay missing %q: %s", token, raw)
 		}
+	}
+	if strings.Contains(string(raw), `"url":"https://example.test/rules"`) {
+		t.Fatalf("official replay retained source metadata: %s", raw)
 	}
 }

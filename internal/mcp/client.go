@@ -34,16 +34,13 @@ const (
 var errAuthenticationRequired = errors.New("MCP source requires authentication")
 
 type session struct {
-	source     canonical.ToolNamespace
+	source     canonical.MCPToolSource
 	sdk        *mcp.ClientSession
 	authStatus *authenticationStatus
 }
 
-func openSession(ctx context.Context, source canonical.ToolNamespace, access SourceAccess) (*session, error) {
-	remote, ok := source.MCPSource()
-	if !ok {
-		return nil, canonical.InternalError("MCP client requires a remote namespace")
-	}
+func openSession(ctx context.Context, source canonical.MCPToolSource, access SourceAccess) (*session, error) {
+	remote := source.Source()
 	httpClient, authStatus, err := safeHTTPClient(source, access)
 	if err != nil {
 		return nil, err
@@ -79,7 +76,7 @@ func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, [
 	bounds := toolListBounds{
 		bytes: len(s.source.Description()), seenCursors: map[string]struct{}{},
 	}
-	remote, _ := s.source.MCPSource()
+	remote := s.source.Source()
 	allowed, selected := remote.AllowedTools().Get()
 	for {
 		result, err := s.sdk.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
@@ -160,7 +157,7 @@ func sdkToolRetainedBytes(sourceDescription string, tool *mcp.Tool) (int, error)
 		len(expandedDescription), nil
 }
 
-func declarationFromSDKTool(source canonical.ToolNamespace, tool *mcp.Tool) (canonical.ToolDeclaration, []compat.Change, error) {
+func declarationFromSDKTool(source canonical.MCPToolSource, tool *mcp.Tool) (canonical.ToolDeclaration, []compat.Change, error) {
 	input, err := schemaFromSDK(tool.InputSchema)
 	if err != nil {
 		return canonical.ToolDeclaration{}, nil, fmt.Errorf("MCP tool %q input schema: %w", tool.Name, err)
@@ -291,11 +288,8 @@ func schemaFromSDK(value any) (canonical.ToolSchema, error) {
 	return canonical.NewToolSchemaObject(object), nil
 }
 
-func safeHTTPClient(source canonical.ToolNamespace, access SourceAccess) (*http.Client, *authenticationStatus, error) {
-	remote, ok := source.MCPSource()
-	if !ok {
-		return nil, nil, canonical.InternalError("MCP client requires a remote namespace")
-	}
+func safeHTTPClient(source canonical.MCPToolSource, access SourceAccess) (*http.Client, *authenticationStatus, error) {
+	remote := source.Source()
 	rawEndpoint, isURL := remote.URL()
 	if !isURL {
 		return nil, nil, canonical.InternalError("MCP client requires a URL source")

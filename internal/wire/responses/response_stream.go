@@ -11,18 +11,21 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
 // DecodeResponseStream returns canonical envelope events directly for responses streams.
-func decodeResponseStream(request canonical.CanonicalRequest, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change) *responsesResponseStream {
+func decodeResponseStream(request canonical.CanonicalRequest, names wire.ToolNames, stream carrier.ByteStream, exchangeID string, _ *[]compat.Change, continuationEligible bool) *responsesResponseStream {
 	reader := &responsesResponseStream{
-		exchangeID:      exchangeID,
-		responseEnvID:   canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
-		reader:          core.NewSSEReader(stream.Body),
-		providerOutputs: map[int]*pendingResponseOutput{},
-		latestUsage:     canonical.NewUnknownTokenUsage(),
-		request:         request.Clone(),
+		exchangeID:           exchangeID,
+		responseEnvID:        canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
+		reader:               core.NewSSEReader(stream.Body),
+		providerOutputs:      map[int]*pendingResponseOutput{},
+		latestUsage:          canonical.NewUnknownTokenUsage(),
+		request:              request.Clone(),
+		toolNames:            names,
+		continuationEligible: continuationEligible,
 	}
 	reader.changeLog = &reader.changes
 	return reader
@@ -45,8 +48,10 @@ type responsesResponseStream struct {
 	latestUsage           canonical.TokenUsage
 	seq                   int64
 	request               canonical.CanonicalRequest
+	toolNames             wire.ToolNames
 	nextOrdinal           uint32
 	frameIndex            int
+	continuationEligible  bool
 }
 
 func (s *responsesResponseStream) unresolvedTerminalOutputs(items []json.RawMessage) ([]json.RawMessage, []int) {
@@ -327,7 +332,7 @@ func (s *responsesResponseStream) ensureToolState(outputIndex int, ordinal uint3
 	if err != nil {
 		return nil, canonical.InternalError("responses stream tool environment is ambiguous")
 	}
-	resolved, _, err := canonical.ResolveToolDeclarationByName(environment.Declarations(), name, normalizedType)
+	key, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKind(normalizedType), name)
 	if err != nil {
 		return nil, canonical.InternalError("responses stream tool call references an unknown or ambiguous tool")
 	}
@@ -335,7 +340,7 @@ func (s *responsesResponseStream) ensureToolState(outputIndex int, ordinal uint3
 	if err != nil {
 		return nil, canonical.InternalError("responses stream tool call is missing call_id")
 	}
-	state := &responsesToolState{ordinal: ordinal, toolType: normalizedType, callID: canonicalCallID, tool: resolved.Key()}
+	state := &responsesToolState{ordinal: ordinal, toolType: normalizedType, callID: canonicalCallID, tool: key}
 	output.tool = state
 	start, err := canonical.NewToolCallStart(canonicalCallID, state.tool)
 	if err != nil {

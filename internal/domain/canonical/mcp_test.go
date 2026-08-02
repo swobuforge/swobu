@@ -9,8 +9,8 @@ func newCanonicalTestMCPURL(endpoint string, allowed Specified[[]string]) (MCPSo
 	)
 }
 
-func TestMCPNamespaceOwnsSourceCatalogScopeAndDerivedLookup(t *testing.T) {
-	sourceKey, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
+func TestMCPToolSourceOwnsAuthorityCatalogAndDerivedLookup(t *testing.T) {
+	sourceKey, _ := NewToolKey("mcp", ToolKindMCP, "docs")
 	source, err := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Specify([]string{"search"}))
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +21,7 @@ func TestMCPNamespaceOwnsSourceCatalogScopeAndDerivedLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	namespace, err := NewMCPToolNamespace(sourceKey, "Docs", source, []ToolDeclaration{tool})
+	namespace, err := NewMCPToolSource(sourceKey, "Docs", source, []ToolDeclaration{tool})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +42,14 @@ func TestMCPNamespaceOwnsSourceCatalogScopeAndDerivedLookup(t *testing.T) {
 	}
 }
 
-func TestRequestScopedRemoteMCPNamespaceExpiresAtomically(t *testing.T) {
-	key, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
+func TestRequestScopedRemoteMCPSourceExpiresAtomically(t *testing.T) {
+	key, _ := NewToolKey("mcp", ToolKindMCP, "docs")
 	source, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Unspecified[[]string]())
-	namespace, _ := NewMCPToolNamespace(key, "", source, nil)
+	namespace, _ := NewMCPToolSource(key, "", source, nil)
 	set, _ := NewToolSet([]ToolDeclaration{namespace})
 	item, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
 	if retained := RetainedHistory([]CanonicalItem{item}); len(retained) != 0 {
-		t.Fatalf("request-scoped remote namespace survived: %#v", retained)
+		t.Fatalf("request-scoped remote MCP source survived: %#v", retained)
 	}
 }
 
@@ -104,15 +104,15 @@ func TestMCPSourceEquivalenceIncludesKnownAuthorityRefinements(t *testing.T) {
 	}
 }
 
-func TestRemoteNamespaceCannotBeNested(t *testing.T) {
-	childKey, _ := NewToolKey("mcp", ToolKindNamespace, "docs")
+func TestRemoteMCPSourceCannotBeNested(t *testing.T) {
+	childKey, _ := NewToolKey("mcp", ToolKindMCP, "docs")
 	source, _ := newCanonicalTestMCPURL("https://mcp.example.test/rpc", Unspecified[[]string]())
-	child, err := NewMCPToolNamespace(childKey, "", source, nil)
+	child, err := NewMCPToolSource(childKey, "", source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parentKey, _ := NewRequestToolKey(ToolKindNamespace, "parent")
 	if _, err := NewToolNamespace(parentKey, "", []ToolDeclaration{child}); err == nil {
-		t.Fatal("nested remote namespace entered canonical state")
+		t.Fatal("nested remote MCP source entered canonical state")
 	}
 }

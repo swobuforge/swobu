@@ -11,9 +11,11 @@ func TestEncodeHistoricalToolCallUsesStoredNamespacedKeyWithoutCurrentTools(t *t
 	callID, _ := canonical.NewToolCallID("call_1")
 	arguments, _ := canonical.ParseJSONObject([]byte(`{"city":"London"}`))
 	item, _ := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(arguments))
-	want := key.Name()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
+	names := testAttemptToolNames(request)
+	want, _ := names.WireName(key)
 
-	got, err := encodeMessagesToolCall(item, nil)
+	got, err := encodeMessagesToolCall(item, names)
 	if err != nil {
 		t.Fatal(err)
 	}

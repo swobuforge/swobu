@@ -23,7 +23,7 @@ func TestUnicodeCitationRoundTripsAcrossResponsesAndMessages(t *testing.T) {
 			name: "Responses to Messages",
 			decode: func(t *testing.T) canonical.CanonicalResponse {
 				raw := []byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A£😀B","annotations":[{"type":"url_citation","url":"https://example.com/source","title":"Source","start_index":1,"end_index":2}]}]}]}`)
-				decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}), "exchange")
+				decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}), "exchange")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -33,7 +33,7 @@ func TestUnicodeCitationRoundTripsAcrossResponsesAndMessages(t *testing.T) {
 				return (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 			},
 			replay: func(t *testing.T, document carrier.Document) canonical.CanonicalResponse {
-				decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, document, "exchange")
+				decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, document, "exchange")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -44,7 +44,7 @@ func TestUnicodeCitationRoundTripsAcrossResponsesAndMessages(t *testing.T) {
 			name: "Messages to Responses",
 			decode: func(t *testing.T) canonical.CanonicalResponse {
 				raw := []byte(`{"id":"msg_1","model":"m","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"A£😀B","citations":[{"type":"web_search_result_location","url":"https://example.com/source","title":"Source","start_char_index":1,"end_char_index":3}]}]}`)
-				decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}), "exchange")
+				decoded, err := (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}), "exchange")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -54,7 +54,7 @@ func TestUnicodeCitationRoundTripsAcrossResponsesAndMessages(t *testing.T) {
 				return (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 			},
 			replay: func(t *testing.T, document carrier.Document) canonical.CanonicalResponse {
-				decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, document, "exchange")
+				decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, document, "exchange")
 				if err != nil {
 					t.Fatal(err)
 				}

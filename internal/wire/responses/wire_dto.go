@@ -49,6 +49,7 @@ type responsesWireOutputItemDTO struct {
 	Content          json.RawMessage                `json:"content,omitempty"`
 	CallID           string                         `json:"call_id,omitempty"`
 	Name             string                         `json:"name,omitempty"`
+	Namespace        string                         `json:"namespace,omitempty"`
 	Arguments        json.RawMessage                `json:"arguments,omitempty"`
 	Input            string                         `json:"input,omitempty"`
 	ServerLabel      string                         `json:"server_label,omitempty"`
@@ -77,6 +78,7 @@ type responsesInputItemDTO struct {
 	CallID           string                         `json:"call_id"`
 	ID               string                         `json:"id"`
 	Name             string                         `json:"name"`
+	Namespace        string                         `json:"namespace,omitempty"`
 	Arguments        json.RawMessage                `json:"arguments"`
 	Input            json.RawMessage                `json:"input"`
 	Output           json.RawMessage                `json:"output"`
@@ -92,6 +94,7 @@ type responsesResponseDTO struct {
 	Object            string                         `json:"object"`
 	Model             string                         `json:"model"`
 	Status            string                         `json:"status"`
+	Store             *bool                          `json:"store,omitempty"`
 	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 	OutputText        string                         `json:"output_text"`
@@ -187,6 +190,7 @@ type responsesStreamingResponseDTO struct {
 	Object            string                         `json:"object"`
 	Model             string                         `json:"model"`
 	Status            string                         `json:"status"`
+	Store             *bool                          `json:"store,omitempty"`
 	IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 	ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 	Output            any                            `json:"output,omitempty"`

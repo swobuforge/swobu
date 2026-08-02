@@ -27,7 +27,7 @@ type Access struct {
 // WithBearer adds the authorization-token field for one source.
 func (a Access) WithBearer(source canonical.ToolKey, bearer string) (Access, error) {
 	bearer = strings.TrimSpace(bearer)
-	if source.IsZero() || source.Kind() != canonical.ToolKindNamespace || bearer == "" {
+	if source.IsZero() || source.Kind() != canonical.ToolKindMCP || bearer == "" {
 		return Access{}, canonical.BadRequest("responses MCP authorization is invalid")
 	}
 	return a.withSource(source, func(current SourceAccess) (SourceAccess, error) {
@@ -49,7 +49,7 @@ func (a Access) WithBearer(source canonical.ToolKey, bearer string) (Access, err
 // compared case-insensitively so contradictory authority cannot depend on map
 // order or spelling.
 func (a Access) WithHeaders(source canonical.ToolKey, headers map[string]string) (Access, error) {
-	if source.IsZero() || source.Kind() != canonical.ToolKindNamespace {
+	if source.IsZero() || source.Kind() != canonical.ToolKindMCP {
 		return Access{}, canonical.BadRequest("responses MCP headers are invalid")
 	}
 	return a.withSource(source, func(current SourceAccess) (SourceAccess, error) {
