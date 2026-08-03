@@ -3,6 +3,7 @@ package zai
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -77,41 +78,120 @@ func TestRewriteWebSearchTranslatesOnlyEmptyStandardOptions(t *testing.T) {
 	}
 }
 
-func TestCodecInheritsStandardReasoningBudgetProjection(t *testing.T) {
-	budget, err := canonical.NewBudgetReasoningCompute(10_000)
+func TestCodecAppliesStaticZAIReasoningProjectionWithoutModelBranches(t *testing.T) {
+	budgetLow, err := canonical.NewBudgetReasoningCompute(1_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
-		Compute: canonical.Specify(budget),
-	})
+	budgetMedium, err := canonical.NewBudgetReasoningCompute(10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:     canonical.Specify("glm"),
-		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
-		Reasoning: reasoning,
-	})
+	budgetHigh, err := canonical.NewBudgetReasoningCompute(30_000)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	document, changes, err := (codec{}).Encode(provider.Request{
-		Canonical: request,
-		Delivery:  delivery.BufferedDelivery(),
-	})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name         string
+		compute      *canonical.ReasoningCompute
+		effort       *canonical.InferenceEffort
+		wantThinking string
+		wantEffort   string
+		wantChanges  []compat.Change
+	}{
+		{name: "unspecified"},
+		{name: "disabled", compute: reasoningComputePointer(canonical.NewDisabledReasoningCompute()), wantThinking: "disabled"},
+		{
+			name: "disabled with effort", compute: reasoningComputePointer(canonical.NewDisabledReasoningCompute()),
+			effort: effortPointer(canonical.InferenceEffortMax), wantThinking: "disabled",
+			wantChanges: []compat.Change{compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{})},
+		},
+		{name: "automatic", compute: reasoningComputePointer(canonical.NewAutomaticReasoningCompute()), wantThinking: "enabled"},
+		{
+			name: "automatic with effort", compute: reasoningComputePointer(canonical.NewAutomaticReasoningCompute()),
+			effort: effortPointer(canonical.InferenceEffortHigh), wantThinking: "enabled", wantEffort: "high",
+		},
+		{name: "effort only", effort: effortPointer(canonical.InferenceEffortHigh), wantEffort: "high"},
+		{
+			name: "low budget", compute: reasoningComputePointer(budgetLow), wantThinking: "enabled", wantEffort: "low",
+			wantChanges: []compat.Change{reasoningBudgetApproximation()},
+		},
+		{
+			name: "medium budget", compute: reasoningComputePointer(budgetMedium), wantThinking: "enabled", wantEffort: "medium",
+			wantChanges: []compat.Change{reasoningBudgetApproximation()},
+		},
+		{
+			name: "high budget", compute: reasoningComputePointer(budgetHigh), wantThinking: "enabled", wantEffort: "high",
+			wantChanges: []compat.Change{reasoningBudgetApproximation()},
+		},
+		{
+			name: "budget with explicit effort", compute: reasoningComputePointer(budgetMedium),
+			effort: effortPointer(canonical.InferenceEffortMax), wantThinking: "enabled", wantEffort: "max",
+			wantChanges: []compat.Change{reasoningBudgetApproximation()},
+		},
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
-		t.Fatal(err)
+
+	for _, model := range []string{"glm-4.5", "glm-5.1", "glm-5.2", "glm-99", "opaque-future-model"} {
+		for _, tt := range tests {
+			t.Run(model+"/"+tt.name, func(t *testing.T) {
+				reasoning := canonical.ReasoningControls{}
+				if tt.compute != nil {
+					reasoning, err = canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+						Compute: canonical.Specify(*tt.compute),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: tt.effort})
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := canonical.NewCanonicalRequest(canonical.RequestParams{
+					Model:     canonical.Specify(model),
+					Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+					Controls:  controls,
+					Reasoning: reasoning,
+				})
+				document, changes, err := (codec{}).Encode(provider.Request{
+					Canonical: request,
+					Delivery:  delivery.BufferedDelivery(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var payload map[string]any
+				if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+					t.Fatal(err)
+				}
+				thinking, thinkingPresent := payload["thinking"].(map[string]any)
+				if tt.wantThinking == "" {
+					if thinkingPresent {
+						t.Fatalf("thinking = %#v, want absent", thinking)
+					}
+				} else if !thinkingPresent || thinking["type"] != tt.wantThinking {
+					t.Fatalf("thinking = %#v, want %q", payload["thinking"], tt.wantThinking)
+				}
+				if tt.wantEffort == "" {
+					if _, exists := payload["reasoning_effort"]; exists {
+						t.Fatalf("reasoning_effort = %#v, want absent", payload["reasoning_effort"])
+					}
+				} else if payload["reasoning_effort"] != tt.wantEffort {
+					t.Fatalf("reasoning_effort = %#v, want %q", payload["reasoning_effort"], tt.wantEffort)
+				}
+				if !reflect.DeepEqual(changes, tt.wantChanges) {
+					t.Fatalf("changes = %#v, want %#v", changes, tt.wantChanges)
+				}
+			})
+		}
 	}
-	if payload["reasoning_effort"] != "medium" {
-		t.Fatalf("reasoning_effort = %#v, want medium", payload["reasoning_effort"])
-	}
-	if len(changes) != 1 ||
-		changes[0].Capability != canonical.RequestReasoning ||
-		changes[0].Kind != compat.Approximation ||
-		changes[0].Preserved != canonical.RequestControlsEffort {
-		t.Fatalf("changes = %#v, want one reasoning-to-effort approximation", changes)
-	}
+}
+
+func reasoningComputePointer(value canonical.ReasoningCompute) *canonical.ReasoningCompute {
+	return &value
+}
+
+func effortPointer(value canonical.InferenceEffort) *canonical.InferenceEffort {
+	return &value
 }

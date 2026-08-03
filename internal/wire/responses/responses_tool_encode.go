@@ -185,6 +185,23 @@ func resolveResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, 
 	return canonical.ToolDeclaration{}, canonical.BadRequest("Responses function call references an unknown namespace")
 }
 
+// resolveHistoricalResponsesFunctionCall preserves a client transcript call by
+// value when its scoped declaration is no longer part of the current request.
+// Provider output still uses strict attempt-local declaration resolution.
+func resolveHistoricalResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, name string) (canonical.ToolKey, error) {
+	if strings.TrimSpace(namespace) == "" {
+		return canonical.ResolveHistoricalToolKeyByName(tools, name, canonical.ToolKindFunction)
+	}
+	historical, err := canonical.HistoricalScopedToolKey(namespace, name, canonical.ToolKindFunction)
+	if err != nil {
+		return canonical.ToolKey{}, err
+	}
+	if declaration, err := resolveResponsesFunctionCall(tools, namespace, name); err == nil {
+		return declaration.Key(), nil
+	}
+	return historical, nil
+}
+
 func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {
 	name, err := responsesToolWireName(declaration, names)
 	if err != nil {

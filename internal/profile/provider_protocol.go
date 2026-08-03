@@ -16,6 +16,13 @@ const (
 
 type ProviderProtocol string
 
+type ProtocolAuthoring uint8
+
+const (
+	ProtocolAuthored ProtocolAuthoring = iota
+	ProtocolDerived
+)
+
 // ConcreteProviderProtocolsForSpec returns provider-native concrete protocols in
 // the catalog-declared order. "auto" is intentionally excluded.
 func ConcreteProviderProtocolsForSpec(spec string) []string {
@@ -34,15 +41,22 @@ func ConcreteProviderProtocolsForSpec(spec string) []string {
 	return out
 }
 
-// DerivedProtocolForSpec returns the protocol that operator authoring omits
-// when the provider has exactly one concrete protocol. Routing remains the
-// authority that validates and materializes the derived protocol.
+// DerivedProtocolForSpec returns the catalog-selected protocol that operator
+// authoring omits. Routing remains the authority that validates and
+// materializes the derived protocol.
 func DerivedProtocolForSpec(spec string) (string, bool) {
-	protocols := ConcreteProviderProtocolsForSpec(spec)
-	if len(protocols) != 1 {
+	provider, ok := profileFor(spec)
+	if !ok {
 		return "", false
 	}
-	return protocols[0], true
+	return derivedProtocolForProfile(provider)
+}
+
+func derivedProtocolForProfile(provider Profile) (string, bool) {
+	if provider.ProtocolAuthoring != ProtocolDerived || len(provider.ProviderProtocols) == 0 {
+		return "", false
+	}
+	return strings.TrimSpace(provider.ProviderProtocols[0].Name), true
 }
 
 func SupportedProviderProtocolsForSpec(spec string) []string {

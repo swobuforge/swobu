@@ -13,6 +13,37 @@ func TestToolKeyIsTypedAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestHistoricalScopedToolKeyPreservesExactClientIdentity(t *testing.T) {
+	t.Parallel()
+
+	key, err := HistoricalScopedToolKey("mcp__openaiDeveloperDocs", "search_openai_docs", ToolKindFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.Namespace() != "mcp__openaiDeveloperDocs" || key.Name() != "search_openai_docs" || key.Kind() != ToolKindFunction {
+		t.Fatalf("historical scoped key = %#v", key)
+	}
+}
+
+func TestHistoricalScopedToolKeyRejectsNormalizedIdentity(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		namespace string
+		toolName  string
+	}{
+		{name: "namespace whitespace", namespace: " mcp__openaiDeveloperDocs", toolName: "search_openai_docs"},
+		{name: "name whitespace", namespace: "mcp__openaiDeveloperDocs", toolName: "search_openai_docs "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := HistoricalScopedToolKey(test.namespace, test.toolName, ToolKindFunction); err == nil {
+				t.Fatal("HistoricalScopedToolKey accepted a normalized identity")
+			}
+		})
+	}
+}
+
 func TestToolDeclarationObjectValuesAreCanonicalAndCloned(t *testing.T) {
 	schema := testToolSchema(`{"z":1,"a":{"b":2,"a":1}}`)
 	decl := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", schema, Unspecified[bool]())

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -229,7 +231,7 @@ func TestDecodeRequestUsesActionlessCodexMarkerOnlyForHistoryPartition(t *testin
 func TestDecodeStreamingMessageUsesTerminalCitationAnnotations(t *testing.T) {
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"£source\"}\n\n" +
-		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"£source\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com/x\",\"start_index\":0,\"end_index\":0}]}]}}\n\n" +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"£source\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com/x\",\"start_index\":0,\"end_index\":6}]}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\"}}\n\n"
 	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
@@ -346,7 +348,7 @@ func TestDecodeBufferedWebSearchLifecycleAndUnicodeCitation(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarations}})
-	raw := []byte(`{"id":"resp_provider","model":"model","status":"completed","output":[{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one","one"],"sources":[{"type":"url","url":"https://example.com/a","title":"A"}]}},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"£source","annotations":[{"type":"url_citation","url":"https://example.com/a","title":"A","start_index":0,"end_index":0}]}]}]}`)
+	raw := []byte(`{"id":"resp_provider","model":"model","status":"completed","output":[{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one","one"],"sources":[{"type":"url","url":"https://example.com/a","title":"A"}]}},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"£source","annotations":[{"type":"url_citation","url":"https://example.com/a","title":"A","start_index":0,"end_index":6}]}]}]}`)
 	stream, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), raw, "exchange", nil, true)
 	if err != nil {
 		t.Fatal(err)
@@ -378,7 +380,7 @@ func TestDecodeBufferedWebSearchLifecycleAndUnicodeCitation(t *testing.T) {
 	citations := message.Content()[0].Citations()
 	start, _ := citations[0].Start.Get()
 	end, _ := citations[0].End.Get()
-	if start != 0 || end != 2 {
+	if start != 0 || end != 8 {
 		t.Fatalf("UTF-8 citation bytes = [%d,%d)", start, end)
 	}
 }
@@ -445,10 +447,6 @@ func TestDecodeCompletedResponsesClassifiesMalformedWebSearchProviderDataAsBacke
 			name: "invalid citation URL",
 			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"not-a-url"}]}]}`,
 		},
-		{
-			name: "invalid citation range",
-			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"https://example.com","start_index":4,"end_index":8}]}]}`,
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -475,6 +473,69 @@ func TestResponsesWebSearchCallerMalformationRemainsBadRequest(t *testing.T) {
 	var canonicalErr canonical.Error
 	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
 		t.Fatalf("error = %T %v, want BAD_REQUEST", err, err)
+	}
+}
+
+func TestResponsesCitationOffsetsPreferPublishedInclusiveEnd(t *testing.T) {
+	text := "A£😀B"
+	raw := json.RawMessage(`[{"type":"url_citation","url":"https://example.com/source","start_index":1,"end_index":2}]`)
+	citations, err := decodeResponsesAnnotations(text, raw, nil, "ex", canonical.ResponseItemOccurrence(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(citations) != 1 {
+		t.Fatalf("citations = %#v", citations)
+	}
+	start, hasStart := citations[0].Start.Get()
+	end, hasEnd := citations[0].End.Get()
+	if !hasStart || !hasEnd || start != 1 || end != 7 || text[start:end] != "£😀" {
+		t.Fatalf("canonical citation = [%d,%d) specified=(%t,%t)", start, end, hasStart, hasEnd)
+	}
+
+	encoded, err := encodeResponsesAnnotations(text, citations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 1 || encoded[0].StartIndex == nil || encoded[0].EndIndex == nil ||
+		*encoded[0].StartIndex != 1 || *encoded[0].EndIndex != 2 {
+		t.Fatalf("encoded citation = %#v, want inclusive [1,2]", encoded)
+	}
+}
+
+func TestResponsesCitationClampsNonconformingOffsetsToText(t *testing.T) {
+	text := "источник"
+	characterCount := utf8.RuneCountInString(text)
+	raw := json.RawMessage(fmt.Sprintf(`[{"type":"url_citation","url":"https://example.com/source","start_index":0,"end_index":%d}]`, characterCount))
+	citations, err := decodeResponsesAnnotations(text, raw, nil, "ex", canonical.ResponseItemOccurrence(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, _ := citations[0].Start.Get()
+	end, _ := citations[0].End.Get()
+	if start != 0 || end != uint32(len(text)) {
+		t.Fatalf("canonical citation = [%d,%d), want [0,%d)", start, end, len(text))
+	}
+}
+
+func TestResponsesCitationDropsUnusableClampedSpanWithoutFailingResponse(t *testing.T) {
+	text := "answer"
+	raw := json.RawMessage(`[{"type":"url_citation","url":"https://example.com/source","start_index":9,"end_index":-2}]`)
+	var changes []compat.Change
+	citations, err := decodeResponsesAnnotations(text, raw, &changes, "ex", canonical.ResponseItemOccurrence(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(citations) != 1 {
+		t.Fatalf("citations = %#v", citations)
+	}
+	if _, ok := citations[0].Start.Get(); ok {
+		t.Fatalf("unusable span retained start: %#v", citations[0])
+	}
+	if _, ok := citations[0].End.Get(); ok {
+		t.Fatalf("unusable span retained end: %#v", citations[0])
+	}
+	if len(changes) != 1 || changes[0].Capability != canonical.ResponseItemsMessageCitations || changes[0].Kind != compat.Approximation {
+		t.Fatalf("changes = %#v", changes)
 	}
 }
 

@@ -70,7 +70,7 @@ func TestResponsesProviderOutputRejectsMissingNestedDiscriminators(t *testing.T)
 		},
 		{
 			name: "annotation",
-			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"visible","annotations":[{"url":"https://hidden.test"},{"type":"url_citation","url":"https://visible.test","start_index":0,"end_index":0}]}]}`,
+			item: `{"type":"message","status":"completed","content":[{"type":"output_text","text":"visible","annotations":[{"url":"https://hidden.test"},{"type":"url_citation","url":"https://visible.test","start_index":0,"end_index":6}]}]}`,
 		},
 		{
 			name: "web search source",

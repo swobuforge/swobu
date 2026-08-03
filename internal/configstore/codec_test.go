@@ -78,6 +78,18 @@ func TestCodecRejectsZAIWithoutExplicitAccess(t *testing.T) {
 	}
 }
 
+func TestCodecRejectsMultipleAPIKeyProviderVariants(t *testing.T) {
+	raw := strings.Replace(
+		allVariantsYAML,
+		"connection: {openai: {credential: env:OPENAI_API_KEY}}",
+		"connection: {openai: {credential: env:OPENAI_API_KEY}, deepseek: {credential: env:DEEPSEEK_API_KEY}}",
+		1,
+	)
+	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "exactly one provider variant") {
+		t.Fatalf("decode error = %v, want multiple provider variant rejection", err)
+	}
+}
+
 func TestCodecRejectsEveryAuthoredZAIProtocol(t *testing.T) {
 	for _, protocol := range []string{"chat_completions_stream", "responses"} {
 		raw := strings.Replace(

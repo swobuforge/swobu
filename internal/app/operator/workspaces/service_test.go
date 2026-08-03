@@ -80,6 +80,16 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 	}
 }
 
+func TestOperatorTargetDraftRejectsMultipleAPIKeyProviderVariants(t *testing.T) {
+	_, err := finalizeTargetDraft("ambiguous", "model", "responses", Connection{
+		OpenAI:   &CredentialConnection{Credential: "env:OPENAI_API_KEY"},
+		DeepSeek: &CredentialConnection{Credential: "env:DEEPSEEK_API_KEY"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exactly one provider variant") {
+		t.Fatalf("finalize error = %v, want multiple provider variant rejection", err)
+	}
+}
+
 func TestProjectTargetPreservesEffectiveDerivedProtocol(t *testing.T) {
 	for _, test := range []struct {
 		name       string

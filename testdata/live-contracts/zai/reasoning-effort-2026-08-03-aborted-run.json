@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "state": "aborted_without_row_checkpointing",
+  "date": "2026-08-03",
+  "purpose": "RFC-zai-reasoning-effort-static-empirical-contract full matrix",
+  "recoverable_evidence": {
+    "inventories": [
+      {
+        "access": "general_api",
+        "http_status": 200,
+        "models": [
+          "glm-4.5",
+          "glm-4.5-air",
+          "glm-4.6",
+          "glm-4.7",
+          "glm-5",
+          "glm-5-turbo",
+          "glm-5.1",
+          "glm-5.2"
+        ]
+      },
+      {
+        "access": "coding_plan",
+        "http_status": 200,
+        "models": [
+          "glm-4.5",
+          "glm-4.5-air",
+          "glm-4.6",
+          "glm-4.7",
+          "glm-5",
+          "glm-5-turbo",
+          "glm-5.1",
+          "glm-5.2"
+        ]
+      }
+    ],
+    "observed_process_elapsed": "at least 00:07:48 before interruption",
+    "planned_generation_rows": 384,
+    "workers": 4,
+    "timeout_seconds": 120,
+    "retries": 2,
+    "passes": 2
+  },
+  "unrecoverable_evidence": {
+    "completed_generation_rows": "unknown",
+    "reason": "the original probe retained completed futures only in process memory and serialized after the complete matrix; termination discarded them"
+  },
+  "forensic_search": [
+    "no surviving probe process",
+    "no final or partial result artifact",
+    "no row log or temporary response file",
+    "no deleted open descriptor containing probe results",
+    "two sanitized /models responses recovered from /tmp"
+  ],
+  "corrective_action": "probe schema v2 journals and fsyncs every completed row, atomically refreshes the summary artifact, records interruptions, and resumes persisted rows"
+}

@@ -2,6 +2,8 @@ package profile
 
 import (
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestCatalog_SpecSupport(t *testing.T) {
@@ -71,6 +73,23 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if got, ok := DerivedProtocolForSpec("deepseek"); !ok || got != "messages_stream" {
 		t.Fatalf("deepseek derived protocol = %q, %v", got, ok)
+	}
+	if got, ok := DerivedProtocolForSpec("zai"); !ok || got != "chat_completions_stream" {
+		t.Fatalf("Z.AI derived protocol = %q, %v", got, ok)
+	}
+	authored := Profile{
+		ProviderID: ProviderID("single-authored"),
+		ProviderProtocols: []ProviderProtocolSpec{{
+			Name:  "responses",
+			Kind:  protocolkind.Responses,
+			Frame: FrameHTTPJSONBody,
+		}},
+	}
+	if authored.ProtocolAuthoring != ProtocolAuthored {
+		t.Fatalf("zero-value protocol authoring = %d, want authored", authored.ProtocolAuthoring)
+	}
+	if got, ok := derivedProtocolForProfile(authored); ok || got != "" {
+		t.Fatalf("single-protocol authored profile derived protocol = %q, %v", got, ok)
 	}
 	if !RequiresCredential("openrouter", DefaultExecuteBaseURL("openrouter")) {
 		t.Fatal("openrouter should require credential")

@@ -49,6 +49,52 @@ func TestNamespacedFunctionCallUsesAttemptScopedFlatAddress(t *testing.T) {
 	}
 }
 
+func TestDecodeClientRequestAcceptsHistoricalNamespacedFunctionCallWithoutCurrentTools(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"model":"default",
+		"input":[{
+			"type":"function_call",
+			"namespace":"mcp__openaiDeveloperDocs",
+			"name":"search_openai_docs",
+			"call_id":"call_tK1kALZQxH5AGr3Z7dw6QThF",
+			"arguments":"{\"limit\":10,\"query\":\"Responses API url_citation start_index end_index character offsets UTF-16\"}"
+		}]
+	}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+		protocolkind.Responses, "application/json", nil, raw, carrier.Meta{},
+	))
+	if err != nil {
+		t.Fatalf("DecodeClientRequest returned err=%v", err)
+	}
+	call, ok := decoded.Request.Request.Items()[0].ToolCall()
+	if !ok || call.Tool().Namespace() != "mcp__openaiDeveloperDocs" || call.Tool().Name() != "search_openai_docs" {
+		t.Fatalf("historical namespaced call identity = %#v", call.Tool())
+	}
+}
+
+func TestDecodeClientRequestRejectsMalformedHistoricalNamespacedFunctionCallIdentity(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"model":"default",
+		"input":[{
+			"type":"function_call",
+			"namespace":" mcp__openaiDeveloperDocs",
+			"name":"search_openai_docs",
+			"call_id":"call_1",
+			"arguments":"{}"
+		}]
+	}`)
+	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+		protocolkind.Responses, "application/json", nil, raw, carrier.Meta{},
+	))
+	if err == nil || !strings.Contains(err.Error(), "invalid tool identity") {
+		t.Fatalf("DecodeClientRequest err=%v, want invalid tool identity", err)
+	}
+}
+
 func TestNamespacedFunctionCallResponseRestoresClientAddress(t *testing.T) {
 	key, _ := canonical.NewToolKey("mcp__microsoft_docs__", canonical.ToolKindFunction, "microsoft_docs_search")
 	callID, _ := canonical.NewToolCallID("call_1")

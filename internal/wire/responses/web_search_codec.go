@@ -358,19 +358,29 @@ func decodeResponsesAnnotations(text string, raw json.RawMessage, changeLog *[]c
 		source, _ := canonical.NewWebSource(webURL, title)
 		citation := canonical.WebCitation{Source: source}
 		if (annotation.StartIndex == nil) != (annotation.EndIndex == nil) {
-			return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are incomplete", "")
+			if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsMessageCitations, compat.Approximation, occurrence); err != nil {
+				return nil, err
+			}
 		}
-		if annotation.StartIndex != nil {
-			start, ok := responsesCharacterIndexToByteOffset(text, *annotation.StartIndex)
-			if !ok || *annotation.EndIndex < *annotation.StartIndex {
-				return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are invalid", "")
+		if annotation.StartIndex != nil && annotation.EndIndex != nil {
+			characterCount := utf8.RuneCountInString(text)
+			if characterCount > 0 {
+				startIndex := max(0, min(*annotation.StartIndex, characterCount-1))
+				endIndex := max(0, min(*annotation.EndIndex, characterCount-1))
+				if startIndex <= endIndex {
+					start, _ := responsesCharacterIndexToByteOffset(text, startIndex)
+					end, _ := responsesCharacterIndexToByteOffset(text, endIndex+1)
+					citation.Start = canonical.Specify(uint32(start))
+					citation.End = canonical.Specify(uint32(end))
+				}
+				if startIndex != *annotation.StartIndex || endIndex != *annotation.EndIndex || startIndex > endIndex {
+					if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsMessageCitations, compat.Approximation, occurrence); err != nil {
+						return nil, err
+					}
+				}
+			} else if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsMessageCitations, compat.Approximation, occurrence); err != nil {
+				return nil, err
 			}
-			end, ok := responsesCharacterIndexToByteOffset(text, *annotation.EndIndex+1)
-			if !ok {
-				return nil, canonical.NewBackendError("responses", 0, "responses URL citation offsets are invalid", "")
-			}
-			citation.Start = canonical.Specify(uint32(start))
-			citation.End = canonical.Specify(uint32(end))
 		}
 		citations = append(citations, citation)
 	}
@@ -456,9 +466,9 @@ func encodeResponsesAnnotations(text string, citations []canonical.WebCitation) 
 			if !ok || endExclusive <= startIndex {
 				return nil, canonical.InternalError("canonical URL citation end is invalid")
 			}
-			endIndex := endExclusive - 1
 			annotation.StartIndex = &startIndex
-			annotation.EndIndex = &endIndex
+			endInclusive := endExclusive - 1
+			annotation.EndIndex = &endInclusive
 		}
 		out = append(out, annotation)
 	}
