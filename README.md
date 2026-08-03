@@ -8,11 +8,7 @@ Swobu is a local compatibility boundary for Claude Code, Codex, and other AI
 clients. Route across providers without silently losing tools, reasoning, or
 session state.
 
-<p align="center">
-  <a href="https://swobu.com">
-    <video src="./assets/readme/swobu-failover-demo.mp4" controls muted playsinline width="640"></video>
-  </a>
-</p>
+<video src="https://github.com/user-attachments/assets/ccaf3a78-eda0-4391-a493-d4ba6921fef0" controls muted playsinline width="640"></video>
 
 *One backend lacks a capability the request needs. Swobu skips it and runs the other — the coding session continues.*
 
@@ -123,12 +119,14 @@ provider effects fail explicitly.
 
 - OpenAI
 - Anthropic
+- DeepSeek
+- Z.AI
 - Azure AI
 - AWS Bedrock
 - OpenRouter
 - Ollama
 - ChatGPT
-- Custom endpoints
+- OpenAI/Anthropic Compatible Endpoints
 
 ### Request families
 
