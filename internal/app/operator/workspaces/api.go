@@ -56,6 +56,7 @@ type TargetSettingsDraft struct {
 type Connection struct {
 	OpenAI     *CredentialConnection `json:"openai,omitempty"`
 	Anthropic  *CredentialConnection `json:"anthropic,omitempty"`
+	DeepSeek   *CredentialConnection `json:"deepseek,omitempty"`
 	OpenRouter *CredentialConnection `json:"openrouter,omitempty"`
 	ZAI        *ZAIConnection        `json:"zai,omitempty"`
 	ChatGPT    *CredentialConnection `json:"chatgpt,omitempty"`
@@ -110,6 +111,9 @@ func projectWorkspace(workspace routing.Workspace) Workspace {
 }
 
 func projectTarget(target routing.Target) Target {
+	// Read models expose effective runtime truth. Single-protocol providers omit
+	// protocol from authoring and persisted config, but diagnostics and external
+	// operator clients still receive the effective routed protocol here.
 	out := Target{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), Provider: string(target.Provider())}
 	out.Connection = ConnectionFromRouting(target.Connection())
 	return out
@@ -120,16 +124,22 @@ func projectTarget(target routing.Target) Target {
 func ConnectionFromRouting(connection routing.Connection) Connection {
 	out := Connection{}
 	switch c := connection.(type) {
-	case routing.OpenAIConnection:
-		out.OpenAI = &CredentialConnection{Credential: c.Credential().String()}
-	case routing.AnthropicConnection:
-		out.Anthropic = &CredentialConnection{Credential: c.Credential().String()}
-	case routing.OpenRouterConnection:
-		out.OpenRouter = &CredentialConnection{Credential: c.Credential().String()}
+	case routing.APIKeyConnection:
+		credential := &CredentialConnection{Credential: c.Credential().String()}
+		switch c.Provider() {
+		case routing.ProviderOpenAI:
+			out.OpenAI = credential
+		case routing.ProviderAnthropic:
+			out.Anthropic = credential
+		case routing.ProviderDeepSeek:
+			out.DeepSeek = credential
+		case routing.ProviderOpenRouter:
+			out.OpenRouter = credential
+		case routing.ProviderChatGPT:
+			out.ChatGPT = credential
+		}
 	case routing.ZAIConnection:
 		out.ZAI = &ZAIConnection{Access: string(c.Access()), Credential: c.Credential().String()}
-	case routing.ChatGPTConnection:
-		out.ChatGPT = &CredentialConnection{Credential: c.Credential().String()}
 	case routing.OllamaConnection:
 		value, _ := c.BaseURL()
 		out.Ollama = &OllamaConnection{BaseURL: value.String()}
@@ -165,19 +175,22 @@ func finalizeTargetDraft(id, model, protocol string, connection Connection) (rou
 func (c Connection) routingDraft() routing.ConnectionDraft {
 	draft := routing.ConnectionDraft{}
 	if c.OpenAI != nil {
-		draft.OpenAI = &routing.CredentialConnectionDraft{Credential: c.OpenAI.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: c.OpenAI.Credential}
 	}
 	if c.Anthropic != nil {
-		draft.Anthropic = &routing.CredentialConnectionDraft{Credential: c.Anthropic.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: c.Anthropic.Credential}
+	}
+	if c.DeepSeek != nil {
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: c.DeepSeek.Credential}
 	}
 	if c.OpenRouter != nil {
-		draft.OpenRouter = &routing.CredentialConnectionDraft{Credential: c.OpenRouter.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: c.OpenRouter.Credential}
 	}
 	if c.ZAI != nil {
 		draft.ZAI = &routing.ZAIConnectionDraft{Access: c.ZAI.Access, Credential: c.ZAI.Credential}
 	}
 	if c.ChatGPT != nil {
-		draft.ChatGPT = &routing.CredentialConnectionDraft{Credential: c.ChatGPT.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: c.ChatGPT.Credential}
 	}
 	if c.Ollama != nil {
 		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: c.Ollama.BaseURL}

@@ -52,15 +52,23 @@ func TestBedrockRetryLaunchesAnotherProbe(t *testing.T) {
 	}
 }
 
-func TestCredentialChangeInvalidatesCreate(t *testing.T) {
+func TestCredentialChangePreservesTypedModelAcrossFailedDiscovery(t *testing.T) {
 	w := readyBedrockConfig(t)
 	if !w.readyToCreate() {
 		t.Fatal("fixture is not initially creatable")
 	}
+	wantModel := w.SelectedModel.Get().ModelName
+	wantProtocol := w.Draft.Get().ProviderProtocol
 	newCredentialRow(w, false).props.Apply("env:MISSING")
 	w.SetCatalogResult(readmodel.ModelCatalogReadModel{}, errors.New("missing credential"))
-	if w.readyToCreate() {
-		t.Fatal("failed current probe retained stale create authorization")
+	if got := w.SelectedModel.Get().ModelName; got != wantModel {
+		t.Fatalf("credential refresh cleared typed model: got %q want %q", got, wantModel)
+	}
+	if got := w.Draft.Get().ProviderProtocol; got != wantProtocol {
+		t.Fatalf("credential refresh cleared authored protocol: got %q want %q", got, wantProtocol)
+	}
+	if !w.readyToCreate() {
+		t.Fatal("failed optional discovery blocked an otherwise complete target")
 	}
 }
 
@@ -294,8 +302,8 @@ func TestBedrockRefreshPreservesSelectionWhenStillAvailable(t *testing.T) {
 	deployments = nil
 	w.RefreshBedrockIdentity()
 	w.ProbeCatalog()
-	if w.SelectedModel.Get().ModelName != "" || w.Draft.Get().ProviderProtocol != "" {
-		t.Fatalf("stale selection survived refresh: %#v", w.Draft.Get())
+	if w.SelectedModel.Get().ModelName != "model-1" || w.Draft.Get().ProviderProtocol != "responses" {
+		t.Fatalf("typed selection was invalidated by catalog refresh: %#v", w.Draft.Get())
 	}
 }
 
@@ -335,8 +343,8 @@ func TestMountedBedrockRefreshStartsExactlyOneProbeAndReconcilesSelection(t *tes
 	if probes != 2 || w.catalogLoading() {
 		t.Fatalf("probes=%d loading=%v", probes, w.catalogLoading())
 	}
-	if w.SelectedModel.Get().ModelName != "" || w.Draft.Get().ProviderProtocol != "" {
-		t.Fatal("vanished model survived refresh")
+	if w.SelectedModel.Get().ModelName != "model-1" || w.Draft.Get().ProviderProtocol != "responses" {
+		t.Fatal("typed model was invalidated by catalog refresh")
 	}
 }
 
@@ -402,6 +410,42 @@ func TestCustomEndpointWithoutModelCatalogAcceptsTypedModel(t *testing.T) {
 	w.selectProtocol(options[0].ID)
 	if !w.readyToCreate() {
 		t.Fatal("typed custom model remained blocked by optional catalog discovery")
+	}
+}
+
+func TestDeepSeekSuccessfulEmptyCatalogAcceptsTypedModelAndHidesProtocol(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecDeepSeek, "", "env:DEEPSEEK_API_KEY")
+	if !setupAllowsModelChoice(w) {
+		t.Fatal("DeepSeek model input was blocked before optional discovery")
+	}
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{}, nil)
+	if !setupAllowsModelChoice(w) {
+		t.Fatal("successful empty DeepSeek catalog did not allow model choice")
+	}
+	picker := ModelPicker(w, nil)
+	if picker.Mode != ui.SearchPickerOpen {
+		t.Fatal("DeepSeek model picker is not open")
+	}
+	picker.OnSelect(ui.Selection{Value: "deepseek-v4-pro[1m]", Source: ui.SelectionQuery})
+	if !w.readyToCreate() {
+		t.Fatal("typed DeepSeek model remained blocked after successful probe")
+	}
+	if got := w.Draft.Get().ProviderProtocol; got != "" {
+		t.Fatalf("DeepSeek draft protocol = %q, want omitted", got)
+	}
+	frame := testkit.RenderMountedTrimmed(t, w, 100, 20)
+	if strings.Contains(frame, "protocol") {
+		t.Fatalf("DeepSeek authoring exposed protocol row:\n%s", frame)
+	}
+}
+
+func TestDeepSeekRefreshPreservesUnlistedSelection(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecDeepSeek, "", "env:DEEPSEEK_API_KEY")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{}, nil)
+	w.selectModelByID("future-deepseek-model")
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "deepseek-v4-pro", Name: "deepseek-v4-pro", ModelName: "deepseek-v4-pro"}}}, nil)
+	if got := w.SelectedModel.Get().ModelName; got != "future-deepseek-model" {
+		t.Fatalf("refresh replaced unlisted DeepSeek selection with %q", got)
 	}
 }
 

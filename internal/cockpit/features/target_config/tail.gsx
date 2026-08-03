@@ -17,10 +17,7 @@ func setupAllowsModelChoice(w *TargetConfig) bool {
 	if w.RequiresInteractiveAuth() && strings.TrimSpace(w.Draft.Get().CredentialRef) == "" {
 		return false
 	}
-	if w.UsesManualModelEntry() {
-		return w.setupState().Ready() && !w.catalogLoading()
-	}
-	return w.catalogValidated()
+	return w.setupState().Ready() && !w.catalogLoading()
 }
 
 func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
@@ -40,7 +37,7 @@ func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 		}
 	})
 	picker.AutoFocus = true
-	if w.UsesManualModelEntry() { picker.Mode = ui.SearchPickerOpen }
+	picker.Mode = ui.SearchPickerOpen
 	return picker
 }
 
@@ -83,7 +80,7 @@ func protocolDisplayLabel(w *TargetConfig, protocol string) string {
 	return protocol
 }
 func SetupAllowsProtocolChoice(w *TargetConfig) bool {
-	return strings.TrimSpace(w.SelectedModel.Get().ModelName) != "" && len(w.CurrentProtocolOptions()) > 0
+	return !w.derivesProviderProtocol() && strings.TrimSpace(w.SelectedModel.Get().ModelName) != "" && len(w.CurrentProtocolOptions()) > 0
 }
 
 func fixedProviderProtocol(w *TargetConfig) (string, bool) {
@@ -226,19 +223,17 @@ templ (t *targetTail) Render() {
 	<div class="flex-col w-full">
 		if targetCatalogLoading(t.root) {
 			@ModelCatalogLoading(t.root)
-		} else if t.root.UsesManualModelEntry() && setupAllowsModelChoice(t.root) {
-			@ModelSelectRow(t.root)
 		} else if targetCatalogFailed(t.root) && t.root.IsBedrockFlow() {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")
-		} else if targetCatalogFailed(t.root) {
-			@ModelCatalogRetry(t.root)
 		} else if setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)
 		} else {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")
 		}
 
-		if SetupAllowsProtocolChoice(t.root) {
+		if t.root.derivesProviderProtocol() {
+			// Derived protocol is intentionally absent from operator authoring.
+		} else if SetupAllowsProtocolChoice(t.root) {
 			@ProtocolSelect(t.root)
 		} else if label, fixed := fixedProviderProtocol(t.root); fixed {
 			@InertTargetField("protocol", label, "fixed")

@@ -128,15 +128,9 @@ func probeDeployments(
 
 func connectionCredentialRef(connection routing.Connection) string {
 	switch c := connection.(type) {
-	case routing.OpenAIConnection:
-		return c.Credential().String()
-	case routing.AnthropicConnection:
-		return c.Credential().String()
-	case routing.OpenRouterConnection:
+	case routing.APIKeyConnection:
 		return c.Credential().String()
 	case routing.ZAIConnection:
-		return c.Credential().String()
-	case routing.ChatGPTConnection:
 		return c.Credential().String()
 	case routing.AzureConnection:
 		return c.Credential().String()

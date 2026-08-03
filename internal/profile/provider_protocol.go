@@ -34,6 +34,17 @@ func ConcreteProviderProtocolsForSpec(spec string) []string {
 	return out
 }
 
+// DerivedProtocolForSpec returns the protocol that operator authoring omits
+// when the provider has exactly one concrete protocol. Routing remains the
+// authority that validates and materializes the derived protocol.
+func DerivedProtocolForSpec(spec string) (string, bool) {
+	protocols := ConcreteProviderProtocolsForSpec(spec)
+	if len(protocols) != 1 {
+		return "", false
+	}
+	return protocols[0], true
+}
+
 func SupportedProviderProtocolsForSpec(spec string) []string {
 	concrete := ConcreteProviderProtocolsForSpec(spec)
 	if len(concrete) == 0 {

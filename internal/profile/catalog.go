@@ -26,6 +26,9 @@ var (
 	providerProtocolsZAI = []ProviderProtocolSpec{
 		{Name: routing.ZAIProviderProtocol, Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
 	}
+	providerProtocolsDeepSeek = []ProviderProtocolSpec{
+		{Name: routing.DeepSeekProviderProtocol, Kind: protocolkind.Messages, Frame: FrameSSEEvent},
+	}
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 	}
@@ -115,6 +118,19 @@ func catalog() []Profile {
 			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ANTHROPIC_API_KEY"},
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsAnthropic),
+		},
+		{
+			ProviderID:          ProviderSpecDeepSeek,
+			ProviderDisplayName: "DeepSeek",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"credential", "model", "V4", "Pro", "Flash", "thinking", "web search"},
+			Locator: LocatorSpec{
+				Kind:    LocatorFixed,
+				Default: "https://api.deepseek.com/anthropic/v1",
+			},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "DEEPSEEK_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsDeepSeek),
 		},
 		{
 			ProviderID:          ProviderSpecOpenRouter,

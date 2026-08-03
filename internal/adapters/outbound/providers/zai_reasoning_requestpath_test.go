@@ -132,7 +132,13 @@ func zaiReasoningWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, routing.Protocol{}, connection)
+	protocol, err := routing.ParseProtocol(routing.ZAIProviderProtocol, routing.ProviderZAI, func(provider routing.Provider, candidate string) bool {
+		return provider == routing.ProviderZAI && candidate == routing.ZAIProviderProtocol
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := routing.NewTarget(targetID, model, protocol, connection)
 	if err != nil {
 		t.Fatal(err)
 	}

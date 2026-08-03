@@ -24,15 +24,23 @@ const (
 )
 
 type BackendAdapter struct {
+	providerID  profile.ProviderID
 	client      *http.Client
 	credentials providersruntime.CredentialProvider
 }
 
 func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
+	return NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials)
+}
+
+// NewBackendAdapter builds the shared Messages transport for one provider
+// whose profile declares Anthropic Messages protocols and x-api-key auth.
+func NewBackendAdapter(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	return BackendAdapter{
+		providerID:  providerID,
 		client:      client,
 		credentials: credentials,
 	}
@@ -40,7 +48,7 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 
 // NewRuntime builds a complete Anthropic provider runtime.
 func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	executor := NewExecutor(client, credentials)
+	executor := NewBackendAdapter(providerID, client, credentials)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		BackendResolver:    executor,
@@ -51,7 +59,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes the exact Anthropic Messages backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	if err := validateAnthropicProviderProtocol(target.ProviderProtocol); err != nil {
+	if err := e.validateProviderTarget(target); err != nil {
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
@@ -67,19 +75,19 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 
 // Send performs Anthropic HTTP transport over a final Messages document.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
-	if err := validateAnthropicProviderProtocol(target.ProviderProtocol); err != nil {
+	if err := e.validateProviderTarget(target); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("anthropic provider base URL is required"))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("messages provider base URL is required"))
 	}
 	if doc.IsEmpty() {
-		return nil, provider.AttemptNotDispatched(canonical.InternalError("anthropic provider request document is required"))
+		return nil, provider.AttemptNotDispatched(canonical.InternalError("messages provider request document is required"))
 	}
 	wireReqBody := doc.RawBytes()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, httpedge.JoinBaseURLAndPath(target.BaseURL, "/messages"), bytes.NewReader(wireReqBody))
 	if err != nil {
-		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("anthropic provider request could not be built"))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("messages provider request could not be built"))
 	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -93,7 +101,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("anthropic provider request failed before backend response"))
+		return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("messages provider request failed before backend response"))
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
@@ -162,15 +170,15 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	if err != nil {
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
-	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecAnthropic))
+	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(string(e.providerID))
 	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
 	for _, modelID := range models {
 		out = append(out, profile.NewProviderDeployment(
 			modelID,
 			modelID,
-			string(profile.ProviderSpecAnthropic),
+			string(e.providerID),
 			"",
-			string(profile.ProviderSpecAnthropic),
+			string(e.providerID),
 			supportedProtocols,
 			"",
 		))
@@ -183,20 +191,41 @@ func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetS
 	return provider.TargetProbeResult{Deployments: deployments}, err
 }
 
-func validateAnthropicProviderProtocol(providerProtocol string) error {
-	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
-		return canonical.BadEndpoint("anthropic provider protocol must be concrete")
+func (e BackendAdapter) validateProviderTarget(target provider.TargetSnapshot) error {
+	if target.ProviderID() != string(e.providerID) {
+		return canonical.BadEndpoint("selected provider does not match messages adapter")
 	}
-	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecAnthropic), providerProtocol) {
-		return canonical.BadEndpoint("selected provider protocol is unsupported for anthropic")
+	return validateProviderProtocol(e.providerID, target)
+}
+
+// validateProviderProtocol proves the catalog token, canonical protocol kind,
+// and transport frame all identify one Messages execution mode. Catalog
+// admission alone is insufficient for providers such as Azure that expose
+// multiple protocol families through separate shared adapters.
+func validateProviderProtocol(providerID profile.ProviderID, target provider.TargetSnapshot) error {
+	providerProtocol := strings.TrimSpace(target.ProviderProtocol) // swobu:io-string source=boundary
+	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
+		return canonical.BadEndpoint("messages provider protocol must be concrete")
+	}
+	kind, frame, ok := profile.ProviderProtocolKindAndFrame(string(providerID), providerProtocol)
+	if !ok {
+		return canonical.BadEndpoint("selected provider protocol is unsupported for messages adapter")
+	}
+	if kind != protocolkind.Messages {
+		return canonical.BadEndpoint("selected provider protocol is not Messages")
+	}
+	if target.ProtocolKind != kind {
+		return canonical.BadEndpoint("selected provider protocol kind does not match messages target")
+	}
+	if target.SelectedFrame != frame {
+		return canonical.BadEndpoint("selected provider protocol frame does not match messages target")
 	}
 	return nil
 }
 
 func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
 	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
-		return canonical.BadEndpoint("anthropic provider credential reference is required")
+		return canonical.BadEndpoint("messages provider credential reference is required")
 	}
 	if e.credentials == nil {
 		return canonical.BadEndpoint("credential resolver is not configured")

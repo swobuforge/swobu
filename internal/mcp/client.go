@@ -18,6 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/platform/outboundhttp"
 )
 
 const (
@@ -304,35 +305,42 @@ func safeHTTPClient(source canonical.MCPToolSource, access SourceAccess) (*http.
 	if port == "" {
 		port = "443"
 	}
-	transport := &http.Transport{
-		Proxy:           nil,
-		TLSClientConfig: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12},
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			dialHost, _, err := net.SplitHostPort(address)
-			if err != nil || !strings.EqualFold(strings.TrimSuffix(dialHost, "."), strings.TrimSuffix(host, ".")) {
-				return nil, fmt.Errorf("MCP dial destination changed origin")
+	// outboundhttp owns proxy route selection via Go's request-level
+	// ProxyFromEnvironment. The restricted-direct guarded dialer runs only when
+	// the per-request decision is "direct" — never on the first-hop address of an
+	// already-selected proxy. The destination authority was validated at request
+	// construction above (absolute HTTPS, no userinfo/query/fragment) and is
+	// re-checked by the round-tripper chain below. SNI is supplied by the standard
+	// transport from the request URL; only the TLS floor is pinned here.
+	directDial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialHost, _, err := net.SplitHostPort(address)
+		if err != nil || !strings.EqualFold(strings.TrimSuffix(dialHost, "."), strings.TrimSuffix(host, ".")) {
+			return nil, fmt.Errorf("MCP dial destination changed origin")
+		}
+		addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, fmt.Errorf("resolve MCP endpoint: %w", err)
+		}
+		if !publicMCPResolution(addresses) {
+			return nil, fmt.Errorf("MCP endpoint resolution contains a prohibited address")
+		}
+		var last error
+		for _, ip := range addresses {
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
+			if err == nil {
+				return conn, nil
 			}
-			addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, fmt.Errorf("resolve MCP endpoint: %w", err)
-			}
-			if !publicMCPResolution(addresses) {
-				return nil, fmt.Errorf("MCP endpoint resolution contains a prohibited address")
-			}
-			var last error
-			for _, ip := range addresses {
-				conn, err := (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
-				if err == nil {
-					return conn, nil
-				}
-				last = err
-			}
-			if last == nil {
-				last = fmt.Errorf("MCP endpoint resolved no addresses")
-			}
-			return nil, last
-		},
+			last = err
+		}
+		if last == nil {
+			last = fmt.Errorf("MCP endpoint resolved no addresses")
+		}
+		return nil, last
 	}
+	transport := outboundhttp.NewTransport(outboundhttp.Config{
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
+		DirectDialContext: directDial,
+	})
 	var roundTripper http.RoundTripper = responseLimitTransport{next: transport}
 	if len(access.Headers) > 0 {
 		roundTripper = headerTransport{next: roundTripper, origin: endpointOrigin(endpoint), headers: access.Headers}

@@ -20,21 +20,12 @@ type Connection interface {
 // rule in the sealed sum prevents runtime-only fields from changing generation.
 func connectionsEqual(left, right Connection) bool {
 	switch left := left.(type) {
-	case OpenAIConnection:
-		right, ok := right.(OpenAIConnection)
-		return ok && left.credential.String() == right.credential.String()
-	case AnthropicConnection:
-		right, ok := right.(AnthropicConnection)
-		return ok && left.credential.String() == right.credential.String()
-	case OpenRouterConnection:
-		right, ok := right.(OpenRouterConnection)
-		return ok && left.credential.String() == right.credential.String()
+	case APIKeyConnection:
+		right, ok := right.(APIKeyConnection)
+		return ok && left.provider == right.provider && left.credential.String() == right.credential.String()
 	case ZAIConnection:
 		right, ok := right.(ZAIConnection)
 		return ok && left.access == right.access && left.credential.String() == right.credential.String()
-	case ChatGPTConnection:
-		right, ok := right.(ChatGPTConnection)
-		return ok && left.credential.String() == right.credential.String()
 	case OllamaConnection:
 		right, ok := right.(OllamaConnection)
 		return ok && left.baseURL.String() == right.baseURL.String()
@@ -108,35 +99,27 @@ var (
 	credentialNamePattern    = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 )
 
-type OpenAIConnection struct{ credential credentialref.Ref }
+const DeepSeekProviderProtocol = "messages_stream"
 
-func NewOpenAIConnection(raw string) (OpenAIConnection, error) {
-	ref, err := parseCredential("connection.openai.credential", raw)
-	return OpenAIConnection{ref}, err
+// APIKeyConnection is the durable shape shared by fixed providers whose only
+// authored connection fact is a credential reference.
+type APIKeyConnection struct {
+	provider   Provider
+	credential credentialref.Ref
 }
-func (OpenAIConnection) Provider() Provider              { return ProviderOpenAI }
-func (OpenAIConnection) isConnection()                   {}
-func (c OpenAIConnection) Credential() credentialref.Ref { return c.credential }
 
-type AnthropicConnection struct{ credential credentialref.Ref }
-
-func NewAnthropicConnection(raw string) (AnthropicConnection, error) {
-	ref, err := parseCredential("connection.anthropic.credential", raw)
-	return AnthropicConnection{ref}, err
+func NewAPIKeyConnection(provider Provider, raw string) (APIKeyConnection, error) {
+	switch provider {
+	case ProviderOpenAI, ProviderAnthropic, ProviderDeepSeek, ProviderOpenRouter, ProviderChatGPT:
+	default:
+		return APIKeyConnection{}, pathError("connection.provider", fmt.Sprintf("provider %q does not use an API-key connection", provider))
+	}
+	ref, err := parseCredential("connection."+string(provider)+".credential", raw)
+	return APIKeyConnection{provider: provider, credential: ref}, err
 }
-func (AnthropicConnection) Provider() Provider              { return ProviderAnthropic }
-func (AnthropicConnection) isConnection()                   {}
-func (c AnthropicConnection) Credential() credentialref.Ref { return c.credential }
-
-type OpenRouterConnection struct{ credential credentialref.Ref }
-
-func NewOpenRouterConnection(raw string) (OpenRouterConnection, error) {
-	ref, err := parseCredential("connection.openrouter.credential", raw)
-	return OpenRouterConnection{ref}, err
-}
-func (OpenRouterConnection) Provider() Provider              { return ProviderOpenRouter }
-func (OpenRouterConnection) isConnection()                   {}
-func (c OpenRouterConnection) Credential() credentialref.Ref { return c.credential }
+func (c APIKeyConnection) Provider() Provider            { return c.provider }
+func (APIKeyConnection) isConnection()                   {}
+func (c APIKeyConnection) Credential() credentialref.Ref { return c.credential }
 
 // ZAIAccess identifies the Z.AI commercial API surface selected by the
 // operator. It is durable routing intent because it determines where requests
@@ -210,16 +193,6 @@ func (c ZAIConnection) BaseURL() string {
 	}
 }
 func (c ZAIConnection) Credential() credentialref.Ref { return c.credential }
-
-type ChatGPTConnection struct{ credential credentialref.Ref }
-
-func NewChatGPTConnection(raw string) (ChatGPTConnection, error) {
-	ref, err := parseCredential("connection.chatgpt.credential", raw)
-	return ChatGPTConnection{ref}, err
-}
-func (ChatGPTConnection) Provider() Provider              { return ProviderChatGPT }
-func (ChatGPTConnection) isConnection()                   {}
-func (c ChatGPTConnection) Credential() credentialref.Ref { return c.credential }
 
 type OllamaConnection struct{ baseURL URL }
 
@@ -342,16 +315,10 @@ func (c CustomConnection) Auth() CustomAuth { return c.auth }
 
 func setConnectionCredential(connection Connection, raw string) (Connection, error) {
 	switch c := connection.(type) {
-	case OpenAIConnection:
-		return NewOpenAIConnection(raw)
-	case AnthropicConnection:
-		return NewAnthropicConnection(raw)
-	case OpenRouterConnection:
-		return NewOpenRouterConnection(raw)
+	case APIKeyConnection:
+		return NewAPIKeyConnection(c.provider, raw)
 	case ZAIConnection:
 		return NewZAIConnection(c.access, raw)
-	case ChatGPTConnection:
-		return NewChatGPTConnection(raw)
 	case AzureConnection:
 		ref, err := parseCredential("connection.azure.credential", raw)
 		if err != nil {

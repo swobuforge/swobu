@@ -61,7 +61,7 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 	after := workspaceView("server-normalized-model", "env:COMMITTED")
 	stub := &workspaceClientStub{getResponses: []workspaceapi.Workspace{before}, updateResponse: after}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	connection, err := routing.NewOpenAIConnection("env:CLIENT")
+	connection, err := routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:CLIENT")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 		createResponse: committed,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	connection, err := routing.NewOpenAIConnection("env:OPENAI_API_KEY")
+	connection, err := routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:OPENAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}

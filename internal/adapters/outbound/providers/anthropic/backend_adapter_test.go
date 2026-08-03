@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
@@ -217,4 +218,66 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 		t.Fatalf("tool.cache_control must be omitted")
 	}
 
+}
+
+func TestMessagesAdapterRejectsNonMessagesProviderProtocols(t *testing.T) {
+	adapter := NewBackendAdapter(profile.ProviderSpecAzure, nil, staticCredentialProvider{token: "test-token"})
+	for _, test := range []struct {
+		name     string
+		protocol protocolkind.ProtocolKind
+		frame    string
+		token    string
+	}{
+		{name: "chat completions", protocol: protocolkind.ChatCompletions, frame: profile.FrameHTTPJSONBody, token: "chat_completions"},
+		{name: "responses", protocol: protocolkind.Responses, frame: profile.FrameHTTPJSONBody, token: "responses"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot("azure", "azure", "https://example.test", "env:AZURE_KEY", test.protocol, test.frame, test.token)
+			target.Model = "deployment"
+			if _, err := adapter.ResolveBackend(target); err == nil {
+				t.Fatalf("ResolveBackend accepted Azure %q through Messages adapter", test.token)
+			}
+		})
+	}
+}
+
+func TestMessagesAdapterAcceptsMessagesProviderProtocols(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		providerID profile.ProviderID
+		token      string
+		frame      string
+	}{
+		{name: "Anthropic buffered Messages", providerID: profile.ProviderSpecAnthropic, token: "messages", frame: profile.FrameHTTPJSONBody},
+		{name: "DeepSeek streamed Messages", providerID: profile.ProviderSpecDeepSeek, token: "messages_stream", frame: profile.FrameSSEEvent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := NewBackendAdapter(test.providerID, nil, staticCredentialProvider{token: "test-token"})
+			target := provider.NewTargetSnapshot("target", string(test.providerID), "https://example.test", "env:KEY", protocolkind.Messages, test.frame, test.token)
+			target.Model = "model"
+			if _, err := adapter.ResolveBackend(target); err != nil {
+				t.Fatalf("ResolveBackend rejected %q: %v", test.token, err)
+			}
+		})
+	}
+}
+
+func TestMessagesAdapterRejectsMismatchedMessagesProjection(t *testing.T) {
+	adapter := NewBackendAdapter(profile.ProviderSpecDeepSeek, nil, staticCredentialProvider{token: "test-token"})
+	for _, test := range []struct {
+		name     string
+		protocol protocolkind.ProtocolKind
+		frame    string
+	}{
+		{name: "wrong kind", protocol: protocolkind.Responses, frame: profile.FrameSSEEvent},
+		{name: "wrong frame", protocol: protocolkind.Messages, frame: profile.FrameHTTPJSONBody},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := provider.NewTargetSnapshot("deepseek", "deepseek", "https://example.test", "env:DEEPSEEK_API_KEY", test.protocol, test.frame, "messages_stream")
+			target.Model = "deepseek-v4-pro"
+			if _, err := adapter.ResolveBackend(target); err == nil {
+				t.Fatalf("ResolveBackend accepted mismatched kind/frame: %#v", target)
+			}
+		})
+	}
 }

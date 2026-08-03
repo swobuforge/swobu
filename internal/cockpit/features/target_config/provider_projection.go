@@ -16,11 +16,13 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 	locator := strings.TrimSpace(draft.Locator)
 	switch profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) {
 	case profile.ProviderSpecOpenAI:
-		return routing.NewOpenAIConnection(credential)
+		return routing.NewAPIKeyConnection(routing.ProviderOpenAI, credential)
 	case profile.ProviderSpecAnthropic:
-		return routing.NewAnthropicConnection(credential)
+		return routing.NewAPIKeyConnection(routing.ProviderAnthropic, credential)
+	case profile.ProviderSpecDeepSeek:
+		return routing.NewAPIKeyConnection(routing.ProviderDeepSeek, credential)
 	case profile.ProviderSpecOpenRouter:
-		return routing.NewOpenRouterConnection(credential)
+		return routing.NewAPIKeyConnection(routing.ProviderOpenRouter, credential)
 	case profile.ProviderSpecZAI:
 		access, err := routing.ParseZAIAccess(draft.ZAIAccess)
 		if err != nil {
@@ -28,7 +30,7 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 		}
 		return routing.NewZAIConnection(access, credential)
 	case profile.ProviderSpecChatGPT:
-		return routing.NewChatGPTConnection(credential)
+		return routing.NewAPIKeyConnection(routing.ProviderChatGPT, credential)
 	case profile.ProviderSpecOllama:
 		return routing.NewOllamaConnection(locator)
 	case profile.ProviderSpecAzure:
@@ -74,7 +76,7 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
 		RouteModelID:     strings.TrimSpace(string(routeID)),         // swobu:io-string source=boundary
 	}
-	if profile.ProviderID(spec) == profile.ProviderSpecZAI {
+	if _, derived := profile.DerivedProtocolForSpec(spec); derived {
 		draft.ProviderProtocol = ""
 	}
 	if profile.ProviderID(spec) == profile.ProviderSpecCustom {
@@ -89,7 +91,7 @@ func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol 
 	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock {
 		draft.Locator = strings.TrimSpace(locator) // swobu:io-string source=boundary
 	}
-	if profile.ProviderID(draft.ProviderSpec) == profile.ProviderSpecZAI {
+	if _, derived := profile.DerivedProtocolForSpec(draft.ProviderSpec); derived {
 		draft.ProviderProtocol = ""
 	} else {
 		draft.ProviderProtocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -52,9 +53,10 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 	}{
 		"openai":     {"responses", Connection{OpenAI: &CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, routing.ProviderOpenAI},
 		"anthropic":  {"messages", Connection{Anthropic: &CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, routing.ProviderAnthropic},
+		"deepseek":   {"", Connection{DeepSeek: &CredentialConnection{Credential: "env:DEEPSEEK_API_KEY"}}, routing.ProviderDeepSeek},
 		"openrouter": {"chat_completions", Connection{OpenRouter: &CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, routing.ProviderOpenRouter},
 		"zai":        {"", Connection{ZAI: &ZAIConnection{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}}, routing.ProviderZAI},
-		"chatgpt":    {"responses_stream", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
+		"chatgpt":    {"", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
 		"ollama":     {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
 		"azure":      {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
 		"bedrock":    {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2"}}, routing.ProviderBedrock},
@@ -71,8 +73,62 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 			if test.provider == routing.ProviderZAI && target.Protocol().String() != routing.ZAIProviderProtocol {
 				t.Fatalf("derived Z.AI protocol = %q", target.Protocol().String())
 			}
+			if want, derived := profile.DerivedProtocolForSpec(string(test.provider)); derived && target.Protocol().String() != want {
+				t.Fatalf("derived protocol = %q, want %q", target.Protocol().String(), want)
+			}
 		})
 	}
+}
+
+func TestProjectTargetPreservesEffectiveDerivedProtocol(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		connection routing.Connection
+		protocol   string
+	}{
+		{name: "Z.AI", connection: mustZAIConnection(t), protocol: routing.ZAIProviderProtocol},
+		{name: "DeepSeek", connection: mustDeepSeekConnection(t), protocol: routing.DeepSeekProviderProtocol},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			id, err := routing.ParseTargetID("target")
+			if err != nil {
+				t.Fatal(err)
+			}
+			model, err := routing.ParseUpstreamModel("model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			protocol, err := routing.ParseProtocol(test.protocol, test.connection.Provider(), func(routing.Provider, string) bool { return true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := routing.NewTarget(id, model, protocol, test.connection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := projectTarget(target).Protocol; got != test.protocol {
+				t.Fatalf("projected protocol = %q, want %q", got, test.protocol)
+			}
+		})
+	}
+}
+
+func mustZAIConnection(t *testing.T) routing.Connection {
+	t.Helper()
+	connection, err := routing.NewZAIConnection(routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return connection
+}
+
+func mustDeepSeekConnection(t *testing.T) routing.Connection {
+	t.Helper()
+	connection, err := routing.NewAPIKeyConnection(routing.ProviderDeepSeek, "env:DEEPSEEK_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return connection
 }
 
 func TestServiceSemanticCommandsReturnCommittedHierarchy(t *testing.T) {
@@ -138,7 +194,7 @@ func TestServiceSetCredentialPreservesTargetFactsAcrossRestart(t *testing.T) {
 	persisted, _ := reopened.Config().Workspace(mustSlug(t, "dev"))
 	route, _ := persisted.Route(mustRoute(t, "chat"))
 	actual := route.Tiers()[0].Targets()[0]
-	connection, ok := actual.Connection().(routing.OpenAIConnection)
+	connection, ok := actual.Connection().(routing.APIKeyConnection)
 	if actual.Model().String() != "gpt-5" || actual.Protocol().String() != "responses" || actual.Provider() != routing.ProviderOpenAI || !ok || connection.Credential().String() != "env:ROTATED" {
 		t.Fatalf("persisted target = %#v", actual)
 	}

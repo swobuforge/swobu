@@ -2,9 +2,9 @@
      provider          ChatGPT                                                        change ↵
    > authentication    browser login                                                  choose ↵
      model             waiting for setup
-     protocol          OpenAI · Responses · stream                                    fixed
      routing           fallback after step 1                                          change ↵
      create                                                                           complete setup
+
 
 
 
