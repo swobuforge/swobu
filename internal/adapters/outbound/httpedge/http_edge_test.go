@@ -1,6 +1,11 @@
 package httpedge
 
-import "testing"
+import (
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
 
 func TestIsEventStreamContentType(t *testing.T) {
 	t.Parallel()
@@ -26,5 +31,19 @@ func TestIsEventStreamContentType(t *testing.T) {
 				t.Fatalf("IsEventStreamContentType(%q)=%t want=%t", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDecodeHTTPResponseContentEncodingPreservesResponseOnError(t *testing.T) {
+	resp := &http.Response{
+		Header: http.Header{"Content-Encoding": {"unsupported"}},
+		Body:   io.NopCloser(strings.NewReader("body")),
+	}
+	got, err := DecodeHTTPResponseContentEncoding(resp)
+	if err == nil {
+		t.Fatal("decode unexpectedly succeeded")
+	}
+	if got != resp || got.Body == nil {
+		t.Fatalf("response = %#v, want original response with owned body", got)
 	}
 }

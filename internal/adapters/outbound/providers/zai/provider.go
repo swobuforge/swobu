@@ -1,5 +1,5 @@
-// Package zai owns the two-access Z.AI provider and its one demonstrated
-// divergence from standard Chat Completions request grammar.
+// Package zai owns the two-access Z.AI provider and its demonstrated
+// divergences from standard Chat Completions request grammar.
 package zai
 
 import (
@@ -55,10 +55,21 @@ type webSearchOptions struct {
 }
 
 func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
+	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
+		return carrier.Document{}, nil, err
+	}
+	var changes []compat.Change
+	document, err := chatcompletions.LowerProviderRequestDocument(
+		req.Canonical,
+		req.ToolNames,
+		req.Delivery,
+		&changes,
+		req.ExchangeID,
+	)
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
+	applyReasoning(&document, req.Canonical, &changes)
 
 	if err := rewriteWebSearch(&document); err != nil {
 		return carrier.Document{}, changes, err

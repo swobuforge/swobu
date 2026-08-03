@@ -4,6 +4,7 @@
 package workspaces
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -167,29 +168,45 @@ func (t TargetSettingsDraft) routingTarget(id string) (routing.Target, error) {
 }
 
 func finalizeTargetDraft(id, model, protocol string, connection Connection) (routing.Target, error) {
+	draft, err := connection.routingDraft()
+	if err != nil {
+		return routing.Target{}, err
+	}
 	return routing.FinalizeTarget(routing.TargetDraft{
-		ID: id, Model: model, Protocol: protocol, Connection: connection.routingDraft(),
+		ID: id, Model: model, Protocol: protocol, Connection: draft,
 	}, profile.RoutingConstructionFacts())
 }
 
-func (c Connection) routingDraft() routing.ConnectionDraft {
+func (c Connection) routingDraft() (routing.ConnectionDraft, error) {
 	draft := routing.ConnectionDraft{}
 	if c.OpenAI != nil {
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: c.OpenAI.Credential}
 	}
 	if c.Anthropic != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: c.Anthropic.Credential}
 	}
 	if c.DeepSeek != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: c.DeepSeek.Credential}
 	}
 	if c.OpenRouter != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: c.OpenRouter.Credential}
 	}
 	if c.ZAI != nil {
 		draft.ZAI = &routing.ZAIConnectionDraft{Access: c.ZAI.Access, Credential: c.ZAI.Credential}
 	}
 	if c.ChatGPT != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: c.ChatGPT.Credential}
 	}
 	if c.Ollama != nil {
@@ -207,13 +224,17 @@ func (c Connection) routingDraft() routing.ConnectionDraft {
 			draft.Custom.Header = &routing.CustomHeaderDraft{Name: c.Custom.Header.Name, Credential: c.Custom.Header.Credential}
 		}
 	}
-	return draft
+	return draft, nil
 }
 
 // RoutingConnection parses the operator connection union through the routing
 // domain's single connection finalizer.
 func (c Connection) RoutingConnection() (routing.Connection, error) {
-	return routing.FinalizeConnection(c.routingDraft(), profile.RoutingConstructionFacts())
+	draft, err := c.routingDraft()
+	if err != nil {
+		return nil, err
+	}
+	return routing.FinalizeConnection(draft, profile.RoutingConstructionFacts())
 }
 
 func normalize(raw string) string { return strings.TrimSpace(raw) }

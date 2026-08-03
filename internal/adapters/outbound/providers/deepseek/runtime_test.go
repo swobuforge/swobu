@@ -17,6 +17,22 @@ import (
 
 type staticCredentialProvider struct{ token string }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
 func (p staticCredentialProvider) ResolveCredential(context.Context, string, string) (string, error) {
 	return p.token, nil
 }
@@ -117,5 +133,25 @@ func TestDiscoveryAcceptsSuccessfulEmptyCatalog(t *testing.T) {
 	deployments, err := discovery.ListDeployments(context.Background(), target)
 	if err != nil || len(deployments) != 0 {
 		t.Fatalf("deployments = %#v, error = %v", deployments, err)
+	}
+}
+
+func TestDiscoveryReturnsUnsupportedContentEncodingWithoutPanic(t *testing.T) {
+	body := &closeTrackingBody{Reader: strings.NewReader(`{"data":[]}`)}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Encoding": {"unsupported"}},
+			Body:       body,
+			Request:    request,
+		}, nil
+	})}
+	discovery := Discovery{client: client, credentials: staticCredentialProvider{token: "token"}, catalogURL: "https://api.deepseek.test/models"}
+	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, profile.FrameSSEEvent, "messages_stream")
+	if _, err := discovery.ListDeployments(context.Background(), target); err == nil {
+		t.Fatal("discovery unexpectedly accepted unsupported content encoding")
+	}
+	if !body.closed {
+		t.Fatal("discovery did not close the original response body")
 	}
 }

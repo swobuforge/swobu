@@ -162,18 +162,30 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: dto.OpenAI.Credential}
 	}
 	if dto.Anthropic != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: dto.Anthropic.Credential}
 	}
 	if dto.DeepSeek != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: dto.DeepSeek.Credential}
 	}
 	if dto.OpenRouter != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: dto.OpenRouter.Credential}
 	}
 	if dto.ZAI != nil {
 		draft.ZAI = &routing.ZAIConnectionDraft{Access: dto.ZAI.Access, Credential: dto.ZAI.Credential}
 	}
 	if dto.ChatGPT != nil {
+		if draft.APIKey != nil {
+			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+		}
 		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: dto.ChatGPT.Credential}
 	}
 	if dto.Ollama != nil {

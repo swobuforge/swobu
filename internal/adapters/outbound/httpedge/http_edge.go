@@ -31,7 +31,7 @@ func DecodeHTTPResponseContentEncoding(resp *http.Response) (*http.Response, err
 	}
 	decodedBody, err := httpcontent.DecodeStream(contentEncoding, resp.Body)
 	if err != nil {
-		return nil, err
+		return resp, err
 	}
 	resp.Body = decodedBody
 	resp.Header.Del("Content-Encoding")

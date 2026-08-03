@@ -121,14 +121,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, err
 			}
-			var toolKey canonical.ToolKey
-			if strings.TrimSpace(item.Namespace) == "" {
-				toolKey, err = canonical.ResolveHistoricalToolKeyByName(tools, item.Name, canonical.ToolKindFunction)
-			} else {
-				var resolved canonical.ToolDeclaration
-				resolved, err = resolveResponsesFunctionCall(tools, item.Namespace, item.Name)
-				toolKey = resolved.Key()
-			}
+			toolKey, err := resolveHistoricalResponsesFunctionCall(tools, item.Namespace, item.Name)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request function_call has an invalid tool identity")
 			}

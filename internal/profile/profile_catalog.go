@@ -68,6 +68,7 @@ type Profile struct {
 	CatalogItemLabel    string
 	DefaultAuthHeader   string
 	VisibleInOperatorUI bool
+	ProtocolAuthoring   ProtocolAuthoring
 	ProviderProtocols   []ProviderProtocolSpec
 }
 

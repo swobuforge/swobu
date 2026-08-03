@@ -104,6 +104,7 @@ func catalog() []Profile {
 			},
 			Credential:          CredentialSpec{Requirement: CredentialUnsupported},
 			VisibleInOperatorUI: true,
+			ProtocolAuthoring:   ProtocolDerived,
 			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 		},
 		{
@@ -130,6 +131,7 @@ func catalog() []Profile {
 			},
 			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "DEEPSEEK_API_KEY"},
 			VisibleInOperatorUI: true,
+			ProtocolAuthoring:   ProtocolDerived,
 			ProviderProtocols:   slices.Clone(providerProtocolsDeepSeek),
 		},
 		{
@@ -155,6 +157,7 @@ func catalog() []Profile {
 			},
 			Credential:          CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ZAI_API_KEY"},
 			VisibleInOperatorUI: true,
+			ProtocolAuthoring:   ProtocolDerived,
 			ProviderProtocols:   slices.Clone(providerProtocolsZAI),
 		},
 		{

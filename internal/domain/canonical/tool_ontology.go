@@ -217,6 +217,19 @@ func ResolveHistoricalToolKeyByName(tools []ToolDeclaration, name string, kind T
 	return key, nil
 }
 
+// HistoricalScopedToolKey preserves one client-transcript identity by value.
+// It does not resolve or authorize a current declaration.
+func HistoricalScopedToolKey(namespace string, name string, kind ToolKind) (ToolKey, error) {
+	if namespace == "" || strings.TrimSpace(namespace) != namespace || name == "" || strings.TrimSpace(name) != name { // swobu:io-string source=domain
+		return ToolKey{}, BadRequest("canonical historical scoped tool call identity is invalid")
+	}
+	key, err := NewToolKey(namespace, kind, name)
+	if err != nil {
+		return ToolKey{}, BadRequest("canonical historical scoped tool call identity is invalid")
+	}
+	return key, nil
+}
+
 // ToolIdentityFromWire preserves a client transcript's literal flat identity.
 // Provider aliases are resolved only through the exact attempt-local table.
 func ToolIdentityFromWire(raw string, kind ToolKind) (ToolKey, error) {
