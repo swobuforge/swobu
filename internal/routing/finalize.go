@@ -17,19 +17,20 @@ type TargetDraft struct {
 
 // ConnectionDraft is a raw tagged union. Exactly one arm must be present.
 type ConnectionDraft struct {
-	OpenAI     *CredentialConnectionDraft
-	Anthropic  *CredentialConnectionDraft
-	OpenRouter *CredentialConnectionDraft
-	ZAI        *ZAIConnectionDraft
-	ChatGPT    *CredentialConnectionDraft
-	Ollama     *OllamaConnectionDraft
-	Azure      *AzureConnectionDraft
-	Bedrock    *BedrockConnectionDraft
-	Custom     *CustomConnectionDraft
+	APIKey  *APIKeyConnectionDraft
+	ZAI     *ZAIConnectionDraft
+	Ollama  *OllamaConnectionDraft
+	Azure   *AzureConnectionDraft
+	Bedrock *BedrockConnectionDraft
+	Custom  *CustomConnectionDraft
 }
 
-// CredentialConnectionDraft carries one unresolved credential locator.
-type CredentialConnectionDraft struct{ Credential string }
+// APIKeyConnectionDraft carries one fixed provider identity and unresolved
+// credential locator from a provider-specific transport arm.
+type APIKeyConnectionDraft struct {
+	Provider   Provider
+	Credential string
+}
 
 // ZAIConnectionDraft carries the selected Z.AI access product and credential.
 type ZAIConnectionDraft struct {
@@ -68,6 +69,7 @@ type CustomHeaderDraft struct {
 // importing provider catalogs into the routing domain.
 type TargetConstructionFacts struct {
 	ProtocolSupported             ProtocolSupport
+	DerivedProtocol               func(Provider) (string, bool)
 	NormalizeAzureProjectEndpoint func(string) (string, error)
 	BedrockRegionSupported        func(string) bool
 }
@@ -88,11 +90,17 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 		return Target{}, err
 	}
 	rawProtocol := strings.TrimSpace(draft.Protocol)
-	if _, derived := derivedProtocolForConnection(connection); derived {
-		if rawProtocol != "" {
-			return Target{}, pathError("target.protocol", "Z.AI protocol is derived and must be omitted")
+	if facts.DerivedProtocol != nil {
+		if derivedProtocol, derived := facts.DerivedProtocol(connection.Provider()); derived {
+			if rawProtocol != "" {
+				return Target{}, pathError("target.protocol", "provider protocol is derived and must be omitted")
+			}
+			protocol, err := ParseProtocol(derivedProtocol, connection.Provider(), facts.ProtocolSupported)
+			if err != nil {
+				return Target{}, err
+			}
+			return NewTarget(id, model, protocol, connection)
 		}
-		return NewTarget(id, model, Protocol{}, connection)
 	}
 	protocol, err := ParseProtocol(rawProtocol, connection.Provider(), facts.ProtocolSupported)
 	if err != nil {
@@ -105,7 +113,7 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 // requiring unrelated target identity, model, or protocol fields.
 func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (Connection, error) {
 	count := 0
-	for _, present := range []bool{draft.OpenAI != nil, draft.Anthropic != nil, draft.OpenRouter != nil, draft.ZAI != nil, draft.ChatGPT != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
+	for _, present := range []bool{draft.APIKey != nil, draft.ZAI != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
 			count++
 		}
@@ -113,14 +121,8 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 	if count != 1 {
 		return nil, pathError("target.connection", "exactly one provider variant is required")
 	}
-	if draft.OpenAI != nil {
-		return NewOpenAIConnection(draft.OpenAI.Credential)
-	}
-	if draft.Anthropic != nil {
-		return NewAnthropicConnection(draft.Anthropic.Credential)
-	}
-	if draft.OpenRouter != nil {
-		return NewOpenRouterConnection(draft.OpenRouter.Credential)
+	if draft.APIKey != nil {
+		return NewAPIKeyConnection(draft.APIKey.Provider, draft.APIKey.Credential)
 	}
 	if draft.ZAI != nil {
 		access, err := ParseZAIAccess(draft.ZAI.Access)
@@ -128,9 +130,6 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 			return nil, err
 		}
 		return NewZAIConnection(access, draft.ZAI.Credential)
-	}
-	if draft.ChatGPT != nil {
-		return NewChatGPTConnection(draft.ChatGPT.Credential)
 	}
 	if draft.Ollama != nil {
 		return NewOllamaConnection(draft.Ollama.BaseURL)

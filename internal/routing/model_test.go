@@ -21,7 +21,7 @@ func testTarget(t *testing.T, id string) Target {
 	t.Helper()
 	targetID, _ := ParseTargetID(id)
 	model, _ := ParseUpstreamModel("upstream-" + id)
-	connection, err := NewOpenAIConnection("env:OPENAI_API_KEY")
+	connection, err := NewAPIKeyConnection(ProviderOpenAI, "env:OPENAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}

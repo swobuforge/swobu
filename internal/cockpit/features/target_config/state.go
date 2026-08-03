@@ -204,10 +204,9 @@ func (w *TargetConfig) CurrentProtocolOptions() []protocolOption {
 	return resolveProtocolOptions(w.Draft.Get().ProviderSpec, w.SelectedModel.Get())
 }
 
-// UsesManualModelEntry reports providers whose operator-authored model is
-// authoritative without live catalog evidence.
-func (w *TargetConfig) UsesManualModelEntry() bool {
-	return w.IsCustomFlow() || w.IsZAIFlow()
+func (w *TargetConfig) derivesProviderProtocol() bool {
+	_, derived := profile.DerivedProtocolForSpec(w.Draft.Get().ProviderSpec)
+	return derived
 }
 
 func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
@@ -215,39 +214,14 @@ func (w *TargetConfig) catalogLoading() bool                           { return 
 func (w *TargetConfig) catalogFailed() bool                            { return w.Catalog.Get().Err != "" }
 func (w *TargetConfig) createFailed() bool                             { return w.SaveOperation.Get().Err != "" }
 func (w *TargetConfig) readyToCreate() bool {
-	protocolReady := w.IsZAIFlow() || strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
+	protocolReady := w.derivesProviderProtocol() || strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
 	return w.setupState().Ready() &&
 		w.modelSelectionValidated() &&
 		protocolReady
 }
 
-// modelSelectionValidated makes open-set provider model entry authoritative.
-// Catalog-backed providers still require current discovery evidence.
 func (w *TargetConfig) modelSelectionValidated() bool {
-	if w.UsesManualModelEntry() {
-		return strings.TrimSpace(w.SelectedModel.Get().ModelName) != ""
-	}
-	return w.catalogValidated() && w.selectedModelIsInCurrentCatalog()
-}
-
-// catalogValidated requires current, successful probe evidence. Retained
-// deployments from an earlier connection never authorize persistence.
-func (w *TargetConfig) catalogValidated() bool {
-	operation := w.Catalog.Get()
-	return !operation.Loading && strings.TrimSpace(operation.Err) == "" && len(operation.Result.Deployments) > 0
-}
-
-func (w *TargetConfig) selectedModelIsInCurrentCatalog() bool {
-	selected := w.SelectedModel.Get()
-	if strings.TrimSpace(selected.ModelName) == "" {
-		return false
-	}
-	for _, deployment := range w.catalogResult().Deployments {
-		if deployment.ID == selected.ID || deployment.ModelName == selected.ModelName {
-			return true
-		}
-	}
-	return false
+	return strings.TrimSpace(w.SelectedModel.Get().ModelName) != ""
 }
 
 func (w *TargetConfig) authSessionPending() bool {

@@ -122,7 +122,7 @@ func TestSetCredentialPreservesUnrelatedTargetFields(t *testing.T) {
 	if target.ID() != id || target.Model().String() != "upstream-a" || target.Protocol().String() != "responses" {
 		t.Fatalf("unrelated target fields changed: %#v", target)
 	}
-	connection := target.Connection().(OpenAIConnection)
+	connection := target.Connection().(APIKeyConnection)
 	if connection.Credential().String() != "env:ROTATED" {
 		t.Fatalf("credential = %q", connection.Credential().String())
 	}
@@ -152,7 +152,7 @@ func TestNoOpTargetSavesRetainVersion(t *testing.T) {
 		t.Fatalf("no-op settings save version = %d, want %d", got, target.Version())
 	}
 
-	credential := target.Connection().(OpenAIConnection).Credential().String()
+	credential := target.Connection().(APIKeyConnection).Credential().String()
 	next, err = next.SetCredential(slug, routeName, id, credential)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestTargetVersionChangesForIndependentTargetSettingsMutations(t *testing.T)
 	openAIBase := testTarget(t, "a")
 	modelChanged, _ := ParseUpstreamModel("different-deployment")
 	protocolChanged := testProtocol(t, ProviderOpenAI, "chat_completions")
-	credentialChanged, _ := NewOpenAIConnection("env:ROTATED_OPENAI_KEY")
+	credentialChanged, _ := NewAPIKeyConnection(ProviderOpenAI, "env:ROTATED_OPENAI_KEY")
 	customAuth, _ := NewCustomHeaderAuth("Authorization", "env:CUSTOM_KEY")
 	customA, _ := NewCustomConnection("https://custom-a.example/v1", customAuth)
 	customB, _ := NewCustomConnection("https://custom-b.example/v1", customAuth)
@@ -247,7 +247,7 @@ func TestTargetVersionChangesWhenProviderConnectionVariantChanges(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
 	anthropicProtocol := testProtocol(t, ProviderAnthropic, "messages")
 
 	config := testConfig(t, base)
@@ -270,7 +270,7 @@ func TestTargetRejectsProtocolFromDifferentProvider(t *testing.T) {
 	targetID, _ := ParseTargetID("a")
 	model, _ := ParseUpstreamModel("shared-deployment")
 	bedrockProtocol := testProtocol(t, ProviderBedrock, "messages")
-	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
 	if _, err := NewTarget(targetID, model, bedrockProtocol, anthropic); err == nil {
 		t.Fatal("target accepted protocol from a provider that contradicts its connection")
 	}
@@ -281,7 +281,7 @@ func TestUpdateTargetSettingsRejectsProviderChangeWithoutMatchingProtocol(t *tes
 	config := testConfig(t, base)
 	slug, _ := ParseWorkspaceSlug("dev")
 	routeName, _ := ParseRouteName("chat")
-	anthropic, _ := NewAnthropicConnection("env:ANTHROPIC_API_KEY")
+	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
 	if _, err := config.UpdateTargetSettings(slug, routeName, base.ID(), TargetSettings{
 		Model: base.Model(), Protocol: base.Protocol(), Connection: anthropic,
 	}); err == nil {

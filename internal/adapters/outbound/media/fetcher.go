@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/platform/outboundhttp"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -37,7 +38,12 @@ func (f PublicImageFetcher) FetchImage(ctx context.Context, source canonical.URL
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	transport := &http.Transport{Proxy: nil, DialContext: authorizedDialer(resolver, policy)}
+	// outboundhttp owns proxy route selection via Go's request-level
+	// ProxyFromEnvironment. The restricted-direct guarded dialer runs only when
+	// the per-request decision is "direct" — never on the first-hop address of an
+	// already-selected proxy. URL/scheme/redirect authority still runs on every
+	// request and redirect, independent of dialing.
+	transport := outboundhttp.NewTransport(outboundhttp.Config{DirectDialContext: authorizedDialer(resolver, policy)})
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {

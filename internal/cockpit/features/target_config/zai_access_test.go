@@ -21,12 +21,12 @@ func TestZAICreateFlow(t *testing.T) {
 		t.Fatalf("setup status = %v, want missing access", got)
 	}
 	frame := testkit.RenderMountedTrimmed(t, w, 100, 24)
-	for _, required := range []string{"provider", "Z.AI", "access", "required", "protocol", "OpenAI · Chat Completions · stream", "fixed"} {
+	for _, required := range []string{"provider", "Z.AI", "access", "required"} {
 		if !strings.Contains(frame, required) {
 			t.Fatalf("Z.AI form missing %q:\n%s", required, frame)
 		}
 	}
-	for _, forbidden := range []string{"backend URL", "credential header", "authentication mode"} {
+	for _, forbidden := range []string{"backend URL", "credential header", "authentication mode", "protocol"} {
 		if strings.Contains(frame, forbidden) {
 			t.Fatalf("Z.AI form exposes %q:\n%s", forbidden, frame)
 		}

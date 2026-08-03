@@ -90,6 +90,7 @@ type Provider string
 const (
 	ProviderOpenAI     Provider = "openai"
 	ProviderAnthropic  Provider = "anthropic"
+	ProviderDeepSeek   Provider = "deepseek"
 	ProviderOpenRouter Provider = "openrouter"
 	ProviderZAI        Provider = "zai"
 	ProviderChatGPT    Provider = "chatgpt"
@@ -353,28 +354,11 @@ type Target struct {
 }
 
 func NewTarget(id TargetID, model UpstreamModel, protocol Protocol, connection Connection) (Target, error) {
-	if derived, ok := derivedProtocolForConnection(connection); ok {
-		if protocol.value != "" && protocol != derived {
-			return Target{}, pathError(
-				"target.protocol",
-				fmt.Sprintf("protocol %q contradicts derived provider protocol %q", protocol.value, derived.value),
-			)
-		}
-		protocol = derived
-	}
 	target := Target{id: id, version: initialTargetVersion, model: model, protocol: protocol, connection: connection}
 	if err := target.validate(); err != nil {
 		return Target{}, err
 	}
 	return target, nil
-}
-
-func derivedProtocolForConnection(connection Connection) (Protocol, bool) {
-	_, ok := connection.(ZAIConnection)
-	if !ok {
-		return Protocol{}, false
-	}
-	return Protocol{value: ZAIProviderProtocol, provider: ProviderZAI}, true
 }
 
 func (t Target) validate() error {

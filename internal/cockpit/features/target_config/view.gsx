@@ -56,7 +56,7 @@ func EndpointInput(w *TargetConfig, autoFocus bool) *ui.EditableRow {
 	row.Placeholder, row.ViewAction, row.EditAction, row.AutoFocus = "enter "+label, "edit ↵", "save ↵", autoFocus
 	row.OnSubmit = func(raw string) {
 		w.BaseURL.Set(strings.TrimSpace(raw))
-		w.invalidateCatalogSelection()
+		w.invalidateCatalogEvidence()
 		w.reseedInferredCredentialHeader()
 		w.advanceFromSetup()
 	}

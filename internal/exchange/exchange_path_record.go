@@ -77,16 +77,10 @@ func ProviderTargetFromConnection(targetID string, connection routing.Connection
 	credential := ""
 	authHeader := ""
 	switch connection := connection.(type) {
-	case routing.OpenAIConnection:
-		credential = connection.Credential().String()
-	case routing.AnthropicConnection:
-		credential = connection.Credential().String()
-	case routing.OpenRouterConnection:
+	case routing.APIKeyConnection:
 		credential = connection.Credential().String()
 	case routing.ZAIConnection:
 		baseURL = connection.BaseURL()
-		credential = connection.Credential().String()
-	case routing.ChatGPTConnection:
 		credential = connection.Credential().String()
 	case routing.OllamaConnection:
 		if configured, ok := connection.BaseURL(); ok {

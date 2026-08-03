@@ -15,9 +15,10 @@ workspaces:
           - targets:
               - {id: openai, model: gpt-5, protocol: responses, connection: {openai: {credential: env:OPENAI_API_KEY}}}
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
+              - {id: deepseek, model: deepseek-v4-pro, connection: {deepseek: {credential: env:DEEPSEEK_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
               - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
-              - {id: chatgpt, model: gpt-5, protocol: responses_stream, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
+              - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
               - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, credential: env:BEDROCK_API_KEY}}}
@@ -49,6 +50,21 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if strings.Contains(string(raw), "protocol: chat_completions_stream") {
 		t.Fatalf("derived Z.AI protocol was persisted:\n%s", raw)
 	}
+	if !strings.Contains(string(raw), "deepseek:") || strings.Contains(string(raw), "protocol: messages_stream") {
+		t.Fatalf("DeepSeek connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+}
+
+func TestCodecRejectsAuthoredDeepSeekProtocol(t *testing.T) {
+	raw := strings.Replace(
+		allVariantsYAML,
+		"id: deepseek, model: deepseek-v4-pro, connection:",
+		"id: deepseek, model: deepseek-v4-pro, protocol: messages_stream, connection:",
+		1,
+	)
+	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "provider protocol is derived and must be omitted") {
+		t.Fatalf("decode error = %v, want authored DeepSeek protocol rejection", err)
+	}
 }
 
 func TestCodecRejectsZAIWithoutExplicitAccess(t *testing.T) {
@@ -70,8 +86,8 @@ func TestCodecRejectsEveryAuthoredZAIProtocol(t *testing.T) {
 			"id: zai, model: manual-model, protocol: "+protocol+", connection:",
 			1,
 		)
-		if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "Z.AI protocol is derived and must be omitted") {
-			t.Fatalf("protocol %q decode error = %v, want authored Z.AI protocol rejection", protocol, err)
+		if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "provider protocol is derived and must be omitted") {
+			t.Fatalf("protocol %q decode error = %v, want authored derived protocol rejection", protocol, err)
 		}
 	}
 }

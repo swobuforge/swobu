@@ -78,7 +78,7 @@ func AzureProjectEndpointDraftInput(w *TargetConfig, value *tui.State[string], a
 		}
 		w.Error.Set("")
 		w.BaseURL.Set(projectEndpoint)
-		w.invalidateCatalogSelection()
+		w.invalidateCatalogEvidence()
 		value.Set(projectEndpoint)
 		w.advanceFromSetup()
 		if len(onSubmitted) > 0 && onSubmitted[0] != nil {

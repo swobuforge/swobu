@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
@@ -35,6 +36,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 	return newProviderRegistry(profile.All(), []providersruntime.ProviderRuntimeBundle{
 		openai.NewRuntime(client, credentials),
 		anthropic.NewRuntime(profile.ProviderSpecAnthropic, client, credentials),
+		deepseek.NewRuntime(client, credentials),
 		chatgpt.NewRuntime(profile.ProviderSpecChatGPT, client, credentials),
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
 		azure.NewRuntime(client, credentials),

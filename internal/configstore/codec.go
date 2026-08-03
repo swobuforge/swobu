@@ -39,6 +39,7 @@ type targetDTO struct {
 type connectionDTO struct {
 	OpenAI     *credentialConnectionDTO `yaml:"openai,omitempty"`
 	Anthropic  *credentialConnectionDTO `yaml:"anthropic,omitempty"`
+	DeepSeek   *credentialConnectionDTO `yaml:"deepseek,omitempty"`
 	OpenRouter *credentialConnectionDTO `yaml:"openrouter,omitempty"`
 	ZAI        *zaiConnectionDTO        `yaml:"zai,omitempty"`
 	ChatGPT    *credentialConnectionDTO `yaml:"chatgpt,omitempty"`
@@ -158,19 +159,22 @@ func decodeTarget(dto targetDTO) (routing.Target, error) {
 func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 	draft := routing.ConnectionDraft{}
 	if dto.OpenAI != nil {
-		draft.OpenAI = &routing.CredentialConnectionDraft{Credential: dto.OpenAI.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: dto.OpenAI.Credential}
 	}
 	if dto.Anthropic != nil {
-		draft.Anthropic = &routing.CredentialConnectionDraft{Credential: dto.Anthropic.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: dto.Anthropic.Credential}
+	}
+	if dto.DeepSeek != nil {
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: dto.DeepSeek.Credential}
 	}
 	if dto.OpenRouter != nil {
-		draft.OpenRouter = &routing.CredentialConnectionDraft{Credential: dto.OpenRouter.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: dto.OpenRouter.Credential}
 	}
 	if dto.ZAI != nil {
 		draft.ZAI = &routing.ZAIConnectionDraft{Access: dto.ZAI.Access, Credential: dto.ZAI.Credential}
 	}
 	if dto.ChatGPT != nil {
-		draft.ChatGPT = &routing.CredentialConnectionDraft{Credential: dto.ChatGPT.Credential}
+		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: dto.ChatGPT.Credential}
 	}
 	if dto.Ollama != nil {
 		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: dto.Ollama.BaseURL}
@@ -230,18 +234,28 @@ func encode(config routing.Config) ([]byte, error) {
 
 func encodeTarget(target routing.Target) (targetDTO, error) {
 	dto := targetDTO{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String()}
-	switch c := target.Connection().(type) {
-	case routing.OpenAIConnection:
-		dto.Connection.OpenAI = &credentialConnectionDTO{Credential: c.Credential().String()}
-	case routing.AnthropicConnection:
-		dto.Connection.Anthropic = &credentialConnectionDTO{Credential: c.Credential().String()}
-	case routing.OpenRouterConnection:
-		dto.Connection.OpenRouter = &credentialConnectionDTO{Credential: c.Credential().String()}
-	case routing.ZAIConnection:
+	if _, derived := profile.DerivedProtocolForSpec(string(target.Provider())); derived {
 		dto.Protocol = ""
+	}
+	switch c := target.Connection().(type) {
+	case routing.APIKeyConnection:
+		credential := &credentialConnectionDTO{Credential: c.Credential().String()}
+		switch c.Provider() {
+		case routing.ProviderOpenAI:
+			dto.Connection.OpenAI = credential
+		case routing.ProviderAnthropic:
+			dto.Connection.Anthropic = credential
+		case routing.ProviderDeepSeek:
+			dto.Connection.DeepSeek = credential
+		case routing.ProviderOpenRouter:
+			dto.Connection.OpenRouter = credential
+		case routing.ProviderChatGPT:
+			dto.Connection.ChatGPT = credential
+		default:
+			return targetDTO{}, fmt.Errorf("encode target %s: unsupported API-key provider %q", target.ID().String(), c.Provider())
+		}
+	case routing.ZAIConnection:
 		dto.Connection.ZAI = &zaiConnectionDTO{Access: string(c.Access()), Credential: c.Credential().String()}
-	case routing.ChatGPTConnection:
-		dto.Connection.ChatGPT = &credentialConnectionDTO{Credential: c.Credential().String()}
 	case routing.OllamaConnection:
 		u, _ := c.BaseURL()
 		dto.Connection.Ollama = &ollamaConnectionDTO{BaseURL: u.String()}

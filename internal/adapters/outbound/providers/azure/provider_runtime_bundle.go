@@ -74,7 +74,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 	router := azureBackendAdapter{
 		openAI:    openaifamily.NewExecutor(client, credentials, NewPolicy()),
-		anthropic: anthropicprovider.NewExecutor(client, credentials),
+		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials),
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,

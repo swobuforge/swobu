@@ -10,6 +10,9 @@ func RoutingConstructionFacts() routing.TargetConstructionFacts {
 		ProtocolSupported: func(provider routing.Provider, protocol string) bool {
 			return protocol != ProviderProtocolAuto && SupportsProviderProtocolForSpec(string(provider), protocol)
 		},
+		DerivedProtocol: func(provider routing.Provider) (string, bool) {
+			return DerivedProtocolForSpec(string(provider))
+		},
 		NormalizeAzureProjectEndpoint: NormalizeAzureProjectEndpoint,
 		BedrockRegionSupported:        SupportsBedrockMantleRegion,
 	}

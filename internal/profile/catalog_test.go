@@ -16,6 +16,9 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("anthropic") {
 		t.Fatal("anthropic provider spec should be supported")
 	}
+	if !SupportsSpec("deepseek") {
+		t.Fatal("deepseek provider spec should be supported")
+	}
 	if !SupportsSpec("bedrock") {
 		t.Fatal("bedrock provider spec should be supported")
 	}
@@ -56,6 +59,18 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if got := DefaultExecuteBaseURL("openrouter"); got != "https://openrouter.ai/api/v1" {
 		t.Fatalf("openrouter default base URL = %q", got)
+	}
+	if got := DefaultExecuteBaseURL("deepseek"); got != "https://api.deepseek.com/anthropic/v1" {
+		t.Fatalf("deepseek default base URL = %q", got)
+	}
+	if got := DefaultEnvKeyForSpec("deepseek"); got != "DEEPSEEK_API_KEY" {
+		t.Fatalf("deepseek default env key = %q", got)
+	}
+	if got := ConcreteProviderProtocolsForSpec("deepseek"); len(got) != 1 || got[0] != "messages_stream" {
+		t.Fatalf("deepseek protocols = %v", got)
+	}
+	if got, ok := DerivedProtocolForSpec("deepseek"); !ok || got != "messages_stream" {
+		t.Fatalf("deepseek derived protocol = %q, %v", got, ok)
 	}
 	if !RequiresCredential("openrouter", DefaultExecuteBaseURL("openrouter")) {
 		t.Fatal("openrouter should require credential")

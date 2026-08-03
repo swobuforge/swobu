@@ -56,7 +56,7 @@ func (w *TargetConfig) changeCredentialRef(ref string) {
 		d.CredentialRef = strings.TrimSpace(ref)
 		return d
 	})
-	w.invalidateCatalogSelection()
+	w.invalidateCatalogEvidence()
 	w.advanceFromSetup()
 	w.CommitEdit(w.actionContext())
 }
@@ -132,9 +132,8 @@ func (w *TargetConfig) SetCatalogResult(result readmodel.ModelCatalogReadModel, 
 	}
 }
 
-// reconcileSelectedModel preserves a selection only while the refreshed
-// provider catalog still contains it; protocol truth is cleared with a stale
-// model so creation cannot proceed on evidence from an earlier probe.
+// reconcileSelectedModel enriches a typed selection when discovery returns a
+// matching row. A missing row never invalidates the operator-authored model.
 func (w *TargetConfig) reconcileSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
 	selected := w.SelectedModel.Get()
 	if strings.TrimSpace(selected.ModelName) == "" {
@@ -143,9 +142,7 @@ func (w *TargetConfig) reconcileSelectedModel(deployments []readmodel.ModelDeplo
 	if w.hydrateSelectedModel(deployments) {
 		return true
 	}
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
-	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ModelID = ""; d.ProviderProtocol = ""; return d })
-	return false
+	return true
 }
 
 func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
@@ -176,7 +173,7 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 	w.SelectedModel.Set(model)
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
 	w.Error.Set("")
-	if w.IsZAIFlow() {
+	if w.derivesProviderProtocol() {
 		w.CommitEdit(w.actionContext())
 		return
 	}
@@ -289,7 +286,7 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 		w.Error.Set("")
 		return
 	}
-	w.invalidateCatalogSelection()
+	w.invalidateCatalogEvidence()
 	w.startCatalogProbe()
 }
 
@@ -366,7 +363,7 @@ func (w *TargetConfig) SelectBedrockRegion(region string) {
 		d.Locator = region
 		return d
 	})
-	w.invalidateCatalogSelection()
+	w.invalidateCatalogEvidence()
 	w.Error.Set("")
 	w.advanceFromSetup()
 }
@@ -444,9 +441,9 @@ func (w *TargetConfig) advanceFromSetup() {
 	}
 }
 
-// invalidateCatalogSelection severs every value derived from the previous
-// connection before a new probe begins. A successful new catalog may then be
-// selected normally; stale evidence is never actionable while loading/failed.
+// invalidateCatalogSelection clears authored model intent only when the
+// provider namespace changes. Credential, endpoint, and region refreshes use
+// invalidateCatalogEvidence so exact operator input survives discovery drift.
 func (w *TargetConfig) invalidateCatalogSelection() {
 	w.Catalog.Set(catalogOperationState{})
 	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
@@ -754,7 +751,7 @@ func (w *TargetConfig) Create(ctx context.Context) {
 	model := w.SelectedModel.Get()
 	placement := w.Placement.Get()
 	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
-	if w.IsZAIFlow() {
+	if w.derivesProviderProtocol() {
 		protocol = ""
 	} else if protocol == "" {
 		w.Error.Set("complete setup")
@@ -815,7 +812,7 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 	model := w.SelectedModel.Get()
 	modelID := strings.TrimSpace(model.ModelName)
 	protocol := strings.TrimSpace(w.Draft.Get().ProviderProtocol)
-	if w.IsZAIFlow() {
+	if w.derivesProviderProtocol() {
 		protocol = ""
 	} else if protocol == "" {
 		return

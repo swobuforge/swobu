@@ -33,13 +33,21 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 		make func() (routing.Connection, error)
 		arm  func(targetConnection) bool
 	}{
-		{"openai", func() (routing.Connection, error) { return routing.NewOpenAIConnection("env:OPENAI_API_KEY") }, func(c targetConnection) bool { return c.openAI }},
-		{"anthropic", func() (routing.Connection, error) { return routing.NewAnthropicConnection("env:ANTHROPIC_API_KEY") }, func(c targetConnection) bool { return c.anthropic }},
-		{"openrouter", func() (routing.Connection, error) { return routing.NewOpenRouterConnection("env:OPENROUTER_API_KEY") }, func(c targetConnection) bool { return c.openRouter }},
+		{"openai", func() (routing.Connection, error) {
+			return routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:OPENAI_API_KEY")
+		}, func(c targetConnection) bool { return c.openAI }},
+		{"anthropic", func() (routing.Connection, error) {
+			return routing.NewAPIKeyConnection(routing.ProviderAnthropic, "env:ANTHROPIC_API_KEY")
+		}, func(c targetConnection) bool { return c.anthropic }},
+		{"openrouter", func() (routing.Connection, error) {
+			return routing.NewAPIKeyConnection(routing.ProviderOpenRouter, "env:OPENROUTER_API_KEY")
+		}, func(c targetConnection) bool { return c.openRouter }},
 		{"zai", func() (routing.Connection, error) {
 			return routing.NewZAIConnection(routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
 		}, func(c targetConnection) bool { return c.zai }},
-		{"chatgpt", func() (routing.Connection, error) { return routing.NewChatGPTConnection("secret:chatgpt/session") }, func(c targetConnection) bool { return c.chatGPT }},
+		{"chatgpt", func() (routing.Connection, error) {
+			return routing.NewAPIKeyConnection(routing.ProviderChatGPT, "secret:chatgpt/session")
+		}, func(c targetConnection) bool { return c.chatGPT }},
 		{"ollama", func() (routing.Connection, error) { return routing.NewOllamaConnection("http://127.0.0.1:11434") }, func(c targetConnection) bool { return c.ollama }},
 		{"azure", func() (routing.Connection, error) {
 			return routing.NewAzureConnection("https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")

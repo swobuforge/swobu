@@ -28,6 +28,7 @@ const (
 	ProviderSpecOpenAI     ProviderID = "openai"
 	ProviderSpecChatGPT    ProviderID = "chatgpt"
 	ProviderSpecAnthropic  ProviderID = "anthropic"
+	ProviderSpecDeepSeek   ProviderID = "deepseek"
 	ProviderSpecOpenRouter ProviderID = "openrouter"
 	ProviderSpecZAI        ProviderID = "zai"
 	ProviderSpecBedrock    ProviderID = "bedrock"

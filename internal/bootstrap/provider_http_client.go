@@ -3,16 +3,13 @@ package bootstrap
 import (
 	"net/http"
 	"time"
+
+	"github.com/swobuforge/swobu/internal/platform/outboundhttp"
 )
 
 var providerResponseHeaderTimeout = 5 * time.Minute
 
 func newProviderHTTPClient() *http.Client {
-	baseTransport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Client{}
-	}
-	transport := baseTransport.Clone()
-	transport.ResponseHeaderTimeout = providerResponseHeaderTimeout
+	transport := outboundhttp.NewTransport(outboundhttp.Config{ResponseHeaderTimeout: providerResponseHeaderTimeout})
 	return &http.Client{Transport: transport}
 }
