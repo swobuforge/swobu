@@ -4,83 +4,63 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"reflect"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 )
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
 // exact backend and lowers one final wire document without external I/O.
-func prepareProviderCall(s exchangeState, selection providerCallSelection, runner runtimeBundle, preparedOverride *attemptImagesMaterialized) (providerCall, provider.TargetSnapshot, []compat.Change, command, error) {
+func prepareProviderCall(ctx context.Context, s exchangeState, selection providerCallSelection, runner runtimeBundle) (providerCall, provider.TargetSnapshot, []compat.Change, mediaFetchCache, error) {
 	target, ok := s.route.at(selection.candidateIndex)
 	if !ok {
-		return providerCall{}, provider.TargetSnapshot{}, nil, nil, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
+		return providerCall{}, provider.TargetSnapshot{}, nil, s.mediaFetchCache, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
 	}
 	path, err := resolveProviderPath(target)
 	if err != nil {
-		return providerCall{}, provider.TargetSnapshot{}, nil, nil, err
+		return providerCall{}, provider.TargetSnapshot{}, nil, s.mediaFetchCache, err
 	}
 	backend, err := runner.Runtime.ResolveBackend(path.target)
 	if err != nil {
-		return providerCall{}, path.target, nil, nil, err
+		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
 	if err := backend.Validate(); err != nil {
-		return providerCall{}, path.target, nil, nil, canonical.InternalError("required provider backend is incomplete")
+		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("required provider backend is incomplete")
 	}
 	if !backend.Target.Equal(path.target) {
-		return providerCall{}, path.target, nil, nil, canonical.InternalError("resolved provider backend changed target execution projection")
+		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("resolved provider backend changed target execution projection")
 	}
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
-		return providerCall{}, path.target, nil, nil, canonical.InternalError("required client codec not resolved")
+		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("required client codec not resolved")
 	}
 	resolved := *s.prepared
-	var canonicalRequest canonical.CanonicalRequest
-	switch selection.requestChoice {
-	case providerRequestPreferred:
-		canonicalRequest = resolved.ForTarget(path.target)
-	case providerRequestFullHistory:
-		canonicalRequest = resolved.Full.Clone()
-	default:
-		return providerCall{}, path.target, nil, nil, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
+	if selection.requestChoice != providerRequestPreferred && selection.requestChoice != providerRequestFullHistory {
+		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
-	usedMedia := session.ResolvedMedia{}
-	if preparedOverride != nil {
-		canonicalRequest = preparedOverride.request.Clone()
-		usedMedia = preparedOverride.usedMedia.Clone()
-	} else if requestHasImages(canonicalRequest) {
-		historicalMedia := historicalMediaForAttempt(canonicalRequest, s.prepared.ResolvedMedia)
-		command := materializeAttemptImagesCommand{
-			selection: selection, request: canonicalRequest.Clone(), semantic: s.prepared.Full.Clone(),
-			policy: runner.Policy.ImageFetch, limits: runner.Policy.Limits.Media,
-			fetcher: runner.ImageFetcher, fetchCache: cloneMediaFetchCache(s.mediaFetchCache), historical: historicalMedia,
-		}
-		return providerCall{}, path.target, nil, command, nil
-	}
-	semanticFull := resolved.Full.Clone()
-	attemptRequest := canonicalRequest.Clone()
+	fetchCache := cloneMediaFetchCache(s.mediaFetchCache)
+	semanticFull := resolved.Request()
+	attemptRequest := semanticFull.Clone()
 	if s.mcp != nil {
 		semanticFull, err = s.mcp.AttemptRequest(semanticFull)
 		if err != nil {
-			return providerCall{}, path.target, nil, nil, err
+			return providerCall{}, path.target, nil, s.mediaFetchCache, err
 		}
 		attemptRequest, err = s.mcp.AttemptRequest(attemptRequest)
 		if err != nil {
-			return providerCall{}, path.target, nil, nil, err
+			return providerCall{}, path.target, nil, s.mediaFetchCache, err
 		}
 	}
 	toolNames, namingChanges, err := provider.BuildAttemptToolNames(semanticFull)
 	if err != nil {
-		return providerCall{}, path.target, nil, nil, err
+		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
 	replaySafety, err := providerReplaySafetyFor(attemptRequest)
 	if err != nil {
-		return providerCall{}, path.target, nil, nil, fmt.Errorf("provider attempt replay safety: %w", err)
+		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("provider attempt replay safety: %w", err)
 	}
 	providerRequest := provider.Request{
 		ExchangeID: s.input.exchangeID,
@@ -89,65 +69,52 @@ func prepareProviderCall(s exchangeState, selection providerCallSelection, runne
 		ToolNames:  toolNames,
 		MCPAccess:  s.input.mcpAccess,
 	}
+	preparationCtx := ctx
+	cancel := func() {}
+	if timeout := runner.Policy.ImageFetch.TotalPreparationTimeout(); timeout > 0 {
+		preparationCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	providerRequest.EncodeContext = provider.EncodeContext{
+		Context:      preparationCtx,
+		ResolveImage: newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
+	}
+	if selection.requestChoice == providerRequestPreferred {
+		if id, start, end, ok := resolved.ResponsesPrevious(path.target.TargetID, path.target.TargetVersion); ok {
+			providerRequest.ResponsesPrevious = &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}
+		}
+	}
 	requestChanges := compat.CloneChanges(namingChanges)
 	workspaceSlug := s.input.workspace.Slug().String()
 	if err := validateCheckpointInput(runner, workspaceSlug); err != nil {
-		return providerCall{}, path.target, nil, nil, err
+		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
 	contract := NewExecutionContract(s.input.clientDelivery).WithProviderDelivery(path.delivery)
 	if err := contract.Validate(); err != nil {
-		return providerCall{}, path.target, nil, nil, canonical.BadRequest("execution contract is invalid: " + err.Error())
+		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.BadRequest("execution contract is invalid: " + err.Error())
 	}
 	doc, changes, err := backend.Codec.Encode(providerRequest)
 	requestChanges = append(requestChanges, changes...)
 	if err != nil {
-		return providerCall{}, path.target, requestChanges, nil, fmt.Errorf("provider request encoding: %w", err)
-	}
-	resolvedMedia, err := s.prepared.ResolvedMedia.Merge(usedMedia)
-	if err != nil {
-		return providerCall{}, path.target, requestChanges, nil, fmt.Errorf("resolved media provenance: %w", err)
+		return providerCall{}, path.target, requestChanges, fetchCache, fmt.Errorf("provider request encoding: %w", err)
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		decodeContext:  bindRequestToTarget(semanticFull, path.target.Model),
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
-		workspaceSlug: workspaceSlug, fullRequest: s.prepared.Full.Clone(),
-		resolvedMedia:      resolvedMedia,
+		workspaceSlug: workspaceSlug, fullRequest: resolved.Request(),
+		historyScheme:      s.input.requestFingerprint.Scheme(),
 		advance:            s.advance,
+		sessionID:          s.sessionID,
+		expectedHead:       s.expectedHead,
 		delayClientHandoff: delayClientHandoffFor(s.mcp),
 		providerRound:      len(s.providerUsage),
 		replaySafety:       replaySafety,
-	}, path.target, requestChanges, nil, nil
+	}, path.target, requestChanges, fetchCache, nil
 }
 
 func delayClientHandoffFor(run *mcp.Run) bool {
 	return run != nil && run.CanExecute()
-}
-
-// rebaseAttemptMedia converts positions in the attempted request into the
-// durable semantic request coordinate space. An attempted native delta is
-// accepted only when its items are exactly the semantic transcript suffix.
-func rebaseAttemptMedia(prepared session.ResolvedRequest, attempt canonical.CanonicalRequest, used session.ResolvedMedia) (session.ResolvedMedia, error) {
-	semanticItems := prepared.Full.Items()
-	attemptItems := attempt.Items()
-	if len(attemptItems) > len(semanticItems) {
-		return session.ResolvedMedia{}, fmt.Errorf("attempt items exceed semantic history")
-	}
-	offset := len(semanticItems) - len(attemptItems)
-	if !reflect.DeepEqual(semanticItems[offset:], attemptItems) {
-		return session.ResolvedMedia{}, fmt.Errorf("attempt items are not the semantic history suffix")
-	}
-	return used.ShiftItems(uint32(offset))
-}
-
-func historicalMediaForAttempt(request canonical.CanonicalRequest, media session.ResolvedMedia) session.ResolvedMedia {
-	if previous, ok := request.PreviousResponse(); ok && previous.Responses != nil {
-		// Native resumption does not resend historical request positions;
-		// its delta positions begin at zero and must not collide with the
-		// full-history binding coordinate space.
-		return session.ResolvedMedia{}
-	}
-	return media.Clone()
 }
 
 // completeProviderCall is a reducer-owned response edge. It validates and
@@ -219,8 +186,8 @@ func handoffResponseStream(ctx context.Context, call providerCall, stream canoni
 	capture := newCheckpointCaptureResponseStream(stream, binding)
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
-		store: runner.CheckpointStore, request: call.fullRequest.Clone(),
-		resolvedMedia: call.resolvedMedia.Clone(), advance: call.advance,
+		store: runner.CheckpointStore, request: call.fullRequest.Clone(), historyScheme: call.historyScheme,
+		advance: call.advance, sessionID: call.sessionID, expectedHead: call.expectedHead,
 	}
 	gated := newCheckpointTerminalGate(capture, call.clientCodec, call.fullRequest, committer)
 	return encodeClientOutput(ctx, call, gated, incremental)

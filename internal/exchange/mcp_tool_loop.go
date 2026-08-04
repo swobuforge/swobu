@@ -1,10 +1,10 @@
 package exchange
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/session"
 )
 
 func beginMCPBatch(s exchangeState, phase callingMCPPhase) (reducerOutcome, error) {
@@ -38,7 +38,7 @@ func beginMCPCall(s exchangeState, phase callingMCPPhase) (reducerOutcome, error
 	}, nil
 }
 
-func reduceCallingMCP(s exchangeState, phase callingMCPPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
+func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
 	if started, ok := event.(mcpBatchStarted); ok {
 		if started.err != nil {
 			s.phase = failedPhase{problem: started.err, target: phase.target}
@@ -60,17 +60,14 @@ func reduceCallingMCP(s exchangeState, phase callingMCPPhase, event exchangeEven
 	if phase.next < len(phase.calls) {
 		return beginMCPCall(s, phase)
 	}
-	items := s.prepared.Full.Items()
-	items = append(items, phase.responseItems...)
-	items = append(items, phase.results...)
-	next := s.prepared.Full.WithItems(items)
-	s.prepared = &session.ResolvedRequest{
-		Full: next, Delta: next, ResolvedMedia: s.prepared.ResolvedMedia.Clone(),
+	next, replaceErr := s.prepared.AppendLocalRound(phase.responseItems, phase.results)
+	if replaceErr != nil {
+		s.phase = failedPhase{problem: canonical.InternalError("MCP tool loop produced invalid complete history: " + replaceErr.Error()), target: phase.target}
+		return reducerOutcome{nextState: s}, nil
 	}
-	call, target, requestChanges, preparation, err := prepareProviderCall(s, phase.selection, runner, nil)
-	if preparation != nil {
-		err = canonical.InternalError("MCP tool results unexpectedly require another preparation effect")
-	}
+	s.prepared = &next
+	call, target, requestChanges, fetchCache, err := prepareProviderCall(ctx, s, phase.selection, runner)
+	s.mediaFetchCache = cloneMediaFetchCache(fetchCache)
 	if err != nil {
 		s.phase = failedPhase{problem: err, target: target}
 		return reducerOutcome{nextState: s}, nil

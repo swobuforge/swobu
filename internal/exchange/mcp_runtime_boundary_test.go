@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -34,7 +35,7 @@ func TestMCPExecutionRecordsPolyfillTruth(t *testing.T) {
 	}
 	call, _ := item.ToolCall()
 	outcome, err := reduceCallingMCP(
-		exchangeState{mcp: &mcp.Run{}},
+		context.Background(), exchangeState{mcp: &mcp.Run{}},
 		callingMCPPhase{calls: []canonical.ToolCallItem{call}},
 		mcpBatchStarted{},
 		runtimeBundle{},

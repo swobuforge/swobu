@@ -44,7 +44,7 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		t.Fatal(err)
 	}
 	store := session.NewMemoryStore()
-	if err := store.Put(context.Background(), "dev", session.Checkpoint{Request: decoded.Request.Request, Response: response}); err != nil {
+	if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{HistoryScheme: "responses/v1", Request: decoded.Request.Request, Response: response}); err != nil {
 		t.Fatal(err)
 	}
 	checkpoint, found, err := store.Get(context.Background(), "dev", responseID)

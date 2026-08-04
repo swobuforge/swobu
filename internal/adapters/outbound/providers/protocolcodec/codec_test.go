@@ -39,14 +39,10 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 		t.Fatalf("chat codec did not preserve full history: %s", raw)
 	}
 
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "second turn")},
-		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous", Responses: &canonical.ResponsesContinuation{
-			ProviderResponseID: "provider_previous", TargetID: "target", TargetVersion: 1,
-		}},
+	responses, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+		Canonical: full, Delivery: delivery.BufferedDelivery(),
+		ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: "provider_previous", OmitStart: 0, OmitEnd: 2},
 	})
-	responses, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{Canonical: delta, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

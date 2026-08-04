@@ -18,6 +18,9 @@ import (
 
 func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	first := decodeMessagesFingerprintRequest(t, `{"model":"m","system":"one","messages":[{"role":"user","content":"hello"}]}`)
+	if first.RequestFingerprint.Scheme() != fingerprintScheme {
+		t.Fatalf("request scheme = %q, want %q", first.RequestFingerprint.Scheme(), fingerprintScheme)
+	}
 	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi")}, canonical.Completed("end_turn"))
 	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
@@ -25,6 +28,9 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 	if encoded.ResponseFingerprint == nil {
 		t.Fatal("buffered response fingerprint is nil")
+	}
+	if encoded.ResponseFingerprint.Scheme() != fingerprintScheme {
+		t.Fatalf("response scheme = %q, want %q", encoded.ResponseFingerprint.Scheme(), fingerprintScheme)
 	}
 	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
 	if err != nil {

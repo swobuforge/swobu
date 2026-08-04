@@ -24,6 +24,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/mcp"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ClientCodec translates client-family wire documents into canonical requests
@@ -234,6 +235,9 @@ func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 // ProviderEncodeInput is the declarative canonical input for provider encoders.
 type ProviderEncodeInput struct {
 	Request canonical.CanonicalRequest
+	// ResponsesPrevious is concrete OpenAI Responses lowering data. Request
+	// remains complete when this field is present.
+	ResponsesPrevious *provider.ResponsesPrevious
 	// ToolNames is transient representation state for this provider attempt.
 	ToolNames ToolNames
 	// MCPAccess is transient request state for native MCP projection.

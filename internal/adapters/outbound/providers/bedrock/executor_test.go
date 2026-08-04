@@ -187,6 +187,28 @@ func TestBedrockMantleMessagesUsesInlineImagePolyfill(t *testing.T) {
 	if !strings.Contains(string(document.RawBytes()), `"type":"base64"`) {
 		t.Fatalf("inline image did not lower as base64: %s", document.RawBytes())
 	}
+	urlImage, err := canonical.NewURLImage("https://example.test/image.png", canonical.Unspecified[canonical.ImageDetail]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolveCalls := 0
+	document, _, err = backend.Codec.Encode(provider.Request{
+		Canonical: requestForImage(urlImage),
+		Delivery:  delivery.BufferedDelivery(),
+		EncodeContext: provider.EncodeContext{Context: context.Background(), ResolveImage: func(_ context.Context, source canonical.URLImage) (provider.InspectedImage, error) {
+			resolveCalls++
+			if source.String() != "https://example.test/image.png" {
+				t.Fatalf("resolved URL = %q", source.String())
+			}
+			return provider.InspectedImage{MediaType: canonical.ImageMediaPNG, Bytes: []byte{1, 2, 3}}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Bedrock Mantle Messages rejected resolved URL image: %v", err)
+	}
+	if resolveCalls != 1 || !strings.Contains(string(document.RawBytes()), `"type":"base64"`) || strings.Contains(string(document.RawBytes()), "https://example.test/image.png") {
+		t.Fatalf("URL image lowering calls=%d document=%s", resolveCalls, document.RawBytes())
+	}
 }
 
 func TestBedrockMessagesInheritsProtocolWebSearch(t *testing.T) {

@@ -12,12 +12,11 @@
 // Availability alone is never replay permission. Untyped issued-call errors
 // conservatively mean provider execution may have occurred.
 //
-// Exchange materializes every URL image into validated immutable bytes before
-// provider execution so retries and full-history execution observe the same
-// content. MediaFetcher owns bounded network I/O only, while InspectImage is the
-// shared pure validator for fetched and inline bytes. Codecs receive prepared
-// legal inline carriers, remain pure, and solely own exact target-grammar
-// projection. Successful projection returns non-exact semantic changes as
+// Exchange passes an exchange-scoped read-through image resolver into provider
+// encoding. URL-native codecs preserve locators without invoking it; byte-only
+// codecs resolve through the existing bounded fetch policy, inspection, and
+// cache. Fetched bytes never enter canonical history or checkpoints. Codecs
+// solely own exact target-grammar projection. Successful projection returns non-exact semantic changes as
 // values; target-local incompatibility remains a typed error for exchange.
 // AttemptToolNames owns one immutable canonical-key to wire-name bijection for
 // an attempt. It preserves safe request-level literals and gives every generated

@@ -9,40 +9,30 @@ import (
 
 const defaultCheckpointTTL = 24 * time.Hour
 
-// Checkpoint is one self-contained immutable successful-response boundary
-// retained for process-local session resumption. Its identity is the Swobu ID
-// in Response; no duplicate checkpoint or session ID is stored. Request is the
-// complete effective request, not a delta. ResolvedMedia is semantic resumption
-// state because later execution must not refetch mutable external URLs.
-//
-// Intentionally absent:
-//   - Status (a checkpoint implies completed)
-//   - Attachment bag
-//   - Mutable session head
-//   - Parent or request-delta graph
+// Checkpoint is one self-contained immutable successful-response boundary.
+// Request is always the complete effective canonical request. HistoryScheme
+// identifies the immutable client-codec lineage. History is an optional
+// visible-history digest used only for implicit lookup while this checkpoint
+// is the current session head.
 type Checkpoint struct {
-	// HistoryFingerprint is the optional completed visible-history value used
-	// for exact implicit lookup. Its absence never prevents explicit resumption.
-	HistoryFingerprint *historyfingerprint.History
-	Request            canonical.CanonicalRequest
-	Response           canonical.CanonicalResponse
-	ResolvedMedia      ResolvedMedia
-	CreatedAt          time.Time
-	// ExpiresAt bounds how long the checkpoint remains resumable.
-	ExpiresAt *time.Time
+	ID            canonical.SwobuResponseID
+	SessionID     ClientSessionID
+	HistoryScheme historyfingerprint.Scheme
+	History       *historyfingerprint.History
+	Request       canonical.CanonicalRequest
+	Response      canonical.CanonicalResponse
+	CreatedAt     time.Time
+	ExpiresAt     *time.Time
 }
 
-// Clone returns a deep copy suitable for crossing the storage boundary.
 func (r Checkpoint) Clone() Checkpoint {
 	cloned := Checkpoint{
-		Request:       r.Request.Clone(),
-		Response:      r.Response.Clone(),
-		ResolvedMedia: r.ResolvedMedia.Clone(),
-		CreatedAt:     r.CreatedAt,
+		ID: r.ID, SessionID: r.SessionID, HistoryScheme: r.HistoryScheme, Request: r.Request.Clone(),
+		Response: r.Response.Clone(), CreatedAt: r.CreatedAt,
 	}
-	if r.HistoryFingerprint != nil {
-		history := *r.HistoryFingerprint
-		cloned.HistoryFingerprint = &history
+	if r.History != nil {
+		history := *r.History
+		cloned.History = &history
 	}
 	if r.ExpiresAt != nil {
 		expiresAt := *r.ExpiresAt

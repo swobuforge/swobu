@@ -23,11 +23,11 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 			name = "streamed turn one"
 		}
 		t.Run(name, func(t *testing.T) {
-			priorRequest, media := replayFixturePriorRequest(t)
+			priorRequest := replayFixturePriorRequest(t)
 			response := decodeReplayFixtureResponse(t, priorRequest, streamed)
 			store := session.NewMemoryStore()
-			if err := store.Put(context.Background(), "dev", session.Checkpoint{
-				Request: priorRequest, Response: response, ResolvedMedia: media,
+			if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{
+				HistoryScheme: fingerprintScheme, Request: priorRequest, Response: response,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -47,22 +47,14 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			asset, ok := resolved.ResolvedMedia.Resolve(
-				canonical.RequestPartRef{Item: 1, Part: 1},
-				"https://example.test/image.png?version=one",
-			)
-			if !ok || string(asset.Bytes()) != "durable-image" {
-				t.Fatalf("resolved media was not retained: %#v", asset)
-			}
-
 			differentTarget := provider.NewTargetSnapshot(
 				"responses-b", "openai", "https://example.test", "cred",
 				protocolkind.Responses, "m", "responses",
 			)
 			differentTarget.TargetVersion = 2
-			stateless := resolved.ForTarget(differentTarget)
-			if _, hasPrevious := stateless.PreviousResponse(); hasPrevious {
-				t.Fatal("different target retained previous_response_id")
+			stateless := resolved.Request()
+			if _, _, _, ok := resolved.ResponsesPrevious(differentTarget.TargetID, differentTarget.TargetVersion); ok {
+				t.Fatal("different target exposed previous_response_id data")
 			}
 			document, err := EncodeCarrierWithChanges(
 				EncodeInput{Request: stateless, ToolNames: testAttemptToolNames(stateless)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{},
@@ -75,7 +67,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 	}
 }
 
-func replayFixturePriorRequest(t *testing.T) (canonical.CanonicalRequest, session.ResolvedMedia) {
+func replayFixturePriorRequest(t *testing.T) canonical.CanonicalRequest {
 	t.Helper()
 	image, err := canonical.NewURLImage(
 		"https://example.test/image.png?version=one",
@@ -105,15 +97,7 @@ func replayFixturePriorRequest(t *testing.T) (canonical.CanonicalRequest, sessio
 			),
 		), message},
 	})
-	media, err := (session.ResolvedMedia{}).Bind(
-		canonical.RequestPartRef{Item: 1, Part: 1},
-		"https://example.test/image.png?version=one",
-		canonical.ImageMediaPNG, []byte("durable-image"),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return request, media
+	return request
 }
 
 func decodeReplayFixtureResponse(t *testing.T, request canonical.CanonicalRequest, streamed bool) canonical.CanonicalResponse {

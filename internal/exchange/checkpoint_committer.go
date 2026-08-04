@@ -12,11 +12,14 @@ import (
 	"github.com/swobuforge/swobu/internal/session"
 )
 
-// checkpointCommitter joins canonical capture with the optional codec history
-// leaf. A successful client-visible response ID is gated on its canonical
-// checkpoint because client projections can omit continuation-critical opaque
-// reasoning and resolved media. Client wire storage hints never participate;
-// only history-fingerprint composition is best effort.
+// checkpointCommitter joins canonical capture with a mandatory codec scheme
+// and optional history leaf, then atomically starts or advances one session
+// lineage. A successful
+// client-visible response ID is gated on its canonical checkpoint because
+// client projections can omit continuation-critical opaque reasoning. Client
+// wire storage hints never participate. Fingerprint composition is best effort;
+// failure leaves the scheme-qualified lineage explicitly resumable but
+// unindexed for implicit history lookup.
 type checkpointCommitter struct {
 	once sync.Once
 	err  error
@@ -25,8 +28,10 @@ type checkpointCommitter struct {
 	workspaceSlug string
 	store         session.Store
 	request       canonical.CanonicalRequest
-	resolvedMedia session.ResolvedMedia
+	historyScheme historyfingerprint.Scheme
 	advance       *historyAdvance
+	sessionID     session.ClientSessionID
+	expectedHead  canonical.SwobuResponseID
 }
 
 // CheckpointCommitError identifies failure to make a client-visible response
@@ -55,17 +60,24 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 	c.once.Do(func() {
 		record := session.Checkpoint{
 			Request: c.request.Clone(), Response: response.Clone(),
-			ResolvedMedia: c.resolvedMedia.Clone(), CreatedAt: time.Now().UTC(),
+			HistoryScheme: c.historyScheme, CreatedAt: time.Now().UTC(),
 		}
 		if c.advance != nil && fingerprint != nil {
 			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *fingerprint)
 			if err != nil {
 				c.logHistoryComposeFailure(err)
 			} else {
-				record.HistoryFingerprint = &history
+				record.History = &history
 			}
 		}
-		if err := c.store.Put(ctx, c.workspaceSlug, record); err != nil {
+		var err error
+		if c.sessionID == "" {
+			_, err = c.store.StartSession(ctx, c.workspaceSlug, record)
+		} else {
+			record.SessionID = c.sessionID
+			err = c.store.AdvanceSession(ctx, c.workspaceSlug, c.sessionID, c.expectedHead, record)
+		}
+		if err != nil {
 			c.logFailure("store", err)
 			c.err = checkpointCommitError(fmt.Errorf("checkpoint store failed: %w", err))
 		}

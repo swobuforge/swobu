@@ -15,17 +15,13 @@ import (
 
 const maxMemoryStoreRecords = 1024
 
-// NewMemoryStore returns a thread-safe in-memory Store for production
-// bootstrap where persistent session storage is not yet wired. Checkpoints are bounded by
-// ExpiresAt and reclaimed opportunistically on every write as well as reads.
-func NewMemoryStore() Store {
-	return newMemoryStore()
-}
+func NewMemoryStore() Store { return newMemoryStore() }
 
 type memoryStore struct {
 	mu        sync.RWMutex
 	records   map[workspaceRecordID]Checkpoint
-	byHistory map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}
+	sessions  map[workspaceSessionID]ClientSession
+	byHistory map[workspaceHistoryKey]map[workspaceSessionID]struct{}
 	expires   expirationHeap
 	now       func() time.Time
 }
@@ -35,6 +31,11 @@ type workspaceRecordID struct {
 	id            canonical.SwobuResponseID
 }
 
+type workspaceSessionID struct {
+	workspaceSlug string
+	id            ClientSessionID
+}
+
 type workspaceHistoryKey struct {
 	workspaceSlug string
 	history       historyfingerprint.History
@@ -42,8 +43,8 @@ type workspaceHistoryKey struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		records:   make(map[workspaceRecordID]Checkpoint),
-		byHistory: make(map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}),
+		records: make(map[workspaceRecordID]Checkpoint), sessions: make(map[workspaceSessionID]ClientSession),
+		byHistory: make(map[workspaceHistoryKey]map[workspaceSessionID]struct{}),
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -52,7 +53,6 @@ type expirationEntry struct {
 	key workspaceRecordID
 	at  time.Time
 }
-
 type expirationHeap []expirationEntry
 
 func (h expirationHeap) Len() int           { return len(h) }
@@ -67,126 +67,215 @@ func (h *expirationHeap) Pop() any {
 	return value
 }
 
+func normalizeWorkspace(workspace string) (string, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", errors.New("session workspace slug is empty")
+	}
+	return workspace, nil
+}
+
+func (s *memoryStore) Get(_ context.Context, workspace string, id canonical.SwobuResponseID) (Checkpoint, bool, error) {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return Checkpoint{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: id}]
+	if !ok {
+		return Checkpoint{}, false, nil
+	}
+	return record.Clone(), true, nil
+}
+
+func (s *memoryStore) IsCurrentHead(_ context.Context, workspace string, sessionID ClientSessionID, checkpointID canonical.SwobuResponseID) (bool, error) {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	session, ok := s.sessions[workspaceSessionID{workspaceSlug: workspace, id: sessionID}]
+	return ok && session.Head == checkpointID, nil
+}
+
+func (s *memoryStore) ResolveHeadByHistory(_ context.Context, workspace string, history historyfingerprint.History) (Checkpoint, HistoryResolution, error) {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return Checkpoint{}, HistoryNotFound, err
+	}
+	if history.Scheme() == "" {
+		return Checkpoint{}, HistoryNotFound, errors.New("session history fingerprint is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	indexKey := workspaceHistoryKey{workspaceSlug: workspace, history: history}
+	members := s.byHistory[indexKey]
+	available := make([]Checkpoint, 0, len(members))
+	for sessionKey := range members {
+		session, ok := s.sessions[sessionKey]
+		if !ok {
+			delete(members, sessionKey)
+			continue
+		}
+		record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: session.Head}]
+		if !ok {
+			delete(members, sessionKey)
+			continue
+		}
+		available = append(available, record.Clone())
+	}
+	if len(members) == 0 {
+		delete(s.byHistory, indexKey)
+	}
+	switch len(available) {
+	case 0:
+		return Checkpoint{}, HistoryNotFound, nil
+	case 1:
+		return available[0], HistoryUniqueHead, nil
+	default:
+		return Checkpoint{}, HistoryAmbiguous, nil
+	}
+}
+
+func (s *memoryStore) StartSession(_ context.Context, workspace string, record Checkpoint) (ClientSession, error) {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return ClientSession{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	if err := s.prepareRecord(&record); err != nil {
+		return ClientSession{}, err
+	}
+	if record.SessionID == "" {
+		record.SessionID = ClientSessionID(record.ID)
+	}
+	sessionKey := workspaceSessionID{workspaceSlug: workspace, id: record.SessionID}
+	if _, exists := s.sessions[sessionKey]; exists {
+		return ClientSession{}, ErrSessionExists
+	}
+	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ID}]; exists {
+		return ClientSession{}, ErrCheckpointExists
+	}
+	session := ClientSession{ID: record.SessionID, Scheme: record.HistoryScheme, Head: record.ID}
+	s.storeRecord(workspace, record)
+	s.sessions[sessionKey] = session
+	s.indexHead(workspace, session, record)
+	return session, nil
+}
+
+func (s *memoryStore) AdvanceSession(_ context.Context, workspace string, sessionID ClientSessionID, expectedHead canonical.SwobuResponseID, record Checkpoint) error {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	if err := s.prepareRecord(&record); err != nil {
+		return err
+	}
+	sessionKey := workspaceSessionID{workspaceSlug: workspace, id: sessionID}
+	current, ok := s.sessions[sessionKey]
+	if !ok || current.Head != expectedHead {
+		return ErrStaleSessionHead
+	}
+	if record.SessionID != "" && record.SessionID != sessionID {
+		return errors.New("checkpoint session ID does not match advancing session")
+	}
+	if record.HistoryScheme != current.Scheme {
+		return ErrSessionSchemeMismatch
+	}
+	record.SessionID = sessionID
+	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ID}]; exists {
+		return ErrCheckpointExists
+	}
+	old := s.records[workspaceRecordID{workspaceSlug: workspace, id: current.Head}]
+	s.unindexHead(workspace, current, old)
+	s.storeRecord(workspace, record)
+	current.Head = record.ID
+	s.sessions[sessionKey] = current
+	s.indexHead(workspace, current, record)
+	return nil
+}
+
+func (s *memoryStore) prepareRecord(record *Checkpoint) error {
+	if record.HistoryScheme == "" {
+		return errors.New("checkpoint history scheme is empty")
+	}
+	if record.History != nil && record.History.Scheme() != record.HistoryScheme {
+		return errors.New("checkpoint history fingerprint scheme does not match checkpoint scheme")
+	}
+	response := record.Response.Response()
+	if err := response.ValidateCommittedResponse(); err != nil {
+		return fmt.Errorf("invalid session checkpoint response reference: %w", err)
+	}
+	if record.ID == "" {
+		record.ID = response.SwobuID
+	}
+	if record.ID != response.SwobuID {
+		return errors.New("checkpoint ID does not match response")
+	}
+	if record.ExpiresAt == nil {
+		expires := s.now().Add(defaultCheckpointTTL)
+		record.ExpiresAt = &expires
+	}
+	return nil
+}
+
+func (s *memoryStore) storeRecord(workspace string, record Checkpoint) {
+	if len(s.records) >= maxMemoryStoreRecords {
+		s.evictOldest()
+	}
+	key := workspaceRecordID{workspaceSlug: workspace, id: record.ID}
+	cloned := record.Clone()
+	s.records[key] = cloned
+	heap.Push(&s.expires, expirationEntry{key: key, at: *cloned.ExpiresAt})
+}
+
+func (s *memoryStore) indexHead(workspace string, session ClientSession, record Checkpoint) {
+	if record.History == nil {
+		return
+	}
+	key := workspaceHistoryKey{workspaceSlug: workspace, history: *record.History}
+	if s.byHistory[key] == nil {
+		s.byHistory[key] = make(map[workspaceSessionID]struct{})
+	}
+	s.byHistory[key][workspaceSessionID{workspaceSlug: workspace, id: session.ID}] = struct{}{}
+}
+
+func (s *memoryStore) unindexHead(workspace string, session ClientSession, record Checkpoint) {
+	if record.History == nil {
+		return
+	}
+	key := workspaceHistoryKey{workspaceSlug: workspace, history: *record.History}
+	delete(s.byHistory[key], workspaceSessionID{workspaceSlug: workspace, id: session.ID})
+	if len(s.byHistory[key]) == 0 {
+		delete(s.byHistory, key)
+	}
+}
+
 func (s *memoryStore) reclaimExpired(now time.Time) {
 	for s.expires.Len() > 0 && !s.expires[0].at.After(now) {
 		entry := heap.Pop(&s.expires).(expirationEntry)
-		record, found := s.records[entry.key]
-		if found && record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
+		record, ok := s.records[entry.key]
+		if ok && record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
 			s.deleteRecord(entry.key, record)
 		}
 	}
 }
 
-func (s *memoryStore) Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Checkpoint, bool, error) {
-	_ = ctx
-	workspaceSlug = strings.TrimSpace(workspaceSlug) // swobu:io-string source=boundary
-	if workspaceSlug == "" {
-		return Checkpoint{}, false, errors.New("session workspace slug is empty")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
-	r, ok := s.records[key]
-	if !ok {
-		return Checkpoint{}, false, nil
-	}
-	if r.ExpiresAt != nil && !r.ExpiresAt.After(s.now()) {
-		s.deleteRecord(key, r)
-		return Checkpoint{}, false, nil
-	}
-	return r.Clone(), true, nil
-}
-
-func (s *memoryStore) FindByHistory(_ context.Context, workspaceSlug string, history historyfingerprint.History) (HistoryMatch, error) {
-	workspaceSlug = strings.TrimSpace(workspaceSlug) // swobu:io-string source=boundary
-	if workspaceSlug == "" {
-		return HistoryMatch{}, errors.New("session workspace slug is empty")
-	}
-	if history.Scheme() == "" {
-		return HistoryMatch{}, errors.New("session history fingerprint is invalid")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	s.reclaimExpired(now)
-	indexKey := workspaceHistoryKey{workspaceSlug: workspaceSlug, history: history}
-	ids, found := s.byHistory[indexKey]
-	if !found {
-		return MissingHistoryMatch(), nil
-	}
-	available := make([]Checkpoint, 0, len(ids))
-	for id := range ids {
-		recordKey := workspaceRecordID{workspaceSlug: workspaceSlug, id: id}
-		record, exists := s.records[recordKey]
-		if !exists {
-			delete(ids, id)
-			continue
-		}
-		if record.ExpiresAt != nil && !record.ExpiresAt.After(now) {
-			s.deleteRecord(recordKey, record)
-			continue
-		}
-		available = append(available, record)
-	}
-	if len(ids) == 0 {
-		delete(s.byHistory, indexKey)
-	}
-	switch len(available) {
-	case 0:
-		return MissingHistoryMatch(), nil
-	case 1:
-		return UniqueHistoryMatch(available[0]), nil
-	default:
-		return AmbiguousHistoryMatch(), nil
-	}
-}
-
-func (s *memoryStore) Put(ctx context.Context, workspaceSlug string, record Checkpoint) error {
-	_ = ctx
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	s.reclaimExpired(now)
-	workspaceSlug = strings.TrimSpace(workspaceSlug) // swobu:io-string source=boundary
-	if workspaceSlug == "" {
-		return errors.New("session workspace slug is empty")
-	}
-	responseRef := record.Response.Response()
-	if err := responseRef.ValidateCommittedResponse(); err != nil {
-		return fmt.Errorf("invalid session checkpoint response reference: %w", err)
-	}
-	if err := record.ResolvedMedia.ValidateForRequest(record.Request); err != nil {
-		return fmt.Errorf("invalid session checkpoint media: %w", err)
-	}
-	key := workspaceRecordID{workspaceSlug: workspaceSlug, id: responseRef.SwobuID}
-	if _, exists := s.records[key]; exists {
-		return ErrCheckpointExists
-	}
-	cloned := record.Clone()
-	if cloned.ExpiresAt == nil {
-		expiresAt := now.Add(defaultCheckpointTTL)
-		cloned.ExpiresAt = &expiresAt
-	}
-	if len(s.records) >= maxMemoryStoreRecords {
-		s.evictOldest()
-	}
-	s.records[key] = cloned
-	if cloned.HistoryFingerprint != nil {
-		indexKey := workspaceHistoryKey{workspaceSlug: workspaceSlug, history: *cloned.HistoryFingerprint}
-		if s.byHistory[indexKey] == nil {
-			s.byHistory[indexKey] = make(map[canonical.SwobuResponseID]struct{})
-		}
-		s.byHistory[indexKey][responseRef.SwobuID] = struct{}{}
-	}
-	heap.Push(&s.expires, expirationEntry{key: key, at: *cloned.ExpiresAt})
-	return nil
-}
-
 func (s *memoryStore) evictOldest() {
 	for s.expires.Len() > 0 {
 		entry := heap.Pop(&s.expires).(expirationEntry)
-		record, found := s.records[entry.key]
-		if !found || record.ExpiresAt == nil || !record.ExpiresAt.Equal(entry.at) {
+		record, ok := s.records[entry.key]
+		if !ok || record.ExpiresAt == nil || !record.ExpiresAt.Equal(entry.at) {
 			continue
 		}
 		s.deleteRecord(entry.key, record)
@@ -194,18 +283,11 @@ func (s *memoryStore) evictOldest() {
 	}
 }
 
-// deleteRecord keeps the primary record and secondary membership set in one
-// lock-owned mutation. Other indistinguishable records survive independently.
 func (s *memoryStore) deleteRecord(key workspaceRecordID, record Checkpoint) {
 	delete(s.records, key)
-	if record.HistoryFingerprint == nil {
-		return
-	}
-	indexKey := workspaceHistoryKey{workspaceSlug: key.workspaceSlug, history: *record.HistoryFingerprint}
-	if indexedIDs, found := s.byHistory[indexKey]; found {
-		delete(indexedIDs, key.id)
-		if len(indexedIDs) == 0 {
-			delete(s.byHistory, indexKey)
-		}
+	sessionKey := workspaceSessionID{workspaceSlug: key.workspaceSlug, id: record.SessionID}
+	if session, ok := s.sessions[sessionKey]; ok && session.Head == record.ID {
+		s.unindexHead(key.workspaceSlug, session, record)
+		delete(s.sessions, sessionKey)
 	}
 }

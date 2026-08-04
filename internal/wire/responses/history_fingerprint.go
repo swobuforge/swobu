@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-const fingerprintScheme historyfingerprint.Scheme = "responses"
+const fingerprintScheme historyfingerprint.Scheme = "responses/v1"
 
 // responsesHistoryItemDTO is the private superset of input/output item fields
 // needed to reproduce the ordered output sequence a client appends to input.
@@ -161,7 +161,11 @@ func fingerprintResponsesRequestValue(items []responsesHistoryItemDTO) (historyf
 	if err != nil {
 		return historyfingerprint.Request{}, err
 	}
-	return historyfingerprint.FingerprintRequest(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	return historyfingerprint.FingerprintRequest(fingerprintScheme, material)
 }
 
 func fingerprintResponsesResponseValue(items []responsesHistoryItemDTO) (historyfingerprint.Response, error) {
@@ -173,7 +177,11 @@ func fingerprintResponsesResponseValue(items []responsesHistoryItemDTO) (history
 	if err != nil {
 		return historyfingerprint.Response{}, err
 	}
-	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	return historyfingerprint.FingerprintResponse(fingerprintScheme, material)
 }
 
 func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]responsesHistoryItemDTO, error) {

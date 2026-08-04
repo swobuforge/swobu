@@ -6,12 +6,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestPreviousResponseUsesTypedProviderResponseRef(t *testing.T) {
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}, PreviousResponse: testResponsesPrevious("swobu_1", "provider_1")})
-	doc, err := EncodeCarrier(request, delivery.BufferedDelivery())
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}})
+	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: "provider_1", OmitStart: 0, OmitEnd: 0}, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,9 +29,9 @@ func TestPreviousResponseDoesNotSynthesizeDeletedContextBands(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:      canonical.Specify("m"),
 		ToolPolicy: canonical.Specify(canonical.ToolPolicy{}), ToolCallBatch: canonical.Specify(canonical.ToolCallBatchPolicy{}), OutputFormat: canonical.Specify(canonical.OutputFormat{}),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}, PreviousResponse: testResponsesPrevious("swobu_1", "provider_1"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")},
 	})
-	doc, err := EncodeCarrier(request, delivery.BufferedDelivery())
+	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: "provider_1", OmitStart: 0, OmitEnd: 0}, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

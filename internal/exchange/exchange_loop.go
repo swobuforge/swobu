@@ -88,35 +88,23 @@ func runExchange(
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
 	case loadCheckpointCommand:
-		var match session.HistoryMatch
+		var record session.Checkpoint
+		var resolution session.HistoryResolution
+		var current bool
 		var err error
 		if c.explicit {
-			record, found, getErr := c.store.Get(ctx, c.workspaceSlug, c.reference)
-			err = getErr
+			var found bool
+			record, found, err = c.store.Get(ctx, c.workspaceSlug, c.reference)
 			if found {
-				match = session.UniqueHistoryMatch(record)
+				resolution = session.HistoryUniqueHead
+				current, err = c.store.IsCurrentHead(ctx, c.workspaceSlug, record.SessionID, record.ID)
 			} else {
-				match = session.MissingHistoryMatch()
+				resolution = session.HistoryNotFound
 			}
 		} else {
-			match, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
+			record, resolution, err = c.store.ResolveHeadByHistory(ctx, c.workspaceSlug, c.history)
 		}
-		return checkpointLoaded{match: match, err: err}
-	case materializeAttemptImagesCommand:
-		preparationCtx := ctx
-		cancel := func() {}
-		if timeout := c.policy.TotalPreparationTimeout(); timeout > 0 {
-			preparationCtx, cancel = context.WithTimeout(ctx, timeout)
-		}
-		defer cancel()
-		request, fetchCache, usedMedia, err := materializeRequestImages(preparationCtx, c.request, c.policy, c.limits, c.fetcher, c.fetchCache, c.historical)
-		if err == nil {
-			usedMedia, err = rebaseAttemptMedia(session.ResolvedRequest{Full: c.semantic}, c.request, usedMedia)
-			if err != nil {
-				err = canonical.InternalError("materialized media coordinates do not match the semantic request: " + err.Error())
-			}
-		}
-		return attemptImagesMaterialized{selection: c.selection, request: request, fetchCache: fetchCache, usedMedia: usedMedia, err: err}
+		return checkpointLoaded{record: record, resolution: resolution, current: current, err: err}
 	case prepareMCPCommand:
 		full, run, changes, err := mcp.Open(ctx, c.full, c.access)
 		return mcpPrepared{full: full, run: run, changes: changes, err: err}

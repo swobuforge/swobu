@@ -64,9 +64,10 @@ type ResponseRef struct {
 	Responses *ResponsesContinuation
 }
 
-// ResponsesContinuation is consumed by session target projection to choose
-// native Delta continuation only for the exact target generation that created
-// the provider response; every other target receives materialized Full history.
+// ResponsesContinuation records the provider response and exact target
+// generation that produced it. Session records the canonical omit range;
+// exchange combines both facts into provider-local continuation metadata while
+// the provider request's canonical history remains complete.
 type ResponsesContinuation struct {
 	ProviderResponseID ResponsesResponseID
 	TargetID           string

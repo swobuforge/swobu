@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -27,7 +26,7 @@ func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
 		phase: preparingMCPPhase{},
 	}
 	outcome, err := reducePreparingMCP(
-		state,
+		context.Background(), state,
 		mcpPrepared{err: errors.New("stop after MCP open")},
 		runtimeBundle{},
 	)
@@ -101,19 +100,15 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	}}
 	state.mcp = &mcp.Run{}
 
-	call, _, _, preparation, err := prepareProviderCall(
-		state,
+	call, _, _, _, err := prepareProviderCall(
+		context.Background(), state,
 		providerCallSelection{
 			candidateIndex: 0, requestChoice: providerRequestFullHistory,
 		},
 		withRuntime(bufferedProviderTransport(nil)),
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if preparation != nil {
-		t.Fatalf("provider preparation unexpectedly deferred: %T", preparation)
 	}
 	environment, err := canonical.EffectiveTools(call.decodeContext)
 	if err != nil {
@@ -124,7 +119,7 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	}
 }
 
-func TestProviderPreparationRebuildsSameToolNamesForFullHistoryNativeDeltaAndImageResume(t *testing.T) {
+func TestProviderPreparationRebuildsSameToolNamesForFullHistoryPreferredAttemptAndImageResume(t *testing.T) {
 	currentKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "search")
 	historicalKey, _ := canonical.NewToolKey("history/legacy", canonical.ToolKindCustom, "apply")
 	current := canonicaltest.MustFunctionTool(
@@ -135,30 +130,19 @@ func TestProviderPreparationRebuildsSameToolNamesForFullHistoryNativeDeltaAndIma
 	historicalCall, _ := canonical.NewToolCallItem(callID, historicalKey, canonical.NewTextToolInput("old"))
 	imageRequest, imageBytes := testURLImageRequest(t, "https://example.test/current.png")
 	imageItem := imageRequest.Items()[0]
-	full := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{declarations, historicalCall, imageItem},
-	})
-
 	target := requestpathTarget(t, "stable-tool-names")
-	path, err := resolveProviderPath(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
+	currentRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{imageItem},
-		PreviousResponse: &canonical.ResponseRef{
-			SwobuID: "resp_previous",
-			Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: canonical.NewResponsesResponseID("provider_previous"),
-				TargetID:           path.target.TargetID, TargetVersion: path.target.TargetVersion,
-			},
-		},
+		Items: []canonical.CanonicalItem{declarations, imageItem},
 	})
-	prepared := session.ResolvedRequest{Full: full, Delta: delta}
+	prepared := mustResumeSession(t,
+		canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations}}),
+		[]canonical.CanonicalItem{historicalCall},
+		currentRequest,
+		target,
+	)
 	state := reducerTestState(t)
-	state.input.request = delta
+	state.input.request = currentRequest
 	state.prepared = &prepared
 	state.route = routePlan{targets: []routing.Target{target}}
 	runner := withRuntime(bufferedProviderTransport(nil))
@@ -169,25 +153,11 @@ func TestProviderPreparationRebuildsSameToolNamesForFullHistoryNativeDeltaAndIma
 	aliases := make(map[providerRequestChoice]map[canonical.ToolKey]string)
 	for _, choice := range []providerRequestChoice{providerRequestFullHistory, providerRequestPreferred} {
 		selection := providerCallSelection{candidateIndex: 0, requestChoice: choice}
-		_, _, _, deferred, err := prepareProviderCall(state, selection, runner, nil)
+		call, _, _, cache, err := prepareProviderCall(context.Background(), state, selection, runner)
 		if err != nil {
 			t.Fatal(err)
 		}
-		materialize, ok := deferred.(materializeAttemptImagesCommand)
-		if !ok {
-			t.Fatalf("choice %d preparation = %T, want image materialization", choice, deferred)
-		}
-		event, ok := executeCommand(context.Background(), materialize).(attemptImagesMaterialized)
-		if !ok || event.err != nil {
-			t.Fatalf("choice %d materialization = %#v", choice, event)
-		}
-		call, _, _, next, err := prepareProviderCall(state, selection, runner, &event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if next != nil {
-			t.Fatalf("choice %d preparation deferred twice: %T", choice, next)
-		}
+		state.mediaFetchCache = cloneMediaFetchCache(cache)
 		aliases[choice] = make(map[canonical.ToolKey]string)
 		for _, key := range []canonical.ToolKey{currentKey, historicalKey} {
 			name, err := call.request.ToolNames.WireName(key)
@@ -199,7 +169,7 @@ func TestProviderPreparationRebuildsSameToolNamesForFullHistoryNativeDeltaAndIma
 	}
 	for _, key := range []canonical.ToolKey{currentKey, historicalKey} {
 		if aliases[providerRequestFullHistory][key] != aliases[providerRequestPreferred][key] {
-			t.Fatalf("tool %q changed between full history and native delta: %#v", key, aliases)
+			t.Fatalf("tool %q changed between full history and preferred attempt: %#v", key, aliases)
 		}
 	}
 }

@@ -26,7 +26,7 @@ type messagesHistoryPartDTO struct {
 	Source    json.RawMessage `json:"source,omitempty"`
 }
 
-const fingerprintScheme historyfingerprint.Scheme = "messages"
+const fingerprintScheme historyfingerprint.Scheme = "messages/v1"
 
 type messagesHistoryResult struct {
 	previous *historyfingerprint.History
@@ -78,7 +78,11 @@ func fingerprintMessagesRequest(messages []messagesMessageDTO) (historyfingerpri
 	if err != nil {
 		return historyfingerprint.Request{}, err
 	}
-	return historyfingerprint.FingerprintRequest(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	return historyfingerprint.FingerprintRequest(fingerprintScheme, material)
 }
 
 func fingerprintMessagesResponseValue(message messagesMessageDTO) (historyfingerprint.Response, error) {
@@ -90,7 +94,11 @@ func fingerprintMessagesResponseValue(message messagesMessageDTO) (historyfinger
 	if err != nil {
 		return historyfingerprint.Response{}, err
 	}
-	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	return historyfingerprint.FingerprintResponse(fingerprintScheme, material)
 }
 
 func normalizeMessagesHistory(messages []messagesMessageDTO) ([]messagesMessageDTO, error) {

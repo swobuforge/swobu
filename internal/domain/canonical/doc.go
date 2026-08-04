@@ -88,8 +88,9 @@
 // Canonical therefore stores the minimum sufficient state for observable
 // projection, inference-equivalent continuation, and correct execution. Typed
 // protocol-native values remain only beneath the semantic owner whose named
-// consumer needs them, such as encrypted reasoning replay and a target-bound
-// continuation handle. Independent protocol transcripts, provider wire names,
+// consumer needs them, such as encrypted reasoning replay and an OpenAI
+// Responses provider response ID bound to the exact producing target. Independent
+// protocol transcripts, provider wire names,
 // aliases, transport DTOs, and runtime mechanics remain outside this package.
 // Projection proceeds exact, bounded approximation, polyfill, then fail. Never
 // canonicalize a fact circularly merely because canonical plumbing can carry it.
