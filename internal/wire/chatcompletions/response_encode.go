@@ -33,11 +33,11 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	raw, err := json.Marshal(chatCompletionsResponseDTO{
+	raw, err := json.Marshal(chatCompletionsResponseDTO[chatCompletionsBufferedChoiceDTO]{
 		ID:     sse.FallbackID(output.Response().SwobuID.String(), "chatcmpl_swobu"),
 		Object: "chat.completion",
 		Model:  output.Model(),
-		Choices: []chatCompletionsChoiceDTO{{
+		Choices: []chatCompletionsBufferedChoiceDTO{{
 			Index:        0,
 			Message:      message,
 			FinishReason: chatClientFinishReason(output.Completion().Reason(), len(message.ToolCalls) > 0),

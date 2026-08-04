@@ -63,12 +63,15 @@ type chatCompletionsToolDefinitionCustomDTO struct {
 	Format      json.RawMessage `json:"format,omitempty"`
 }
 
-type chatCompletionsResponseDTO struct {
-	ID      string                     `json:"id"`
-	Object  string                     `json:"object"`
-	Model   string                     `json:"model"`
-	Choices []chatCompletionsChoiceDTO `json:"choices"`
-	Usage   *chatCompletionsUsageDTO   `json:"usage,omitempty"`
+// chatCompletionsResponseDTO shares only the response envelope. Buffered and
+// streaming egress use distinct choice types so mutually exclusive wire fields
+// cannot coexist. Provider ingress remains intentionally permissive elsewhere.
+type chatCompletionsResponseDTO[C any] struct {
+	ID      string                   `json:"id"`
+	Object  string                   `json:"object"`
+	Model   string                   `json:"model"`
+	Choices []C                      `json:"choices"`
+	Usage   *chatCompletionsUsageDTO `json:"usage,omitempty"`
 }
 
 type chatCompletionsUsageDTO struct {
@@ -90,11 +93,16 @@ type chatCompletionsCompletionTokenDetailsDTO struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
-type chatCompletionsChoiceDTO struct {
+type chatCompletionsBufferedChoiceDTO struct {
 	Index        int                               `json:"index"`
-	Message      chatCompletionsResponseMessageDTO `json:"message,omitempty"`
-	Delta        *chatCompletionsDeltaDTO          `json:"delta,omitempty"`
-	FinishReason string                            `json:"finish_reason,omitempty"`
+	Message      chatCompletionsResponseMessageDTO `json:"message"`
+	FinishReason string                            `json:"finish_reason"`
+}
+
+type chatCompletionsStreamChoiceDTO struct {
+	Index        int                     `json:"index"`
+	Delta        chatCompletionsDeltaDTO `json:"delta"`
+	FinishReason *string                 `json:"finish_reason"`
 }
 
 type chatCompletionsResponseMessageDTO struct {
