@@ -1,57 +1,36 @@
-// Package exchange is the request-path bounded context: ingress, orchestration,
-// and execution contract.
+// Package exchange is the request-path orchestration bounded context.
 //
-// This package owns:
-//   - Client request ingress (wire decode, endpoint resolution)
-//   - Routing orchestration (one reducer-owned state lifecycle per request)
-//   - Ordered provider-call attempts and all selection of further provider work
-//   - One exchange-scoped URL fetch cache reused by candidate attempts without
-//     becoming checkpoint truth
-//   - Winning-attempt media bindings, merged only with inherited durable
-//     bindings and retained by exact request-part occurrence
-//   - Explicit workspace-slug partitioning for the daemon-global checkpoint store
-//   - Explicit-ID versus exact client-history predecessor selection, atomic
-//     rebased-request handling, history composition, canonical response capture,
-//     and pre-terminal-publication checkpoint commit
-//   - Lazy, attempt-scoped Responses ancestry loading only when a selected
-//     Responses attempt cannot use exact native delta continuation
-//   - Delivery conversion contract and exact-backend orchestration
-//   - The client codec bridge surface; provider codecs live behind provider.Backend
-//   - Opening one fully initialized request-scoped MCP runtime for locally
-//     executable URL declarations before candidate selection while preserving
-//     native declarations for target projection
-//   - Delayed handoff, provider re-entry, usage accumulation, and fallback
-//     closure as consequences of runtime-owned MCP calls
-//   - Truthful issued-call execution possibility and final-attempt replay safety
-//   - One bounded same-target transient retry derived from immutable attempt
-//     history before ordered candidate fallback
-//   - Monotonic closure of provider recovery before the first MCP side effect
-//   - Ingress and winning-attempt compatibility changes, finalized with client
-//     projection in the existing response completion
+// It owns:
+//   - client ingress orchestration after wire decode;
+//   - explicit checkpoint lookup and exact unique current-head history lookup;
+//   - session Draft preparation, request-scoped MCP opening, and final freeze;
+//   - routing, ordered provider calls, same-target retry, and route failover;
+//   - exact-target selection of concrete OpenAI Responses continuation data;
+//   - one exchange-scoped read-through image fetch cache reused across attempts;
+//   - canonical response capture and atomic session start/head advancement before
+//     terminal client publication;
+//   - delayed MCP handoff, local tool execution, provider re-entry, usage
+//     accumulation, and compatibility evidence.
 //
-// It does NOT own:
-//   - Routing policy (internal/routing)
-//   - Provider adapters (internal/adapters/outbound/providers)
-//   - Canonical MCP source/tool meaning (internal/domain/canonical)
-//   - MCP access, sessions, catalogs, ownership, budgets, protocol mechanics,
-//     and network hardening (internal/mcp)
-//   - A generic tool runtime
+// Provider requests always carry one complete canonical request. Optional
+// ResponsesPrevious metadata authorizes a Responses codec to omit one exact
+// prior-history range while emitting previous_response_id. A target change,
+// target-version change, invalid provider reference, or unsupported provider
+// receives the same complete request without that metadata.
+//
+// Provider encoding receives an exchange-scoped read-through image resolver
+// backed by the existing fetch policy, limits, fetcher, inspection, and cache.
+// URL-native codecs preserve locators without invoking it; byte-only codecs
+// resolve only the URL images they must lower inline. Fetched bytes never become
+// checkpoint or session truth, and resolution is not a reducer phase or durable
+// state.
+//
+// It does not own routing policy, provider adapter semantics, canonical MCP
+// meaning, client history fingerprint representation, persistent checkpoints,
+// or generic tool-runtime infrastructure.
 //
 // Import rules:
-//   - exchange → routing, provider, session, profile, observation, domain, mcp
-//   - Nothing may import exchange except adapters and bootstrap.
-//
-// Remote MCP enters as concrete runtime-open, batch-reservation, and call
-// commands/events.
-// Exchange stores one runtime pointer and no SDK sessions, bearer maps, catalog
-// indexes, executor interfaces, registries, or pools. Native MCP declarations
-// remain canonical until the selected provider codec projects or rejects them.
-// New provider representations add explicit transient request choices and
-// closed transitions only when an implemented alternative exists. Generic
-// provider errors never infer which canonical capability caused a failure.
-// Availability never stands in for delivery or
-// replay safety. Alternatives do not add nested retry loops, synchronized route
-// cursors, or phase booleans. Request-image materialization
-// is protocol-independent and malformed or unavailable client media fails the
-// exchange. A later typed backend-local codec rejection may advance routing.
+//   - exchange may import routing, provider, session, profile, observation,
+//     canonical domain, wire contracts, and MCP;
+//   - only adapters and bootstrap may import exchange.
 package exchange

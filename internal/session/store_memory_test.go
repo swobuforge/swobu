@@ -12,340 +12,263 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
-func TestMemoryStoreFindsUniqueHistoryAndRejectsAmbiguousHistoryWithinWorkspace(t *testing.T) {
-	store := newMemoryStore()
-	fingerprint := testCheckpointFingerprint(t, "one")
-	first := storeRecord("resp_first")
-	first.HistoryFingerprint = &fingerprint
-	if err := store.Put(context.Background(), "alpha", first); err != nil {
-		t.Fatal(err)
-	}
-	match, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
-	got, found := match.Unique()
-	if err != nil || !found || got.Response.Response().SwobuID != "resp_first" {
-		t.Fatalf("first lookup = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
-	}
-	match, err = store.FindByHistory(context.Background(), "beta", fingerprint)
-	if err != nil || !match.IsMissing() {
-		t.Fatalf("cross-workspace lookup = (%#v, %v), want miss", match, err)
-	}
-	match, err = newMemoryStore().FindByHistory(context.Background(), "alpha", fingerprint)
-	if err != nil || !match.IsMissing() {
-		t.Fatalf("cross-store lookup = (%#v, %v), want miss", match, err)
-	}
-
-	second := storeRecord("resp_second")
-	second.HistoryFingerprint = &fingerprint
-	if err := store.Put(context.Background(), "alpha", second); err != nil {
-		t.Fatal(err)
-	}
-	match, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
-	if err != nil || !match.IsAmbiguous() {
-		t.Fatalf("two indistinguishable checkpoints lookup = (%#v, %v), want ambiguous", match, err)
-	}
-}
-
-func TestMemoryStoreExpiryRemovesFingerprintIndexWithoutRemovingReplacement(t *testing.T) {
-	store := newMemoryStore()
-	current := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
-	fingerprint := testCheckpointFingerprint(t, "shared")
-	oldExpiry := current.Add(time.Minute)
-	old := storeRecord("resp_old")
-	old.HistoryFingerprint, old.ExpiresAt = &fingerprint, &oldExpiry
-	if err := store.Put(context.Background(), "alpha", old); err != nil {
-		t.Fatal(err)
-	}
-	newExpiry := current.Add(time.Hour)
-	newer := storeRecord("resp_new")
-	newer.HistoryFingerprint, newer.ExpiresAt = &fingerprint, &newExpiry
-	if err := store.Put(context.Background(), "alpha", newer); err != nil {
-		t.Fatal(err)
-	}
-	current = current.Add(2 * time.Minute)
-	match, err := store.FindByHistory(context.Background(), "alpha", fingerprint)
-	got, found := match.Unique()
-	if err != nil || !found || got.Response.Response().SwobuID != "resp_new" {
-		t.Fatalf("lookup after old expiry = (%q, %t, %v)", got.Response.Response().SwobuID, found, err)
-	}
-	current = current.Add(time.Hour)
-	match, err = store.FindByHistory(context.Background(), "alpha", fingerprint)
-	if err != nil || !match.IsMissing() {
-		t.Fatalf("lookup after replacement expiry = (%#v, %v), want miss", match, err)
-	}
-}
-
-func testCheckpointFingerprint(t *testing.T, material string) historyfingerprint.History {
-	t.Helper()
-	request, err := historyfingerprint.FingerprintRequest("responses", []byte("request:"+material))
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := historyfingerprint.FingerprintResponse("responses", []byte("response:"+material))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := historyfingerprint.Advance(nil, request, response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fingerprint
-}
-
-func TestMemoryStoreConcurrentAccess(t *testing.T) {
+func TestMemoryStoreIndexesOnlyCurrentHeadsAndAdvancesAtomically(t *testing.T) {
 	store := NewMemoryStore()
-	scope := "alpha"
+	firstHistory := testHistory(t, "first")
+	first := storeRecord("resp_1", &firstHistory)
+	sessionValue, err := store.StartSession(context.Background(), "alpha", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", firstHistory); err != nil || resolution != HistoryUniqueHead || got.ID != "resp_1" {
+		t.Fatalf("first head = (%q, %v, %v)", got.ID, resolution, err)
+	}
+	secondHistory := testHistory(t, "second")
+	second := storeRecord("resp_2", &secondHistory)
+	if err := store.AdvanceSession(context.Background(), "alpha", sessionValue.ID, "resp_1", second); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", firstHistory); err != nil || resolution != HistoryNotFound {
+		t.Fatalf("old history resolution = (%v, %v)", resolution, err)
+	}
+	if got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", secondHistory); err != nil || resolution != HistoryUniqueHead || got.ID != "resp_2" {
+		t.Fatalf("second head = (%q, %v, %v)", got.ID, resolution, err)
+	}
+	if err := store.AdvanceSession(context.Background(), "alpha", sessionValue.ID, "resp_1", storeRecord("resp_3", nil)); !errors.Is(err, ErrStaleSessionHead) {
+		t.Fatalf("stale advance error = %v", err)
+	}
+	if old, found, err := store.Get(context.Background(), "alpha", "resp_1"); err != nil || !found || old.ID != "resp_1" {
+		t.Fatalf("explicit old checkpoint = (%q, %t, %v)", old.ID, found, err)
+	}
+}
 
-	const goroutines = 32
-	const iterations = 16
+func TestMemoryStoreReportsAmbiguousCurrentHeads(t *testing.T) {
+	store := NewMemoryStore()
+	history := testHistory(t, "shared")
+	if _, err := store.StartSession(context.Background(), "alpha", storeRecord("resp_1", &history)); err != nil {
+		t.Fatal(err)
+	}
+	second := storeRecord("resp_2", &history)
+	second.SessionID = "session-2"
+	if _, err := store.StartSession(context.Background(), "alpha", second); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history); err != nil || resolution != HistoryAmbiguous {
+		t.Fatalf("resolution = (%v, %v), want ambiguous", resolution, err)
+	}
+}
 
+func TestMemoryStorePartitionsWorkspacesAndExpiresHeads(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	history := testHistory(t, "shared")
+	record := storeRecord("resp", &history)
+	expires := now.Add(time.Minute)
+	record.ExpiresAt = &expires
+	if _, err := store.StartSession(context.Background(), "alpha", record); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.Get(context.Background(), "beta", "resp"); err != nil || found {
+		t.Fatalf("cross-workspace get = (%t, %v)", found, err)
+	}
+	now = now.Add(2 * time.Minute)
+	if _, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history); err != nil || resolution != HistoryNotFound {
+		t.Fatalf("expired resolution = (%v, %v)", resolution, err)
+	}
+}
+
+func TestMemoryStoreConcurrentAdvanceAllowsExactlyOneWinner(t *testing.T) {
+	store := NewMemoryStore()
+	firstHistory := testHistory(t, "concurrent-first")
+	started, err := store.StartSession(context.Background(), "alpha", storeRecord("resp_first", &firstHistory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondHistory := testHistory(t, "concurrent-second")
+	thirdHistory := testHistory(t, "concurrent-third")
+	candidates := []Checkpoint{storeRecord("resp_second", &secondHistory), storeRecord("resp_third", &thirdHistory)}
 	start := make(chan struct{})
-	errCh := make(chan error, goroutines*iterations)
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
-		go func(g int) {
-			defer wg.Done()
+	results := make(chan error, len(candidates))
+	var group sync.WaitGroup
+	for _, candidate := range candidates {
+		candidate := candidate
+		group.Add(1)
+		go func() {
+			defer group.Done()
 			<-start
-			for i := 0; i < iterations; i++ {
-				id := canonical.SwobuResponseID(fmt.Sprintf("resp_%d_%d", g, i))
-				record := storeRecord(id)
-				if err := store.Put(context.Background(), scope, record); err != nil {
-					errCh <- fmt.Errorf("Put(%s) error: %w", id, err)
-					return
-				}
-				got, ok, err := store.Get(context.Background(), scope, id)
-				if err != nil {
-					errCh <- fmt.Errorf("Get(%s) error: %w", id, err)
-					return
-				}
-				if !ok {
-					errCh <- fmt.Errorf("Get(%s) missing record", id)
-					return
-				}
-				if got.Response.Response().SwobuID != id {
-					errCh <- fmt.Errorf("Get(%s) returned %s", id, got.Response.Response().SwobuID)
-					return
-				}
-			}
-		}(g)
+			results <- store.AdvanceSession(context.Background(), "alpha", started.ID, "resp_first", candidate)
+		}()
 	}
 	close(start)
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
+	group.Wait()
+	close(results)
+	winners := 0
+	stale := 0
+	for result := range results {
+		switch {
+		case result == nil:
+			winners++
+		case errors.Is(result, ErrStaleSessionHead):
+			stale++
+		default:
+			t.Fatalf("concurrent advance error = %v", result)
+		}
+	}
+	if winners != 1 || stale != 1 {
+		t.Fatalf("concurrent results winners=%d stale=%d, want 1/1", winners, stale)
+	}
+}
+
+func TestMemoryStoreRejectsCrossSchemeAdvanceWithoutMutation(t *testing.T) {
+	store := NewMemoryStore()
+	firstHistory := testHistory(t, "scheme-first")
+	started, err := store.StartSession(context.Background(), "alpha", storeRecord("resp_first", &firstHistory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherHistory := testHistoryForScheme(t, "messages/v1", "scheme-other")
+	proposed := storeRecord("resp_other", &otherHistory)
+	if err := store.AdvanceSession(context.Background(), "alpha", started.ID, "resp_first", proposed); !errors.Is(err, ErrSessionSchemeMismatch) {
+		t.Fatalf("cross-scheme advance error = %v", err)
+	}
+	if current, err := store.IsCurrentHead(context.Background(), "alpha", started.ID, "resp_first"); err != nil || !current {
+		t.Fatalf("original head current = (%t, %v)", current, err)
+	}
+	if got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", firstHistory); err != nil || resolution != HistoryUniqueHead || got.ID != "resp_first" {
+		t.Fatalf("original index = (%q, %v, %v)", got.ID, resolution, err)
+	}
+	if _, found, err := store.Get(context.Background(), "alpha", "resp_other"); err != nil || found {
+		t.Fatalf("proposed checkpoint stored = (%t, %v)", found, err)
+	}
+}
+
+func TestMemoryStoreReturnsDefensiveCopies(t *testing.T) {
+	store := NewMemoryStore()
+	history := testHistory(t, "clone")
+	record := storeRecord("resp_clone", &history)
+	continuation := &canonical.ResponsesContinuation{ProviderResponseID: "provider_response", TargetID: "target", TargetVersion: 1}
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_clone", Responses: continuation}, "test-model", nil, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Response = response
+	started, err := store.StartSession(context.Background(), "alpha", record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started.Head = "mutated"
+	started.Scheme = "messages/v1"
+	loaded, found, err := store.Get(context.Background(), "alpha", "resp_clone")
+	if err != nil || !found {
+		t.Fatalf("get = (%t, %v)", found, err)
+	}
+	ref := loaded.Response.Response()
+	ref.Responses.ProviderResponseID = "mutated_provider"
+	loaded.History = nil
+	again, found, err := store.Get(context.Background(), "alpha", "resp_clone")
+	if err != nil || !found {
+		t.Fatalf("second get = (%t, %v)", found, err)
+	}
+	if again.History == nil || again.Response.Response().Responses.ProviderResponseID != "provider_response" {
+		t.Fatalf("stored checkpoint was mutated: %#v", again)
+	}
+	if current, err := store.IsCurrentHead(context.Background(), "alpha", ClientSessionID("resp_clone"), "resp_clone"); err != nil || !current {
+		t.Fatalf("stored session was mutated: (%t, %v)", current, err)
+	}
+}
+
+func TestMemoryStoreCapacityEvictionRemovesSessionAndHistoryIndex(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	oldestHistory := testHistory(t, "oldest")
+	oldest := storeRecord("resp_oldest", &oldestHistory)
+	expires := now.Add(time.Minute)
+	oldest.ExpiresAt = &expires
+	if _, err := store.StartSession(context.Background(), "alpha", oldest); err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index < maxMemoryStoreRecords; index++ {
+		record := storeRecord(canonical.SwobuResponseID(fmt.Sprintf("resp_%04d", index)), nil)
+		record.SessionID = ClientSessionID(record.ID)
+		expires := now.Add(time.Duration(index+1) * time.Minute)
+		record.ExpiresAt = &expires
+		if _, err := store.StartSession(context.Background(), "alpha", record); err != nil {
 			t.Fatal(err)
 		}
 	}
-}
-
-func TestMemoryStoreEvictsOldestExpiringRecordAtCapacity(t *testing.T) {
-	store := newMemoryStore()
-	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
-	for index := 0; index <= maxMemoryStoreRecords; index++ {
-		id := canonical.SwobuResponseID(fmt.Sprintf("resp_%04d", index))
-		record := storeRecord(id)
-		expiresAt := now.Add(time.Duration(index+1) * time.Minute)
-		record.ExpiresAt = &expiresAt
-		if err := store.Put(context.Background(), "alpha", record); err != nil {
-			t.Fatalf("Put(%s): %v", id, err)
-		}
-	}
-	if len(store.records) != maxMemoryStoreRecords {
-		t.Fatalf("record count = %d, want %d", len(store.records), maxMemoryStoreRecords)
-	}
-	if _, found, err := store.Get(context.Background(), "alpha", "resp_0000"); err != nil || found {
-		t.Fatalf("oldest record lookup = (found %t, err %v), want eviction", found, err)
-	}
-	newestID := canonical.SwobuResponseID(fmt.Sprintf("resp_%04d", maxMemoryStoreRecords))
-	if _, found, err := store.Get(context.Background(), "alpha", newestID); err != nil || !found {
-		t.Fatalf("newest record lookup = (found %t, err %v), want retained", found, err)
-	}
-}
-
-func TestMemoryStoreDefensivelyCopiesResponsesContinuation(t *testing.T) {
-	store := NewMemoryStore()
-	scope := "alpha"
-	target := testBackendTarget(t, "m")
-	responses := nativeResponses(target, "provider_resp_1")
-	record := checkpoint("resp_1", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), responses)
-
-	if err := store.Put(context.Background(), scope, record); err != nil {
-		t.Fatalf("Put failed: %v", err)
-	}
-
-	responses.ProviderResponseID = "mutated"
-	got, ok, err := store.Get(context.Background(), scope, "resp_1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected record to be found")
-	}
-	if got.Response.Response().Responses == nil || got.Response.Response().Responses.ProviderResponseID != "provider_resp_1" {
-		t.Fatalf("stored Responses refinement = %#v", got.Response.Response().Responses)
-	}
-
-	gotRef := got.Response.Response()
-	gotRef.Responses.ProviderResponseID = "changed"
-	gotAgain, ok, err := store.Get(context.Background(), scope, "resp_1")
-	if err != nil {
-		t.Fatalf("second Get failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected record to be found on second read")
-	}
-	if gotAgain.Response.Response().Responses == nil || gotAgain.Response.Response().Responses.ProviderResponseID != "provider_resp_1" {
-		t.Fatalf("store was mutated through Get result: %#v", gotAgain.Response.Response().Responses)
-	}
-}
-
-func TestMemoryStoreDefensivelyCopiesExpiresAt(t *testing.T) {
-	store := NewMemoryStore()
-	scope := "alpha"
-	expiresAt := time.Now().UTC().Add(time.Hour)
-	record := checkpoint("resp_expiry", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), nil)
-	record.ExpiresAt = &expiresAt
-	record.CreatedAt = time.Now().UTC()
-
-	if err := store.Put(context.Background(), scope, record); err != nil {
-		t.Fatalf("Put failed: %v", err)
-	}
-
-	expiresAt = time.Now().UTC()
-	got, ok, err := store.Get(context.Background(), scope, "resp_expiry")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected record to be found")
-	}
-	if got.ExpiresAt == nil {
-		t.Fatal("expected expiry to be present")
-	}
-	if !got.ExpiresAt.After(time.Now().UTC()) {
-		t.Fatalf("stored expiry = %v, want future time", got.ExpiresAt)
-	}
-	got.ExpiresAt = nil
-	gotAgain, ok, err := store.Get(context.Background(), scope, "resp_expiry")
-	if err != nil {
-		t.Fatalf("second Get failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected record to be found on second read")
-	}
-	if gotAgain.ExpiresAt == nil {
-		t.Fatal("expected expiry to remain present on second read")
-	}
-}
-
-func TestMemoryStoreRejectsExpiredRecord(t *testing.T) {
-	store := NewMemoryStore()
-	scope := "alpha"
-	expiredAt := time.Now().UTC().Add(-time.Minute)
-	record := checkpoint("resp_expired", makeRequest("m", makeItems("hello"), nil), makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "ok")), nil)
-	record.ExpiresAt = &expiredAt
-	record.CreatedAt = time.Now().UTC().Add(-2 * time.Minute)
-
-	if err := store.Put(context.Background(), scope, record); err != nil {
-		t.Fatalf("Put failed: %v", err)
-	}
-
-	got, ok, err := store.Get(context.Background(), scope, "resp_expired")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if ok {
-		t.Fatalf("expected expired record to be rejected, got %+v", got)
-	}
-}
-
-func TestMemoryStoreRejectsDuplicateIDs(t *testing.T) {
-	store := NewMemoryStore()
-	scope := "alpha"
-	record := storeRecord("resp_1")
-	if err := store.Put(context.Background(), scope, record); err != nil {
-		t.Fatalf("first Put failed: %v", err)
-	}
-	if err := store.Put(context.Background(), scope, record); err == nil {
-		t.Fatal("expected duplicate Put to fail")
-	} else if !errors.Is(err, ErrCheckpointExists) {
-		t.Fatalf("duplicate Put error = %v, want ErrCheckpointExists", err)
-	}
-	got, ok, err := store.Get(context.Background(), scope, "resp_1")
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected record to remain present after duplicate Put rejection")
-	}
-	if got.Response.Response().SwobuID != "resp_1" {
-		t.Fatalf("stored record id = %q, want resp_1", got.Response.Response().SwobuID)
-	}
-}
-
-func TestMemoryStoreWriteReclaimsHighVolumeExpiredRecordsWithoutReadingThem(t *testing.T) {
-	store := newMemoryStore()
-	current := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
-	expiresAt := current.Add(time.Minute)
-
-	const recordCount = 10_000
-	for i := 0; i < recordCount; i++ {
-		record := storeRecord(canonical.SwobuResponseID(fmt.Sprintf("expired_%05d", i)))
-		record.CreatedAt, record.ExpiresAt = current, &expiresAt
-		if err := store.Put(context.Background(), "alpha", record); err != nil {
-			t.Fatalf("Put %d: %v", i, err)
-		}
-	}
-	if got := len(store.records); got != maxMemoryStoreRecords {
-		t.Fatalf("records before expiry = %d, want bounded count %d", got, maxMemoryStoreRecords)
-	}
-
-	current = current.Add(2 * time.Minute)
-	live := storeRecord("live")
-	live.CreatedAt = current
-	if err := store.Put(context.Background(), "alpha", live); err != nil {
+	trigger := storeRecord("resp_trigger", nil)
+	expires = now.Add(48 * time.Hour)
+	trigger.ExpiresAt = &expires
+	if _, err := store.StartSession(context.Background(), "alpha", trigger); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(store.records); got != 1 {
-		t.Fatalf("records after write reclamation = %d, want 1", got)
+	if _, found, err := store.Get(context.Background(), "alpha", "resp_oldest"); err != nil || found {
+		t.Fatalf("evicted checkpoint = (%t, %v)", found, err)
 	}
-	if got := store.expires.Len(); got != 1 {
-		t.Fatalf("expiration index after reclamation = %d, want 1", got)
+	if _, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", oldestHistory); err != nil || resolution != HistoryNotFound {
+		t.Fatalf("evicted history resolution = (%v, %v)", resolution, err)
+	}
+	if current, err := store.IsCurrentHead(context.Background(), "alpha", "resp_oldest", "resp_oldest"); err != nil || current {
+		t.Fatalf("evicted session current = (%t, %v)", current, err)
 	}
 }
 
-func TestMemoryStorePartitionsCheckpointsByWorkspaceSlug(t *testing.T) {
+func TestMemoryStoreSupportsConcurrentStartGetAndResolve(t *testing.T) {
 	store := NewMemoryStore()
-	record := storeRecord("resp_shared")
-
-	if err := store.Put(context.Background(), "alpha", record); err != nil {
-		t.Fatalf("Put alpha: %v", err)
+	var group sync.WaitGroup
+	for index := 0; index < 32; index++ {
+		index := index
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			history := testHistory(t, fmt.Sprintf("concurrent-%d", index))
+			id := canonical.SwobuResponseID(fmt.Sprintf("resp_%d", index))
+			if _, err := store.StartSession(context.Background(), "alpha", storeRecord(id, &history)); err != nil {
+				t.Errorf("start %d: %v", index, err)
+				return
+			}
+			if _, found, err := store.Get(context.Background(), "alpha", id); err != nil || !found {
+				t.Errorf("get %d = (%t, %v)", index, found, err)
+			}
+			if got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history); err != nil || resolution != HistoryUniqueHead || got.ID != id {
+				t.Errorf("resolve %d = (%q, %v, %v)", index, got.ID, resolution, err)
+			}
+		}()
 	}
-	if _, found, err := store.Get(context.Background(), "beta", record.Response.Response().SwobuID); err != nil {
-		t.Fatalf("Get beta: %v", err)
-	} else if found {
-		t.Fatal("record from alpha was visible in beta")
-	}
-	if err := store.Put(context.Background(), "beta", record); err != nil {
-		t.Fatalf("same checkpoint ID must be legal in another workspace: %v", err)
-	}
-	for _, workspaceSlug := range []string{"alpha", "beta"} {
-		if got, found, err := store.Get(context.Background(), workspaceSlug, record.Response.Response().SwobuID); err != nil {
-			t.Fatalf("Get %s: %v", workspaceSlug, err)
-		} else if !found || got.Response.Response().SwobuID != record.Response.Response().SwobuID {
-			t.Fatalf("Get %s = (%q, %t), want (%q, true)", workspaceSlug, got.Response.Response().SwobuID, found, record.Response.Response().SwobuID)
-		}
-	}
+	group.Wait()
 }
 
-func storeRecord(id canonical.SwobuResponseID) Checkpoint {
-	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: canonical.NewSwobuResponseID(id.String())}, "test-model", nil, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
+func testHistory(t *testing.T, material string) historyfingerprint.History {
+	return testHistoryForScheme(t, "responses/v1", material)
+}
+
+func testHistoryForScheme(t *testing.T, scheme historyfingerprint.Scheme, material string) historyfingerprint.History {
+	t.Helper()
+	request, err := historyfingerprint.FingerprintRequest(scheme, []byte("request:"+material))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := historyfingerprint.FingerprintResponse(scheme, []byte("response:"+material))
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := historyfingerprint.Advance(nil, request, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return history
+}
+
+func storeRecord(id canonical.SwobuResponseID, history *historyfingerprint.History) Checkpoint {
+	response, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id}, "test-model", nil, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		panic(err)
 	}
-	return Checkpoint{Response: response, CreatedAt: time.Now().UTC()}
+	scheme := historyfingerprint.Scheme("responses/v1")
+	if history != nil {
+		scheme = history.Scheme()
+	}
+	return Checkpoint{ID: id, HistoryScheme: scheme, History: history, Response: response, CreatedAt: time.Now().UTC()}
 }

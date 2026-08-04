@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"testing"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -14,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -23,8 +25,10 @@ import (
 // production provider-only execution surface or shadow call authority.
 type Runner = runtimeBundle
 
+const testHistoryScheme historyfingerprint.Scheme = "responses/v1"
+
 func testHistoryRequest(material []byte) historyfingerprint.Request {
-	fingerprint, err := historyfingerprint.FingerprintRequest("responses", material)
+	fingerprint, err := historyfingerprint.FingerprintRequest(testHistoryScheme, material)
 	if err != nil {
 		panic(err)
 	}
@@ -32,7 +36,7 @@ func testHistoryRequest(material []byte) historyfingerprint.Request {
 }
 
 func testHistoryResponse(material []byte) *historyfingerprint.Response {
-	fingerprint, err := historyfingerprint.FingerprintResponse("responses", material)
+	fingerprint, err := historyfingerprint.FingerprintResponse(testHistoryScheme, material)
 	if err != nil {
 		panic(err)
 	}
@@ -93,11 +97,15 @@ func (deterministicResponseIDGenerator) NewSwobuResponseID(_ context.Context, ex
 }
 
 func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeInput) (ClientResponse, error) {
-	if in.Prepared.Full.Model() == "" {
-		in.Prepared = session.ResolvedRequest{Full: in.Request.Clone(), Delta: in.Request.Clone()}
-	}
 	if err := validateCheckpointInput(runner, in.WorkspaceSlug); err != nil {
 		return nil, err
+	}
+	if in.Prepared.Request().Model() == "" {
+		prepared, err := session.Begin(in.Request)
+		if err != nil {
+			return nil, err
+		}
+		in.Prepared = prepared
 	}
 	responseID, err := allocateResponseID(ctx, in.ExchangeID, runner.ResponseIDs)
 	if err != nil {
@@ -108,12 +116,16 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		return nil, err
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
-	request := provider.Request{Canonical: in.Prepared.ForTarget(backend.Target), Delivery: in.ProviderDelivery}
+	request := provider.Request{Canonical: in.Prepared.Request(), Delivery: in.ProviderDelivery}
+	if id, start, end, ok := in.Prepared.ResponsesPrevious(backend.Target.TargetID, backend.Target.TargetVersion); ok {
+		request.ResponsesPrevious = &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}
+	}
 	call := providerCall{
 		backend: backend, request: request, clientCodec: clientCodec,
 		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
-		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Full.Clone(),
-		advance: &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
+		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Request(),
+		historyScheme: testHistoryScheme,
+		advance:       &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
 	}
 	document, _, err := backend.Codec.Encode(request)
 	call.document = document
@@ -126,6 +138,58 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 	}
 	response, _, _, err := completeProviderCall(ctx, call, ingress, responseID, runner)
 	return response, err
+}
+
+func mustResumeSession(
+	t *testing.T,
+	previousRequest canonical.CanonicalRequest,
+	previousResponseItems []canonical.CanonicalItem,
+	current canonical.CanonicalRequest,
+	target routing.Target,
+) session.ResolvedRequest {
+	t.Helper()
+	path, err := resolveProviderPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := path.target
+	response, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{
+			SwobuID: "swobu_resp_123",
+			Responses: &canonical.ResponsesContinuation{
+				ProviderResponseID: "provider_resp_789",
+				TargetID:           snapshot.TargetID, TargetVersion: snapshot.TargetVersion,
+			},
+		},
+		snapshot.Model,
+		previousResponseItems,
+		canonical.Completed("completed"),
+		canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current = canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: current.ModelField(), Items: current.Items(),
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123"},
+		ToolPolicy:       current.ToolPolicyField(), ToolCallBatch: current.ToolCallBatchField(),
+		Controls: current.Controls(), Reasoning: current.Reasoning(), OutputFormat: current.OutputFormatField(),
+		Responses: current.Responses(),
+	})
+	prepared, err := session.Resume(current, session.Checkpoint{Request: previousRequest, Response: response})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepared
+}
+
+func mustNativeSession(t *testing.T, current canonical.CanonicalRequest, target routing.Target) session.ResolvedRequest {
+	t.Helper()
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("a"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "complete history")},
+	})
+	return mustResumeSession(t, previous, nil, current, target)
 }
 
 // RunPreparedProviderForTest exposes the package test bridge to external tests.

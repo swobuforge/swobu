@@ -1,10 +1,14 @@
 package historyfingerprint
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"hash"
+	"io"
+	"sort"
 )
 
 const (
@@ -33,6 +37,22 @@ type Request struct {
 type Response struct {
 	scheme Scheme
 	sum    [sha256.Size]byte
+}
+
+// FrameJSONValue converts one JSON value into deterministic semantic material.
+// Object member order and insignificant whitespace do not affect the result;
+// JSON kinds, array order, object keys, and number spellings remain distinct.
+func FrameJSONValue(raw []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := requireJSONEnd(decoder); err != nil {
+		return nil, err
+	}
+	return appendJSONValue(nil, value), nil
 }
 
 // Scheme returns the codec-local representation scheme.
@@ -112,4 +132,70 @@ func writeFrame(h hash.Hash, value []byte) {
 	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
 	_, _ = h.Write(size[:])
 	_, _ = h.Write(value)
+}
+
+func requireJSONEnd(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("history fingerprint JSON contains multiple values")
+		}
+		return err
+	}
+	return nil
+}
+
+func appendJSONValue(dst []byte, value any) []byte {
+	switch typed := value.(type) {
+	case nil:
+		return appendByteFrame(dst, 'n')
+	case bool:
+		if typed {
+			return appendByteFrame(dst, 't')
+		}
+		return appendByteFrame(dst, 'f')
+	case string:
+		dst = appendByteFrame(dst, 's')
+		return appendSliceFrame(dst, []byte(typed))
+	case json.Number:
+		dst = appendByteFrame(dst, '#')
+		return appendSliceFrame(dst, []byte(typed.String()))
+	case []any:
+		dst = appendByteFrame(dst, '[')
+		dst = appendSize(dst, len(typed))
+		for _, item := range typed {
+			dst = appendJSONValue(dst, item)
+		}
+		return dst
+	case map[string]any:
+		dst = appendByteFrame(dst, '{')
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		dst = appendSize(dst, len(keys))
+		for _, key := range keys {
+			dst = appendSliceFrame(dst, []byte(key))
+			dst = appendJSONValue(dst, typed[key])
+		}
+		return dst
+	default:
+		panic("history fingerprint received an unsupported decoded JSON value")
+	}
+}
+
+func appendByteFrame(dst []byte, value byte) []byte {
+	return appendSliceFrame(dst, []byte{value})
+}
+
+func appendSliceFrame(dst, value []byte) []byte {
+	dst = appendSize(dst, len(value))
+	return append(dst, value...)
+}
+
+func appendSize(dst []byte, size int) []byte {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(size))
+	return append(dst, encoded[:]...)
 }

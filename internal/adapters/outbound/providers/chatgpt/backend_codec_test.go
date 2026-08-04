@@ -416,7 +416,7 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 		t.Fatal("ChatGPT decoder minted native continuation during turn-one checkpoint commit")
 	}
 	store := session.NewMemoryStore()
-	if err := store.Put(context.Background(), "dev", session.Checkpoint{Request: turnOne, Response: *turnOneResponse}); err != nil {
+	if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse}); err != nil {
 		t.Fatal(err)
 	}
 	checkpoint, found, err := store.Get(context.Background(), "dev", "resp_previous")
@@ -438,11 +438,11 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Hydration reconstructs Full and an identity-only Delta. ForTarget must
-	// select Full because ChatGPT responses never mint native continuation.
-	selected := prepared.ForTarget(target)
-	if _, ok := selected.PreviousResponse(); ok {
-		t.Fatal("ChatGPT identity-only handle must not select Delta continuation")
+	// Hydration stores one complete request. The preferred attempt must keep
+	// complete history because ChatGPT responses never mint native continuation.
+	selected := prepared.Request()
+	if _, _, _, ok := prepared.ResponsesPrevious(target.TargetID, target.TargetVersion); ok {
+		t.Fatal("ChatGPT identity-only handle exposed Responses continuation")
 	}
 
 	document, _, err := newBackendCodec("chatgpt").Encode(provider.Request{Canonical: selected, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})

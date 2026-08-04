@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
-const fingerprintScheme historyfingerprint.Scheme = "chat-completions"
+const fingerprintScheme historyfingerprint.Scheme = "chat-completions/v1"
 
 // chatCompletionsHistoryMessageDTO is the protocol-native assistant value a
 // client appends to a later messages array. It is private because only this
@@ -29,9 +29,11 @@ type chatCompletionsHistoryResult struct {
 }
 
 func fingerprintChatCompletionsHistory(messages []chatCompletionsMessageDTO) (chatCompletionsHistoryResult, error) {
+	contextEnd := chatCompletionsLeadingContextEnd(messages)
 	var previous *historyfingerprint.History
-	requestStart := 0
-	for index, message := range messages {
+	requestStart := contextEnd
+	for index := contextEnd; index < len(messages); index++ {
+		message := messages[index]
 		// A terminal assistant value may be supported prefill. It becomes a
 		// completed response only after later protocol input proves the boundary.
 		if index == len(messages)-1 || strings.TrimSpace(message.Role) != "assistant" { // swobu:io-string source=boundary
@@ -56,14 +58,18 @@ func fingerprintChatCompletionsHistory(messages []chatCompletionsMessageDTO) (ch
 	if err != nil {
 		return chatCompletionsHistoryResult{}, err
 	}
+	currentMessages := make([]chatCompletionsMessageDTO, 0, contextEnd+len(messages)-requestStart)
+	currentMessages = append(currentMessages, messages[:contextEnd]...)
+	currentMessages = append(currentMessages, messages[requestStart:]...)
 	return chatCompletionsHistoryResult{
 		previous: previous,
 		request:  current,
-		current:  append([]chatCompletionsMessageDTO(nil), messages[requestStart:]...),
+		current:  currentMessages,
 	}, nil
 }
 
 func fingerprintChatCompletionsRequest(messages []chatCompletionsMessageDTO) (historyfingerprint.Request, error) {
+	messages = messages[chatCompletionsLeadingContextEnd(messages):]
 	history := make([]chatCompletionsHistoryMessageDTO, len(messages))
 	for index, message := range messages {
 		history[index] = chatHistoryMessageFromRequest(message)
@@ -72,7 +78,23 @@ func fingerprintChatCompletionsRequest(messages []chatCompletionsMessageDTO) (hi
 	if err != nil {
 		return historyfingerprint.Request{}, err
 	}
-	return historyfingerprint.FingerprintRequest(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	return historyfingerprint.FingerprintRequest(fingerprintScheme, material)
+}
+
+func chatCompletionsLeadingContextEnd(messages []chatCompletionsMessageDTO) int {
+	for index, message := range messages {
+		switch strings.TrimSpace(message.Role) { // swobu:io-string source=boundary
+		case "system", "developer":
+			continue
+		default:
+			return index
+		}
+	}
+	return len(messages)
 }
 
 func fingerprintChatCompletionsResponseMessages(messages []chatCompletionsMessageDTO) (historyfingerprint.Response, error) {
@@ -84,7 +106,11 @@ func fingerprintChatCompletionsResponseMessages(messages []chatCompletionsMessag
 	if err != nil {
 		return historyfingerprint.Response{}, err
 	}
-	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	return historyfingerprint.FingerprintResponse(fingerprintScheme, material)
 }
 
 func fingerprintChatCompletionsResponse(output canonical.CanonicalResponse) (historyfingerprint.Response, error) {
@@ -164,7 +190,11 @@ func (s *chatCompletionsResponseHistoryState) fingerprint() (historyfingerprint.
 	if err != nil {
 		return historyfingerprint.Response{}, err
 	}
-	return historyfingerprint.FingerprintResponse(fingerprintScheme, raw)
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Response{}, err
+	}
+	return historyfingerprint.FingerprintResponse(fingerprintScheme, material)
 }
 
 func chatHistoryMessageFromRequest(message chatCompletionsMessageDTO) chatCompletionsHistoryMessageDTO {

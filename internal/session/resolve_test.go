@@ -3,7 +3,6 @@ package session
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -115,18 +114,17 @@ func TestResumeDoesNotInheritReasoningControlsAndPreservesOpaqueThinking(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, request := range map[string]canonical.CanonicalRequest{"full": resolved.Full, "delta": resolved.Delta} {
-		if _, ok := request.Reasoning().ComputeField().Get(); ok {
-			t.Fatalf("%s inherited omitted reasoning compute", name)
-		}
-		if _, ok := request.Controls().Effort.Get(); ok {
-			t.Fatalf("%s inherited omitted inference effort", name)
-		}
-		if request.Reasoning().ResponsesContextField().IsSpecified() {
-			t.Fatalf("%s inherited omitted Responses reasoning context", name)
-		}
+	request := resolved.Request()
+	if _, ok := request.Reasoning().ComputeField().Get(); ok {
+		t.Fatal("resolved request inherited omitted reasoning compute")
 	}
-	items := resolved.Full.Items()
+	if _, ok := request.Controls().Effort.Get(); ok {
+		t.Fatal("resolved request inherited omitted inference effort")
+	}
+	if request.Reasoning().ResponsesContextField().IsSpecified() {
+		t.Fatal("resolved request inherited omitted Responses reasoning context")
+	}
+	items := resolved.Request().Items()
 	if len(items) != 3 || items[1].Kind() != canonical.ItemKindReasoning {
 		t.Fatalf("materialized reasoning items = %#v", items)
 	}
@@ -165,12 +163,11 @@ func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, request := range map[string]canonical.CanonicalRequest{"full": resolved.Full, "delta": resolved.Delta} {
-		compute, computeSet := request.Reasoning().ComputeField().Get()
-		gotEffort, effortSet := request.Controls().Effort.Get()
-		if !computeSet || compute.Kind() != canonical.ReasoningAutomatic || !effortSet || gotEffort != effort {
-			t.Fatalf("%s did not carry effective unfinished-turn compute", name)
-		}
+	request := resolved.Request()
+	compute, computeSet := request.Reasoning().ComputeField().Get()
+	gotEffort, effortSet := request.Controls().Effort.Get()
+	if !computeSet || compute.Kind() != canonical.ReasoningAutomatic || !effortSet || gotEffort != effort {
+		t.Fatal("resolved request did not carry effective unfinished-turn compute")
 	}
 
 	unrelatedID, _ := canonical.NewToolCallID("call_other")
@@ -215,8 +212,8 @@ func TestResumeValidatesRequiredPolicyAfterRestoringUnfinishedTurnTools(t *testi
 	if err != nil {
 		t.Fatalf("Resume rejected valid restored tool environment: %v", err)
 	}
-	if len(canonicaltest.Tools(resolved.Full)) != 1 {
-		t.Fatalf("resolved tools = %#v, want restored search declaration", canonicaltest.Tools(resolved.Full))
+	if len(canonicaltest.Tools(resolved.Request())) != 1 {
+		t.Fatalf("resolved tools = %#v, want restored search declaration", canonicaltest.Tools(resolved.Request()))
 	}
 }
 
@@ -250,21 +247,6 @@ func TestBeginRejectsOrphanDiscoveryResult(t *testing.T) {
 	}
 }
 
-func TestResolvedRequestValidatesFullButNotNativeDelta(t *testing.T) {
-	full := makeRequest("m", makeItems("materialized history"), nil)
-	callID, _ := canonical.NewToolCallID("call_1")
-	orphan, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
-	delta := makeRequest("m", []canonical.CanonicalItem{orphan}, nil)
-
-	resolved, err := newResolvedRequest(full, delta, ResolvedMedia{})
-	if err != nil {
-		t.Fatalf("native delta was incorrectly subjected to full-history validation: %v", err)
-	}
-	if len(resolved.Delta.Items()) != 1 || resolved.Delta.Items()[0].Kind() != canonical.ItemKindToolResult {
-		t.Fatalf("resolved delta = %#v, want target-held-state-dependent result", resolved.Delta.Items())
-	}
-}
-
 func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) {
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	tool := canonicaltest.MustFunctionTool(key, "lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
@@ -277,7 +259,8 @@ func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) 
 		},
 	})
 	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
-	record := checkpoint("resp_previous", previousRequest, makeResponse(call), nil)
+	target := testBackendTarget(t, "m")
+	record := checkpoint("resp_previous", previousRequest, makeResponse(call), nativeResponses(target, "provider_previous"))
 	callID, _ := canonical.NewToolCallID("call_1")
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
 	current := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -288,12 +271,15 @@ func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	prelude, rest, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	prelude, rest, err := canonical.SplitRequestPrelude(resolved.Request().Items())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prelude.Items()) != 2 || len(rest) != 1 || rest[0].Kind() != canonical.ItemKindToolResult {
-		t.Fatalf("unfinished-turn delta = %#v", resolved.Delta.Items())
+	if len(prelude.Items()) != 2 || len(rest) != 3 || rest[2].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("unfinished-turn complete request = %#v", resolved.Request().Items())
+	}
+	if _, start, end, ok := resolved.ResponsesPrevious(target.TargetID, target.TargetVersion); !ok || start != 2 || end != 4 {
+		t.Fatalf("unfinished-turn Responses data = (%d, %d, %t)", start, end, ok)
 	}
 
 	completedRecord := checkpoint("resp_previous", previousRequest, makeResponse(
@@ -307,7 +293,7 @@ func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	prelude, _, err = canonical.SplitRequestPrelude(completed.Delta.Items())
+	prelude, _, err = canonical.SplitRequestPrelude(completed.Request().Items())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +337,7 @@ func TestResumeReplacesCurrentRequestContextBandsAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prelude, _, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	prelude, _, err := canonical.SplitRequestPrelude(resolved.Request().Items())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +387,7 @@ func TestResumeExplicitEmptyDirectiveDoesNotRepeatPriorDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prelude, _, err := canonical.SplitRequestPrelude(resolved.Delta.Items())
+	prelude, _, err := canonical.SplitRequestPrelude(resolved.Request().Items())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,8 +466,8 @@ func TestResumeAcceptsPartialResultsForInterleavedToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("interleaved prior response did not resume: %v", err)
 	}
-	if len(resolved.Full.Items()) != 6 {
-		t.Fatalf("materialized items = %d, want checkpoint request + full interleaved response + partial result", len(resolved.Full.Items()))
+	if len(resolved.Request().Items()) != 6 {
+		t.Fatalf("materialized items = %d, want checkpoint request + full interleaved response + partial result", len(resolved.Request().Items()))
 	}
 	_ = resultTwo
 	_ = callTwoID
@@ -510,7 +496,7 @@ func TestResumeExplicitDisabledReasoningClearsInheritedDisclosure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, present := resolved.Delta.Reasoning().DisclosureField().Get(); present {
+	if _, present := resolved.Request().Reasoning().DisclosureField().Get(); present {
 		t.Fatal("explicit disabled reasoning retained inherited disclosure")
 	}
 }
@@ -521,7 +507,7 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	semantic := prepared.Full
+	semantic := prepared.Request()
 	for name, specified := range map[string]bool{
 		"model":              semantic.ModelSpecified(),
 		"tool policy":        semantic.ToolPolicySpecified(),
@@ -530,16 +516,6 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	} {
 		if !specified {
 			t.Fatalf("effective semantic request left %s omitted", name)
-		}
-	}
-	for name, specified := range map[string]bool{
-		"model":              prepared.Delta.ModelSpecified(),
-		"tool policy":        prepared.Delta.ToolPolicySpecified(),
-		"tool-call batching": prepared.Delta.ToolCallBatchSpecified(),
-		"output format":      prepared.Delta.OutputFormatSpecified(),
-	} {
-		if specified {
-			t.Fatalf("source delta changed omitted %s into explicit empty", name)
 		}
 	}
 	explicit := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -551,12 +527,12 @@ func TestBeginMaterializesEveryDefaultBearingBand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	explicitDelta := explicitPrepared.Delta
+	explicitSemantic := explicitPrepared.Request()
 	for name, specified := range map[string]bool{
-		"model":              explicitDelta.ModelSpecified(),
-		"tool policy":        explicitDelta.ToolPolicySpecified(),
-		"tool-call batching": explicitDelta.ToolCallBatchSpecified(),
-		"output format":      explicitDelta.OutputFormatSpecified(),
+		"model":              explicitSemantic.ModelSpecified(),
+		"tool policy":        explicitSemantic.ToolPolicySpecified(),
+		"tool-call batching": explicitSemantic.ToolCallBatchSpecified(),
+		"output format":      explicitSemantic.OutputFormatSpecified(),
 	} {
 		if !specified {
 			t.Fatalf("source delta lost explicit empty %s", name)
@@ -571,14 +547,14 @@ func TestResumeMaterializesOrderedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := prepared.Full.Items()
+	items := prepared.Request().Items()
 	if len(items) != 3 || canonicalItemText(items[0]) != "turn1" || canonicalItemText(items[1]) != "assistant1" || canonicalItemText(items[2]) != "turn2" {
 		t.Fatalf("semantic history=%#v", items)
 	}
 }
 
 func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
-	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"), "", canonical.NewToolSchemaObject(mustJSONObject(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
+	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"), "", canonical.NewToolSchemaObject(canonicaltest.Object(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
 	structured, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -609,8 +585,8 @@ func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Full.Model() != "" || canonicaltest.DirectiveText(prepared.Full.Items()) != "" || len(canonicaltest.Tools(prepared.Full)) != 0 || prepared.Full.Controls().Limits.StopSequences == nil || prepared.Full.ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Full.ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Full.OutputFormat().Kind != canonical.OutputFormatText {
-		t.Fatalf("explicit clears not retained: %#v", prepared.Full)
+	if prepared.Request().Model() != "" || canonicaltest.DirectiveText(prepared.Request().Items()) != "" || len(canonicaltest.Tools(prepared.Request())) != 0 || prepared.Request().Controls().Limits.StopSequences == nil || prepared.Request().ToolPolicy().Mode != canonical.ToolPolicyNone || prepared.Request().ToolCallBatch().Mode != canonical.ToolCallBatchUnspecified || prepared.Request().OutputFormat().Kind != canonical.OutputFormatText {
+		t.Fatalf("explicit clears not retained: %#v", prepared.Request())
 	}
 }
 
@@ -626,46 +602,10 @@ func TestResumeDoesNotInheritCompletedTurnContextOrControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Full.Model() != "old" || canonicaltest.DirectiveText(prepared.Full.Items()) != "" ||
-		prepared.Full.ToolPolicySpecified() || prepared.Full.Controls().Limits.StopSequences != nil {
-		t.Fatalf("completed-turn request state was retained: %#v", prepared.Full)
+	if prepared.Request().Model() != "old" || canonicaltest.DirectiveText(prepared.Request().Items()) != "" ||
+		prepared.Request().ToolPolicySpecified() || prepared.Request().Controls().Limits.StopSequences != nil {
+		t.Fatalf("completed-turn request state was retained: %#v", prepared.Request())
 	}
-}
-
-func TestResolvedRequestUsesDeltaOnlyForApplicableNativeContinuation(t *testing.T) {
-	target := testBackendTarget(t, "gpt-4o")
-	prepared := ResolvedRequest{
-		Full:  makeRequest("gpt-4o", makeItems("turn1", "assistant1", "turn2"), nil),
-		Delta: makeRequest("gpt-4o", makeItems("turn2"), &canonical.ResponseRef{SwobuID: "resp_prev", Responses: nativeResponses(target, "provider_prev")}),
-	}
-	if got := prepared.ForTarget(target); len(got.Items()) != 1 {
-		t.Fatalf("native continuation items=%d, want delta", len(got.Items()))
-	}
-	target.TargetVersion++
-	if got := prepared.ForTarget(target); len(got.Items()) != 3 {
-		t.Fatalf("changed target items=%d, want full history", len(got.Items()))
-	}
-}
-
-func TestResumeIsDeterministicOverStoreResolvedCheckpoint(t *testing.T) {
-	record := checkpoint("resp_prev", makeRequest("m", makeItems("turn"), nil), makeResponse(), nil)
-	expired := time.Now().UTC().Add(-time.Minute)
-	record.ExpiresAt = &expired
-	if _, err := Resume(makeRequest("m", makeItems("continue"), &canonical.ResponseRef{SwobuID: "resp_prev"}), record); err != nil {
-		t.Fatalf("store-resolved checkpoint rejected: %v", err)
-	}
-	if _, err := Resume(makeRequest("m", makeItems("continue"), &canonical.ResponseRef{SwobuID: "other"}), record); err == nil {
-		t.Fatal("mismatched record accepted")
-	}
-}
-
-func mustJSONObject(t *testing.T, raw string) canonical.JSONObject {
-	t.Helper()
-	object, err := canonical.ParseJSONObject([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return object
 }
 
 func canonicalItemText(item canonical.CanonicalItem) string {

@@ -127,24 +127,33 @@ func (s *countingCheckpointStore) Get(ctx context.Context, workspace string, id 
 	return s.base.Get(ctx, workspace, id)
 }
 
-func (s *countingCheckpointStore) Put(ctx context.Context, workspace string, record session.Checkpoint) error {
-	return s.base.Put(ctx, workspace, record)
+func (s *countingCheckpointStore) IsCurrentHead(ctx context.Context, workspace string, sessionID session.ClientSessionID, checkpointID canonical.SwobuResponseID) (bool, error) {
+	return s.base.IsCurrentHead(ctx, workspace, sessionID, checkpointID)
 }
 
-func (s *countingCheckpointStore) FindByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.HistoryMatch, error) {
+func (s *countingCheckpointStore) ResolveHeadByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.Checkpoint, session.HistoryResolution, error) {
 	s.getCalls++
-	return s.base.FindByHistory(ctx, workspace, history)
+	return s.base.ResolveHeadByHistory(ctx, workspace, history)
+}
+
+func (s *countingCheckpointStore) StartSession(ctx context.Context, workspace string, record session.Checkpoint) (session.ClientSession, error) {
+	return s.base.StartSession(ctx, workspace, record)
+}
+
+func (s *countingCheckpointStore) AdvanceSession(ctx context.Context, workspace string, sessionID session.ClientSessionID, expectedHead canonical.SwobuResponseID, record session.Checkpoint) error {
+	return s.base.AdvanceSession(ctx, workspace, sessionID, expectedHead, record)
 }
 
 func reducerTestState(t *testing.T) exchangeState {
 	t.Helper()
 	return exchangeState{
 		input: exchangeInput{
-			exchangeID:     "ex_reducer",
-			clientFamily:   canonical.ClientFamilyResponses,
-			clientDelivery: delivery.BufferedDelivery(),
-			request:        testCanonicalRequest("a"),
-			workspace:      requestpathWorkspace(t),
+			exchangeID:         "ex_reducer",
+			clientFamily:       canonical.ClientFamilyResponses,
+			clientDelivery:     delivery.BufferedDelivery(),
+			request:            testCanonicalRequest("a"),
+			requestFingerprint: testHistoryRequest([]byte("reducer-request")),
+			workspace:          requestpathWorkspace(t),
 		},
 		swobuResponseID: canonical.SwobuResponseID("swobu_ex_reducer"),
 		phase:           startingPhase{},
@@ -198,7 +207,7 @@ func activeProviderAttempt(t *testing.T, state exchangeState) activeProviderExec
 
 func beginPreparedProviderCall(t *testing.T, state exchangeState) reducerOutcome {
 	t.Helper()
-	outcome, err := advanceProviderExecution(state, reducerRuntime())
+	outcome, err := advanceProviderExecution(context.Background(), state, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +511,7 @@ func TestSynchronousCompletionFailureRetriesBeforeRouteFallback(t *testing.T) {
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
-	started, err := advanceProviderExecution(s, runner)
+	started, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,23 +537,12 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	semantic := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("a"),
-		Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "complete history")},
-	})
-	delta := canonical.NewCanonicalRequest(canonical.RequestParams{
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("a"),
 		Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
-		PreviousResponse: &canonical.ResponseRef{
-			SwobuID: "swobu_resp_123",
-			Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789",
-				TargetID:           target.ID().String(),
-				TargetVersion:      uint64(target.Version()),
-			},
-		},
 	})
-	s.prepared = &session.ResolvedRequest{Full: semantic, Delta: delta}
+	prepared := mustNativeSession(t, current, target)
+	s.prepared = &prepared
 
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
@@ -625,17 +623,10 @@ func TestReducerDoesNotInferNativeReferenceFailureFromUnstructured400(t *testing
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "complete history")},
-		}),
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current delta")},
+	}), target)
+	s.prepared = &prepared
 
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
@@ -660,15 +651,8 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 		nativeTarget,
 		requestpathTarget(t, "retry-b"),
 	}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: nativeTarget.ID().String(), TargetVersion: uint64(nativeTarget.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, s.input.request, nativeTarget)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	first := activeProviderAttempt(t, started.nextState)
 	fullHistory, err := reduce(context.Background(), started.nextState, providerCallFailed{
@@ -741,15 +725,8 @@ func TestReducerOperationalRetryRetainsNativePreviousResponseOn500(t *testing.T)
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, s.input.request, target)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{attemptID: active.id,
@@ -772,15 +749,9 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()) + 1,
-			}},
-		}),
-	}
+	otherTarget := requestpathTarget(t, "native-other")
+	prepared := mustNativeSession(t, s.input.request, otherTarget)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	attempt := activeProviderAttempt(t, started.nextState)
 	if nativePreviousResponseSent(attempt.call.request) {
@@ -807,15 +778,8 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, s.input.request, target)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerIngressReceived{
@@ -950,7 +914,7 @@ func TestPreparationFailureDoesNotAllocateProviderCallAttempt(t *testing.T) {
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
 
-	outcome, err := advanceProviderExecution(s, runner)
+	outcome, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -974,39 +938,13 @@ func TestFallbackEligiblePreparationFailureSkipsCandidateWithoutConsumingAttempt
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
 
-	outcome, err := advanceProviderExecution(s, runner)
+	outcome, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	attempt := activeProviderAttempt(t, outcome.nextState)
 	if len(outcome.nextState.providerCallAttempts) != 1 || attempt.id != 1 || attempt.candidateIndex != 1 {
 		t.Fatalf("provider execution after local rejection = %#v", outcome.nextState)
-	}
-}
-
-func TestPostMaterializationCodecFailureAdvancesRoute(t *testing.T) {
-	s := reducerTestState(t)
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "incompatible-a"),
-		requestpathTarget(t, "media-b"),
-	}}
-	prepared := mustBeginSession(t, s.input.request)
-	s.prepared = &prepared
-	s.phase = materializingAttemptImagesPhase{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-		target:    provider.TargetSnapshot{TargetID: "incompatible-a"},
-	}
-	runner := withRuntime(nil)
-	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
-	outcome, err := reduce(context.Background(), s, attemptImagesMaterialized{
-		selection: providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	attempt := activeProviderAttempt(t, outcome.nextState)
-	if attempt.candidateIndex != 1 || attempt.target.TargetID != "media-b" {
-		t.Fatalf("candidate fallback = %#v", attempt.providerCallAttempt)
 	}
 }
 
@@ -1072,7 +1010,7 @@ func TestBackendResolutionMustPreserveResolvedTargetProjection(t *testing.T) {
 	runner := withRuntime(nil)
 	runner.Runtime = targetMutatingRuntime{candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}}
 
-	outcome, err := advanceProviderExecution(s, runner)
+	outcome, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,15 +1026,8 @@ func TestProviderCallRequirementsUseActualAttempt(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"),
-			PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, s.input.request, target)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	attempt := activeProviderAttempt(t, started.nextState)
 	if !attempt.nativePreviousResponse {
@@ -1108,14 +1039,8 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
-	s.prepared = &session.ResolvedRequest{
-		Full: s.input.request,
-		Delta: canonical.NewCanonicalRequest(canonical.RequestParams{
-			Model: canonical.Specify("a"), PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123", Responses: &canonical.ResponsesContinuation{
-				ProviderResponseID: "provider_resp_789", TargetID: target.ID().String(), TargetVersion: uint64(target.Version()),
-			}},
-		}),
-	}
+	prepared := mustNativeSession(t, s.input.request, target)
+	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
@@ -1341,7 +1266,7 @@ func TestFailedResponsesWebSearchLifecycleCompletesAsTypedProviderOutput(t *test
 	runner := withRuntime(nil)
 	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
 
-	started, err := advanceProviderExecution(s, runner)
+	started, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1422,10 +1347,15 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	previous := session.Checkpoint{
+		HistoryScheme: testHistoryScheme,
+		History: func() *historyfingerprint.History {
+			value := testExchangeHistoryForScheme(t, "responses/v1", "explicit-fallback")
+			return &value
+		}(),
 		Request:  canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn one")}}),
 		Response: previousResponse,
 	}
-	if err := store.Put(context.Background(), "dev", previous); err != nil {
+	if _, err := store.StartSession(context.Background(), "dev", previous); err != nil {
 		t.Fatal(err)
 	}
 	providerCalls := 0

@@ -3,28 +3,63 @@ package session
 import (
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
-// ResolvedRequest contains the complete canonical request and the current delta
-// with any exact-target native-resumption handle inherited from a checkpoint.
+// ResolvedRequest contains one complete canonical request and the optional
+// exact Responses history projection inherited from a checkpoint.
 type ResolvedRequest struct {
-	Full          canonical.CanonicalRequest
-	Delta         canonical.CanonicalRequest
-	ResolvedMedia ResolvedMedia
+	request           canonical.CanonicalRequest
+	responsesPrevious *responsesPrevious
 }
 
-// ForTarget returns the valid request representation for one exact target
-// generation. A matching native handle selects Delta; every other target
-// receives Full for full-history execution.
-func (p ResolvedRequest) ForTarget(target provider.TargetSnapshot) canonical.CanonicalRequest {
-	if previous, ok := p.Delta.PreviousResponse(); ok && previous.Responses != nil &&
-		previous.Responses.AppliesTo(target.TargetID, target.TargetVersion) {
-		return p.Delta.Clone()
+type responsesPrevious struct {
+	response  canonical.ResponseRef
+	omitItems requestItemRange
+}
+
+type requestItemRange struct {
+	start uint32
+	end   uint32
+}
+
+type materializedRequest struct {
+	request         canonical.CanonicalRequest
+	previousHistory requestItemRange
+}
+
+// Draft is transient session composition state used only while request-scoped
+// MCP preparation may still update the current prelude.
+type Draft struct {
+	current    canonical.CanonicalRequest
+	checkpoint *Checkpoint
+}
+
+func (r ResolvedRequest) Request() canonical.CanonicalRequest { return r.request.Clone() }
+func (r ResolvedRequest) HasResponsesPrevious() bool          { return r.responsesPrevious != nil }
+
+// AppendLocalRound returns a new complete request after one Swobu-executed MCP
+// round. The local round is not represented by any prior provider response, so
+// reusable Responses continuation state is intentionally cleared.
+func (r ResolvedRequest) AppendLocalRound(responseItems, resultItems []canonical.CanonicalItem) (ResolvedRequest, error) {
+	items := r.request.Items()
+	items = append(items, cloneCanonicalItems(responseItems)...)
+	items = append(items, cloneCanonicalItems(resultItems)...)
+	return newResolvedRequest(r.request.WithItems(items), nil)
+}
+
+// ResponsesPrevious returns exact provider lowering data only for the target
+// generation that produced the reusable OpenAI Responses state.
+func (r ResolvedRequest) ResponsesPrevious(targetID string, targetVersion uint64) (canonical.ResponsesResponseID, uint32, uint32, bool) {
+	previous := r.responsesPrevious
+	if previous == nil || previous.response.Responses == nil ||
+		!previous.response.Responses.AppliesTo(targetID, targetVersion) {
+		return "", 0, 0, false
 	}
-	return p.Full.Clone()
+	return previous.response.Responses.ProviderResponseID, previous.omitItems.start, previous.omitItems.end, true
 }
 
 // PreviousSwobuResponseID returns the explicit workspace-local checkpoint key
@@ -43,87 +78,129 @@ func PreviousSwobuResponseID(request canonical.CanonicalRequest) (canonical.Swob
 // Begin resolves a request that has no predecessor checkpoint. A request that
 // names one belongs on the Resume path and is rejected as an orchestration bug.
 func Begin(request canonical.CanonicalRequest) (ResolvedRequest, error) {
-	if _, ok := request.PreviousResponse(); ok {
-		return ResolvedRequest{}, errors.New("session begin request contains previous response")
-	}
-	complete, err := withoutPreviousResponse(request)
+	draft, err := PrepareBegin(request)
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	current := requestWithoutPreviousResponse(request)
-	return newResolvedRequest(complete, current, ResolvedMedia{})
+	return draft.Finalize(draft.Current())
 }
 
 // Resume applies request to one already-loaded immutable checkpoint. The
 // request and checkpoint response are the two identity sources; equality is
 // proven here once and no store access occurs.
 func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (ResolvedRequest, error) {
-	requestedSwobuResponseID, found, err := PreviousSwobuResponseID(request)
+	draft, err := PrepareResume(request, checkpoint)
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	if !found {
-		return ResolvedRequest{}, canonical.BadRequest("unknown previous_response_id")
+	return draft.Finalize(draft.Current())
+}
+
+// PrepareBegin validates and exposes one current invocation before its
+// request-scoped MCP context is finalized.
+func PrepareBegin(request canonical.CanonicalRequest) (Draft, error) {
+	if _, ok := request.PreviousResponse(); ok {
+		return Draft{}, errors.New("session begin request contains previous response")
+	}
+	current, err := materializeBeginRequest(request)
+	if err != nil {
+		return Draft{}, err
+	}
+	if err := canonical.ValidateMaterializedRequest(current); err != nil {
+		return Draft{}, err
+	}
+	return Draft{current: current.Clone()}, nil
+}
+
+func materializeBeginRequest(request canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+	toolPolicy, err := request.EffectiveToolPolicy()
+	if err != nil {
+		return canonical.CanonicalRequest{}, err
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:         canonical.Specify(request.Model()),
+		Items:         cloneCanonicalItems(request.Items()),
+		ToolPolicy:    canonical.Specify(toolPolicy),
+		ToolCallBatch: canonical.Specify(request.ToolCallBatch()),
+		Controls:      request.Controls(),
+		Reasoning:     request.Reasoning(),
+		OutputFormat:  canonical.Specify(request.OutputFormat()),
+		Responses:     request.Responses(),
+	}), nil
+}
+
+// PrepareResume validates checkpoint identity and restores unfinished-turn
+// state before request-scoped MCP preparation.
+func PrepareResume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Draft, error) {
+	requestedSwobuResponseID, hasExplicit, err := PreviousSwobuResponseID(request)
+	if err != nil {
+		return Draft{}, err
 	}
 	response := checkpoint.Response.Response()
 	if err := response.ValidateCommittedResponse(); err != nil {
-		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint response reference: %w", err)
+		return Draft{}, fmt.Errorf("invalid session checkpoint response reference: %w", err)
 	}
-	if response.SwobuID != requestedSwobuResponseID {
-		return ResolvedRequest{}, canonical.BadRequest("unknown previous_response_id")
+	if hasExplicit && response.SwobuID != requestedSwobuResponseID {
+		return Draft{}, canonical.BadRequest("unknown previous_response_id")
 	}
-	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
-		return ResolvedRequest{}, fmt.Errorf("invalid session checkpoint media: %w", err)
-	}
-	effective, err := resolveTurnContinuation(checkpoint, request)
+	current, err := withoutPreviousResponse(request)
 	if err != nil {
-		return ResolvedRequest{}, err
+		return Draft{}, err
 	}
-	full, err := materialize(checkpoint, effective)
+	effective, err := resolveTurnContinuation(checkpoint, current)
 	if err != nil {
-		return ResolvedRequest{}, err
+		return Draft{}, err
 	}
-	return newResolvedRequest(full, nativeDelta(checkpoint.Request, effective, &response), checkpoint.ResolvedMedia)
+	cloned := checkpoint.Clone()
+	return Draft{current: effective.Clone(), checkpoint: &cloned}, nil
 }
 
-// ResumeHistory uses the complete supplied request only as the history value
-// whose fingerprint selected checkpoint. After that identity proof, checkpoint
-// canonical truth is authoritative: materialization restores hidden opaque thinking
-// that no client projection was allowed to carry.
-func ResumeHistory(complete canonical.CanonicalRequest, rebased canonical.CanonicalRequest, checkpoint Checkpoint) (ResolvedRequest, error) {
-	if _, ok := complete.PreviousResponse(); ok {
-		return ResolvedRequest{}, errors.New("implicit history request contains explicit previous response")
+// Current returns the invocation-local request that MCP may prepare.
+func (d Draft) Current() canonical.CanonicalRequest { return d.current.Clone() }
+
+// Finalize freezes one resolved request after proving that preparation changed
+// only the request-scoped prelude and preserved the current history verbatim.
+func (d Draft) Finalize(prepared canonical.CanonicalRequest) (ResolvedRequest, error) {
+	if _, ok := prepared.PreviousResponse(); ok {
+		return ResolvedRequest{}, errors.New("prepared current request contains previous response")
 	}
-	if _, ok := rebased.PreviousResponse(); ok {
-		return ResolvedRequest{}, errors.New("rebased history request contains explicit previous response")
+	_, originalHistory, err := canonical.SplitRequestPrelude(d.current.Items())
+	if err != nil {
+		return ResolvedRequest{}, fmt.Errorf("session draft current request is invalid: %w", err)
 	}
-	response := checkpoint.Response.Response()
-	if err := response.ValidateCommittedResponse(); err != nil {
-		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint response reference: %w", err)
+	_, preparedHistory, err := canonical.SplitRequestPrelude(prepared.Items())
+	if err != nil {
+		return ResolvedRequest{}, fmt.Errorf("prepared request-scoped context must precede history: %w", err)
 	}
-	if err := checkpoint.ResolvedMedia.ValidateForRequest(checkpoint.Request); err != nil {
-		return ResolvedRequest{}, fmt.Errorf("invalid history checkpoint media: %w", err)
+	if !reflect.DeepEqual(originalHistory, preparedHistory) {
+		return ResolvedRequest{}, errors.New("request-scoped preparation rewrote current history")
 	}
-	effective, err := resolveTurnContinuation(checkpoint, rebased)
+	if !reflect.DeepEqual(d.current.WithItems(prepared.Items()), prepared) {
+		return ResolvedRequest{}, errors.New("request-scoped preparation changed non-item request state")
+	}
+	if d.checkpoint == nil {
+		return newResolvedRequest(prepared, nil)
+	}
+	materialized, err := materialize(*d.checkpoint, prepared)
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	full, err := materialize(checkpoint, effective)
-	if err != nil {
-		return ResolvedRequest{}, err
-	}
-	return newResolvedRequest(full, nativeDelta(checkpoint.Request, effective, &response), checkpoint.ResolvedMedia)
+	return newResolvedRequest(materialized.request, newResponsesPrevious(d.checkpoint.Response.Response(), materialized.previousHistory))
 }
 
-// newResolvedRequest validates only the fully materialized request. Delta may
-// intentionally omit state retained behind an exact provider continuation
-// handle, so applying full-history invariants to it would reject valid native
-// resumptions.
-func newResolvedRequest(full, delta canonical.CanonicalRequest, media ResolvedMedia) (ResolvedRequest, error) {
-	if err := canonical.ValidateMaterializedRequest(full); err != nil {
+func newResolvedRequest(request canonical.CanonicalRequest, previous *responsesPrevious) (ResolvedRequest, error) {
+	if _, ok := request.PreviousResponse(); ok {
+		return ResolvedRequest{}, errors.New("resolved complete request contains previous response")
+	}
+	if err := canonical.ValidateMaterializedRequest(request); err != nil {
 		return ResolvedRequest{}, err
 	}
-	return ResolvedRequest{Full: full, Delta: delta, ResolvedMedia: media.Clone()}, nil
+	if previous != nil {
+		if err := previous.validateFor(request); err != nil {
+			return ResolvedRequest{}, err
+		}
+	}
+	return ResolvedRequest{request: request.Clone(), responsesPrevious: cloneResponsesPrevious(previous)}, nil
 }
 
 // resolveTurnContinuation validates tool-result correlation and writes the
@@ -274,23 +351,6 @@ func replaceComputeControls(request canonical.CanonicalRequest, controls canonic
 }
 
 func withoutPreviousResponse(request canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
-	toolPolicy, err := request.EffectiveToolPolicy()
-	if err != nil {
-		return canonical.CanonicalRequest{}, err
-	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:         canonical.Specify(request.Model()),
-		Items:         cloneCanonicalItems(request.Items()),
-		ToolPolicy:    canonical.Specify(toolPolicy),
-		ToolCallBatch: canonical.Specify(request.ToolCallBatch()),
-		Controls:      request.Controls(),
-		Reasoning:     request.Reasoning(),
-		OutputFormat:  canonical.Specify(request.OutputFormat()),
-		Responses:     request.Responses(),
-	}), nil
-}
-
-func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonical.CanonicalRequest {
 	return canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         request.ModelField(),
 		Items:         cloneCanonicalItems(request.Items()),
@@ -300,34 +360,28 @@ func requestWithoutPreviousResponse(request canonical.CanonicalRequest) canonica
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  request.OutputFormatField(),
 		Responses:     request.Responses(),
-	})
+	}), nil
 }
 
-func nativeDelta(previous canonical.CanonicalRequest, current canonical.CanonicalRequest, previousResponse *canonical.ResponseRef) canonical.CanonicalRequest {
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:            canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Model())),
-		Items:            cloneCanonicalItems(current.Items()),
-		PreviousResponse: previousResponse,
-		ToolPolicy:       current.ToolPolicyField(),
-		ToolCallBatch:    current.ToolCallBatchField(),
-		Controls:         current.Controls(),
-		Reasoning:        current.Reasoning(),
-		OutputFormat:     current.OutputFormatField(),
-		Responses:        current.Responses(),
-	})
-}
-
-func materialize(previous Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
+func materialize(previous Checkpoint, current canonical.CanonicalRequest) (materializedRequest, error) {
 	prelude, currentHistory, err := canonical.SplitRequestPrelude(current.Items())
 	if err != nil {
-		return canonical.CanonicalRequest{}, canonical.BadRequest("request-scoped context must precede history")
+		return materializedRequest{}, canonical.BadRequest("request-scoped context must precede history")
 	}
 	items := prelude.Items()
+	start, err := checkedRequestItemIndex(len(items))
+	if err != nil {
+		return materializedRequest{}, err
+	}
 	items = append(items, canonical.RetainedHistory(previous.Request.Items())...)
 	items = append(items, cloneCanonicalItems(previous.Response.Items())...)
+	end, err := checkedRequestItemIndex(len(items))
+	if err != nil {
+		return materializedRequest{}, err
+	}
 	items = append(items, currentHistory...)
 
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:         canonical.Specify(inheritString(current.ModelSpecified(), current.Model(), previous.Request.Model())),
 		Items:         items,
 		ToolPolicy:    current.ToolPolicyField(),
@@ -336,7 +390,47 @@ func materialize(previous Checkpoint, current canonical.CanonicalRequest) (canon
 		Reasoning:     current.Reasoning(),
 		OutputFormat:  current.OutputFormatField(),
 		Responses:     current.Responses(),
-	}), nil
+	})
+	return materializedRequest{request: request, previousHistory: requestItemRange{start: start, end: end}}, nil
+}
+
+func checkedRequestItemIndex(value int) (uint32, error) {
+	if value < 0 || uint64(value) > math.MaxUint32 {
+		return 0, errors.New("resolved request item count exceeds coordinate range")
+	}
+	return uint32(value), nil
+}
+
+func newResponsesPrevious(response canonical.ResponseRef, replacedHistory requestItemRange) *responsesPrevious {
+	if response.Responses == nil {
+		return nil
+	}
+	return &responsesPrevious{response: response.Clone(), omitItems: replacedHistory}
+}
+
+func cloneResponsesPrevious(previous *responsesPrevious) *responsesPrevious {
+	if previous == nil {
+		return nil
+	}
+	return &responsesPrevious{response: previous.response.Clone(), omitItems: previous.omitItems}
+}
+
+func (p responsesPrevious) validateFor(request canonical.CanonicalRequest) error {
+	if p.response.Responses == nil {
+		return errors.New("responses previous relation is missing provider continuation")
+	}
+	items := request.Items()
+	if p.omitItems.start > p.omitItems.end || uint64(p.omitItems.end) > uint64(len(items)) {
+		return errors.New("responses previous history range is invalid")
+	}
+	prelude, _, err := canonical.SplitRequestPrelude(items)
+	if err != nil {
+		return fmt.Errorf("resolved request prelude is invalid: %w", err)
+	}
+	if uint32(len(prelude.Items())) != p.omitItems.start {
+		return errors.New("responses previous history range does not follow request prelude")
+	}
+	return nil
 }
 
 func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalItem {

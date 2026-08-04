@@ -8,64 +8,38 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
-// ErrCheckpointExists reports that Put was asked to overwrite an immutable
-// checkpoint under the same workspace-scoped response ID.
-var ErrCheckpointExists = errors.New("session checkpoint already exists")
-
-// HistoryMatch is the closed result of one exact visible-history lookup.
-// Ambiguous is deliberately distinct from missing: an indistinguishable
-// visible projection must never select arbitrary hidden checkpoint state.
-type HistoryMatch struct {
-	kind       historyMatchKind
-	checkpoint Checkpoint
-}
-
-type historyMatchKind uint8
-
-const (
-	historyMatchMissing historyMatchKind = iota + 1
-	historyMatchUnique
-	historyMatchAmbiguous
+var (
+	ErrCheckpointExists      = errors.New("session checkpoint already exists")
+	ErrSessionExists         = errors.New("client session already exists")
+	ErrStaleSessionHead      = errors.New("client session head changed")
+	ErrSessionSchemeMismatch = errors.New("client session codec scheme changed")
 )
 
-func MissingHistoryMatch() HistoryMatch { return HistoryMatch{kind: historyMatchMissing} }
+// ClientSessionID is one process-local client history lineage.
+type ClientSessionID string
 
-func UniqueHistoryMatch(checkpoint Checkpoint) HistoryMatch {
-	cloned := checkpoint.Clone()
-	return HistoryMatch{kind: historyMatchUnique, checkpoint: cloned}
+// ClientSession records the current checkpoint head for one codec scheme.
+type ClientSession struct {
+	ID     ClientSessionID
+	Scheme historyfingerprint.Scheme
+	Head   canonical.SwobuResponseID
 }
 
-func AmbiguousHistoryMatch() HistoryMatch { return HistoryMatch{kind: historyMatchAmbiguous} }
+// HistoryResolution is the closed result of exact current-head lookup.
+type HistoryResolution uint8
 
-func (m HistoryMatch) IsMissing() bool {
-	return m.kind == historyMatchMissing
-}
+const (
+	HistoryNotFound HistoryResolution = iota
+	HistoryUniqueHead
+	HistoryAmbiguous
+)
 
-func (m HistoryMatch) IsAmbiguous() bool {
-	return m.kind == historyMatchAmbiguous
-}
-
-func (m HistoryMatch) Unique() (Checkpoint, bool) {
-	if m.kind != historyMatchUnique {
-		return Checkpoint{}, false
-	}
-	return m.checkpoint.Clone(), true
-}
-
-// Store retains immutable self-contained checkpoints in workspace-slug
-// partitions. It exposes no ancestor or chain operation because each response
-// ID resolves independently. The
-// caller supplies the validated slug resolved from the request URL; the store
-// owns no caller identity, mutable session head, or generic namespace.
+// Store retains immutable checkpoints and one atomic current head per session
+// lineage inside workspace partitions.
 type Store interface {
-	// Get returns one unexpired checkpoint by workspace slug and response ID.
-	// Expired checkpoints are never returned; the bool indicates whether an
-	// available checkpoint was found.
-	Get(ctx context.Context, workspaceSlug string, id canonical.SwobuResponseID) (Checkpoint, bool, error)
-	// FindByHistory performs one exact workspace-local secondary-index lookup.
-	// It never searches prefixes, ancestors, or canonical history, and it never
-	// chooses among checkpoints with indistinguishable visible histories.
-	FindByHistory(ctx context.Context, workspaceSlug string, history historyfingerprint.History) (HistoryMatch, error)
-	// Put writes one immutable checkpoint. Duplicate response IDs are rejected.
-	Put(ctx context.Context, workspaceSlug string, checkpoint Checkpoint) error
+	Get(context.Context, string, canonical.SwobuResponseID) (Checkpoint, bool, error)
+	IsCurrentHead(context.Context, string, ClientSessionID, canonical.SwobuResponseID) (bool, error)
+	ResolveHeadByHistory(context.Context, string, historyfingerprint.History) (Checkpoint, HistoryResolution, error)
+	StartSession(context.Context, string, Checkpoint) (ClientSession, error)
+	AdvanceSession(context.Context, string, ClientSessionID, canonical.SwobuResponseID, Checkpoint) error
 }

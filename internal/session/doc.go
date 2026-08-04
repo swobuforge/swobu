@@ -1,38 +1,35 @@
-// Package session owns immutable state required to resume a logical model
-// session across independent requests.
+// Package session owns immutable canonical checkpoints and linear client-session
+// heads used to resume one logical model session across independent requests.
 //
-// Each successfully client-encoded completed response must commit one
-// self-contained checkpoint keyed by its Swobu response ID and partitioned by
-// workspace. The checkpoint retains the complete effective request, canonical
-// response, and occurrence-bound resolved media. It has no parent chain,
-// request-delta graph, lifecycle status, or provider sidecar. Client wire storage hints
-// cannot suppress this correctness state: provider-specific opaque thinking and
-// resolved media may be absent from the client projection but required by a
-// later continuation. An optional opaque
-// client-history fingerprint provides one exact secondary lookup. Resolution
-// materializes canonical checkpoint truth plus the codec-rebased current
-// invocation, restoring opaque thinking hidden from client projection. It may also
-// build a native-resumption delta when the matched checkpoint contains a valid
-// exact-target provider handle. Reasoning controls and effort normally remain
-// local to each invocation. When matching tool results continue an unfinished
-// assistant turn, omitted compute and effort are resolved from the
-// checkpoint request directly into the effective Full and Delta requests, and
-// missing request-scoped directives and declarations are repeated without
-// becoming history. They expire once the turn completes. Explicit compute or
-// effort conflicts reject. Partial result batches are legal, while duplicate
-// or foreign call IDs are malformed continuations.
+// Each successfully client-encoded completed response commits one self-contained
+// checkpoint partitioned by workspace. A checkpoint retains one complete
+// effective canonical request, its canonical response, a mandatory immutable
+// codec scheme, an optional visible-history fingerprint for implicit lookup,
+// and the internal session lineage it advances. A current head without a
+// fingerprint remains explicitly resumable and unindexed. Only current heads
+// with fingerprints participate in implicit lookup; older retained checkpoints
+// remain available only by explicit Swobu response ID. Head advancement is
+// atomic compare-and-swap and rejects codec-scheme changes, so one lineage
+// cannot silently branch or change client history grammar.
+//
+// Resolution receives either one complete genesis request or one codec-rebased
+// current invocation plus an already selected checkpoint. It never receives a
+// full replay witness together with the current invocation and never compares
+// canonical prefixes. Resume restores opaque checkpoint history, unfinished
+// tool-turn context, and records the exact complete-request item range that an
+// applicable OpenAI Responses previous_response_id may replace. The resolved
+// request remains complete and immutable; provider lowering data is derived
+// separately for the exact target generation that produced it.
+//
+// Request-scoped MCP preparation occurs through a transient Draft before the
+// resolved request is frozen. Local MCP rounds append one explicit complete
+// history segment and clear prior provider continuation state.
 //
 // Checkpoints are a bounded process-local recent window. Expiry, reclamation,
-// and daemon restart forget them; this package does not promise restart-safe
-// persistence. An unresolved Swobu response ID is never reinterpreted as an
-// external provider-native selector.
+// and daemon restart forget them. Fetched media bytes are execution artifacts
+// and never enter session, checkpoint, or history-fingerprint state.
 //
-// Checkpoints also retain validated external-media bytes bound to exact
-// canonical request occurrences, so resumed execution never depends on
-// refetching mutable URLs.
-//
-// Package session does not own history fingerprint composition, protocol DTO
-// interpretation, client stream lifecycle, routing, provider selection,
-// response-ID allocation, mutable session heads, authentication, or transport
-// encoding.
+// Package session does not own client protocol DTOs, fingerprint composition,
+// routing, provider selection, image fetching, response-ID allocation,
+// authentication, transport encoding, or client stream lifecycle.
 package session

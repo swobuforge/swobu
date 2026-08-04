@@ -42,7 +42,7 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 	store := session.NewMemoryStore()
 	committer := &checkpointCommitter{
 		exchangeID: "gate_order", workspaceSlug: "alpha", store: store,
-		request: testCanonicalRequest("m"),
+		request: testCanonicalRequest("m"), historyScheme: testHistoryScheme,
 	}
 	stream := newCheckpointTerminalGate(
 		capture,
@@ -62,7 +62,7 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 	if err != nil || !found {
 		t.Fatalf("checkpoint at finish publication = (%t, %v), want addressable", found, err)
 	}
-	if record.HistoryFingerprint != nil {
-		t.Fatalf("optional history fingerprint = %#v, want absent", record.HistoryFingerprint)
+	if record.History != nil {
+		t.Fatalf("optional history fingerprint = %#v, want absent", record.History)
 	}
 }

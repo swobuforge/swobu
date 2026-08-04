@@ -43,15 +43,26 @@ func (failingCheckpointStore) Get(context.Context, string, canonical.SwobuRespon
 	return session.Checkpoint{}, false, nil
 }
 
-func (s failingCheckpointStore) Put(context.Context, string, session.Checkpoint) error {
+func (s failingCheckpointStore) StartSession(context.Context, string, session.Checkpoint) (session.ClientSession, error) {
+	if s.puts != nil {
+		*s.puts++
+	}
+	return session.ClientSession{}, errors.New("forced checkpoint store failure at /private/checkpoints")
+}
+
+func (failingCheckpointStore) IsCurrentHead(context.Context, string, session.ClientSessionID, canonical.SwobuResponseID) (bool, error) {
+	return false, nil
+}
+
+func (failingCheckpointStore) ResolveHeadByHistory(context.Context, string, historyfingerprint.History) (session.Checkpoint, session.HistoryResolution, error) {
+	return session.Checkpoint{}, session.HistoryNotFound, nil
+}
+
+func (s failingCheckpointStore) AdvanceSession(context.Context, string, session.ClientSessionID, canonical.SwobuResponseID, session.Checkpoint) error {
 	if s.puts != nil {
 		*s.puts++
 	}
 	return errors.New("forced checkpoint store failure at /private/checkpoints")
-}
-
-func (failingCheckpointStore) FindByHistory(context.Context, string, historyfingerprint.History) (session.HistoryMatch, error) {
-	return session.MissingHistoryMatch(), nil
 }
 
 // TestRunner_SwobuResponseIDReplacesProviderID proves that when the exchange

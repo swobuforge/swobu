@@ -18,6 +18,9 @@ import (
 
 func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	first := decodeChatFingerprintRequest(t, `{"model":"m","messages":[{"role":"user","content":"hello"}]}`)
+	if first.RequestFingerprint.Scheme() != fingerprintScheme {
+		t.Fatalf("request scheme = %q, want %q", first.RequestFingerprint.Scheme(), fingerprintScheme)
+	}
 	if first.RebasedRequest != nil {
 		t.Fatalf("first rebased request = %#v, want nil", first.RebasedRequest)
 	}
@@ -30,6 +33,9 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 	if encoded.ResponseFingerprint == nil {
 		t.Fatal("buffered response fingerprint is nil")
+	}
+	if encoded.ResponseFingerprint.Scheme() != fingerprintScheme {
+		t.Fatalf("response scheme = %q, want %q", encoded.ResponseFingerprint.Scheme(), fingerprintScheme)
 	}
 	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
 	if err != nil {
@@ -56,6 +62,66 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	changedCurrent := decodeChatFingerprintRequest(t, `{"model":"m","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"},{"role":"user","content":"different"}]}`)
 	if changedCurrent.RequestFingerprint == second.RequestFingerprint {
 		t.Fatal("changed current input did not change request fingerprint")
+	}
+}
+
+func TestHistoryFingerprintExcludesCurrentLeadingContext(t *testing.T) {
+	first := decodeChatFingerprintRequest(t, `{
+		"model":"m",
+		"tools":[{"type":"function","function":{"name":"first_tool","parameters":{"type":"object"}}}],
+		"messages":[
+			{"role":"system","content":"system A"},
+			{"role":"developer","content":"developer A"},
+			{"role":"user","content":"hello"}
+		]}`)
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{
+		canonicaltest.Message(t, canonical.MessageRoleAssistant, "hi"),
+	}, canonical.Completed("stop"))
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeChatFingerprintRequest(t, `{
+		"model":"different",
+		"tools":[{"type":"function","function":{"name":"second_tool","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],
+		"messages":[
+			{"role":"system","content":"system B"},
+			{"role":"developer","content":"developer B"},
+			{"role":"user","content":"hello"},
+			{"role":"assistant","content":"hi"},
+			{"role":"user","content":"again"}
+		]}`)
+	if second.RebasedRequest == nil || second.RebasedRequest.Previous != wantPrevious {
+		t.Fatalf("changed context predecessor = %#v, want %#v", second.RebasedRequest, wantPrevious)
+	}
+	items := second.RebasedRequest.Request.Items()
+	if len(items) < 4 || canonicaltest.DirectiveText(items) == "" || len(canonicaltest.Tools(second.RebasedRequest.Request)) != 1 {
+		t.Fatalf("rebased current context was not retained: %#v", second.RebasedRequest.Request)
+	}
+	withoutContext := decodeChatFingerprintRequest(t, `{
+		"model":"different",
+		"messages":[
+			{"role":"user","content":"hello"},
+			{"role":"assistant","content":"hi"},
+			{"role":"user","content":"again"}
+		]}`)
+	if withoutContext.RebasedRequest == nil || withoutContext.RebasedRequest.Previous != wantPrevious {
+		t.Fatalf("removed context predecessor = %#v, want %#v", withoutContext.RebasedRequest, wantPrevious)
+	}
+	mutated := decodeChatFingerprintRequest(t, `{
+		"model":"m",
+		"messages":[
+			{"role":"system","content":"system B"},
+			{"role":"user","content":"changed"},
+			{"role":"assistant","content":"hi"},
+			{"role":"user","content":"again"}
+		]}`)
+	if mutated.RebasedRequest == nil || mutated.RebasedRequest.Previous == wantPrevious {
+		t.Fatal("historical conversation mutation retained predecessor")
 	}
 }
 

@@ -12,7 +12,7 @@ func TestResponseCompletionIsWriteOnceAndNonBlocking(t *testing.T) {
 	if got := observation.Snapshot(); got.State != CompletionPending {
 		t.Fatalf("initial state = %v, want pending", got.State)
 	}
-	fingerprint, err := historyfingerprint.FingerprintResponse("responses", []byte("response"))
+	fingerprint, err := historyfingerprint.FingerprintResponse("responses/v1", []byte("response"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestResponseCompletionFailureCarriesNoFingerprint(t *testing.T) {
 	cell, complete, fail := NewResponseCompletion()
 	want := errors.New("encode failed")
 	fail(want)
-	fingerprint, err := historyfingerprint.FingerprintResponse("responses", []byte("late"))
+	fingerprint, err := historyfingerprint.FingerprintResponse("responses/v1", []byte("late"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,9 @@
 package historyfingerprint
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestOrderedHistoryComposition(t *testing.T) {
 	request := mustRequest(t, "responses", "request")
@@ -48,6 +51,34 @@ func TestHistoryFingerprintRejectsInvalidConstruction(t *testing.T) {
 	}
 	if _, err := Advance(nil, Request{}, matchingResponse); err == nil {
 		t.Fatal("zero request was accepted")
+	}
+}
+
+func TestFrameJSONValueIsSemanticAndTypePreserving(t *testing.T) {
+	first, err := FrameJSONValue([]byte(` { "b": [true, null], "a": "1" } `))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reordered, err := FrameJSONValue([]byte(`{"a":"1","b":[true,null]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, reordered) {
+		t.Fatal("object order or whitespace changed semantic framing")
+	}
+	number, err := FrameJSONValue([]byte(`1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := FrameJSONValue([]byte(`"1"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(number, text) {
+		t.Fatal("number and string received the same semantic framing")
+	}
+	if _, err := FrameJSONValue([]byte(`null true`)); err == nil {
+		t.Fatal("multiple JSON values were accepted")
 	}
 }
 

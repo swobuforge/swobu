@@ -37,7 +37,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical, ToolNames: req.ToolNames, MCPAccess: req.MCPAccess}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, ResponsesPrevious: req.ResponsesPrevious, ToolNames: req.ToolNames, MCPAccess: req.MCPAccess}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:

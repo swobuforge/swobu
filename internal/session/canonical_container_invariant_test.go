@@ -23,11 +23,13 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"HistoryFingerprint", "Request", "Response", "ResolvedMedia", "CreatedAt", "ExpiresAt"})
-	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"Full", "Delta", "ResolvedMedia"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"ID", "SessionID", "HistoryScheme", "History", "Request", "Response", "CreatedAt", "ExpiresAt"})
+	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "responsesPrevious"})
+	assertFields("responsesPrevious", reflect.TypeOf(responsesPrevious{}), []string{"response", "omitItems"})
+	assertFields("requestItemRange", reflect.TypeOf(requestItemRange{}), []string{"start", "end"})
 
 	store := reflect.TypeOf((*Store)(nil)).Elem()
-	wantMethods := []string{"FindByHistory", "Get", "Put"}
+	wantMethods := []string{"AdvanceSession", "Get", "IsCurrentHead", "ResolveHeadByHistory", "StartSession"}
 	if store.NumMethod() != len(wantMethods) {
 		t.Fatalf("Store has %d methods, want %d", store.NumMethod(), len(wantMethods))
 	}
@@ -72,6 +74,17 @@ func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 		"ParentContinuation",
 		"ContinuationChain",
 		"Chain(ctx",
+		"nativeDelta",
+		"rebaseAttemptMedia",
+		"historicalMediaForAttempt",
+		"ShiftItems(",
+		"ResumeHistory",
+		"FindByHistory",
+		"ResolvedMedia",
+		"HistoricalMedia",
+		"ResolveMedia",
+		"WithSameItemLayout",
+		"ReplaceWithFullHistory",
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {

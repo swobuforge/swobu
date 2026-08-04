@@ -50,9 +50,10 @@ type customToolCallItem struct {
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
 // package does not import wire.
 type EncodeInput struct {
-	Request   canonical.CanonicalRequest
-	ToolNames wire.ToolNames
-	Access    mcp.Access
+	Request           canonical.CanonicalRequest
+	ResponsesPrevious *provider.ResponsesPrevious
+	ToolNames         wire.ToolNames
+	Access            mcp.Access
 }
 
 // ProviderRequestDocument is the typed official Responses request before an
@@ -107,18 +108,18 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		return ProviderRequestDocument{}, err
 	}
 	requestTools := requestEnvironment.Declarations()
-	previous, hasPrevious := req.PreviousResponse()
-	responsesRefined := false
-	if hasPrevious {
-		if previous.Responses == nil {
-			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding requires a native previous response refinement")
+	responsesRefined := input.ResponsesPrevious != nil
+	inputRequest := req
+	if previous := input.ResponsesPrevious; previous != nil {
+		if previous.ProviderResponseID.String() == "" || previous.OmitStart > previous.OmitEnd || uint64(previous.OmitEnd) > uint64(len(items)) {
+			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding received invalid previous-response data")
 		}
-		if err := previous.Responses.ValidateBound(); err != nil {
-			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding received an invalid native previous response refinement: %w", err)
-		}
-		responsesRefined = true
+		projected := make([]canonical.CanonicalItem, 0, len(items)-int(previous.OmitEnd-previous.OmitStart))
+		projected = append(projected, items[:previous.OmitStart]...)
+		projected = append(projected, items[previous.OmitEnd:]...)
+		inputRequest = req.WithItems(projected)
 	}
-	payloadInput, err := encodeInput(req, input.ToolNames, input.Access, changeLog, exchangeID)
+	payloadInput, err := encodeInput(inputRequest, input.ToolNames, input.Access, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -194,7 +195,7 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
 	if responsesRefined {
-		payload["previous_response_id"] = previous.Responses.ProviderResponseID
+		payload["previous_response_id"] = input.ResponsesPrevious.ProviderResponseID
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -332,9 +333,6 @@ func responsesWireToolChoiceShape(choice any) string {
 
 func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	items := req.Items()
-	if previous, ok := req.PreviousResponse(); ok && previous.Responses != nil && !hasResumptionInput(items) { // swobu:io-string source=boundary
-		return nil, nil
-	}
 	_, history, err := canonical.SplitRequestPrelude(items)
 	if err != nil {
 		return nil, err
@@ -629,7 +627,8 @@ func contentResultKindsByOccurrence(items []canonical.CanonicalItem) (map[canoni
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
 			// A native continuation contribution may contain only the result;
-			// its call kind remains behind the provider handle. The encoder
+			// its call kind remains behind the OpenAI Responses provider response
+			// ID used as previous_response_id. The encoder
 			// preserves Responses' portable function-result default below.
 			if _, resultOnly := item.ToolResult(); resultOnly {
 				continue

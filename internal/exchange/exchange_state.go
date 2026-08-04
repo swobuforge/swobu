@@ -23,6 +23,7 @@ import (
 type exchangeState struct {
 	input                   exchangeInput
 	swobuResponseID         canonical.SwobuResponseID
+	draft                   *session.Draft
 	prepared                *session.ResolvedRequest
 	mediaFetchCache         mediaFetchCache
 	route                   routePlan
@@ -30,6 +31,8 @@ type exchangeState struct {
 	evaluatedCandidateCount int
 	phase                   phase
 	advance                 *historyAdvance
+	sessionID               session.ClientSessionID
+	expectedHead            canonical.SwobuResponseID
 	mcp                     *mcp.Run
 	providerUsage           []canonical.TokenUsage
 	effectiveChanges        []compat.Change
@@ -86,20 +89,14 @@ type loadingCheckpointPhase struct {
 	explicit  bool
 	reference canonical.SwobuResponseID
 	history   historyfingerprint.History
+	scheme    historyfingerprint.Scheme
 }
 
 func (loadingCheckpointPhase) isPhase() {}
 
-type materializingAttemptImagesPhase struct {
-	selection providerCallSelection
-	target    provider.TargetSnapshot
-}
-
 type preparingMCPPhase struct{}
 
 func (preparingMCPPhase) isPhase() {}
-
-func (materializingAttemptImagesPhase) isPhase() {}
 
 type callingProviderPhase struct {
 	attemptID providerCallAttemptID
@@ -141,20 +138,13 @@ type exchangeStarted struct{}
 func (exchangeStarted) isExchangeEvent() {}
 
 type checkpointLoaded struct {
-	match session.HistoryMatch
-	err   error
+	record     session.Checkpoint
+	resolution session.HistoryResolution
+	current    bool
+	err        error
 }
 
 func (checkpointLoaded) isExchangeEvent() {}
-
-type attemptImagesMaterialized struct {
-	selection  providerCallSelection
-	request    canonical.CanonicalRequest
-	changes    []compat.Change
-	fetchCache mediaFetchCache
-	usedMedia  session.ResolvedMedia
-	err        error
-}
 
 type mcpPrepared struct {
 	full    canonical.CanonicalRequest
@@ -168,8 +158,6 @@ func (mcpPrepared) isExchangeEvent() {}
 type mcpBatchStarted struct{ err error }
 
 func (mcpBatchStarted) isExchangeEvent() {}
-
-func (attemptImagesMaterialized) isExchangeEvent() {}
 
 type providerIngressReceived struct {
 	attemptID providerCallAttemptID
@@ -200,20 +188,10 @@ type loadCheckpointCommand struct {
 	explicit      bool
 	reference     canonical.SwobuResponseID
 	history       historyfingerprint.History
+	scheme        historyfingerprint.Scheme
 }
 
 func (loadCheckpointCommand) isCommand() {}
-
-type materializeAttemptImagesCommand struct {
-	selection  providerCallSelection
-	request    canonical.CanonicalRequest
-	semantic   canonical.CanonicalRequest
-	policy     provider.ImageFetchPolicy
-	limits     provider.MediaLimits
-	fetcher    provider.ImageFetcher
-	fetchCache mediaFetchCache
-	historical session.ResolvedMedia
-}
 
 type prepareMCPCommand struct {
 	full   canonical.CanonicalRequest
@@ -221,8 +199,6 @@ type prepareMCPCommand struct {
 }
 
 func (prepareMCPCommand) isCommand() {}
-
-func (materializeAttemptImagesCommand) isCommand() {}
 
 // callProviderCommand is the irreducible provider I/O operation. Its document
 // is final; the handler may only invoke the selected backend transport.
@@ -261,8 +237,10 @@ type providerCall struct {
 	fullRequest        canonical.CanonicalRequest
 	decodeContext      canonical.CanonicalRequest
 	inputSegment       canonical.CanonicalRequest
-	resolvedMedia      session.ResolvedMedia
+	historyScheme      historyfingerprint.Scheme
 	advance            *historyAdvance
+	sessionID          session.ClientSessionID
+	expectedHead       canonical.SwobuResponseID
 	delayClientHandoff bool
 	providerRound      int
 	replaySafety       providerReplaySafety
@@ -279,54 +257,17 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reduceStarting(s, event, runner)
 	case loadingCheckpointPhase:
 		return reduceLoadingCheckpoint(s, p, event, runner)
-	case materializingAttemptImagesPhase:
-		return reduceMaterializingAttemptImages(s, p, event, runner)
 	case preparingMCPPhase:
-		return reducePreparingMCP(s, event, runner)
+		return reducePreparingMCP(ctx, s, event, runner)
 	case callingProviderPhase:
 		return reduceCallingProvider(ctx, s, p, event, runner)
 	case callingMCPPhase:
-		return reduceCallingMCP(s, p, event, runner)
+		return reduceCallingMCP(ctx, s, p, event, runner)
 	case completedPhase, failedPhase:
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: terminal phase %T received event %T", p, event)
 	default:
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: unknown phase %T", s.phase)
 	}
-}
-
-func reduceMaterializingAttemptImages(s exchangeState, phase materializingAttemptImagesPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
-	prepared, ok := event.(attemptImagesMaterialized)
-	if !ok {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: preparing provider attempt received %T", event)
-	}
-	if prepared.selection != phase.selection {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: prepared provider selection changed")
-	}
-	if prepared.err != nil {
-		s.mediaFetchCache = cloneMediaFetchCache(prepared.fetchCache)
-		s.phase = failedPhase{problem: prepared.err, target: phase.target}
-		return reducerOutcome{nextState: s}, nil
-	}
-	s.mediaFetchCache = cloneMediaFetchCache(prepared.fetchCache)
-	call, target, requestChanges, preparation, err := prepareProviderCall(s, phase.selection, runner, &prepared)
-	requestChanges = append(compat.CloneChanges(prepared.changes), requestChanges...)
-	if preparation != nil {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: prepared request requested media preparation again")
-	}
-	if err != nil {
-		if candidatePreparationCanAdvance(err) {
-			if next, exists := nextRouteCandidate(s, phase.selection); exists {
-				return advanceProviderExecutionFrom(s, runner, next)
-			}
-			var incompatible provider.IncompatibleTargetError
-			if errors.As(err, &incompatible) {
-				err = noCompatibleTarget(err)
-			}
-		}
-		s.phase = failedPhase{problem: err, target: target}
-		return reducerOutcome{nextState: s}, nil
-	}
-	return beginProviderCallAttempt(s, phase.selection, call, requestChanges)
 }
 
 func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -343,9 +284,10 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	} else if ok {
-		s.phase = loadingCheckpointPhase{explicit: true, reference: reference}
+		s.phase = loadingCheckpointPhase{explicit: true, reference: reference, scheme: s.input.requestFingerprint.Scheme()}
 		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
 			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), explicit: true, reference: reference,
+			scheme: s.input.requestFingerprint.Scheme(),
 		}}, nil
 	}
 	if s.input.rebasedRequest != nil {
@@ -354,12 +296,12 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), history: s.input.rebasedRequest.Previous,
 		}}, nil
 	}
-	prepared, err := session.Begin(s.input.request)
+	draft, err := session.PrepareBegin(s.input.request)
 	if err != nil {
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	s.prepared = &prepared
+	s.draft = &draft
 	s.advance = &historyAdvance{Request: s.input.requestFingerprint}
 	return beginMCPPreparation(s, runner)
 }
@@ -373,34 +315,30 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.phase = failedPhase{problem: loaded.err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if phase.explicit && loaded.match.IsMissing() {
+	if phase.explicit && loaded.resolution == session.HistoryNotFound {
 		s.phase = failedPhase{problem: canonical.BadRequest("unknown previous_response_id")}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if loaded.match.IsAmbiguous() {
-		s.phase = failedPhase{problem: canonical.BadRequest("ambiguous client history requires previous_response_id")}
+	if phase.explicit && (!loaded.current || loaded.record.HistoryScheme != phase.scheme) {
+		s.phase = failedPhase{problem: canonical.BadRequest("previous_response_id is not the current checkpoint for this client codec")}
 		return reducerOutcome{nextState: s}, nil
 	}
-	record, found := loaded.match.Unique()
-	if !found && !loaded.match.IsMissing() {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: checkpoint lookup returned invalid match")
-	}
-	var prepared session.ResolvedRequest
+	record := loaded.record
+	found := loaded.resolution == session.HistoryUniqueHead
+	var draft session.Draft
 	var err error
 	if phase.explicit {
-		prepared, err = session.Resume(s.input.request, record)
-		if record.HistoryFingerprint != nil && record.HistoryFingerprint.Scheme() == s.input.requestFingerprint.Scheme() {
-			history := *record.HistoryFingerprint
+		draft, err = session.PrepareResume(s.input.request, record)
+		if record.History != nil {
+			history := *record.History
 			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 		}
 	} else if found {
-		// The codec-rebased request is a candidate only. ForTarget selects it
-		// solely when the checkpoint has an exact usable native handle.
-		prepared, err = session.ResumeHistory(s.input.request, s.input.rebasedRequest.Request, record)
+		draft, err = session.PrepareResume(s.input.rebasedRequest.Request, record)
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	} else {
-		prepared, err = session.Begin(s.input.request)
+		draft, err = session.PrepareBegin(s.input.request)
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	}
@@ -408,7 +346,11 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	s.prepared = &prepared
+	s.draft = &draft
+	if found || phase.explicit {
+		s.sessionID = record.SessionID
+		s.expectedHead = record.ID
+	}
 	return beginMCPPreparation(s, runner)
 }
 
@@ -427,7 +369,7 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if err != nil {
 			return reducerOutcome{}, err
 		}
-		outcome, err := advanceProviderExecution(s, runner)
+		outcome, err := advanceProviderExecution(ctx, s, runner)
 		return outcome, err
 
 	case providerIngressReceived:
@@ -442,7 +384,7 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			if err != nil {
 				return reducerOutcome{}, err
 			}
-			outcome, err := advanceProviderExecution(s, runner)
+			outcome, err := advanceProviderExecution(ctx, s, runner)
 			return outcome, err
 		}
 		var err error
@@ -507,7 +449,7 @@ type providerCallSelection struct {
 
 // advanceProviderExecution is the sole transition that chooses further
 // provider execution. It performs deterministic preparation but never I/O.
-func advanceProviderExecution(s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
+func advanceProviderExecution(ctx context.Context, s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
 	if s.prepared == nil {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider preparation requires resolved session request")
 	}
@@ -515,24 +457,16 @@ func advanceProviderExecution(s exchangeState, runner runtimeBundle) (reducerOut
 	if !ok {
 		return terminateProviderExecution(s), nil
 	}
-	return advanceProviderExecutionFrom(s, runner, selection)
+	return advanceProviderExecutionFrom(ctx, s, runner, selection)
 }
 
-func advanceProviderExecutionFrom(s exchangeState, runner runtimeBundle, selection providerCallSelection) (reducerOutcome, error) {
+func advanceProviderExecutionFrom(ctx context.Context, s exchangeState, runner runtimeBundle, selection providerCallSelection) (reducerOutcome, error) {
 	for {
 		if evaluated := selection.candidateIndex + 1; evaluated > s.evaluatedCandidateCount {
 			s.evaluatedCandidateCount = evaluated
 		}
-		call, target, requestChanges, preparation, err := prepareProviderCall(s, selection, runner, nil)
-		if preparation != nil {
-			switch command := preparation.(type) {
-			case materializeAttemptImagesCommand:
-				s.phase = materializingAttemptImagesPhase{selection: selection, target: target}
-				return reducerOutcome{nextState: s, command: command}, nil
-			default:
-				return reducerOutcome{}, fmt.Errorf("exchange invariant: unsupported provider preparation command %T", preparation)
-			}
-		}
+		call, target, requestChanges, fetchCache, err := prepareProviderCall(ctx, s, selection, runner)
+		s.mediaFetchCache = cloneMediaFetchCache(fetchCache)
 		if err == nil {
 			return beginProviderCallAttempt(s, selection, call, requestChanges)
 		}
@@ -623,8 +557,7 @@ func noCompatibleTarget(lastRejection error) canonical.Error {
 }
 
 func nativePreviousResponseSent(request provider.Request) bool {
-	ref, ok := request.Canonical.PreviousResponse()
-	return ok && ref.Responses != nil
+	return request.ResponsesPrevious != nil
 }
 
 // selectSameTargetAlternative maps the issued call facts to one concrete
@@ -689,11 +622,7 @@ func providerFailureAdvancesCandidate(err error) bool {
 // previousResponseHandoffEvidence describes only the winning representation.
 // Failed and preparation paths do not call this function.
 func previousResponseHandoffEvidence(prepared session.ResolvedRequest, winner providerCallAttempt) []compat.Change {
-	previous, hasPrevious := prepared.Delta.PreviousResponse()
-	if !hasPrevious || previous.Responses == nil {
-		return nil
-	}
-	if winner.nativePreviousResponse {
+	if !prepared.HasResponsesPrevious() || winner.nativePreviousResponse {
 		return nil
 	}
 	return []compat.Change{compat.NewApproximation(

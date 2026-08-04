@@ -62,7 +62,7 @@ type BackendResolver interface {
 	ResolveBackend(TargetSnapshot) (Backend, error)
 }
 
-// Backend binds one exact target to its native-resumption identity, codec, and
+// Backend binds one exact target generation to its codec and
 // document-only transport.
 type Backend struct {
 	Target    TargetSnapshot
