@@ -164,7 +164,9 @@ func workspaceIdentity(s *SectionView) string {
 func sectionHeaderKey(s *SectionView) string { return "section-header:" + workspaceIdentity(s) }
 
 func WorkspaceDisclosureComponent(s *SectionView) tui.Component {
-	return ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
+	disclosure := ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
+	disclosure.AutoFocus = true
+	return disclosure
 }
 
 // ---------------------------------------------------------------------------

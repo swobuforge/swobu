@@ -4,9 +4,10 @@ import tui "github.com/grindlemire/go-tui"
 
 // DisclosureProps describes a focusable header that opens or closes a region.
 type DisclosureProps struct {
-	ID       string
-	Label    string
-	Expanded *tui.State[bool]
+	ID        string
+	Label     string
+	Expanded  *tui.State[bool]
+	AutoFocus bool
 
 	OnExpand   func(Context)
 	OnCollapse func(Context)
@@ -67,6 +68,9 @@ func (d *Disclosure) SetRenderProps(props DisclosureProps) {
 	d.selectable.SetRenderProps(d.selectableProps(true))
 }
 
+// Init seeds one-shot selection after the disclosure shell mounts.
+func (d *Disclosure) Init() func() { return d.selectable.Init() }
+
 // IsFocused satisfies go-tui's focus-gated dispatch contract.
 func (d *Disclosure) IsFocused() bool { return d.selectable.IsFocused() }
 
@@ -100,6 +104,7 @@ func (d *Disclosure) selectableProps(withEscape bool) SelectableProps {
 	props := SelectableProps{
 		ID:         d.props.ID,
 		Label:      d.props.Label,
+		AutoFocus:  d.props.AutoFocus,
 		OnActivate: d.toggle,
 	}
 	if withEscape {
@@ -139,5 +144,6 @@ var (
 	_ tui.Component    = (*Disclosure)(nil)
 	_ tui.KeyListener  = (*Disclosure)(nil)
 	_ tui.AppBinder    = (*Disclosure)(nil)
+	_ tui.Initializer  = (*Disclosure)(nil)
 	_ tui.PropsUpdater = (*Disclosure)(nil)
 )

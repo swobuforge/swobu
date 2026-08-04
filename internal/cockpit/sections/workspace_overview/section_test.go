@@ -180,7 +180,6 @@ func TestSection_EnterActivatesEndpointRow(t *testing.T) {
 	defer h.Close()
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
 	testkit.AssertFocusedFrame(t, frameBefore, "> endpoint")
@@ -200,7 +199,6 @@ func TestSection_SpaceActivatesEndpointRow(t *testing.T) {
 	defer h.Close()
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: ' '})
 
 	if !section.CopiedEndpoint.Get() {
@@ -213,7 +211,6 @@ func TestSection_EnterActivatesSlugRow(t *testing.T) {
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
@@ -233,7 +230,6 @@ func TestSection_DeleteRowShowsMarkerWhenFocused(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frame := h.Frame()
 	testkit.AssertFocusedFrame(t, frame, "> delete")
@@ -247,7 +243,6 @@ func TestSection_SpaceActivatesSlugRow(t *testing.T) {
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: ' '})
@@ -267,7 +262,6 @@ func TestSection_DeleteConfirmation_CancelOnEscape(t *testing.T) {
 	defer h.Close()
 
 	// Navigate to the delete row.
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
