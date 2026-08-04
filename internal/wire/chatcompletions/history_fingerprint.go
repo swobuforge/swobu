@@ -69,7 +69,6 @@ func fingerprintChatCompletionsHistory(messages []chatCompletionsMessageDTO) (ch
 }
 
 func fingerprintChatCompletionsRequest(messages []chatCompletionsMessageDTO) (historyfingerprint.Request, error) {
-	messages = messages[chatCompletionsLeadingContextEnd(messages):]
 	history := make([]chatCompletionsHistoryMessageDTO, len(messages))
 	for index, message := range messages {
 		history[index] = chatHistoryMessageFromRequest(message)

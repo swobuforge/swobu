@@ -226,6 +226,9 @@ func (s *memoryStore) prepareRecord(record *Checkpoint) error {
 		expires := s.now().Add(defaultCheckpointTTL)
 		record.ExpiresAt = &expires
 	}
+	if !record.ExpiresAt.After(s.now()) {
+		return errors.New("checkpoint expiration must be in the future")
+	}
 	return nil
 }
 

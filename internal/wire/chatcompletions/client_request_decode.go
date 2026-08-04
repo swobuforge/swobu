@@ -29,7 +29,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 		// supplied message is therefore current contribution, regardless of
 		// whether its roles resemble completed implicit history.
 		if strings.TrimSpace(dto.PreviousResponseWireID) != "" { // swobu:io-string source=boundary
-			requestFingerprint, err := fingerprintChatCompletionsRequest(dto.Messages)
+			requestFingerprint, err := fingerprintChatCompletionsRequest(dto.Messages[chatCompletionsLeadingContextEnd(dto.Messages):])
 			return wire.ClientRequestResult{
 				Request: request, Delivery: delivery, RequestFingerprint: requestFingerprint,
 			}, err

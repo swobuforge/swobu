@@ -68,6 +68,74 @@ func TestExplicitCurrentHeadResumesWithoutImplicitHistoryDigest(t *testing.T) {
 	}
 }
 
+func TestImplicitHistoryMissStartsFromFullVisibleRequestWithoutInheritedSession(t *testing.T) {
+	history := testExchangeHistory(t, "missing")
+	full := testCanonicalRequest("a")
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "current")},
+	})
+	state := reducerTestState(t)
+	state.input.request = full
+	state.input.rebasedRequest = &wire.RebasedRequest{Previous: history, Request: current}
+	state.phase = loadingCheckpointPhase{history: history}
+	outcome, err := reduce(context.Background(), state, checkpointLoaded{resolution: session.HistoryNotFound}, reducerRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.nextState.draft == nil || outcome.nextState.draft.Current().Model() != full.Model() {
+		t.Fatalf("fallback draft = %#v, want full visible request", outcome.nextState.draft)
+	}
+	if outcome.nextState.sessionID != "" || outcome.nextState.expectedHead != "" {
+		t.Fatalf("fallback inherited lineage: session=%q head=%q", outcome.nextState.sessionID, outcome.nextState.expectedHead)
+	}
+	if outcome.nextState.advance == nil || outcome.nextState.advance.Previous == nil || *outcome.nextState.advance.Previous != history {
+		t.Fatalf("fallback advance = %#v, want visible predecessor seed", outcome.nextState.advance)
+	}
+}
+
+func TestImplicitHistoryAmbiguityStartsNewLineageWithoutHiddenState(t *testing.T) {
+	history := testExchangeHistory(t, "ambiguous")
+	state := reducerTestState(t)
+	state.input.rebasedRequest = &wire.RebasedRequest{Previous: history, Request: testCanonicalRequest("a")}
+	state.phase = loadingCheckpointPhase{history: history}
+	outcome, err := reduce(context.Background(), state, checkpointLoaded{resolution: session.HistoryAmbiguous}, reducerRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.nextState.draft == nil || outcome.nextState.sessionID != "" || outcome.nextState.expectedHead != "" {
+		t.Fatalf("ambiguous fallback retained hidden lineage: draft=%t session=%q head=%q", outcome.nextState.draft != nil, outcome.nextState.sessionID, outcome.nextState.expectedHead)
+	}
+}
+
+func TestExplicitCheckpointRejectsStaleHeadAndWrongCodecScheme(t *testing.T) {
+	record := testSessionCheckpoint(t, "resp_previous", nil)
+	cases := []struct {
+		name    string
+		phase   loadingCheckpointPhase
+		current bool
+	}{
+		{name: "stale head", phase: loadingCheckpointPhase{explicit: true, reference: record.ID, scheme: record.HistoryScheme}},
+		{name: "wrong scheme", phase: loadingCheckpointPhase{explicit: true, reference: record.ID, scheme: "messages/v1"}, current: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			state := reducerTestState(t)
+			state.phase = test.phase
+			outcome, err := reduce(context.Background(), state, checkpointLoaded{record: record, resolution: session.HistoryUniqueHead, current: test.current}, reducerRuntime())
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, ok := outcome.nextState.phase.(failedPhase)
+			if !ok || canonical.TerminalErrorCode(failed.problem) != canonical.ErrorCodeBadRequest {
+				t.Fatalf("phase = %#v, want BAD_REQUEST", outcome.nextState.phase)
+			}
+			if outcome.nextState.draft != nil || outcome.nextState.sessionID != "" || outcome.nextState.expectedHead != "" {
+				t.Fatal("rejected explicit checkpoint mutated resume state")
+			}
+		})
+	}
+}
+
 func TestProviderCallCarriesCompleteRequestPlusExactResponsesData(t *testing.T) {
 	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.test", "cred", "responses", "", "responses")
 	target.TargetVersion = 3
