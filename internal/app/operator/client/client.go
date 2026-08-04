@@ -280,18 +280,33 @@ func (c *Client) ProbeTarget(ctx context.Context, connection workspaceapi.Connec
 }
 
 func errorFromResponse(resp *http.Response, fallback string) error {
+	// The daemon emits two canonical error shapes at this boundary. Workspace
+	// and credential commands marshal the typed workspaces.CommandError flat
+	// ({code,message}); the ChatGPT login flow normalizes remote OAuth errors
+	// nested ({error:{code,message}}). Decode both so every daemon command
+	// surfaces its real cause instead of collapsing to a status-code fallback.
 	var payload struct {
 		Error struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-		if msg := strings.TrimSpace(payload.Error.Message); msg != "" { // swobu:io-string source=boundary
+		code := strings.TrimSpace(payload.Error.Code) // swobu:io-string source=boundary
+		message := strings.TrimSpace(payload.Error.Message) // swobu:io-string source=boundary
+		if code == "" {
+			code = strings.TrimSpace(payload.Code) // swobu:io-string source=boundary
+		}
+		if message == "" {
+			message = strings.TrimSpace(payload.Message) // swobu:io-string source=boundary
+		}
+		if message != "" {
 			return &ResponseError{
 				StatusCode: resp.StatusCode,
-				Code:       strings.TrimSpace(payload.Error.Code),
-				Message:    msg,
+				Code:       code,
+				Message:    message,
 				Fallback:   fallback,
 			}
 		}
