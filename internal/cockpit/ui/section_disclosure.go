@@ -14,6 +14,8 @@ type SectionDisclosure struct {
 	disclosure *interaction.Disclosure
 	Label      string
 	Expanded   *tui.State[bool]
+	// AutoFocus seeds this disclosure as the selected control on first mount.
+	AutoFocus bool
 	// OnToggle lets a section react to disclosure state changes without adding
 	// render-side effects.
 	OnToggle func(expanded bool)
@@ -57,6 +59,8 @@ func (d *SectionDisclosure) Render(app *tui.App) *tui.Element {
 	return root
 }
 
+func (d *SectionDisclosure) Init() func() { return d.disclosure.Init() }
+
 func (d *SectionDisclosure) KeyMap() tui.KeyMap {
 	return d.disclosure.KeyMap()
 }
@@ -73,9 +77,10 @@ func (d *SectionDisclosure) props() interaction.DisclosureProps {
 
 func (d *SectionDisclosure) propsWithID(id string) interaction.DisclosureProps {
 	return interaction.DisclosureProps{
-		ID:       id,
-		Label:    d.Label,
-		Expanded: d.Expanded,
+		ID:        id,
+		Label:     d.Label,
+		Expanded:  d.Expanded,
+		AutoFocus: d.AutoFocus,
 		OnExpand: func(interaction.Context) {
 			if d.OnToggle != nil {
 				d.OnToggle(true)
@@ -93,4 +98,5 @@ var (
 	_ tui.Component   = (*SectionDisclosure)(nil)
 	_ tui.KeyListener = (*SectionDisclosure)(nil)
 	_ tui.AppBinder   = (*SectionDisclosure)(nil)
+	_ tui.Initializer = (*SectionDisclosure)(nil)
 )

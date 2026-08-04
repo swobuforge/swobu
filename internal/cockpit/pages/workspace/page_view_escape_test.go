@@ -29,6 +29,8 @@ func TestPage_EscapeCollapsesExpandedRouteBeforeStoppingCockpit(t *testing.T) {
 	}
 	defer h.Close()
 	h.Open()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 
