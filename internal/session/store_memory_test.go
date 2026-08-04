@@ -58,6 +58,34 @@ func TestMemoryStoreReportsAmbiguousCurrentHeads(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreAmbiguousHistoryBecomesUniqueAfterOneHeadExpires(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	history := testHistory(t, "shared-expiry")
+	first := storeRecord("resp_1", &history)
+	firstExpiry := now.Add(time.Minute)
+	first.ExpiresAt = &firstExpiry
+	if _, err := store.StartSession(context.Background(), "alpha", first); err != nil {
+		t.Fatal(err)
+	}
+	second := storeRecord("resp_2", &history)
+	second.SessionID = "session-2"
+	secondExpiry := now.Add(2 * time.Minute)
+	second.ExpiresAt = &secondExpiry
+	if _, err := store.StartSession(context.Background(), "alpha", second); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history); err != nil || resolution != HistoryAmbiguous {
+		t.Fatalf("initial resolution = (%v, %v), want ambiguous", resolution, err)
+	}
+	now = now.Add(90 * time.Second)
+	got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history)
+	if err != nil || resolution != HistoryUniqueHead || got.ID != "resp_2" {
+		t.Fatalf("post-expiry resolution = (%q, %v, %v), want resp_2 unique", got.ID, resolution, err)
+	}
+}
+
 func TestMemoryStorePartitionsWorkspacesAndExpiresHeads(t *testing.T) {
 	store := newMemoryStore()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
@@ -140,6 +168,84 @@ func TestMemoryStoreRejectsCrossSchemeAdvanceWithoutMutation(t *testing.T) {
 	}
 	if _, found, err := store.Get(context.Background(), "alpha", "resp_other"); err != nil || found {
 		t.Fatalf("proposed checkpoint stored = (%t, %v)", found, err)
+	}
+}
+
+func TestMemoryStoreRejectedStartsLeaveAllStateUnchanged(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	invalidID := storeRecord("resp_wrong", nil)
+	invalidID.ID = "resp_other"
+	expired := storeRecord("resp_expired", nil)
+	expires := now
+	expired.ExpiresAt = &expires
+	cases := []struct {
+		name      string
+		workspace string
+		record    Checkpoint
+	}{
+		{name: "workspace", workspace: " ", record: storeRecord("resp_workspace", nil)},
+		{name: "scheme", workspace: "alpha", record: func() Checkpoint { value := storeRecord("resp_scheme", nil); value.HistoryScheme = ""; return value }()},
+		{name: "response ID", workspace: "alpha", record: invalidID},
+		{name: "expired", workspace: "alpha", record: expired},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			before := memoryStoreShapeOf(store)
+			if _, err := store.StartSession(context.Background(), test.workspace, test.record); err == nil {
+				t.Fatal("invalid start succeeded")
+			}
+			if after := memoryStoreShapeOf(store); after != before {
+				t.Fatalf("store shape changed: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
+func TestMemoryStoreRejectedAdvancesLeaveHeadAndIndexesUnchanged(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	history := testHistory(t, "advance-base")
+	started, err := store.StartSession(context.Background(), "alpha", storeRecord("resp_first", &history))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := storeRecord("resp_first", &history)
+	mismatch := storeRecord("resp_mismatch", nil)
+	mismatch.SessionID = "other-session"
+	invalidID := storeRecord("resp_invalid", nil)
+	invalidID.ID = "resp_other"
+	expired := storeRecord("resp_expired", nil)
+	expires := now
+	expired.ExpiresAt = &expires
+	cases := []struct {
+		name      string
+		sessionID ClientSessionID
+		record    Checkpoint
+	}{
+		{name: "duplicate checkpoint", sessionID: started.ID, record: duplicate},
+		{name: "mismatched session", sessionID: started.ID, record: mismatch},
+		{name: "invalid response ID", sessionID: started.ID, record: invalidID},
+		{name: "expired", sessionID: started.ID, record: expired},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			before := memoryStoreShapeOf(store)
+			if err := store.AdvanceSession(context.Background(), "alpha", test.sessionID, "resp_first", test.record); err == nil {
+				t.Fatal("invalid advance succeeded")
+			}
+			if after := memoryStoreShapeOf(store); after != before {
+				t.Fatalf("store shape changed: before=%+v after=%+v", before, after)
+			}
+			if current, err := store.IsCurrentHead(context.Background(), "alpha", started.ID, "resp_first"); err != nil || !current {
+				t.Fatalf("original head current = (%t, %v)", current, err)
+			}
+			if got, resolution, err := store.ResolveHeadByHistory(context.Background(), "alpha", history); err != nil || resolution != HistoryUniqueHead || got.ID != "resp_first" {
+				t.Fatalf("original index = (%q, %v, %v)", got.ID, resolution, err)
+			}
+		})
 	}
 }
 
@@ -271,4 +377,15 @@ func storeRecord(id canonical.SwobuResponseID, history *historyfingerprint.Histo
 		scheme = history.Scheme()
 	}
 	return Checkpoint{ID: id, HistoryScheme: scheme, History: history, Response: response, CreatedAt: time.Now().UTC()}
+}
+
+type memoryStoreShape struct {
+	records   int
+	sessions  int
+	byHistory int
+	expires   int
+}
+
+func memoryStoreShapeOf(store *memoryStore) memoryStoreShape {
+	return memoryStoreShape{records: len(store.records), sessions: len(store.sessions), byHistory: len(store.byHistory), expires: store.expires.Len()}
 }

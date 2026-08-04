@@ -125,6 +125,41 @@ func TestHistoryFingerprintExcludesCurrentLeadingContext(t *testing.T) {
 	}
 }
 
+func TestMidHistoryContextMutationsChangePredecessor(t *testing.T) {
+	base := `{
+		"model":"m",
+		"messages":[
+			{"role":"user","content":"U1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"developer","content":"D2-A"},
+			{"role":"system","content":"S2-A"},
+			{"role":"user","content":"U2"},
+			{"role":"assistant","content":"A2"},
+			{"role":"user","content":"U3"}
+		]}`
+	baseDecoded := decodeChatFingerprintRequest(t, base)
+	if baseDecoded.RebasedRequest == nil {
+		t.Fatal("base request did not reconstruct predecessor")
+	}
+	mutations := map[string]string{
+		"developer text":   strings.Replace(base, "D2-A", "D2-B", 1),
+		"system text":      strings.Replace(base, "S2-A", "S2-B", 1),
+		"delete developer": strings.Replace(base, `{"role":"developer","content":"D2-A"},`, "", 1),
+		"insert developer": strings.Replace(base, `{"role":"user","content":"U2"}`, `{"role":"developer","content":"D2-extra"},{"role":"user","content":"U2"}`, 1),
+		"reorder context": strings.Replace(base, `{"role":"developer","content":"D2-A"},
+			{"role":"system","content":"S2-A"}`, `{"role":"system","content":"S2-A"},
+			{"role":"developer","content":"D2-A"}`, 1),
+	}
+	for name, raw := range mutations {
+		t.Run(name, func(t *testing.T) {
+			decoded := decodeChatFingerprintRequest(t, raw)
+			if decoded.RebasedRequest == nil || decoded.RebasedRequest.Previous == baseDecoded.RebasedRequest.Previous {
+				t.Fatal("mid-history context mutation retained predecessor fingerprint")
+			}
+		})
+	}
+}
+
 func TestExplicitPredecessorFingerprintsEverySuppliedMessage(t *testing.T) {
 	raw := `{"model":"m","previous_response_id":"swobu_parent","messages":[{"role":"user","content":"A"},{"role":"assistant","content":"B"},{"role":"user","content":"C"}]}`
 	decoded := decodeChatFingerprintRequest(t, raw)

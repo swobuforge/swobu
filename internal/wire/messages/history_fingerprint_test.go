@@ -49,6 +49,33 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCitationMutationsChangePredecessor(t *testing.T) {
+	base := `{"model":"m","messages":[
+		{"role":"user","content":"question"},
+		{"role":"assistant","content":[{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://a.test","title":"A","cited_text":"answer","start_char_index":0,"end_char_index":6}]}]},
+		{"role":"user","content":"again"}
+	]}`
+	baseDecoded := decodeMessagesFingerprintRequest(t, base)
+	if baseDecoded.RebasedRequest == nil {
+		t.Fatal("base request did not reconstruct predecessor")
+	}
+	mutations := map[string]string{
+		"url":         strings.Replace(base, "https://a.test", "https://b.test", 1),
+		"title":       strings.Replace(base, `"title":"A"`, `"title":"B"`, 1),
+		"cited text":  strings.Replace(base, `"cited_text":"answer"`, `"cited_text":"nswer"`, 1),
+		"start range": strings.Replace(base, `"start_char_index":0`, `"start_char_index":1`, 1),
+		"end range":   strings.Replace(base, `"end_char_index":6`, `"end_char_index":5`, 1),
+	}
+	for name, raw := range mutations {
+		t.Run(name, func(t *testing.T) {
+			decoded := decodeMessagesFingerprintRequest(t, raw)
+			if decoded.RebasedRequest == nil || decoded.RebasedRequest.Previous == baseDecoded.RebasedRequest.Previous {
+				t.Fatal("citation mutation retained predecessor fingerprint")
+			}
+		})
+	}
+}
+
 func TestExplicitPredecessorFingerprintsEverySuppliedMessage(t *testing.T) {
 	raw := `{"model":"m","previous_response_id":"swobu_parent","messages":[{"role":"user","content":"A"},{"role":"assistant","content":"B"},{"role":"user","content":"C"}]}`
 	decoded := decodeMessagesFingerprintRequest(t, raw)

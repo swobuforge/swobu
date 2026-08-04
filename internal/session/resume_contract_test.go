@@ -33,7 +33,7 @@ func TestResumeStoresCompleteRequestAndReturnsTargetGatedResponsesData(t *testin
 }
 
 func TestDraftFinalizeAllowsPreludePreparationAndRejectsHistoryRewrite(t *testing.T) {
-	current := makeRequest("m", makeItems("current"), nil)
+	current := makeRequest("m", makeItems("one", "two", "three"), nil)
 	draft, err := PrepareBegin(current)
 	if err != nil {
 		t.Fatal(err)
@@ -48,14 +48,35 @@ func TestDraftFinalizeAllowsPreludePreparationAndRejectsHistoryRewrite(t *testin
 	if got := canonicaltest.DirectiveText(resolved.Request().Items()); got != "prepared" {
 		t.Fatalf("prepared directive = %q", got)
 	}
-	changed := prepared.Items()
-	changed[len(changed)-1] = mustMessageItem(canonical.MessageRoleUser, "rewritten")
-	if _, err := draft.Finalize(prepared.WithItems(changed)); err == nil {
-		t.Fatal("Finalize accepted rewritten current history")
+	history := prepared.Items()
+	cases := []struct {
+		name    string
+		mutated canonical.CanonicalRequest
+	}{
+		{name: "replace item", mutated: prepared.WithItems([]canonical.CanonicalItem{history[0], history[1], mustMessageItem(canonical.MessageRoleUser, "rewritten"), history[3]})},
+		{name: "append item", mutated: prepared.WithItems(append(history, mustMessageItem(canonical.MessageRoleUser, "appended")))},
+		{name: "remove item", mutated: prepared.WithItems(history[:len(history)-1])},
+		{name: "reorder items", mutated: prepared.WithItems([]canonical.CanonicalItem{history[0], history[2], history[1], history[3]})},
+		{name: "change model", mutated: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("other"), Items: history, ToolPolicy: prepared.ToolPolicyField(), ToolCallBatch: prepared.ToolCallBatchField(),
+			Controls: prepared.Controls(), Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Responses: prepared.Responses(),
+		})},
+		{name: "change controls", mutated: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: prepared.ModelField(), Items: history, ToolPolicy: prepared.ToolPolicyField(), ToolCallBatch: prepared.ToolCallBatchField(),
+			Controls:  canonical.GenerationControls{Limits: canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(101)}},
+			Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Responses: prepared.Responses(),
+		})},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := draft.Finalize(test.mutated); err == nil {
+				t.Fatal("Finalize accepted forbidden mutation")
+			}
+		})
 	}
 }
 
-func TestAppendLocalRoundClearsResponsesContinuation(t *testing.T) {
+func TestAppendLocalRoundValidatesToolCorrelationAndClearsResponsesContinuation(t *testing.T) {
 	target := testBackendTarget(t, "m")
 	previous := makeRequest("m", makeItems("turn one"), nil)
 	resolved, err := Resume(
@@ -65,9 +86,19 @@ func TestAppendLocalRoundClearsResponsesContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+	callID, err := canonical.NewToolCallID("call_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	local, err := resolved.AppendLocalRound(
-		[]canonical.CanonicalItem{mustMessageItem(canonical.MessageRoleAssistant, "call")},
-		[]canonical.CanonicalItem{mustMessageItem(canonical.MessageRoleUser, "result")},
+		[]canonical.CanonicalItem{call},
+		[]canonical.CanonicalItem{result},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -77,5 +108,20 @@ func TestAppendLocalRoundClearsResponsesContinuation(t *testing.T) {
 	}
 	if len(local.Request().Items()) != len(resolved.Request().Items())+2 {
 		t.Fatal("local MCP round did not append complete history")
+	}
+	items := local.Request().Items()
+	if appendedCall, ok := items[len(items)-2].ToolCall(); !ok || appendedCall.CallID() != callID {
+		t.Fatal("local MCP call was not appended before its result")
+	}
+	if appendedResult, ok := items[len(items)-1].ToolResult(); !ok || appendedResult.CallID() != callID {
+		t.Fatal("local MCP result lost call correlation")
+	}
+	foreignID, _ := canonical.NewToolCallID("call_other")
+	foreign, _ := canonical.NewToolResultItem(foreignID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if _, err := resolved.AppendLocalRound([]canonical.CanonicalItem{call}, []canonical.CanonicalItem{foreign}); err == nil {
+		t.Fatal("local MCP round accepted a foreign result")
+	}
+	if _, err := resolved.AppendLocalRound([]canonical.CanonicalItem{call}, []canonical.CanonicalItem{result, result}); err == nil {
+		t.Fatal("local MCP round accepted a duplicate result")
 	}
 }

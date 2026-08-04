@@ -12,18 +12,19 @@ import (
 )
 
 type messagesHistoryPartDTO struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
-	Thinking  *string         `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
-	Source    json.RawMessage `json:"source,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	IsError   bool                  `json:"is_error,omitempty"`
+	Content   json.RawMessage       `json:"content,omitempty"`
+	Thinking  *string               `json:"thinking,omitempty"`
+	Signature string                `json:"signature,omitempty"`
+	Data      string                `json:"data,omitempty"`
+	Source    json.RawMessage       `json:"source,omitempty"`
+	Citations []messagesCitationDTO `json:"citations,omitempty"`
 }
 
 const fingerprintScheme historyfingerprint.Scheme = "messages/v1"
