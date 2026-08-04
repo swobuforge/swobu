@@ -385,7 +385,7 @@ func TestCheckpointCommitFailureProjectsEveryProtocolFailureTerminal(t *testing.
 		forbidden []string
 		required  []string
 	}{
-		{name: "chat completions", family: canonical.ClientFamilyChatCompletions, forbidden: []string{`"finish_reason"`}, required: []string{`"code":"INTERNAL_ERROR"`, `"type":"swobu_stream_error"`, "data: [DONE]"}},
+		{name: "chat completions", family: canonical.ClientFamilyChatCompletions, forbidden: []string{`"finish_reason":"`}, required: []string{`"code":"INTERNAL_ERROR"`, `"type":"swobu_stream_error"`, "data: [DONE]"}},
 		{name: "messages", family: canonical.ClientFamilyMessages, forbidden: []string{"event: message_delta", "event: message_stop", `"type":"message_stop"`}, required: []string{"event: error", `"code":"INTERNAL_ERROR"`}},
 		{name: "responses", family: canonical.ClientFamilyResponses, forbidden: []string{"event: response.completed", `"type":"response.completed"`}, required: []string{`"type":"response.failed"`, `"code":"INTERNAL_ERROR"`}},
 	}

@@ -55,16 +55,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		s.resultID = sse.FallbackID(event.ResultID, "chatcmpl_swobu")
 		s.model = event.Model
 		s.started = true
-		raw, _ := json.Marshal(chatCompletionsResponseDTO{
-			ID:     s.resultID,
-			Object: "chat.completion.chunk",
-			Model:  s.model,
-			Choices: []chatCompletionsChoiceDTO{{
-				Index: 0,
-				Delta: &chatCompletionsDeltaDTO{Role: "assistant"},
-			}},
-		})
-		return [][]byte{sse.SSEData(raw)}, nil
+		return s.encodeChunk(chatCompletionsDeltaDTO{Role: "assistant"}, nil, nil)
 	case sse.StreamEventItemStarted:
 		if event.ItemKind == canonical.ItemKindReasoning {
 			s.sawReasoning = true
@@ -89,18 +80,9 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 				return nil, canonical.InternalError("Chat Completions stream received an unsupported canonical tool-call kind")
 			}
 			s.sawVisibleOutput = true
-			raw, _ := json.Marshal(chatCompletionsResponseDTO{
-				ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
-				Object: "chat.completion.chunk",
-				Model:  s.model,
-				Choices: []chatCompletionsChoiceDTO{{
-					Index: 0,
-					Delta: &chatCompletionsDeltaDTO{
-						ToolCalls: []chatCompletionsDeltaToolCallDTO{call},
-					},
-				}},
-			})
-			return [][]byte{sse.SSEData(raw)}, nil
+			return s.encodeChunk(chatCompletionsDeltaDTO{
+				ToolCalls: []chatCompletionsDeltaToolCallDTO{call},
+			}, nil, nil)
 		}
 		return nil, nil
 	case sse.StreamEventContentStarted:
@@ -113,19 +95,10 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			more, err := s.Encode(event)
 			return append(frames, more...), err
 		}
-		raw, _ := json.Marshal(chatCompletionsResponseDTO{
-			ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
-			Object: "chat.completion.chunk",
-			Model:  s.model,
-			Choices: []chatCompletionsChoiceDTO{{
-				Index: 0,
-				Delta: &chatCompletionsDeltaDTO{Content: event.TextDelta},
-			}},
-		})
 		if event.TextDelta != "" {
 			s.sawVisibleOutput = true
 		}
-		return [][]byte{sse.SSEData(raw)}, nil
+		return s.encodeChunk(chatCompletionsDeltaDTO{Content: event.TextDelta}, nil, nil)
 	case sse.StreamEventToolUseArgumentsDelta:
 		index, ok := s.toolByID[event.ItemID]
 		if !ok {
@@ -155,18 +128,9 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		default:
 			return nil, canonical.InternalError("Chat Completions stream received an unknown canonical tool-input kind")
 		}
-		raw, _ := json.Marshal(chatCompletionsResponseDTO{
-			ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
-			Object: "chat.completion.chunk",
-			Model:  s.model,
-			Choices: []chatCompletionsChoiceDTO{{
-				Index: 0,
-				Delta: &chatCompletionsDeltaDTO{
-					ToolCalls: []chatCompletionsDeltaToolCallDTO{call},
-				},
-			}},
-		})
-		return [][]byte{sse.SSEData(raw)}, nil
+		return s.encodeChunk(chatCompletionsDeltaDTO{
+			ToolCalls: []chatCompletionsDeltaToolCallDTO{call},
+		}, nil, nil)
 	case sse.StreamEventItemCompleted:
 		if event.CompletedItem != nil {
 			if event.CompletedItem.Kind() == canonical.ItemKindReasoning {
@@ -205,21 +169,12 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		if projectionErr != nil {
 			return nil, projectionErr
 		}
-		raw, _ := json.Marshal(chatCompletionsResponseDTO{
-			ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
-			Object: "chat.completion.chunk",
-			Model:  s.model,
-			Choices: []chatCompletionsChoiceDTO{{
-				Index:        0,
-				Delta:        &chatCompletionsDeltaDTO{},
-				FinishReason: chatClientFinishReason(finishReason, len(s.toolByID) > 0),
-			}},
-			Usage: chatUsageFromCanonical(event.Usage),
-		})
-		return [][]byte{
-			sse.SSEData(raw),
-			[]byte("data: [DONE]\n\n"),
-		}, nil
+		clientFinishReason := chatClientFinishReason(finishReason, len(s.toolByID) > 0)
+		frames, err := s.encodeChunk(chatCompletionsDeltaDTO{}, &clientFinishReason, chatUsageFromCanonical(event.Usage))
+		if err != nil {
+			return nil, err
+		}
+		return append(frames, []byte("data: [DONE]\n\n")), nil
 	case sse.StreamEventFailed:
 		raw, _ := json.Marshal(map[string]any{
 			"error": map[string]any{
@@ -235,6 +190,28 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 	default:
 		return nil, canonical.InternalError("Chat Completions stream received an unknown canonical event kind")
 	}
+}
+
+func (s *chatCompletionsEnvelopeStreamEncoder) encodeChunk(
+	delta chatCompletionsDeltaDTO,
+	finishReason *string,
+	usage *chatCompletionsUsageDTO,
+) ([][]byte, error) {
+	raw, err := json.Marshal(chatCompletionsResponseDTO[chatCompletionsStreamChoiceDTO]{
+		ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
+		Object: "chat.completion.chunk",
+		Model:  s.model,
+		Choices: []chatCompletionsStreamChoiceDTO{{
+			Index:        0,
+			Delta:        delta,
+			FinishReason: finishReason,
+		}},
+		Usage: usage,
+	})
+	if err != nil {
+		return nil, canonical.InternalError("Chat Completions stream chunk could not be encoded")
+	}
+	return [][]byte{sse.SSEData(raw)}, nil
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
