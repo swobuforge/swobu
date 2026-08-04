@@ -294,7 +294,7 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
-		code := strings.TrimSpace(payload.Error.Code) // swobu:io-string source=boundary
+		code := strings.TrimSpace(payload.Error.Code)       // swobu:io-string source=boundary
 		message := strings.TrimSpace(payload.Error.Message) // swobu:io-string source=boundary
 		if code == "" {
 			code = strings.TrimSpace(payload.Code) // swobu:io-string source=boundary
