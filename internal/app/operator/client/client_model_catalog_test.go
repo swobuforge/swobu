@@ -98,3 +98,40 @@ func TestClientProbeTarget500ReturnsError(t *testing.T) {
 		t.Fatalf("error = %q, want 'backend unavailable'", err.Error())
 	}
 }
+
+// TestClientWorkspaceCommandDecodesFlatCommandError guards the boundary error
+// contract: workspace and credential commands marshal the typed
+// workspaces.CommandError flat as {"code","message"} (not the nested
+// {"error":{...}} shape the ChatGPT login flow emits). A flat body must surface
+// its real cause and code, instead of collapsing to a status-code fallback.
+func TestClientWorkspaceCommandDecodesFlatCommandError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"INVALID_ARGUMENT","message":"target.protocol: provider protocol is derived and must be omitted"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.Client(), server.URL)
+	_, err := c.CreateTarget(context.Background(), workspaceapi.CreateTarget{
+		Workspace: "personal",
+		Route:     "chatgpt-rodion",
+		Target: workspaceapi.TargetDraft{
+			Model:      "gpt-5.6-sol",
+			Connection: workspaceapi.Connection{ChatGPT: &workspaceapi.CredentialConnection{Credential: "secretfile:chatgpt/team/sess_x"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for flat CommandError 400")
+	}
+	if !strings.Contains(err.Error(), "provider protocol is derived and must be omitted") {
+		t.Fatalf("error = %q, want the daemon's real cause", err.Error())
+	}
+	if strings.Contains(err.Error(), "returned status 400") {
+		t.Fatalf("error collapsed to status fallback, real cause lost: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "code=INVALID_ARGUMENT") {
+		t.Fatalf("error = %q, want code=INVALID_ARGUMENT surfaced", err.Error())
+	}
+}
