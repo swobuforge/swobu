@@ -51,8 +51,12 @@ func encodeResponsesOutput(request canonical.CanonicalRequest, output canonical.
 				}
 			}
 		}
+		before := len(state.items)
 		if err := state.appendItem(request, ordinal, item); err != nil {
 			return nil, "", "", "", err
+		}
+		if len(state.items) == before {
+			continue
 		}
 		if state.items[len(state.items)-1].Status == "" {
 			state.items[len(state.items)-1].Status = status
