@@ -44,6 +44,16 @@ swobu
 
 `swobu` attaches to the local daemon, or starts it, and then opens Cockpit.
 
+Use the same startup controls as `swobu daemon` when you need a different
+loopback address or config file:
+
+```sh
+swobu --addr 127.0.0.1:9000 --config ./swobu.yaml
+```
+
+The equivalent environment controls are `SWOBU_ADDR` and
+`SWOBU_CONFIG_PATH`. Explicit flags win over environment values.
+
 Check the daemon:
 
 ```sh

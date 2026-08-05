@@ -31,7 +31,7 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 		Stderr:        &stderr,
 		Stdin:         strings.NewReader("\n"),
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			attachCalled = true
 			return fmt.Errorf("stop after assertion")
 		},
@@ -166,7 +166,7 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 		Stdout:        &stdout,
 		Stderr:        &stderr,
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			attachCalled = true
 			return fmt.Errorf("stop after assertion")
 		},
@@ -200,11 +200,11 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 		Stderr:        &stderr,
 		Stdin:         strings.NewReader(""),
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			attachCalled = true
 			return nil
 		},
-		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer) error { return nil },
+		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer, string) error { return nil },
 		Sleep:             func(time.Duration) {},
 	}
 
