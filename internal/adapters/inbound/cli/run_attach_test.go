@@ -24,10 +24,10 @@ func TestRunner_InteractiveDoesNotLaunchCockpitWhenAttachOrStartFails(t *testing
 	runner := Runner{
 		Stderr:        &stderr,
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			return fmt.Errorf("daemon bootstrap failed")
 		},
-		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer) error {
+		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer, string) error {
 			launched = true
 			return nil
 		},
@@ -53,7 +53,7 @@ func TestRunner_InteractiveShowsNoticeBeforeAttachOrStart(t *testing.T) {
 		Stdout:        &stdout,
 		Stderr:        &stderr,
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error {
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			attachCalled = true
 			claimed, err := producttelemetry.ClaimNotice()
 			if err != nil {
@@ -97,10 +97,10 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 	}))
 	defer srv.Close()
 
-	t.Setenv("SWOBU_ADDR", strings.TrimPrefix(srv.URL, "http://"))
+	addr := strings.TrimPrefix(srv.URL, "http://")
 	var stdout bytes.Buffer
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	err := defaultAttachOrStart(context.Background(), &stdout, io.Discard, client)
+	err := defaultAttachOrStart(context.Background(), &stdout, io.Discard, client, addr, filepath.Join(t.TempDir(), "swobu.yaml"))
 	if err != nil {
 		t.Fatalf("defaultAttachOrStart returned error: %v", err)
 	}
@@ -118,9 +118,9 @@ func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	runner := Runner{
 		Stdout:        &stdout,
 		IsInteractive: func() bool { return true },
-		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client) error { return nil },
+		AttachOrStart: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error { return nil },
 		Sleep:         func(time.Duration) {},
-		LaunchInteractive: func(_ context.Context, _ io.Reader, out io.Writer, _ io.Writer) error {
+		LaunchInteractive: func(_ context.Context, _ io.Reader, out io.Writer, _ io.Writer, _ string) error {
 			launchStdout = out
 			return nil
 		},
@@ -138,6 +138,44 @@ func TestRunner_InteractivePrintsHandoffEventBeforeLaunch(t *testing.T) {
 	}
 	if launchStdout != &stdout {
 		t.Fatalf("launch stdout = %#v, want original runner stdout", launchStdout)
+	}
+}
+
+func TestRunner_InteractiveStartupFlagsOverrideEnvironmentAcrossAttachAndCockpit(t *testing.T) {
+	t.Setenv(platformconfig.EnvSkipVersionNotice, "1")
+	t.Setenv(platformconfig.EnvDoNotTrack, "1")
+	t.Setenv(platformconfig.EnvAddr, "127.0.0.1:8123")
+	t.Setenv(platformconfig.EnvConfigPath, filepath.Join(t.TempDir(), "env-swobu.yaml"))
+
+	const flagAddr = "127.0.0.1:9000"
+	flagConfigPath := filepath.Join(t.TempDir(), "flag-swobu.yaml")
+	var attachAddr string
+	var attachConfigPath string
+	var cockpitAddr string
+	runner := Runner{
+		Addr:          flagAddr,
+		ConfigPath:    flagConfigPath,
+		IsInteractive: func() bool { return true },
+		AttachOrStart: func(_ context.Context, _ io.Writer, _ io.Writer, _ *http.Client, addr, configPath string) error {
+			attachAddr = addr
+			attachConfigPath = configPath
+			return nil
+		},
+		LaunchInteractive: func(_ context.Context, _ io.Reader, _ io.Writer, _ io.Writer, addr string) error {
+			cockpitAddr = addr
+			return nil
+		},
+		Sleep: func(time.Duration) {},
+	}
+
+	if exitCode := runner.Run(context.Background(), nil); exitCode != ExitHealthy {
+		t.Fatalf("exit code = %d, want %d", exitCode, ExitHealthy)
+	}
+	if attachAddr != flagAddr || cockpitAddr != flagAddr {
+		t.Fatalf("attach addr = %q, cockpit addr = %q, want %q", attachAddr, cockpitAddr, flagAddr)
+	}
+	if attachConfigPath != flagConfigPath {
+		t.Fatalf("attach config path = %q, want %q", attachConfigPath, flagConfigPath)
 	}
 }
 

@@ -41,11 +41,12 @@ type Runner struct {
 	Stdout              io.Writer
 	Stderr              io.Writer
 	HTTPClient          *http.Client
-	Addr                string // zero means resolve SWOBU_ADDR or the local default
+	Addr                string // explicit interactive launcher address; zero resolves SWOBU_ADDR or the local default
+	ConfigPath          string // explicit interactive launcher config path; zero resolves SWOBU_CONFIG_PATH or the platform default
 	Start               func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
 	IsInteractive       func() bool
-	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
-	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
+	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
+	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer, string) error
 	StartupHandoffFloor time.Duration
 	Sleep               func(time.Duration)
 }
@@ -72,6 +73,15 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if start == nil {
 		start = bootstrap.Start
 	}
+	if len(args) != 0 {
+		return dispatchSubcommand(ctx, args, start, client, stdout, stderr)
+	}
+	startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	configPath := platformconfig.ResolveConfigPath(r.ConfigPath)
 	isInteractive := r.IsInteractive
 	if isInteractive == nil {
 		isInteractive = defaultIsInteractive
@@ -81,12 +91,8 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 		// V0: direct launch into the active go-tui Cockpit.
 		// We import internal/cockpit — the canonical operator TUI authority —
 		// because it owns the interactive workspace surface.
-		startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
-		if err != nil {
-			return ExitDown
-		}
-		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-			return cockpit.Run(ctx, startupConfig.Addr, stdin, stdout, stderr)
+		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer, addr string) error {
+			return cockpit.Run(ctx, addr, stdin, stdout, stderr)
 		}
 	}
 	attachOrStart := r.AttachOrStart
@@ -102,20 +108,19 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 		sleep = time.Sleep
 	}
 
-	if len(args) == 0 {
-		return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
-			stdin:               stdin,
-			stdout:              stdout,
-			stderr:              stderr,
-			client:              client,
-			attachOrStart:       attachOrStart,
-			launchInteractive:   launchInteractive,
-			isInteractive:       isInteractive,
-			startupHandoffFloor: startupHandoffFloor,
-			sleep:               sleep,
-		})
-	}
-	return dispatchSubcommand(ctx, args, start, client, stdout, stderr)
+	return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
+		stdin:               stdin,
+		stdout:              stdout,
+		stderr:              stderr,
+		client:              client,
+		addr:                startupConfig.Addr,
+		configPath:          configPath,
+		attachOrStart:       attachOrStart,
+		launchInteractive:   launchInteractive,
+		isInteractive:       isInteractive,
+		startupHandoffFloor: startupHandoffFloor,
+		sleep:               sleep,
+	})
 }
 
 type interactiveDefaultRunSpec struct {
@@ -123,8 +128,10 @@ type interactiveDefaultRunSpec struct {
 	stdout              io.Writer
 	stderr              io.Writer
 	client              *http.Client
-	attachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client) error
-	launchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer) error
+	addr                string
+	configPath          string
+	attachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
+	launchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer, string) error
 	isInteractive       func() bool
 	startupHandoffFloor time.Duration
 	sleep               func(time.Duration)
@@ -151,7 +158,7 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 		_, _ = fmt.Fprintln(startupErr, err.Error())
 		return ExitDown
 	}
-	if err := spec.attachOrStart(ctx, startupOut, startupErr, spec.client); err != nil {
+	if err := spec.attachOrStart(ctx, startupOut, startupErr, spec.client, spec.addr, spec.configPath); err != nil {
 		_, _ = fmt.Fprintln(startupErr, err.Error())
 		return ExitDown
 	}
@@ -170,7 +177,7 @@ func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) 
 		_, _ = fmt.Fprintln(startupOut, "swobu handoff: launching cockpit interactive app")
 		_, _ = fmt.Fprintln(startupErr, "swobu handoff: launching cockpit interactive app")
 	}
-	if err := spec.launchInteractive(ctx, spec.stdin, spec.stdout, spec.stderr); err != nil {
+	if err := spec.launchInteractive(ctx, spec.stdin, spec.stdout, spec.stderr, spec.addr); err != nil {
 		bufferedHandler.Flush(context.Background())
 		// Mirror launch failure into stderr; if the cockpit failed before drawing,
 		// operators would otherwise only see the handoff failure indirectly.
@@ -401,15 +408,11 @@ func fetchStatus(ctx context.Context, client *http.Client, addr string) (StatusP
 		return StatusPayload{State: "down"}, ExitDown
 	}
 }
-func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client) error {
-	startupConfig, resolveErr := platformconfig.ResolveStartupConfig("")
-	if resolveErr != nil {
-		return resolveErr
-	}
+func defaultAttachOrStart(ctx context.Context, stdout io.Writer, _ io.Writer, client *http.Client, addr, configPath string) error {
 	_, err := daemonlifecycle.AttachOrStart(ctx, daemonlifecycle.AttachOrStartInput{
-		Addr:              startupConfig.Addr,
+		Addr:              addr,
 		Client:            client,
-		ResolveConfigPath: platformconfig.DefaultConfigPath,
+		ResolveConfigPath: func() string { return configPath },
 		Report:            withoutStartupSplash(startupReporterFromWriter(stdout)),
 		ReadinessTimeout:  15 * time.Second,
 	})

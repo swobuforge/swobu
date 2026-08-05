@@ -3,20 +3,48 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/swobuforge/swobu/internal/adapters/inbound/cli"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/platform/logging"
 )
 
 func main() {
 	logging.ConfigureDefaultLogger(os.Stderr)
 
-	runner := cli.Runner{
+	runner := &cli.Runner{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
+	}
+	root := newRootCommand(runner, os.Stdout, os.Stderr, isInteractiveTTY)
+
+	if err := root.Execute(); err != nil {
+		var codeErr *exitCodeError
+		if ok := asExitCodeError(err, &codeErr); ok {
+			os.Exit(codeErr.code)
+		}
+		_, _ = fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+}
+
+func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive func() bool) *cobra.Command {
+	if runner == nil {
+		runner = &cli.Runner{}
+	}
+	if runner.Stdout == nil {
+		runner.Stdout = stdout
+	}
+	if runner.Stderr == nil {
+		runner.Stderr = stderr
+	}
+	if isInteractive == nil {
+		isInteractive = isInteractiveTTY
 	}
 
 	exitWithRunner := func(args []string) error {
@@ -28,21 +56,28 @@ func main() {
 	}
 
 	root := &cobra.Command{
-		Use:           "swobu",
-		Short:         "Swobu local control boundary",
+		Use:   "swobu",
+		Short: "Swobu local control boundary",
+		Example: strings.Join([]string{
+			"  swobu",
+			"  swobu --addr 127.0.0.1:9000",
+			"  swobu --addr 127.0.0.1:9000 --config ./swobu.yaml",
+		}, "\n"),
 		Version:       controlplane.SwobuVersion(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !isInteractiveTTY() {
+			if !isInteractive() {
 				return cmd.Help()
 			}
 			return exitWithRunner(nil)
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
-	root.SetOut(os.Stdout)
-	root.SetErr(os.Stderr)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.Flags().StringVar(&runner.Addr, "addr", "", fmt.Sprintf("daemon address for Cockpit attach-or-start (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	root.Flags().StringVar(&runner.ConfigPath, "config", "", fmt.Sprintf("daemon config path when Cockpit starts it (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
 
 	delegate := func(prefix ...string) func(*cobra.Command, []string) error {
 		return func(_ *cobra.Command, args []string) error {
@@ -101,15 +136,7 @@ func main() {
 	}
 
 	root.AddCommand(daemonCmd, statusCmd, telemetryCmd, versionCmd)
-
-	if err := root.Execute(); err != nil {
-		var codeErr *exitCodeError
-		if ok := asExitCodeError(err, &codeErr); ok {
-			os.Exit(codeErr.code)
-		}
-		_, _ = fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
+	return root
 }
 
 type exitCodeError struct {

@@ -21,9 +21,19 @@ workspaces:
 
 Clients use `/c/dev/...` and request the route name (`chat`) as `model`. The model value `default`, or any other non-empty model name without a matching route, selects `default_route`; missing or blank model values fail. The first tier is primary, later tiers are fallbacks, and targets within one tier are equally balanced.
 
-Swobu listens on `127.0.0.1:7926` by default. Override it with `--addr` or
-`SWOBU_ADDR`. The address is restart-bound startup configuration, not routing
-state, and workspace edits never rewrite it.
+Swobu listens on `127.0.0.1:7926` by default. Both the Cockpit launcher and the
+foreground daemon accept the same startup controls:
+
+```sh
+swobu --addr 127.0.0.1:9000 --config ./swobu.yaml
+swobu daemon --addr 127.0.0.1:9000 --config ./swobu.yaml
+```
+
+`--addr` overrides `SWOBU_ADDR`; `--config` overrides `SWOBU_CONFIG_PATH`.
+When bare `swobu` must start the daemon, it uses those resolved values and then
+opens Cockpit against the same address. Address and config path are
+restart-bound startup configuration, not routing state, and workspace edits
+never rewrite them.
 
 Each target uses exactly one connection arm: `openai`, `anthropic`, `openrouter`, `chatgpt`, `ollama`, `azure`, `bedrock`, or `custom`. Credentials are locators such as `env:OPENAI_API_KEY`, not secret values. Protocols must be concrete; `auto` is rejected.
 
