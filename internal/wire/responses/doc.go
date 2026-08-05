@@ -24,6 +24,10 @@
 // representation choices: full materialized history, flat scope-qualified
 // ordinary tools, eagerly materialized known declarations, and metadata-light
 // replay. Exact provider codecs may add only positively owned wire details.
+// Foreign opaque reasoning remains in canonical checkpoint truth but enters
+// Responses output and history fingerprints only when a Responses replay or
+// client-visible summary exists; projected history must describe only what the
+// client can append on its next full-history request.
 // Text-only results split across several canonical parts concatenate into the
 // official string form with approximation evidence; image-bearing results retain
 // their rich array.

@@ -457,6 +457,9 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 			}
 			history.Summary = append(history.Summary, responsesReasoningSummaryDTO{Type: "summary_text", Text: part.Text()})
 		}
+		if history.EncryptedContent == "" && len(history.Summary) == 0 {
+			return nil
+		}
 		s.items = append(s.items, history)
 		return nil
 	default:

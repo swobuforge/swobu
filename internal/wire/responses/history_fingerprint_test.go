@@ -341,6 +341,64 @@ func TestBufferedAndStreamingToolResponseFingerprintsConvergeAcrossCarriers(t *t
 	}
 }
 
+func TestForeignOpaqueReasoningDoesNotEnterResponsesOutputOrHistory(t *testing.T) {
+	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":"start"}`)
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"private","signature":"sig"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem(nil, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search")
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+	response := canonicaltest.Response(t, "swobu_1", "m", []canonical.CanonicalItem{reasoning, call}, canonical.Completed("tool_calls"))
+
+	buffered, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(buffered.Document.RawBytes()), `"type":"reasoning"`) {
+		t.Fatalf("buffered output exposed foreign opaque reasoning: %s", buffered.Document.RawBytes())
+	}
+	events := canonical.SynthesizeResponseEnvelopeEvents("ex", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage())
+	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, canonical.NewSliceEventReader(events), delivery.StreamingDelivery(delivery.FramingSSE))
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamBody, err := io.ReadAll(streamed.Stream.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(streamBody), `"type":"reasoning"`) {
+		t.Fatalf("stream output exposed foreign opaque reasoning: %s", streamBody)
+	}
+	assertResponsesCompletionFingerprint(t, streamed.Completion, buffered.ResponseFingerprint)
+
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *buffered.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeResponsesFingerprintRequest(t, `{
+		"model":"m",
+		"tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+			{"type":"function_call","id":"call_1","call_id":"call_1","status":"completed","name":"search","arguments":"{\"q\":\"one\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"result"}
+		]}`)
+	assertCurrentResponsesToolResult(t, second, wantPrevious)
+
+	checkpointReasoning, ok := response.Items()[0].Reasoning()
+	if !ok {
+		t.Fatal("canonical checkpoint truth lost reasoning item")
+	}
+	if _, ok := checkpointReasoning.Opaque().Messages(); !ok {
+		t.Fatal("canonical checkpoint truth lost Messages opaque thinking")
+	}
+}
+
 func assertResponsesCompletionFingerprint(t *testing.T, completion *wire.ResponseCompletion, want *historyfingerprint.Response) {
 	t.Helper()
 	got := completion.Snapshot()

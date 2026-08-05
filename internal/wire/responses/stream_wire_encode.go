@@ -316,12 +316,15 @@ func (e *ResponseStreamWireEncoder) closeReasoningItem(event sse.StreamEvent) ([
 	if event.CompletedItem == nil {
 		return nil, canonical.InternalError("responses reasoning completion is missing canonical item")
 	}
-	outputIndex := e.nextOutputIndex
-	e.nextOutputIndex++
 	projection := responsesResponseHistoryState{}
 	if err := projection.appendItem(e.request, int(event.ItemOrdinal), *event.CompletedItem); err != nil {
 		return nil, err
 	}
+	if len(projection.items) == 0 {
+		return nil, nil
+	}
+	outputIndex := e.nextOutputIndex
+	e.nextOutputIndex++
 	item := projection.items[0]
 	frames := make([][]byte, 0, len(item.Summary)+2)
 	added := item
