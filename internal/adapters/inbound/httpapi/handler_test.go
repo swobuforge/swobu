@@ -977,7 +977,7 @@ func (h *capturingRequestIngress) HandleRequest(ctx context.Context, in exchange
 	if err != nil {
 		return exchange.RequestOutput{}, err
 	}
-	out.Target = provider.NewTargetSnapshot("backend-a", "custom", "https://example.test/v1", "cred-1", "chat_completions", "", "")
+	out.Target = provider.NewCustomTargetSnapshot("backend-a", "https://example.test/v1", "cred-1", "chat_completions", "", "", "Authorization")
 	return out, nil
 }
 

@@ -66,14 +66,31 @@ func SupportsBedrockMantleRegion(region string) bool {
 	return false
 }
 
-// BedrockMantleEndpointForRegion derives the canonical Mantle endpoint URL
-// for one supported region.
-func BedrockMantleEndpointForRegion(region string) string {
-	normalized := strings.TrimSpace(strings.ToLower(region))
-	if normalized == "" {
-		return ""
+// bedrockEndpointNamespaceClass is the recognized/unrecognized classification
+// of an endpoint path.
+type bedrockEndpointNamespaceClass int
+
+const (
+	bedrockNamespaceUnrecognized bedrockEndpointNamespaceClass = iota
+	bedrockNamespaceOpenRoot
+	bedrockNamespaceOpenAI
+	bedrockNamespaceAnthropic
+)
+
+// classifyBedrockEndpointPath classifies an endpoint path by its namespace
+// suffix.
+func classifyBedrockEndpointPath(path string) bedrockEndpointNamespaceClass {
+	trimmed := strings.TrimRight(path, "/")
+	switch {
+	case trimmed == "" || trimmed == "/v1":
+		return bedrockNamespaceOpenRoot
+	case strings.HasSuffix(trimmed, "/openai/v1"):
+		return bedrockNamespaceOpenAI
+	case strings.HasSuffix(trimmed, "/anthropic/v1"):
+		return bedrockNamespaceAnthropic
+	default:
+		return bedrockNamespaceUnrecognized
 	}
-	return "https://bedrock-mantle." + normalized + ".api.aws/v1"
 }
 
 // BedrockMantleRegionFromEndpoint extracts a Mantle region from a canonical

@@ -129,7 +129,7 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			protocolKind:     protocolkind.Messages,
 			providerProtocol: "messages",
 			clientFamily:     canonical.ClientFamilyMessages,
-			basePath:         "/v1",
+			basePath:         "/anthropic/v1",
 			credentialRef:    "env:AWS_BEARER_TOKEN_BEDROCK",
 			providerDelivery: delivery.BufferedDelivery(),
 			responseStatus:   http.StatusOK,
@@ -187,13 +187,20 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 					canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 				},
 			})
+			baseURL := targetBaseURLForCase(srv.URL, tc)
+			var target provider.TargetSnapshot
+			if tc.providerID == string(profile.ProviderSpecBedrock) {
+				target = provider.NewBedrockTargetSnapshot("backend-a", baseURL, tc.credentialRef, tc.protocolKind, "", tc.providerProtocol, "us-east-1")
+			} else {
+				target = provider.NewTargetSnapshot("backend-a", tc.providerID, baseURL, tc.credentialRef, tc.protocolKind, "", tc.providerProtocol)
+			}
 			req := newTestProviderRequest(
 				"ex_matrix",
 				clientFamilyForProtocol(tc.protocolKind),
 				request,
 				carrier.Document{},
 				exchange.NewExecutionContract(tc.providerDelivery),
-				provider.NewTargetSnapshot("backend-a", tc.providerID, targetBaseURLForCase(srv.URL, tc), tc.credentialRef, tc.protocolKind, "", tc.providerProtocol),
+				target,
 			)
 			providerCodec := protocolcodec.Codec{Protocol: tc.protocolKind}
 

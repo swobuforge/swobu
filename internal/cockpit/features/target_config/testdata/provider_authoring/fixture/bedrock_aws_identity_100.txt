@@ -1,14 +1,14 @@
   new target · AWS Bedrock                                                            cancel ↵
      provider          AWS Bedrock                                                    change ↵
      region            Europe (London) · eu-west-2                                    change ↵
+     API URL           https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1          edit ↵
+                       Regional default.
      authentication    AWS identity · Developer · 123456789012                        manage ↵
                        arn:aws:sts::123456789012:assumed-role/Developer/session
      model             Claude Sonnet 4.6                                              change ↵
      protocol          Anthropic · Messages · stream                                  change ↵
      routing           fallback after step 1                                          change ↵
    > create                                                                           create ↵
-
-
 
 
 

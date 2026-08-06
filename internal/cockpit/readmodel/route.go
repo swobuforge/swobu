@@ -45,6 +45,11 @@ type TargetReadModel struct {
 	BaseURL          string
 	AuthHeader       string
 	CredentialRef    string
+	// BedrockRegion carries the durable Bedrock signing region so the Cockpit
+	// form authors region directly from a persisted fact instead of parsing it
+	// back out of the endpoint URL. Empty for every non-Bedrock target and for
+	// a Bedrock target that has no authored region.
+	BedrockRegion string
 }
 
 // TierReadModel is one structural fallback tier. Position, not a persisted

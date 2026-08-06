@@ -3,6 +3,8 @@ package configstore
 import (
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 const allVariantsYAML = `schema_version: 1
@@ -163,5 +165,89 @@ func TestCodecOutputIsDeterministicAndSortsBalancedTargets(t *testing.T) {
 	}
 	if len(first) == 0 || first[len(first)-1] != '\n' {
 		t.Fatal("encoded YAML lacks newline at EOF")
+	}
+}
+
+// bedrockTarget navigates the decoded config to the Bedrock target of the
+// single workspace/route/tier in the variant fixtures below.
+func bedrockTarget(t *testing.T, config routing.Config) routing.BedrockConnection {
+	t.Helper()
+	workspaces := config.Workspaces()
+	if len(workspaces) != 1 {
+		t.Fatalf("workspace count = %d", len(workspaces))
+	}
+	routes := workspaces[0].Routes()
+	if len(routes) != 1 {
+		t.Fatalf("route count = %d", len(routes))
+	}
+	tiers := routes[0].Tiers()
+	if len(tiers) != 1 {
+		t.Fatalf("tier count = %d", len(tiers))
+	}
+	for _, target := range tiers[0].Targets() {
+		if connection, ok := target.Connection().(routing.BedrockConnection); ok {
+			return connection
+		}
+	}
+	t.Fatalf("no Bedrock target decoded")
+	return routing.BedrockConnection{}
+}
+
+// An authored endpoint is a durable first-class fact: it round-trips verbatim
+// through decode -> encode -> decode, and re-encoding persists the value rather
+// than collapsing it back to a region-derived default.
+func TestCodecRoundTripsAuthoredBedrockEndpoint(t *testing.T) {
+	const endpoint = "https://bedrock-mantle.eu-west-2.api.aws/openai/v1"
+	raw := strings.Replace(
+		allVariantsYAML,
+		"{id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, credential: env:BEDROCK_API_KEY}}}",
+		"{id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, endpoint: "+endpoint+", credential: env:BEDROCK_API_KEY}}}",
+		1,
+	)
+	config, err := decode([]byte(raw))
+	if err != nil {
+		t.Fatalf("decode authored endpoint: %v", err)
+	}
+	if connection := bedrockTarget(t, config); connection.Endpoint() != endpoint {
+		t.Fatalf("decoded endpoint = %q, want %q", connection.Endpoint(), endpoint)
+	}
+	encoded, err := encode(config)
+	if err != nil {
+		t.Fatalf("encode authored endpoint: %v", err)
+	}
+	if !strings.Contains(string(encoded), "endpoint: "+endpoint) {
+		t.Fatalf("encoded YAML dropped authored endpoint:\n%s", encoded)
+	}
+	decoded, err := decode(encoded)
+	if err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if connection := bedrockTarget(t, decoded); connection.Endpoint() != endpoint {
+		t.Fatalf("round-tripped endpoint = %q, want %q", connection.Endpoint(), endpoint)
+	}
+}
+
+// A legacy config authored before the endpoint field existed loads unchanged:
+// absence is a null that resolves to a derived endpoint, and that derivation
+// survives a full decode -> encode -> decode loop — the migration is
+// behavior-preserving (no synthesized endpoint key persists on reload).
+func TestCodecMigratesLegacyBedrockConfigToDerivedEndpoint(t *testing.T) {
+	config, err := decode([]byte(allVariantsYAML))
+	if err != nil {
+		t.Fatalf("decode legacy bedrock: %v", err)
+	}
+	if connection := bedrockTarget(t, config); connection.Endpoint() != "" {
+		t.Fatalf("legacy endpoint = %q, want derived (empty)", connection.Endpoint())
+	}
+	encoded, err := encode(config)
+	if err != nil {
+		t.Fatalf("encode legacy bedrock: %v", err)
+	}
+	decoded, err := decode(encoded)
+	if err != nil {
+		t.Fatalf("re-decode legacy bedrock: %v", err)
+	}
+	if connection := bedrockTarget(t, decoded); connection.Endpoint() != "" {
+		t.Fatalf("round-tripped derived endpoint = %q, want still derived (empty)", connection.Endpoint())
 	}
 }

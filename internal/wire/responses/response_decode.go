@@ -569,7 +569,7 @@ func decodeResponsesReasoningItem(item responsesWireOutputItemDTO, changeLog *[]
 	}
 	var opaque canonical.OpaqueThinking
 	if item.EncryptedContent != "" {
-		opaque, err = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: item.EncryptedContent})
+		opaque, err = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: item.EncryptedContent, ItemID: strings.TrimSpace(item.ID)})
 		if err != nil {
 			return canonical.CanonicalItem{}, false, canonical.InternalError("responses encrypted reasoning is invalid")
 		}

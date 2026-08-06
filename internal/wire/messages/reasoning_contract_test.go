@@ -100,6 +100,21 @@ func TestMessagesOpaqueThinkingReplaysAndDisclosureProjectsWithoutMutation(t *te
 	}
 }
 
+func TestMessagesOpaqueThinkingPreservesProviderOwnedReplayFields(t *testing.T) {
+	rawBlock := []byte(`{"type":"thinking","thinking":"brief","signature":"sig","encrypted_content":"opaque-state"}`)
+	opaque, _ := canonical.NewMessagesOpaqueThinking(rawBlock)
+	part, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
+	item, _ := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("deepseek"), Items: []canonical.CanonicalItem{item}})
+	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(document.RawBytes()), `"encrypted_content":"opaque-state"`) {
+		t.Fatalf("provider-owned replay field was lost: %s", document.RawBytes())
+	}
+}
+
 func TestMessagesBufferedAndStreamingReasoningAreAtomic(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("claude")})
 	bufferedRaw := []byte(`{"id":"msg","model":"claude","content":[{"type":"thinking","thinking":"brief","signature":"sig"}],"stop_reason":"end_turn"}`)

@@ -1,8 +1,9 @@
 // Package messages maps canonical requests and responses to the Messages wire
 // grammar. It owns family-level request/response encoding, stream reduction,
-// deterministic flat tool names, opaque thinking replay, and the private
-// client-history fingerprint. Provider authentication, transport, dialects,
-// and target-specific capability rejection stay outside.
+// deterministic flat tool names, exact opaque thinking replay, and the private
+// client-history fingerprint. Opaque replay validates the Messages block kind
+// while retaining provider-owned additive fields. Provider authentication,
+// transport, dialects, and target-specific capability rejection stay outside.
 //
 // Unknown additive occurrences erase locally and preserve sibling order.
 // Closed request contracts, ambiguous flat names, invalid residual containers,

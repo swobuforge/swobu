@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -323,7 +324,7 @@ func runeKeys(value string) []tui.KeyEvent {
 
 func bedrockVisualConfig(t *testing.T, authentication, credential string, identity readmodel.AWSIdentityReadModel) *TargetConfig {
 	t.Helper()
-	w := authoringConfig(t, profile.ProviderSpecBedrock, profile.BedrockMantleEndpointForRegion("eu-west-2"), credential)
+	w := authoringConfig(t, profile.ProviderSpecBedrock, profile.EffectiveBedrockAPIURL("eu-west-2", "", protocolkind.Responses), credential)
 	diagnosticAuthentication := strings.TrimSuffix(authentication, "_failure")
 	catalog := readmodel.ModelCatalogReadModel{
 		BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationKind(diagnosticAuthentication), AWSIdentity: &identity},
@@ -550,4 +551,5 @@ func selectReadyModel(w *TargetConfig, model, protocol string) {
 		d.ProviderProtocol = protocol
 		return d
 	})
+	w.reseedDerivedBedrockEndpointBuffer()
 }

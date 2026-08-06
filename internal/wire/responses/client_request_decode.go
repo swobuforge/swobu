@@ -118,7 +118,8 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request image limits are exceeded")
 	}
 	logResponsesRequestImages(conversation, exchangeID, decodeView)
-	if len(conversation) == 0 && !responsesNativeInputPresent(dto.Input) && strings.TrimSpace(dto.PreviousResponseWireID) == "" { // swobu:io-string source=boundary
+	allowEmptyRebasedContinuation := decodeView == responsesDecodeViewRebasedCurrent
+	if len(conversation) == 0 && !responsesNativeInputPresent(dto.Input) && strings.TrimSpace(dto.PreviousResponseWireID) == "" && !allowEmptyRebasedContinuation { // swobu:io-string source=boundary
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("responses request is missing required fields")
 	}
 	slog.Debug("responses request tools",

@@ -95,8 +95,10 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, r
 			responseEnd++
 		}
 		// A terminal assistant/output value may be current prefill. Later request
-		// input is the evidence that closes this response contribution.
-		if responseEnd == len(items) {
+		// input usually closes the response contribution. A completed hosted
+		// web-search marker is already provider-owned lifecycle evidence, so the
+		// terminal assistant continuation belongs to that completed response.
+		if responseEnd == len(items) && !responsesHistoryRunHasCompletedWebSearch(items[index:responseEnd]) {
 			break
 		}
 		request, err := fingerprintResponsesRequestValue(items[requestStart:index])
@@ -133,6 +135,15 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, r
 		return responsesHistoryResult{}, err
 	}
 	return responsesHistoryResult{previous: previous, request: current, current: currentRaw}, nil
+}
+
+func responsesHistoryRunHasCompletedWebSearch(items []responsesHistoryItemDTO) bool {
+	for index := range items {
+		if strings.TrimSpace(items[index].Type) == "web_search_call" && strings.TrimSpace(items[index].Status) == "completed" { // swobu:io-string source=boundary
+			return true
+		}
+	}
+	return false
 }
 
 func isResponsesHistoryOutput(item responsesHistoryItemDTO) bool {
@@ -186,6 +197,7 @@ func fingerprintResponsesResponseValue(items []responsesHistoryItemDTO) (history
 
 func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]responsesHistoryItemDTO, error) {
 	normalized := make([]responsesHistoryItemDTO, 0, len(items))
+	hostedSearchResponse := responsesHistoryRunHasCompletedWebSearch(items)
 	for index := range items {
 		if !admittedResponsesHistoryItem(items[index]) {
 			continue
@@ -193,15 +205,21 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		item := items[index]
 		if strings.TrimSpace(item.Type) != "web_search_call" { // swobu:io-string source=boundary
 			// Presentation IDs and generic wire statuses have no history
-			// consumer. Web search is the exception because its ID is the
-			// semantic call/result correlation and status selects lifecycle.
+			// consumer. Web-search status selects the replayed lifecycle, but
+			// its presentation ID and action are not stable client history:
+			// Codex appends only an actionless completion marker.
 			item.ID = ""
 			item.Status = ""
-		} else if strings.TrimSpace(item.Status) == "searching" { // swobu:io-string source=boundary
-			item.Status = "in_progress"
+		} else {
+			item.ID = ""
+			item.Name = ""
+			item.Namespace = ""
+			if strings.TrimSpace(item.Status) == "searching" { // swobu:io-string source=boundary
+				item.Status = "in_progress"
+			}
 		}
 		var err error
-		item.Content, err = normalizeResponsesRawJSON(items[index].Content)
+		item.Content, err = normalizeResponsesHistoryContent(items[index].Content, hostedSearchResponse)
 		if err != nil {
 			return nil, err
 		}
@@ -225,6 +243,9 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		if err != nil {
 			return nil, err
 		}
+		if strings.TrimSpace(item.Type) == "web_search_call" { // swobu:io-string source=boundary
+			item.Action = nil
+		}
 		item.Tools, err = normalizeResponsesHistoryTools(items[index].Tools)
 		if err != nil {
 			return nil, err
@@ -232,6 +253,24 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		normalized = append(normalized, item)
 	}
 	return normalized, nil
+}
+
+func normalizeResponsesHistoryContent(source json.RawMessage, stripAnnotations bool) (json.RawMessage, error) {
+	if !stripAnnotations || len(bytes.TrimSpace(source)) == 0 {
+		return normalizeResponsesRawJSON(source)
+	}
+	var content []responsesOutputTextItemDTO
+	if err := json.Unmarshal(source, &content); err != nil {
+		return normalizeResponsesRawJSON(source)
+	}
+	for index := range content {
+		content[index].Annotations = nil
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeResponsesRawJSON(raw)
 }
 
 func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, error) {
@@ -267,8 +306,7 @@ func admittedResponsesHistoryItem(item responsesHistoryItemDTO) bool {
 	case "message", "additional_tools", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "tool_search_call", "tool_search_output", "reasoning":
 		return true
 	case "web_search_call":
-		action := bytes.TrimSpace(item.Action)
-		return len(action) > 0 && !bytes.Equal(action, []byte("null"))
+		return true
 	default:
 		return false
 	}
@@ -411,6 +449,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 				return err
 			}
 			s.items[index].Action = action
+			s.items[index].Status = "completed"
 			return nil
 		}
 		return canonical.InternalError("responses web-search result has no prior call")

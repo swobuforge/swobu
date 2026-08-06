@@ -107,6 +107,52 @@ func TestReasoningIsAssistantOwnedAndAtomicInSynthesizedStream(t *testing.T) {
 	}
 }
 
+func TestResponsesReasoningReplayPreservesOptionalItemID(t *testing.T) {
+	// RFC G2 §7.1 / §11.1: encrypted content is required; the paired Responses
+	// wire id is optional and preserved verbatim through construction, readback,
+	// and clone. Idless replay stays idless; ciphertext never reaches string forms.
+	withID, err := NewResponsesOpaqueThinking(ResponsesReasoningReplay{EncryptedContent: "cipher", ItemID: "rs_1"})
+	if err != nil {
+		t.Fatalf("with-id construct: %v", err)
+	}
+	replay, ok := withID.Responses()
+	if !ok || replay.EncryptedContent != "cipher" || replay.ItemID != "rs_1" {
+		t.Fatalf("readback = (%q,%q,%t), want (cipher,rs_1,true)", replay.EncryptedContent, replay.ItemID, ok)
+	}
+	cloned, ok := withID.Clone().Responses()
+	if !ok || cloned != replay {
+		t.Fatalf("clone did not copy both fields independently: %+v", cloned)
+	}
+
+	idless, err := NewResponsesOpaqueThinking(ResponsesReasoningReplay{EncryptedContent: "cipher"})
+	if err != nil {
+		t.Fatalf("idless construct: %v", err)
+	}
+	if replay, ok := idless.Responses(); !ok || replay.ItemID != "" {
+		t.Fatalf("idless replay gained an id: %+v", replay)
+	}
+
+	if _, err := NewResponsesOpaqueThinking(ResponsesReasoningReplay{ItemID: "rs_1"}); err == nil {
+		t.Fatal("empty encrypted content was accepted")
+	}
+
+	// Only the Responses branch may carry a wire id; Messages and OpenRouter must
+	// never silently absorb one (validate is the construction invariant guard).
+	messages, err := NewMessagesOpaqueThinking([]byte(`{"x":"y"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay, ok := messages.Responses(); ok {
+		t.Fatalf("messages branch exposed a responses replay: %+v", replay)
+	}
+
+	for _, formatted := range []string{fmt.Sprint(withID), fmt.Sprintf("%#v", withID)} {
+		if strings.Contains(formatted, "cipher") || strings.Contains(formatted, "rs_1") {
+			t.Fatalf("opaque thinking leaked through formatting: %q", formatted)
+		}
+	}
+}
+
 func mustReasoningPart(t *testing.T, kind ReasoningPartKind, text string) ReasoningPart {
 	t.Helper()
 	part, err := NewReasoningPart(kind, text)

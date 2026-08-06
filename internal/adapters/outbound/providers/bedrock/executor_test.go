@@ -1,6 +1,7 @@
 package bedrock
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,16 +25,22 @@ import (
 )
 
 func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolKind) provider.TargetSnapshot {
-	return provider.NewTargetSnapshot(
+	// A canonical Mantle host implies its region; mirror the exchange boundary
+	// construction so mantle-host targets sign realistically. Loopback/custom
+	// hosts carry no AWS region. Region is fixed at construction via
+	// NewBedrockTargetSnapshot (never post-construction mutation).
+	region := bedrockHostRegion(baseURL)
+	if region == "" {
+		region = "us-east-1"
+	}
+	return provider.NewBedrockTargetSnapshot(
 		"backend-a",
-		"bedrock",
 		baseURL,
 		credentialRef,
 		kind,
-
 		"",
-		string(kind))
-
+		string(kind),
+		region)
 }
 
 func TestBedrockMantleMessagesRejectsStructuredOutputBeforeTransport(t *testing.T) {
@@ -111,28 +118,30 @@ func TestBedrockMantleNonMessagesProtocolsKeepTheirStructuredOutputSemantics(t *
 	}
 }
 
-func TestBedrockConverseEndpointIsNotMisrepresentedAsACompatibleMessagesTarget(t *testing.T) {
+func TestBedrockCustomHostWithOpaquePathIsAllowedNotFailClosed(t *testing.T) {
+	// Under the three-class host policy, a custom/non-Mantle host (e.g. a Bedrock
+	// PrivateLink or proxy host) remains allowed when its path grammar is opaque.
+	// Recognized /v1 namespaces keep their protocol meaning on every host; this
+	// case proves only that an unknown host is not itself a fail-closed reason.
 	called := false
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		called = true
-		return nil, errors.New("transport must not be reached")
+		return nil, errors.New("transport reachable")
 	})}
 	target := newBedrockTarget(
-		"https://bedrock-runtime.us-east-1.amazonaws.com",
+		"https://bedrock-runtime.us-east-1.amazonaws.com/company/bedrock-api",
 		"env:AWS_BEARER_TOKEN_BEDROCK",
 		protocolkind.Messages,
 	)
-	_, err := NewExecutor(client).Send(
+	exec := NewExecutor(client)
+	exec.credentials = testCredentialProvider{}
+	_, _ = exec.Send(
 		context.Background(),
 		target,
 		carrier.NewDocument(protocolkind.Messages, "application/json", nil, []byte(`{"output_config":{"format":{"type":"json_schema"}}}`), carrier.Meta{}),
 	)
-	var endpointErr canonical.Error
-	if !errors.As(err, &endpointErr) || endpointErr.Code != canonical.ErrorCodeBadEndpoint {
-		t.Fatalf("send error = %T %v, want unsupported endpoint error", err, err)
-	}
-	if called {
-		t.Fatal("Bedrock Converse endpoint reached transport through Mantle adapter")
+	if !called {
+		t.Fatal("custom host was rejected before transport; expected allowed (contract unverified)")
 	}
 }
 
@@ -266,6 +275,45 @@ func TestBedrockMessagesReplaysOpaqueThinking(t *testing.T) {
 	}
 }
 
+// RFC G2 §7.6: the Bedrock Responses seam (mantleResponsesCodec) is an identity
+// decorator. It preserves the reasoning wire id paired with encrypted content
+// verbatim through encode — no rs_→rsn_ rewrite, no rejection — because the
+// proven normalization set is empty (§7.7 intentionally skipped).
+func TestBedrockMantleResponsesPreservesReasoningReplayID(t *testing.T) {
+	opaque, err := canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: "cipher", ItemID: "rs_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "brief")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("xai.grok-4.3"),
+		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
+	})
+	target := newBedrockTarget("https://bedrock-mantle.us-east-1.api.aws/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses)
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(document.RawBytes(), []byte(`"id":"rs_1"`)) {
+		t.Fatalf("Bedrock Responses seam rewrote or dropped the reasoning replay id: %s", document.RawBytes())
+	}
+	if bytes.Contains(document.RawBytes(), []byte(`"id":"rsn_1"`)) {
+		t.Fatalf("Bedrock Responses seam rewrote the reasoning replay id: %s", document.RawBytes())
+	}
+}
+
 type testProviderRequest struct {
 	Request    canonical.CanonicalRequest
 	Contract   exchange.ExecutionContract
@@ -360,17 +408,26 @@ func TestProviderRequestPathForProtocol_MantleFamiliesOnly(t *testing.T) {
 func TestValidateBedrockMantleEndpoint_AcceptsMantleAndLocalHosts(t *testing.T) {
 	t.Parallel()
 
-	if err := validateBedrockMantleEndpoint("https://bedrock-mantle.us-east-1.api.aws/v1"); err != nil {
+	if err := validateBedrockMantleEndpoint("https://bedrock-mantle.us-east-1.api.aws/v1", "us-east-1"); err != nil {
 		t.Fatalf("mantle endpoint rejected: %v", err)
 	}
-	if err := validateBedrockMantleEndpoint("http://127.0.0.1:1234/v1"); err != nil {
+	if err := validateBedrockMantleEndpoint("http://127.0.0.1:1234/v1", ""); err != nil {
 		t.Fatalf("local test endpoint rejected: %v", err)
 	}
-	if err := validateBedrockMantleEndpoint("https://bedrock.us-east-1.amazonaws.com/openai/v1"); err == nil {
-		t.Fatal("expected non-Mantle host to be rejected")
+	// Unknown/custom hosts are allowed (three-class policy); only canonical
+	// Mantle has a verified SigV4 contract, but Swobu never fails-closed merely
+	// because a host is unrecognized.
+	if err := validateBedrockMantleEndpoint("https://bedrock.us-east-1.amazonaws.com/openai/v1", ""); err != nil {
+		t.Fatalf("custom AWS host rejected: %v", err)
 	}
-	if err := validateBedrockMantleEndpoint("https://bedrock.us-east-1.amazonaws.com"); err == nil {
-		t.Fatal("expected control-plane host to be rejected")
+	// A known Mantle host whose implied region contradicts the signing region is
+	// an actionable error.
+	if err := validateBedrockMantleEndpoint("https://bedrock-mantle.us-east-1.api.aws/v1", "eu-west-2"); err == nil {
+		t.Fatal("expected Mantle region/signing-region mismatch to be rejected")
+	}
+	// Empty host is rejected (no host to dispatch to).
+	if err := validateBedrockMantleEndpoint("https:///v1", ""); err == nil {
+		t.Fatal("expected empty host to be rejected")
 	}
 }
 
@@ -405,8 +462,8 @@ func TestListModels_AbsentCredentialReferenceIgnoresAmbientBearer(t *testing.T) 
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/models" {
-			t.Fatalf("path=%q want /models", r.URL.Path)
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("path=%q want /v1/models", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "AWS4-HMAC-SHA256 ") {
 			t.Fatalf("authorization=%q want SigV4", got)
@@ -446,12 +503,20 @@ func TestListModels_TargetCredential_PrecedesAmbientBearerToken(t *testing.T) {
 	}
 }
 
-func TestBedrockSigningRegion_DoesNotFallBackToEnvironment(t *testing.T) {
+func TestBedrockSnapshotUsesPersistedSigningRegion(t *testing.T) {
 	t.Setenv("AWS_REGION", "eu-central-1")
 	t.Setenv("AWS_DEFAULT_REGION", "eu-west-1")
 
-	if _, err := bedrockSigningRegion(mustParseURL("http://127.0.0.1:1234/v1")); err == nil {
-		t.Fatal("expected local endpoint without persisted region to be rejected")
+	mantle := provider.NewBedrockTargetSnapshot(
+		"backend-a",
+		"http://127.0.0.1:1234/v1",
+		"",
+		protocolkind.Responses,
+		"",
+		"responses",
+		"ap-southeast-2")
+	if got := bedrockSigningRegionForTarget(mantle); got != "ap-southeast-2" {
+		t.Fatalf("signing region = %q want ap-southeast-2", got)
 	}
 }
 
@@ -502,8 +567,8 @@ func TestListModels_EnvMode_UsesMantleHTTP(t *testing.T) {
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/models" {
-			t.Fatalf("path=%q want /models", r.URL.Path)
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("path=%q want /v1/models", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("authorization=%q want Bearer test-token", got)
@@ -634,7 +699,7 @@ func TestSendProviderRequest_StreamingMessagesRoutesToMantlePath(t *testing.T) {
 	exec.credentials = testCredentialProvider{}
 	ingress, err := executeBedrockProviderRequest(context.Background(), exec, newBedrockProviderRequest(
 		t,
-		upstream.URL,
+		upstream.URL+"/anthropic/v1",
 		"env:AWS_BEARER_TOKEN_BEDROCK",
 		protocolkind.Messages,
 		delivery.StreamingDelivery(delivery.FramingSSE),
@@ -698,7 +763,7 @@ func TestSendProviderRequest_BufferedMessagesDoesNotEmitCacheBreakpoints(t *test
 		"test-ex", protocolkind.Responses, request,
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		newBedrockTarget(upstream.URL, "secret:test", protocolkind.Messages),
+		newBedrockTarget(upstream.URL+"/anthropic/v1", "secret:test", protocolkind.Messages),
 		sink,
 	)
 	req.ExchangeID = "ex-bedrock-cache-breakpoint"

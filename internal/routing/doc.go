@@ -26,6 +26,10 @@
 // the version; session resolution uses it to reject native handles captured
 // before a target save. Version is intentionally process-local.
 //
+// A Bedrock connection persists the signing region and an optional explicit API
+// URL as separate facts. An empty endpoint remains empty in routing; effective
+// endpoint, request, and catalog URLs are derived only after protocol selection.
+//
 // The canonical model lives in
 // docs/03-architecture/system-shape-and-request-flow/workspace-routing-configuration-and-local-persistence.md
 // and docs/03-architecture/system-shape-and-request-flow/monotonic-routing-boundary-and-attempt-semantics.md.

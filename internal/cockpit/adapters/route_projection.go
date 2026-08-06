@@ -9,7 +9,6 @@ import (
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func routesFromWorkspace(workspace workspaceapi.Workspace) []readmodel.RouteReadModel {
@@ -50,7 +49,13 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.BaseURL = target.Connection.Azure.ProjectEndpoint
 		out.CredentialRef = target.Connection.Azure.Credential
 	case target.Connection.Bedrock != nil:
-		out.BaseURL = profile.BedrockMantleEndpointForRegion(target.Connection.Bedrock.Region)
+		// The read model preserves authored truth: region as a first-class field
+		// and the explicit endpoint verbatim, empty when the endpoint is derived.
+		// The Cockpit derives the effective URL it will display from (region,
+		// endpoint) via profile.EffectiveBedrockAPIURL; the read model never
+		// materializes that derivation, so the durable fact has one shape.
+		out.BaseURL = target.Connection.Bedrock.Endpoint
+		out.BedrockRegion = target.Connection.Bedrock.Region
 		out.CredentialRef = target.Connection.Bedrock.Credential
 	case target.Connection.Custom != nil:
 		out.BaseURL = target.Connection.Custom.BaseURL

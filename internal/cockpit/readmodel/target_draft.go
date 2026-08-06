@@ -6,6 +6,7 @@ type TargetDraft struct {
 	ProviderSpec     string
 	ZAIAccess        string
 	Locator          string
+	Endpoint         string
 	CredentialRef    string
 	CredentialHeader string
 	ProviderProtocol string

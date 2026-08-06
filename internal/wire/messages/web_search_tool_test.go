@@ -52,7 +52,7 @@ func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
 }
 
 func TestDecodeResponseBufferedPreservesWebSearchLifecycle(t *testing.T) {
-	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"web_search_result","url":"https://example.com/x","title":"Example"}]},{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://example.com/x","title":"Example"}]}]}`)
+	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","tool_use_id":"s","content":[{"type":"web_search_result","url":"https://example.com/x","title":"Example","encrypted_content":"opaque-result"}]},{"type":"text","text":"answer","citations":[{"type":"web_search_result_location","url":"https://example.com/x","title":"Example"}]}]}`)
 	reader, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, raw, "ex", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +73,13 @@ func TestDecodeResponseBufferedPreservesWebSearchLifecycle(t *testing.T) {
 	search, ok := result.WebSearch()
 	if !ok || len(search.Sources()) != 1 {
 		t.Fatalf("search result = %#v, %v", search, ok)
+	}
+	encoded, err := encodeMessagesWebSearchResult(search)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"encrypted_content":"opaque-result"`) {
+		t.Fatalf("hosted-search replay token was lost: %s", encoded)
 	}
 }
 

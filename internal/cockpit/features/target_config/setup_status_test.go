@@ -7,6 +7,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -30,7 +31,7 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 		{"azure missing credential", profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "", setupMissingCredential},
 		{"azure ready", profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY", setupReady},
 		{"bedrock missing region", profile.ProviderSpecBedrock, "", "", setupMissingLocator},
-		{"bedrock AWS identity ready", profile.ProviderSpecBedrock, profile.BedrockMantleEndpointForRegion("eu-west-1"), "", setupReady},
+		{"bedrock AWS identity ready", profile.ProviderSpecBedrock, profile.EffectiveBedrockAPIURL("eu-west-1", "", protocolkind.Responses), "", setupReady},
 		{"chatgpt signed out", profile.ProviderSpecChatGPT, "", "", setupMissingInteractiveAuth},
 		{"chatgpt signed in", profile.ProviderSpecChatGPT, "", "secret:chatgpt/session", setupReady},
 	}

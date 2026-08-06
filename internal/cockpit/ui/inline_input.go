@@ -120,6 +120,12 @@ func (inp *InlineInput) SetText(s string) {
 	inp.blink.Set(true)
 }
 
+// MoveHome places the cursor at the start of the current value and resets the
+// viewport so destination-bearing prefixes remain visible when editing opens.
+func (inp *InlineInput) MoveHome() {
+	inp.moveHome()
+}
+
 // CursorPos returns the current cursor position in runes.
 func (inp *InlineInput) CursorPos() int {
 	return inp.cursorPos.Get()

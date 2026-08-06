@@ -10,6 +10,7 @@ VERSION="${VERSION:-}"
 DRY_RUN="${DRY_RUN:-false}"
 EXPECTED_SHA256="${EXPECTED_SHA256:-}"
 VERBOSE="${VERBOSE:-false}"
+START_SWOBU="${START_SWOBU:-true}"
 
 say() { printf '%s\n' "$*" >&2; }
 step() { say "→ $*"; }
@@ -37,11 +38,12 @@ Options:
   --bin-dir <path>      Install directory. Default: $HOME/.local/bin
   --checksum <sha256>   Require an exact SHA-256 checksum
   --dry-run             Show what would happen without installing
+  --no-start            Install without starting Swobu
   --verbose             Show debug output
   -h, --help            Show help
 
 Environment overrides:
-  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE
+  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE, START_SWOBU
 EOF
 }
 
@@ -203,6 +205,9 @@ while [ "$#" -gt 0 ]; do
     --dry-run)
       DRY_RUN=true
       ;;
+    --no-start)
+      START_SWOBU=false
+      ;;
     --verbose)
       VERBOSE=true
       ;;
@@ -253,6 +258,7 @@ if [ "$DRY_RUN" = "true" ]; then
   echo "archive_url=$archive_url"
   echo "checksums_url=$checksums_url"
   echo "install_dir=$INSTALL_DIR"
+  echo "start_swobu=$START_SWOBU"
   if [ -n "$EXPECTED_SHA256" ]; then
     echo "expected_sha256=$(normalize_hex256 "$EXPECTED_SHA256")"
   fi
@@ -342,23 +348,45 @@ chmod 0755 "$tmp_install"
 mv -f "$tmp_install" "$install_path"
 step "Checking installation"
 if "$install_path" --version >/dev/null 2>&1; then
+  installation_verified=true
   ok "$BIN_NAME $tag installed"
 else
+  installation_verified=false
   warn "$BIN_NAME was installed, but '$BIN_NAME --version' failed."
   say "Try:"
   say "  $install_path --version"
 fi
 
-say ""
-say "Try it:"
-if command -v "$BIN_NAME" >/dev/null 2>&1; then
-  say "  $BIN_NAME --version"
-else
-  say "  $install_path --version"
-fi
-say ""
-say "Start:"
-say "  $BIN_NAME --help"
+start_swobu() {
+  if [ "$installation_verified" != "true" ]; then
+    return
+  fi
+  if [ "$START_SWOBU" != "true" ]; then
+    say ""
+    say "Start Swobu:"
+    say "  $install_path"
+    return
+  fi
+
+  if ! exec 3<>/dev/tty; then
+    say ""
+    warn "Swobu was installed, but this session has no controlling terminal."
+    say "Start it:"
+    say "  $install_path"
+    return
+  fi
+
+  say ""
+  step "Starting Swobu"
+  if ! "$install_path" <&3 >&3 2>&3; then
+    warn "Swobu was installed, but startup failed."
+    say "Try again:"
+    say "  $install_path"
+  fi
+  exec 3>&- 3<&-
+}
+
+start_swobu
 
 print_path_help() {
   case "${SHELL:-}" in

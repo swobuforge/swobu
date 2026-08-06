@@ -25,12 +25,6 @@ func TestHistoryFingerprintSemanticRefinement(t *testing.T) {
 		{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"A2"}]},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"U3"}]}
 	]}`
-	webSearch := `{"model":"m","input":[
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"find it"}]},
-		{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one"],"sources":[{"type":"url","url":"https://a.test","title":"A"}]}},
-		{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"https://a.test","title":"A","start_index":0,"end_index":6}]}]},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
-	]}`
 	discovery := `{"model":"m","input":[
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"find tools"}]},
 		{"type":"tool_search_call","call_id":"search_1","execution":"server","arguments":{"query":"files"}},
@@ -53,9 +47,6 @@ func TestHistoryFingerprintSemanticRefinement(t *testing.T) {
 		{"type":"function_call"`,
 			`{"type":"function_call"`, 1)},
 		{name: "historical item deletion", base: core, mutated: strings.Replace(core, `{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"A2"}]},`, "", 1)},
-		{name: "web search query", base: webSearch, mutated: strings.Replace(webSearch, `"one"`, `"two"`, 1)},
-		{name: "web search source URL", base: webSearch, mutated: strings.ReplaceAll(webSearch, "https://a.test", "https://b.test")},
-		{name: "web search source title", base: webSearch, mutated: strings.ReplaceAll(webSearch, `"title":"A"`, `"title":"B"`)},
 		{name: "discovery call ID", base: discovery, mutated: strings.ReplaceAll(discovery, "search_1", "search_2")},
 		{name: "discovery arguments", base: discovery, mutated: strings.Replace(discovery, `"query":"files"`, `"query":"docs"`, 1)},
 		{name: "discovery tool name", base: discovery, mutated: strings.Replace(discovery, "read_file", "read_doc", 1)},

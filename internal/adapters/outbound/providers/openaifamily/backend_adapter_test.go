@@ -20,6 +20,13 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
+func newPolicyTarget(providerID profile.ProviderID, baseURL, credential string, kind protocolkind.ProtocolKind, providerProtocol string) provider.TargetSnapshot {
+	if providerID == profile.ProviderSpecCustom {
+		return provider.NewCustomTargetSnapshot("backend", baseURL, credential, kind, "", providerProtocol, "Authorization")
+	}
+	return provider.NewTargetSnapshot("backend", string(providerID), baseURL, credential, kind, "", providerProtocol)
+}
+
 func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 	maxTokens := 64
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxTokens})
@@ -41,7 +48,7 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions")
 			target.Model = request.Model()
 			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
 			if err != nil {
@@ -86,7 +93,7 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "", protocolkind.ChatCompletions, "", "chat_completions")
+			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "", protocolkind.ChatCompletions, "chat_completions")
 			target.Model = request.Model()
 			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
 			if err != nil {
@@ -128,7 +135,8 @@ func TestCommodityResponsesTargetsUseFlatNamespaceGrammar(t *testing.T) {
 		{name: "llama_cpp_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8081/v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot(test.name, string(test.provider), test.baseURL, "", protocolkind.Responses, "", "responses")
+			target := newPolicyTarget(test.provider, test.baseURL, "", protocolkind.Responses, "responses")
+			target.TargetID = test.name
 			target.Model = "model"
 			backend, err := NewExecutor(nil, nil, test.policy).ResolveBackend(target)
 			if err != nil {
@@ -167,7 +175,7 @@ func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 		{name: "custom_standard_protocol", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), wantField: "reasoning_effort"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("backend", string(tc.providerID), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions")
 			target.Model = request.Model()
 			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
 			if err != nil {
@@ -246,7 +254,7 @@ func TestCustomMessagesReplaysProtocolOpaqueThinking(t *testing.T) {
 		Model: canonical.Specify("compatible-model"),
 		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
 	})
-	target := provider.NewTargetSnapshot("custom-target", string(profile.ProviderSpecCustom), "https://example.test/v1", "", protocolkind.Messages, "", "messages")
+	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "", "messages", "")
 	target.Model = request.Model()
 	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
 	if err != nil {
@@ -271,7 +279,7 @@ func TestCustomMessagesReplaysOpaqueThinking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := provider.NewTargetSnapshot("custom-target", string(profile.ProviderSpecCustom), "https://example.test/v1", "", protocolkind.Messages, "", "messages")
+	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "", "messages", "")
 	target.Model = "compatible-model"
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify(target.Model),
@@ -313,7 +321,7 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("target", string(tc.providerID), "https://example.test/v1", "", protocolkind.Responses, "", "responses")
+			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "", protocolkind.Responses, "responses")
 			target.Model = request.Model()
 			backend, err := NewExecutor(nil, nil, tc.policy).ResolveBackend(target)
 			if err != nil {

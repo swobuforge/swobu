@@ -18,8 +18,12 @@
 // component is mounted; BindApp resumes that pending operation while persisted
 // model/protocol values remain non-authoritative selection seeds until
 // reconciliation. Z.AI retains its open-set authored model and never initiates
-// catalog discovery. Bedrock has
-// one authentication field: an absent credential reference
+// catalog discovery. Bedrock keeps region and optional explicit API URL as
+// separate draft facts. An empty endpoint stays empty through edit and save;
+// the row displays the resolver-derived effective URL without materializing it
+// into generic BaseURL state. Endpoint input is editor-local until successful
+// submission, and submitting the regional default canonicalizes back to empty.
+// Bedrock has one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
 // login-session workflow. Browser login is the default and device code is an

@@ -86,6 +86,12 @@ func (ed *InlineEditor) SetText(s string) {
 	ed.input.SetText(s)
 }
 
+// MoveHome places the cursor and viewport at the start of the current value.
+func (ed *InlineEditor) MoveHome() {
+	ed.ensureInput()
+	ed.input.MoveHome()
+}
+
 // Close resets the visible surface. If OnClose is set it is called first.
 func (ed *InlineEditor) Close() {
 	if ed.OnClose != nil {

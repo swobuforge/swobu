@@ -203,7 +203,7 @@ func (c azureProviderModelCatalogClient) applyCredential(ctx context.Context, re
 	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
-	auth := openaifamily.AuthStrategyForHeader(target.AuthHeader, NewPolicy().AuthStrategy())
+	auth := openaifamily.AuthStrategyForHeader(target.AuthHeader(), NewPolicy().AuthStrategy())
 	auth.Apply(req, token)
 	return nil
 }

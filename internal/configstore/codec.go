@@ -64,6 +64,7 @@ type azureConnectionDTO struct {
 }
 type bedrockConnectionDTO struct {
 	Region     string `yaml:"region"`
+	Endpoint   string `yaml:"endpoint,omitempty"`
 	Credential string `yaml:"credential,omitempty"`
 }
 type customConnectionDTO struct {
@@ -195,7 +196,7 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: dto.Azure.ProjectEndpoint, Credential: dto.Azure.Credential}
 	}
 	if dto.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: dto.Bedrock.Region, Credential: dto.Bedrock.Credential}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: dto.Bedrock.Region, Endpoint: dto.Bedrock.Endpoint, Credential: dto.Bedrock.Credential}
 	}
 	if dto.Custom != nil {
 		if dto.Custom.Auth != nil && dto.Custom.Auth.Header == nil {
@@ -274,7 +275,7 @@ func encodeTarget(target routing.Target) (targetDTO, error) {
 	case routing.AzureConnection:
 		dto.Connection.Azure = &azureConnectionDTO{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:
-		dto.Connection.Bedrock = &bedrockConnectionDTO{Region: c.Region().String(), Credential: c.Credential().String()}
+		dto.Connection.Bedrock = &bedrockConnectionDTO{Region: c.Region().String(), Endpoint: c.Endpoint(), Credential: c.Credential().String()}
 	case routing.CustomConnection:
 		encoded := &customConnectionDTO{BaseURL: c.BaseURL().String()}
 		if c.Auth() != nil {

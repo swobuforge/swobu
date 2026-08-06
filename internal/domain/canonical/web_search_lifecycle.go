@@ -88,8 +88,9 @@ func (u WebURL) String() string { return u.rawURL }
 // WebSource is one trusted URL-backed source record. Omitted metadata is not
 // synthesized, and repeated provider records remain distinct.
 type WebSource struct {
-	URL   WebURL
-	Title Specified[string]
+	URL            WebURL
+	Title          Specified[string]
+	messagesReplay []byte
 }
 
 func NewWebSource(url WebURL, title Specified[string]) (WebSource, error) {
@@ -102,13 +103,40 @@ func NewWebSource(url WebURL, title Specified[string]) (WebSource, error) {
 	return WebSource{URL: url, Title: cloneSpecified(title, func(value string) string { return value })}, nil
 }
 
+// NewMessagesWebSource retains one complete Messages-native hosted-search
+// result while exposing its portable URL and title to the canonical model.
+func NewMessagesWebSource(url WebURL, title Specified[string], replay []byte) (WebSource, error) {
+	source, err := NewWebSource(url, title)
+	if err != nil {
+		return WebSource{}, err
+	}
+	if len(replay) == 0 {
+		return WebSource{}, BadRequest("messages web source replay is empty")
+	}
+	source.messagesReplay = append([]byte(nil), replay...)
+	return source, nil
+}
+
+// MessagesReplay returns independent bytes only when this source originated
+// as one complete Messages-native hosted-search result.
+func (s WebSource) MessagesReplay() ([]byte, bool) {
+	if len(s.messagesReplay) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), s.messagesReplay...), true
+}
+
 func (s WebSource) validate() error {
 	_, err := NewWebSource(s.URL, s.Title)
 	return err
 }
 
 func (s WebSource) Clone() WebSource {
-	return WebSource{URL: s.URL, Title: cloneSpecified(s.Title, func(value string) string { return value })}
+	return WebSource{
+		URL:            s.URL,
+		Title:          cloneSpecified(s.Title, func(value string) string { return value }),
+		messagesReplay: append([]byte(nil), s.messagesReplay...),
+	}
 }
 
 // WebSearchResult is either a successful ordered source list or a typed

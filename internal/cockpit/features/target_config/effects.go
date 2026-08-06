@@ -186,6 +186,10 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 			d.ProviderProtocol = options[0].ID
 			return d
 		})
+		if err := validateTargetDraftEndpoint(w.Draft.Get()); err != nil {
+			w.Error.Set(err.Error())
+			return
+		}
 		w.CommitEdit(w.actionContext())
 	default:
 		// Multiple protocols: the protocol ui.Select row becomes enterable; the
@@ -210,6 +214,11 @@ func (w *TargetConfig) selectProtocol(protocol string) {
 			continue
 		}
 		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = protocol; return d })
+		if err := validateTargetDraftEndpoint(w.Draft.Get()); err != nil {
+			w.Error.Set(err.Error())
+			return
+		}
+		w.reseedDerivedBedrockEndpointBuffer()
 		w.Error.Set("")
 		w.CommitEdit(w.actionContext())
 		return
@@ -280,7 +289,9 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 		d.CredentialRef = credentialRef
 		return d
 	})
-	w.BaseURL.Set(baseURL)
+	if !w.IsBedrockFlow() {
+		w.BaseURL.Set(baseURL)
+	}
 	if w.IsZAIFlow() {
 		w.invalidateCatalogEvidence()
 		w.Error.Set("")
@@ -363,9 +374,19 @@ func (w *TargetConfig) SelectBedrockRegion(region string) {
 		d.Locator = region
 		return d
 	})
+	w.reseedDerivedBedrockEndpointBuffer()
 	w.invalidateCatalogEvidence()
 	w.Error.Set("")
 	w.advanceFromSetup()
+	w.CommitEdit(w.actionContext())
+}
+
+func (w *TargetConfig) reseedDerivedBedrockEndpointBuffer() {
+	draft := w.Draft.Get()
+	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock || strings.TrimSpace(draft.Endpoint) != "" {
+		return
+	}
+	w.BaseURL.Set(profile.EffectiveBedrockAPIURL(strings.TrimSpace(draft.Locator), "", bedrockEndpointProtocolKind(w)))
 }
 
 // SelectZAIAccess commits one closed Z.AI access product. The operator-authored
@@ -758,6 +779,11 @@ func (w *TargetConfig) Create(ctx context.Context) {
 		return
 	}
 	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), model.ModelName, protocol, w.Route.ID)
+	if err := validateTargetDraftEndpoint(draft); err != nil {
+		w.Error.Set(err.Error())
+		w.SaveOperation.Set(createOperationState{Err: err.Error()})
+		return
+	}
 	connection, err := connectionFromDraft(draft)
 	if err != nil {
 		w.Error.Set(err.Error())
@@ -821,6 +847,10 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 		return
 	}
 	draft := currentTargetDraft(w.Draft.Get(), w.BaseURL.Get(), modelID, protocol, w.Route.ID)
+	if err := validateTargetDraftEndpoint(draft); err != nil {
+		w.Error.Set(err.Error())
+		return
+	}
 	connection, err := connectionFromDraft(draft)
 	if err != nil {
 		w.Error.Set(err.Error())

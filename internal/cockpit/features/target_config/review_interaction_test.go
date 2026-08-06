@@ -52,6 +52,222 @@ func TestBedrockRetryLaunchesAnotherProbe(t *testing.T) {
 	}
 }
 
+func TestDerivedBedrockEndpointSurvivesEditRegionChangeAndSaveAsAbsent(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID:               "bedrock-primary",
+		Model:            "xai.grok-4.3",
+		Provider:         string(profile.ProviderSpecBedrock),
+		ProviderProtocol: "responses_stream",
+		BedrockRegion:    "us-east-1",
+	}
+	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	var saved ports.SaveTargetRequest
+	w := NewEditTargetConfig("personal", route, target, func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		saved = request
+		updated := target
+		updated.BedrockRegion = "eu-west-2"
+		return ports.SaveTargetResult{Target: updated, Route: route}, nil
+	}, nil)
+	w.Open()
+
+	if got := w.Draft.Get().Endpoint; got != "" {
+		t.Fatalf("initial explicit endpoint = %q, want absent", got)
+	}
+	wantInitial := "https://bedrock-mantle.us-east-1.api.aws/v1"
+	if got := w.BaseURL.Get(); got != wantInitial {
+		t.Fatalf("initial editor endpoint = %q, want effective %q", got, wantInitial)
+	}
+
+	w.SelectBedrockRegion("eu-west-2")
+
+	connection, ok := saved.Connection.(routing.BedrockConnection)
+	if !ok {
+		t.Fatalf("saved connection = %T, want routing.BedrockConnection", saved.Connection)
+	}
+	if got := connection.Region().String(); got != "eu-west-2" {
+		t.Fatalf("saved region = %q, want eu-west-2", got)
+	}
+	if got := connection.Endpoint(); got != "" {
+		t.Fatalf("saved endpoint = %q, want absent derived intent", got)
+	}
+}
+
+func TestDerivedBedrockEndpointRemainsVisibleWhenEditorOpensAndSubmitsAsAbsent(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID:               "bedrock-primary",
+		Model:            "xai.grok-4.3",
+		Provider:         string(profile.ProviderSpecBedrock),
+		ProviderProtocol: "responses_stream",
+		BedrockRegion:    "eu-west-2",
+	}
+	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	var saved ports.SaveTargetRequest
+	w := NewEditTargetConfig("personal", route, target, func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		saved = request
+		return ports.SaveTargetResult{Target: target, Route: route}, nil
+	}, nil)
+	w.Open()
+
+	wantURL := "https://bedrock-mantle.eu-west-2.api.aws/v1"
+	frame := testkit.RenderMountedTrimmed(t, BedrockProviderForm(w), 120, 18)
+	if !strings.Contains(frame, wantURL) {
+		t.Fatalf("derived API URL row does not show full effective URL %q:\n%s", wantURL, frame)
+	}
+	row := BedrockEndpointRow(w)
+	row.Open()
+	frame = testkit.RenderMountedTrimmed(t, row, 100, 4)
+	if !strings.Contains(frame, "https://bedrock-mantle.eu-west-2") {
+		t.Fatalf("opened editor hides the effective destination at normal width:\n%s", frame)
+	}
+	row.OnSubmit(wantURL)
+	if got := w.Draft.Get().Endpoint; got != "" {
+		t.Fatalf("unchanged regional default persisted explicit endpoint %q", got)
+	}
+	connection, ok := saved.Connection.(routing.BedrockConnection)
+	if !ok {
+		t.Fatalf("saved connection = %T, want routing.BedrockConnection", saved.Connection)
+	}
+	if got := connection.Endpoint(); got != "" {
+		t.Fatalf("saved endpoint = %q, want absent derived intent", got)
+	}
+}
+
+func TestBedrockRegionSelectionRejectsCanonicalEndpointRegionMismatchBeforeSave(t *testing.T) {
+	target := readmodel.TargetReadModel{
+		ID:               "bedrock-primary",
+		Model:            "xai.grok-4.3",
+		Provider:         string(profile.ProviderSpecBedrock),
+		ProviderProtocol: "responses_stream",
+		BedrockRegion:    "us-east-1",
+		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
+	}
+	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	saves := 0
+	w := NewEditTargetConfig("personal", route, target, func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		saves++
+		return ports.SaveTargetResult{Target: target, Route: route}, nil
+	}, nil)
+	w.Open()
+
+	w.SelectBedrockRegion("eu-west-2")
+
+	if saves != 0 {
+		t.Fatalf("save callback called %d times for incoherent canonical endpoint", saves)
+	}
+	if got := w.Error.Get(); !strings.Contains(got, "us-east-1") || !strings.Contains(got, "eu-west-2") {
+		t.Fatalf("mismatch error = %q, want both endpoint and signing regions", got)
+	}
+	if w.readyToCreate() {
+		t.Fatal("canonical endpoint region mismatch reported ready")
+	}
+}
+
+func TestInitialBedrockSetupNormalizesFullRequestURLWithoutSelectingProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"responses", "https://proxy.example/openai/v1/responses", "https://proxy.example/openai/v1"},
+		{"messages", "https://proxy.example/anthropic/v1/messages", "https://proxy.example/anthropic/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+			w.Open()
+			w.SelectProvider(string(profile.ProviderSpecBedrock))
+			w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+				d.Locator = "us-east-1"
+				return d
+			})
+			row := BedrockEndpointRow(w)
+
+			row.OnSubmit(tc.input)
+
+			if got := w.Draft.Get().ProviderProtocol; got != "" {
+				t.Fatalf("protocol = %q, want unresolved", got)
+			}
+			if got := w.Draft.Get().Endpoint; got != tc.want {
+				t.Fatalf("endpoint = %q, want normalized %q", got, tc.want)
+			}
+			if got := w.BaseURL.Get(); got != tc.want {
+				t.Fatalf("editor value = %q, want normalized %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInitialBedrockSetupNormalizedOpenAIBaseRejectsLaterMessagesSelection(t *testing.T) {
+	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+	w.Open()
+	w.SelectProvider(string(profile.ProviderSpecBedrock))
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.Locator = "us-east-1"
+		return d
+	})
+	row := BedrockEndpointRow(w)
+	row.OnSubmit("https://proxy.example/openai/v1/responses")
+	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{
+		ID: "model", Name: "model", ModelName: "model",
+		SupportedProviderProtocols: []string{"responses", "messages"},
+	})
+
+	w.selectProtocol("messages")
+
+	if got := w.Draft.Get().Endpoint; got != "https://proxy.example/openai/v1" {
+		t.Fatalf("normalized endpoint = %q, want preserved OpenAI base", got)
+	}
+	if got := w.Error.Get(); !strings.Contains(got, "different API namespace") {
+		t.Fatalf("later Messages selection error = %q, want namespace rejection", got)
+	}
+	if w.readyToCreate() {
+		t.Fatal("OpenAI base plus Messages reported ready")
+	}
+}
+
+func TestBedrockEndpointCancelRestoresDurableEffectiveValueAfterInvalidSubmit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		endpoint     string
+		wantRestored string
+	}{
+		{"explicit", "https://proxy.example/openai/v1", "https://proxy.example/openai/v1"},
+		{"derived", "", "https://bedrock-mantle.eu-west-2.api.aws/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := readmodel.TargetReadModel{
+				ID:               "bedrock-primary",
+				Model:            "xai.grok-4.3",
+				Provider:         string(profile.ProviderSpecBedrock),
+				ProviderProtocol: "responses_stream",
+				BedrockRegion:    "eu-west-2",
+				BaseURL:          tc.endpoint,
+			}
+			route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+			w := NewEditTargetConfig("personal", route, target, nil, nil)
+			w.Open()
+			row := BedrockEndpointRow(w)
+			row.Open()
+
+			w.BaseURL.Set("https://invalid.example/messages")
+			row.OnSubmit("https://invalid.example/messages")
+			if !row.IsEditing() {
+				t.Fatal("invalid submit closed the endpoint editor")
+			}
+			if got := w.Draft.Get().Endpoint; got != tc.endpoint {
+				t.Fatalf("durable endpoint changed after invalid submit: %q", got)
+			}
+			row.Cancel()
+
+			if got := w.BaseURL.Get(); got != tc.wantRestored {
+				t.Fatalf("cancel restored %q, want %q", got, tc.wantRestored)
+			}
+			if got := w.Draft.Get().Endpoint; got != tc.endpoint {
+				t.Fatalf("durable endpoint changed after cancel: %q", got)
+			}
+		})
+	}
+}
+
 func TestCredentialChangePreservesTypedModelAcrossFailedDiscovery(t *testing.T) {
 	w := readyBedrockConfig(t)
 	if !w.readyToCreate() {

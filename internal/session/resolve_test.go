@@ -13,7 +13,7 @@ const testWorkspaceSlug = "test-ns"
 
 func testBackendTarget(t *testing.T, model string) provider.TargetSnapshot {
 	t.Helper()
-	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", "responses", "")
+	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", "responses", "", "responses")
 	target.Model = model
 	return target
 }

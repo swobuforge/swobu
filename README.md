@@ -28,6 +28,10 @@ Install the release:
 curl -fsSL https://swobu.com/install.sh | sh
 ```
 
+The installer verifies the release and then starts `swobu`, which opens
+Cockpit. For provisioning or CI, pass `--no-start` to `install.sh`, `-NoStart`
+to `install.ps1`, or set `START_SWOBU=false`.
+
 The installer provides release binaries for macOS on Intel and Apple silicon, and for Linux on AMD64 and ARM64. It downloads `checksums.txt` and checks the SHA-256 of the archive before it installs.
 
 If a release binary is not available for your platform, install from source:

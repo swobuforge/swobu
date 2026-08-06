@@ -34,7 +34,7 @@ func connectionsEqual(left, right Connection) bool {
 		return ok && left.projectEndpoint.String() == right.projectEndpoint.String() && left.credential.String() == right.credential.String()
 	case BedrockConnection:
 		right, ok := right.(BedrockConnection)
-		return ok && left.region == right.region && left.Credential().String() == right.Credential().String()
+		return ok && left.region == right.region && left.endpoint == right.endpoint && left.Credential().String() == right.Credential().String()
 	case CustomConnection:
 		right, ok := right.(CustomConnection)
 		return ok && left.baseURL.String() == right.baseURL.String() && customAuthEqual(left.auth, right.auth)
@@ -244,12 +244,18 @@ func ParseBedrockRegion(raw string) (BedrockRegion, error) {
 }
 func (r BedrockRegion) String() string { return r.value }
 
+// BedrockConnection owns the durable Bedrock transport identity: region (the
+// SigV4 signing source), endpoint (the complete API base URL including its AWS
+// namespace, e.g. "https://bedrock-mantle.us-east-1.api.aws/openai/v1"), and
+// credential. An empty endpoint means "derive from region at a higher layer";
+// the routing package never normalizes or validates it as a Mantle host.
 type BedrockConnection struct {
 	region     BedrockRegion
+	endpoint   string
 	credential *credentialref.Ref
 }
 
-func NewBedrockConnection(region BedrockRegion, rawCredential string) (BedrockConnection, error) {
+func NewBedrockConnection(region BedrockRegion, endpoint, rawCredential string) (BedrockConnection, error) {
 	if region.value == "" {
 		return BedrockConnection{}, pathError("connection.bedrock.region", "region is required")
 	}
@@ -261,11 +267,15 @@ func NewBedrockConnection(region BedrockRegion, rawCredential string) (BedrockCo
 		}
 		ref = &parsed
 	}
-	return BedrockConnection{region: region, credential: ref}, nil
+	return BedrockConnection{region: region, endpoint: strings.TrimSpace(endpoint), credential: ref}, nil // swobu:io-string source=boundary
 }
 func (BedrockConnection) Provider() Provider      { return ProviderBedrock }
 func (BedrockConnection) isConnection()           {}
 func (c BedrockConnection) Region() BedrockRegion { return c.region }
+
+// Endpoint returns the authored complete API base URL, or "" when the endpoint
+// is derived from region. Returned verbatim; no normalization happens here.
+func (c BedrockConnection) Endpoint() string { return c.endpoint }
 func (c BedrockConnection) Credential() credentialref.Ref {
 	if c.credential == nil {
 		return credentialref.Ref{}
@@ -327,7 +337,7 @@ func setConnectionCredential(connection Connection, raw string) (Connection, err
 		c.credential = ref
 		return c, nil
 	case BedrockConnection:
-		return NewBedrockConnection(c.region, raw)
+		return NewBedrockConnection(c.region, c.endpoint, raw)
 	case CustomConnection:
 		header, ok := c.auth.(CustomHeaderAuth)
 		if !ok {

@@ -13,28 +13,36 @@ const (
 // OpaqueThinking is one complete, reasoning-only replay unit. The private tag
 // prevents protocol and exact-provider bytes from being cross-converted.
 type OpaqueThinking struct {
-	kind opaqueThinkingKind
-	raw  []byte
+	kind            opaqueThinkingKind
+	raw             []byte
+	responsesItemID string
 }
 
 // ResponsesReasoningReplay is consumed by stateless Responses request
 // encoding to restore provider-hidden reasoning state on a later invocation.
+// ItemID is the optional exact Responses wire id paired with EncryptedContent;
+// it is preserved verbatim through ingress, decode, clone, and replay.
 type ResponsesReasoningReplay struct {
 	EncryptedContent string
+	ItemID           string
 }
 
 func NewResponsesOpaqueThinking(replay ResponsesReasoningReplay) (OpaqueThinking, error) {
 	if replay.EncryptedContent == "" {
 		return OpaqueThinking{}, BadRequest("responses encrypted reasoning is empty")
 	}
-	return OpaqueThinking{kind: opaqueThinkingResponses, raw: []byte(replay.EncryptedContent)}, nil
+	return OpaqueThinking{
+		kind:            opaqueThinkingResponses,
+		raw:             []byte(replay.EncryptedContent),
+		responsesItemID: replay.ItemID,
+	}, nil
 }
 
 func (o OpaqueThinking) Responses() (ResponsesReasoningReplay, bool) {
 	if o.kind != opaqueThinkingResponses || len(o.raw) == 0 {
 		return ResponsesReasoningReplay{}, false
 	}
-	return ResponsesReasoningReplay{EncryptedContent: string(o.raw)}, true
+	return ResponsesReasoningReplay{EncryptedContent: string(o.raw), ItemID: o.responsesItemID}, true
 }
 
 // NewMessagesOpaqueThinking admits one non-empty complete Messages block.
@@ -75,7 +83,7 @@ func (o OpaqueThinking) IsZero() bool { return o.kind == 0 && len(o.raw) == 0 }
 
 // Clone returns an independent replay value.
 func (o OpaqueThinking) Clone() OpaqueThinking {
-	return OpaqueThinking{kind: o.kind, raw: append([]byte(nil), o.raw...)}
+	return OpaqueThinking{kind: o.kind, raw: append([]byte(nil), o.raw...), responsesItemID: o.responsesItemID}
 }
 
 func (OpaqueThinking) String() string   { return "<opaque>" }
@@ -87,6 +95,11 @@ func (o OpaqueThinking) validate() error {
 	}
 	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingOpenRouter && o.kind != opaqueThinkingResponses) || len(o.raw) == 0 {
 		return fmt.Errorf("opaque thinking is invalid")
+	}
+	// A Responses wire id is replay-affecting only for the Responses branch.
+	// Messages and OpenRouter branches must never carry one.
+	if o.responsesItemID != "" && o.kind != opaqueThinkingResponses {
+		return fmt.Errorf("responses reasoning id on a non-responses opaque thinking")
 	}
 	return nil
 }
