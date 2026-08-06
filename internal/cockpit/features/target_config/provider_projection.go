@@ -40,7 +40,7 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 		if err != nil {
 			return nil, err
 		}
-		return routing.NewBedrockConnection(region, credential)
+		return routing.NewBedrockConnection(region, strings.TrimSpace(draft.Endpoint), credential)
 	case profile.ProviderSpecCustom:
 		var auth routing.CustomAuth
 		if credential != "" {
@@ -59,18 +59,36 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 	}
 }
 
+func validateTargetDraftEndpoint(draft readmodel.TargetDraft) error {
+	if profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) != profile.ProviderSpecBedrock {
+		return nil
+	}
+	kind, _, ok := profile.ProviderProtocolKindAndFrame(draft.ProviderSpec, draft.ProviderProtocol)
+	if !ok {
+		return fmt.Errorf("selected provider protocol is unsupported")
+	}
+	_, err := profile.ResolveBedrockEndpoint(draft.Endpoint, draft.Locator, kind)
+	return err
+}
+
 // TargetDraftFromReadModel projects the persisted read shape into the typed
 // draft used by both create and edit authoring.
 func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.TargetReadModel) readmodel.TargetDraft {
 	spec := strings.TrimSpace(target.Provider)   // swobu:io-string source=boundary
 	locator := strings.TrimSpace(target.BaseURL) // swobu:io-string source=boundary
+	endpoint := ""
 	if profile.ProviderID(spec) == profile.ProviderSpecBedrock {
-		locator = profile.BedrockMantleRegionFromEndpoint(target.BaseURL)
+		// Region is an authored first-class fact surfaced on the readmodel; the
+		// endpoint (the complete API base URL) is its own draft field. Neither is
+		// parsed from the other.
+		locator = strings.TrimSpace(target.BedrockRegion)
+		endpoint = strings.TrimSpace(target.BaseURL)
 	}
 	draft := readmodel.TargetDraft{
 		ProviderSpec:     spec,
 		ZAIAccess:        strings.TrimSpace(target.ZAIAccess),
 		Locator:          locator,
+		Endpoint:         endpoint,
 		CredentialRef:    strings.TrimSpace(target.CredentialRef),    // swobu:io-string source=boundary
 		ProviderProtocol: strings.TrimSpace(target.ProviderProtocol), // swobu:io-string source=boundary
 		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
@@ -85,8 +103,9 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 	return draft
 }
 
-// currentTargetDraft applies the transient authoring spine to the durable
-// draft without interpreting provider-specific option arms.
+// currentTargetDraft applies the shared transient authoring spine to the
+// durable draft. Bedrock owns region and explicit endpoint directly on the
+// draft, so the generic locator buffer is ignored for that provider.
 func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol string, routeID readmodel.RouteID) readmodel.TargetDraft {
 	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock {
 		draft.Locator = strings.TrimSpace(locator) // swobu:io-string source=boundary

@@ -61,20 +61,26 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 	}
 	// Messages defines content as an array for successful searches and one
 	// object for a search failure. Keep that wire union here at the codec edge.
-	var blocks []messagesWebSearchResultBlock
+	var rawBlocks []json.RawMessage
 	switch firstJSONByte(content) {
 	case '[':
-		if err := json.Unmarshal(content, &blocks); err != nil {
+		if err := json.Unmarshal(content, &rawBlocks); err != nil {
 			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
 		}
 	case '{':
+		rawBlocks = []json.RawMessage{append([]byte(nil), content...)}
 		var block messagesWebSearchResultBlock
 		if err := json.Unmarshal(content, &block); err != nil || block.Type != "web_search_tool_result_error" {
 			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
 		}
-		blocks = []messagesWebSearchResultBlock{block}
 	default:
 		return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
+	}
+	blocks := make([]messagesWebSearchResultBlock, len(rawBlocks))
+	for index, rawBlock := range rawBlocks {
+		if err := json.Unmarshal(rawBlock, &blocks[index]); err != nil {
+			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result content is invalid")
+		}
 	}
 	if len(blocks) == 1 && blocks[0].Type == "web_search_tool_result_error" {
 		failure, err := canonical.NewWebSearchFailureResult(blocks[0].ErrorCode)
@@ -106,7 +112,7 @@ func decodeMessagesWebSearchResult(callIDText string, content json.RawMessage, i
 		if strings.TrimSpace(block.Title) != "" { // swobu:io-string source=provider-wire
 			title = canonical.Specify(block.Title)
 		}
-		source, err := canonical.NewWebSource(webURL, title)
+		source, err := canonical.NewMessagesWebSource(webURL, title, rawBlocks[index])
 		if err != nil {
 			return canonical.CanonicalItem{}, evidence.malformed("messages web-search result source is invalid")
 		}
@@ -229,13 +235,25 @@ func encodeMessagesWebSearchResult(result canonical.WebSearchResult) (json.RawMe
 		// the content object's type and do not use the is_error field.
 		return raw, err
 	}
-	blocks := make([]messagesWebSearchResultBlock, 0, len(result.Sources()))
+	blocks := make([]json.RawMessage, 0, len(result.Sources()))
 	for _, source := range result.Sources() {
+		if replay, ok := source.MessagesReplay(); ok {
+			var envelope messagesWebSearchResultBlock
+			if err := json.Unmarshal(replay, &envelope); err != nil || envelope.Type != "web_search_result" {
+				return nil, canonical.InternalError("messages web-search result replay is invalid")
+			}
+			blocks = append(blocks, replay)
+			continue
+		}
 		block := messagesWebSearchResultBlock{Type: "web_search_result", URL: source.URL.String()}
 		if title, ok := source.Title.Get(); ok {
 			block.Title = title
 		}
-		blocks = append(blocks, block)
+		raw, err := json.Marshal(block)
+		if err != nil {
+			return nil, canonical.InternalError("messages web-search result could not be encoded")
+		}
+		blocks = append(blocks, raw)
 	}
 	raw, err := json.Marshal(blocks)
 	if err != nil {

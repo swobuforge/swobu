@@ -28,7 +28,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	}
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader()); err != nil {
 		return nil, err
 	}
 

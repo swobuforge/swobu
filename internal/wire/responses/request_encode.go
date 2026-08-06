@@ -587,6 +587,13 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			item := map[string]any{"type": "reasoning"}
 			if replay, ok := reasoning.Opaque().Responses(); ok {
 				item["encrypted_content"] = replay.EncryptedContent
+				// RFC G2 §7.5: replay the paired Responses wire id verbatim when it
+				// was preserved. Idless replay stays idless. The id rides only with
+				// encrypted content (see OpaqueThinking invariant), so this never
+				// revives an id from a non-Responses branch.
+				if replay.ItemID != "" {
+					item["id"] = replay.ItemID
+				}
 			}
 			summary := make([]map[string]any, 0)
 			content := make([]map[string]any, 0)
@@ -655,7 +662,7 @@ func appendResponsesRequestChange(changeLog *[]compat.Change, exchangeID string,
 }
 
 func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonical.MessagePart) (any, error) {
-	if len(parts) == 1 {
+	if author != canonical.MessageRoleAssistant && len(parts) == 1 {
 		if text, ok := parts[0].Text(); ok {
 			return text.Text(), nil
 		}
@@ -663,7 +670,11 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {
 		if text, ok := part.Text(); ok {
-			out = append(out, map[string]any{"type": "input_text", "text": text.Text()})
+			partType := "input_text"
+			if author == canonical.MessageRoleAssistant {
+				partType = "output_text"
+			}
+			out = append(out, map[string]any{"type": partType, "text": text.Text()})
 			continue
 		}
 		if part.Kind() == canonical.PartKindImage {

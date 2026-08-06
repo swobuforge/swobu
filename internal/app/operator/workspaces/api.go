@@ -82,6 +82,7 @@ type AzureConnection struct {
 }
 type BedrockConnection struct {
 	Region     string `json:"region"`
+	Endpoint   string `json:"endpoint,omitempty"`
 	Credential string `json:"credential,omitempty"`
 }
 type CustomConnection struct {
@@ -147,7 +148,7 @@ func ConnectionFromRouting(connection routing.Connection) Connection {
 	case routing.AzureConnection:
 		out.Azure = &AzureConnection{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:
-		out.Bedrock = &BedrockConnection{Region: c.Region().String(), Credential: c.Credential().String()}
+		out.Bedrock = &BedrockConnection{Region: c.Region().String(), Endpoint: c.Endpoint(), Credential: c.Credential().String()}
 	case routing.CustomConnection:
 		custom := &CustomConnection{BaseURL: c.BaseURL().String()}
 		if c.Auth() != nil {
@@ -216,7 +217,7 @@ func (c Connection) routingDraft() (routing.ConnectionDraft, error) {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: c.Azure.ProjectEndpoint, Credential: c.Azure.Credential}
 	}
 	if c.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: c.Bedrock.Region, Credential: c.Bedrock.Credential}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: c.Bedrock.Region, Endpoint: c.Bedrock.Endpoint, Credential: c.Bedrock.Credential}
 	}
 	if c.Custom != nil {
 		draft.Custom = &routing.CustomConnectionDraft{BaseURL: c.Custom.BaseURL}

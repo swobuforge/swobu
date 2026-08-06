@@ -47,9 +47,11 @@ type AzureConnectionDraft struct {
 	Credential      string
 }
 
-// BedrockConnectionDraft carries only the durable Bedrock region.
+// BedrockConnectionDraft carries the durable Bedrock region and the optional
+// authored endpoint. An empty endpoint means "derive from region".
 type BedrockConnectionDraft struct {
 	Region     string
+	Endpoint   string
 	Credential string
 }
 
@@ -152,7 +154,7 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 		if err != nil {
 			return nil, err
 		}
-		return NewBedrockConnection(region, draft.Bedrock.Credential)
+		return NewBedrockConnection(region, draft.Bedrock.Endpoint, draft.Bedrock.Credential)
 	}
 	var auth CustomAuth
 	if draft.Custom.Header != nil {

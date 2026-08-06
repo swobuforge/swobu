@@ -52,6 +52,9 @@ type EditableRow struct {
 	// keystroke. Use only when Value is itself control-local draft state and
 	// live validation must react while typing.
 	PublishWhileEditing bool
+	// OpenAtStart keeps a destination-bearing prefix visible when a long value
+	// first enters edit mode. Ordinary text fields retain cursor-at-end editing.
+	OpenAtStart bool
 	// OnActivate is called when the view-mode row is activated.
 	// If nil, the row auto-switches to edit mode.
 	OnActivate func()
@@ -107,6 +110,9 @@ func (r *EditableRow) Open() {
 		}
 	}
 	r.editor.SetText(seed)
+	if r.OpenAtStart {
+		r.editor.MoveHome()
+	}
 	r.editor.input.OnChange = r.editor.OnChange
 	if app := r.target.App(); app != nil {
 		r.editor.BindApp(app)
@@ -201,6 +207,7 @@ func (r *EditableRow) UpdateProps(fresh tui.Component) {
 	r.AutoFocus = f.AutoFocus
 	r.StartEditing = f.StartEditing
 	r.PublishWhileEditing = f.PublishWhileEditing
+	r.OpenAtStart = f.OpenAtStart
 
 	r.target.Update(r.props())
 	if !prevStartEditing && r.StartEditing && !r.IsEditing() {

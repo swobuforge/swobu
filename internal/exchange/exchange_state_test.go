@@ -1113,7 +1113,7 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 	targetID, _ := routing.ParseTargetID("mantle-a")
 	model, _ := routing.ParseUpstreamModel("model-a")
 	region, _ := routing.ParseBedrockRegion("us-east-1")
-	connection, err := routing.NewBedrockConnection(region, "")
+	connection, err := routing.NewBedrockConnection(region, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

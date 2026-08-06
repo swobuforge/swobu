@@ -29,4 +29,7 @@
 // ID and version bind provider-owned native response handles. Self-contained
 // opaque thinking remains attached to its canonical reasoning item and replays
 // unchanged through the Messages protocol or exact OpenRouter provider hook.
+// TargetSnapshot is an atomic execution projection. Provider-specific execution
+// facts occupy one closed options arm fixed by construction; adapters read them
+// through accessors and cannot complete snapshots through later mutation.
 package provider

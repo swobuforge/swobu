@@ -188,6 +188,18 @@ func TestEditableRow_StartEditingMountFocusesRowElement(t *testing.T) {
 	}
 }
 
+func TestEditableRow_UpdatePropsCopiesOpenAtStart(t *testing.T) {
+	row := NewEditableRow("url", "URL", tui.NewState("https://example.test"))
+	fresh := NewEditableRow("url", "URL", tui.NewState("https://example.test"))
+	fresh.OpenAtStart = true
+
+	row.UpdateProps(fresh)
+
+	if !row.OpenAtStart {
+		t.Fatal("UpdateProps did not copy OpenAtStart")
+	}
+}
+
 func TestEditableRow_RenderEditDoesNotMutateFocusOrState(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "editable_row.go", nil, 0)

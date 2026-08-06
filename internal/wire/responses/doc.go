@@ -28,6 +28,9 @@
 // Responses output and history fingerprints only when a Responses replay or
 // client-visible summary exists; projected history must describe only what the
 // client can append on its next full-history request.
+// Provider-resolved web-search details remain in canonical truth and wire
+// output, while history fingerprints use the completed lifecycle marker and
+// text-only assistant continuation that Codex appends on replay.
 // Text-only results split across several canonical parts concatenate into the
 // official string form with approximation evidence; image-bearing results retain
 // their rich array.

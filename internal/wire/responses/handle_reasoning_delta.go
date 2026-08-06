@@ -62,7 +62,11 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	var opaque canonical.OpaqueThinking
 	if frame.Item.EncryptedContent != "" {
 		var opaqueErr error
-		opaque, opaqueErr = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: frame.Item.EncryptedContent})
+		// RFC G2 §7.4: use the committed stream identity (merged across frames),
+		// not whichever terminal frame happens to carry an id. output.identity.itemID
+		// is already the sole validated id for this output index; a later frame
+		// omitting it (or repeating it) leaves the committed value intact.
+		opaque, opaqueErr = canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: frame.Item.EncryptedContent, ItemID: output.identity.itemID})
 		if opaqueErr != nil {
 			return false, canonical.InternalError("responses streamed encrypted reasoning is invalid")
 		}

@@ -88,7 +88,7 @@ func (w *TargetConfig) baseSetupState(provider profile.Profile, endpointValue st
 
 func (w *TargetConfig) endpointValueFor(provider profile.Profile) string {
 	if provider.ProviderID == profile.ProviderSpecBedrock {
-		return strings.TrimSpace(w.Draft.Get().Locator)
+		return strings.TrimSpace(w.BaseURL.Get())
 	}
 	endpointValue := strings.TrimSpace(w.BaseURL.Get()) // swobu:io-string source=boundary
 	if endpointValue == "" && !profile.RequiresLocator(string(provider.ProviderID)) {
@@ -187,6 +187,9 @@ func httpReadiness(w *TargetConfig, base providerSetupState) providerSetupState 
 }
 
 func (w *TargetConfig) endpointValueForProfile() string {
+	if profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecBedrock {
+		return strings.TrimSpace(w.BaseURL.Get())
+	}
 	if endpoint := strings.TrimSpace(w.BaseURL.Get()); endpoint != "" {
 		return endpoint
 	}

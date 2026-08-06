@@ -50,8 +50,14 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 // ResolveBackend composes one exact Bedrock Mantle backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	codec := provider.Codec(protocolcodec.Codec{Protocol: target.ProtocolKind})
-	if target.ProtocolKind == protocolkind.Messages {
+	switch target.ProtocolKind {
+	case protocolkind.Messages:
 		codec = mantleMessagesCodec{Codec: codec}
+	case protocolkind.Responses:
+		// RFC G2 §7.6: the Bedrock Responses reasoning-replay identity seam. It is
+		// an identity decorator today; the named site where a proven normalization
+		// of the reasoning wire id would land (see mantleResponsesCodec).
+		codec = mantleResponsesCodec{Codec: codec}
 	}
 	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
@@ -65,20 +71,21 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("bedrock provider base URL is required"))
 	}
-	if err := validateBedrockMantleEndpoint(target.BaseURL); err != nil {
+	if err := validateBedrockMantleEndpoint(target.BaseURL, target.BedrockRegion()); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
-	path, err := profile.ProviderRequestPath(target.ProviderID(), target.ProtocolKind)
+	// Route through the single Bedrock endpoint boundary so endpoint and protocol
+	// meet once: it strips a pasted terminal operation exactly once (no doubled
+	// /responses), derives the request URL from one parse, and preserves any
+	// reverse-proxy prefix. The Bedrock adapter owns no URL parsing of its own.
+	resolution, err := profile.ResolveBedrockEndpoint(target.BaseURL, target.BedrockRegion(), target.ProtocolKind)
 	if err != nil {
 		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget(err.Error()))
 	}
-	requestURL := httpedge.JoinBaseURLAndPath(target.BaseURL, path)
-	if target.ProtocolKind == protocolkind.Messages {
-		path = "/anthropic/v1/messages"
-		baseURL := strings.TrimRight(target.BaseURL, "/")
-		baseURL = strings.TrimSuffix(baseURL, "/v1")
-		requestURL = httpedge.JoinBaseURLAndPath(baseURL, path)
+	if resolution.RequestURL == "" {
+		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget("bedrock provider protocol has no request path"))
 	}
+	requestURL := resolution.RequestURL
 
 	wireReqCarrier := doc
 	if wireReqCarrier.IsEmpty() {
@@ -102,7 +109,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := applyBedrockAuth(ctx, e.credentials, target.CredentialRef, httpReq, wireReqBody); err != nil {
+	if err := applyBedrockAuth(ctx, e.credentials, target.CredentialRef, httpReq, wireReqBody, target.BedrockRegion()); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
@@ -119,7 +126,11 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
-		logBedrockBackendDiagnostic("execute", target, path, backendErr)
+		// The resolver owns URL derivation; recompute the operation label for the
+		// diagnostic from the protocol kind so this call site owns no URL parsing.
+		requestPath, _ := profile.ProviderRequestPath(string(profile.ProviderSpecBedrock), target.ProtocolKind)
+		logBedrockBackendDiagnostic("execute", target, requestPath, backendErr)
+		logBedrockRequestValidationDiagnostic(target, requestPath, backendErr, wireReqBody)
 		return nil, provider.AttemptMayHaveExecuted(backendErr)
 	}
 	if httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
@@ -149,10 +160,10 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
 	}
-	if err := validateBedrockMantleEndpoint(target.BaseURL); err != nil {
+	if err := validateBedrockMantleEndpoint(target.BaseURL, target.BedrockRegion()); err != nil {
 		return nil, err
 	}
-	_, region := bedrockEndpointClassAndRegion(target.BaseURL)
+	region := bedrockSigningRegionForTarget(target)
 	resolved, err := resolveBedrockAuth(ctx, e.credentials, target.CredentialRef, region)
 	if err != nil {
 		return nil, err
@@ -162,7 +173,20 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 
 func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target provider.TargetSnapshot, resolved resolvedBedrockAuthState, region string) ([]profile.ProviderDeploymentRecord, error) {
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"), nil)
+	// Catalog discovery is internal normalization (not operator intent): the
+	// resolver collapses the terminal namespace to the bare /v1 service root
+	// while preserving any reverse-proxy prefix, then appends /models. The kind
+	// is irrelevant to the catalog, so pass the zero value to skip the coherence
+	// check — a Messages target's catalog must still resolve.
+	resolution, err := profile.ResolveBedrockEndpoint(target.BaseURL, target.BedrockRegion(), protocolkind.ProtocolKind(""))
+	if err != nil {
+		return nil, canonical.BadEndpoint("bedrock provider model catalog could not be derived from endpoint")
+	}
+	catalogURL := resolution.CatalogURL
+	if catalogURL == "" {
+		return nil, canonical.BadEndpoint("bedrock provider model catalog could not be derived from endpoint")
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL, nil)
 	if err != nil {
 		return nil, canonical.BadEndpoint("bedrock provider model catalog request could not be built")
 	}
@@ -229,9 +253,9 @@ func defaultCallerIdentity(ctx context.Context, cfg aws.Config) (*sts.GetCallerI
 // and treats STS caller identity as optional enrichment even when the catalog
 // fails. This preserves fresh identity evidence for the refresh-identity job.
 func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
-	region, err := bedrockSigningRegion(mustParseURL(target.BaseURL))
-	if err != nil {
-		return provider.TargetProbeResult{}, err
+	region := bedrockSigningRegionForTarget(target)
+	if region == "" {
+		return provider.TargetProbeResult{}, canonical.BadEndpoint("bedrock signing region is required")
 	}
 	resolved, err := resolveBedrockAuth(ctx, e.credentials, target.CredentialRef, region)
 	if err != nil {

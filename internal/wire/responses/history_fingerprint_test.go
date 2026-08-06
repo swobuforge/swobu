@@ -571,6 +571,32 @@ func TestResponsesHistoryPreservesMultimodalContent(t *testing.T) {
 	}
 }
 
+func TestCodexCompletedWebSearchReplayResolvesCheckpoint(t *testing.T) {
+	first := decodeResponsesFingerprintRequest(t, `{"model":"m","tools":[{"type":"web_search"}],"input":"find news"}`)
+	callID, _ := canonical.NewToolCallID("search_1")
+	input, _ := canonical.NewWebSearchToolInput(canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"find news"}})
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	resultValue, _ := canonical.NewWebSearchResult(nil)
+	result, _ := canonical.NewWebSearchResultItem(callID, resultValue)
+	response := canonicaltest.Response(t, "swobu_search", "m", []canonical.CanonicalItem{call, result}, canonical.Incomplete("continuation"))
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrevious, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := decodeResponsesFingerprintRequest(t, `{"model":"m","tools":[{"type":"web_search"}],"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"find news"}]},{"type":"web_search_call","status":"completed"}]}`)
+	if replayed.RebasedRequest == nil || replayed.RebasedRequest.Previous != wantPrevious {
+		t.Fatalf("web-search replay = %#v, want predecessor %#v", replayed.RebasedRequest, wantPrevious)
+	}
+	items := replayed.RebasedRequest.Request.Items()
+	if len(items) != 1 || items[0].Kind() != canonical.ItemKindToolDeclarations {
+		t.Fatalf("web-search current input = %#v, want only active tool declarations", items)
+	}
+}
+
 func decodeResponsesFingerprintRequest(t *testing.T, raw string) wire.ClientRequestResult {
 	t.Helper()
 	result, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(raw), carrier.Meta{}))

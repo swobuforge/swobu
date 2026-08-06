@@ -34,3 +34,51 @@ func TestTargetSnapshotConstructorDerivesOneCoherentFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTargetSnapshotConstructorsExposeExactlyOneProviderOptionsArm(t *testing.T) {
+	custom := NewCustomTargetSnapshot("custom", "https://example.test", "cred", protocolkind.Responses, "", "responses", "X-API-Key")
+	if custom.AuthHeader() != "X-API-Key" {
+		t.Fatalf("custom auth header = %q, want %q", custom.AuthHeader(), "X-API-Key")
+	}
+	if custom.BedrockRegion() != "" {
+		t.Fatalf("custom target exposed Bedrock region %q", custom.BedrockRegion())
+	}
+
+	bedrock := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "us-east-1")
+	if bedrock.BedrockRegion() != "us-east-1" {
+		t.Fatalf("Bedrock region = %q, want %q", bedrock.BedrockRegion(), "us-east-1")
+	}
+	if bedrock.AuthHeader() != "" {
+		t.Fatalf("Bedrock target exposed custom auth header %q", bedrock.AuthHeader())
+	}
+}
+
+func TestGenericTargetSnapshotRejectsProviderSpecificTargets(t *testing.T) {
+	for _, providerSpec := range []string{"bedrock", "custom"} {
+		t.Run(providerSpec, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("generic constructor admitted provider %q", providerSpec)
+				}
+			}()
+			_ = NewTargetSnapshot("target", providerSpec, "https://example.test", "cred", protocolkind.Responses, "", "responses")
+		})
+	}
+}
+
+func TestBedrockTargetSnapshotRejectsMissingSigningRegionAtConstruction(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Bedrock constructor admitted an empty signing region")
+		}
+	}()
+	_ = NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "")
+}
+
+func TestTargetSnapshotEqualityUsesComparableConcreteOptions(t *testing.T) {
+	left := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "us-east-1")
+	right := left.Clone()
+	if !left.Equal(right) {
+		t.Fatal("equal snapshots compare unequal")
+	}
+}

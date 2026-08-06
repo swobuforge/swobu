@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func targetConfigTitle(w *TargetConfig) string {
@@ -131,7 +132,7 @@ func NewEditTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.Rout
 	w.Target = target
 	w.credentialSlot = newCredentialSlot(workspaceID, route.ID, target.ID)
 	w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
-	w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
+	seedEndpointFromTarget(w, target)
 	w.SelectedModel.Set(selectedModelSeedFromTarget(target))
 	w.Placement.Set(defaultPlacementForRoute(route))
 	if w.Draft.Get().ProviderSpec != "" {
@@ -254,7 +255,7 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 	w.mode = targetConfigModeEdit
 	if strings.TrimSpace(w.Draft.Get().ProviderSpec) == "" {
 		w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
-		w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
+		seedEndpointFromTarget(w, target)
 		w.SelectedModel.Set(selectedModelSeedFromTarget(target))
 		w.Placement.Set(defaultPlacementForRoute(route))
 		if w.Draft.Get().ProviderSpec != "" {
@@ -273,6 +274,18 @@ func selectedModelSeedFromTarget(target readmodel.TargetReadModel) readmodel.Mod
 		ModelName:               target.Model,
 		DefaultProviderProtocol: target.ProviderProtocol,
 	}
+}
+
+// seedEndpointFromTarget initializes the temporary editor buffer on edit entry.
+// Bedrock keeps explicit-or-empty durable intent in Draft.Endpoint while the
+// editor receives the protocol-aware effective API base.
+func seedEndpointFromTarget(w *TargetConfig, target readmodel.TargetReadModel) {
+	if profile.ProviderID(target.Provider) == profile.ProviderSpecBedrock {
+		kind, _, _ := profile.ProviderProtocolKindAndFrame(target.Provider, target.ProviderProtocol)
+		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(target.BedrockRegion, target.BaseURL, kind))
+		return
+	}
+	w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
 }
 
 // UpdateProviderOptions refreshes static provider picker options from the page

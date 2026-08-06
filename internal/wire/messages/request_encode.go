@@ -39,6 +39,15 @@ type contentID struct {
 	Signature string                `json:"signature,omitempty"`
 	Data      string                `json:"data,omitempty"`
 	Citations []messagesCitationDTO `json:"citations,omitempty"`
+	opaque    json.RawMessage
+}
+
+func (c contentID) MarshalJSON() ([]byte, error) {
+	if len(c.opaque) > 0 {
+		return append([]byte(nil), c.opaque...), nil
+	}
+	type contentIDAlias contentID
+	return json.Marshal(contentIDAlias(c))
 }
 
 // ProviderRequestDocument is the standard Messages lowering before any
@@ -354,11 +363,13 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		if !exact {
 			return blocks, nil
 		}
-		var block contentID
-		if err := json.Unmarshal(opaque, &block); err != nil || block.Type != "thinking" && block.Type != "redacted_thinking" {
+		var envelope struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(opaque, &envelope); err != nil || envelope.Type != "thinking" && envelope.Type != "redacted_thinking" {
 			return nil, canonical.InternalError("messages opaque thinking is invalid")
 		}
-		return append(blocks, block), nil
+		return append(blocks, contentID{opaque: opaque}), nil
 	}
 	return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent this canonical item kind")
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 const bedrockSigningService = "bedrock"
@@ -84,8 +85,7 @@ func (p credentialsProvider) Retrieve(context.Context) (aws.Credentials, error) 
 	return p.credentials, nil
 }
 
-func applyBedrockAuth(ctx context.Context, credentials providersruntime.CredentialProvider, credentialRef string, req *http.Request, payload []byte) error {
-	_, region := bedrockEndpointClassAndRegion(req.URL.String())
+func applyBedrockAuth(ctx context.Context, credentials providersruntime.CredentialProvider, credentialRef string, req *http.Request, payload []byte, region string) error {
 	resolved, err := resolveBedrockAuth(ctx, credentials, credentialRef, region)
 	if err != nil {
 		return err
@@ -119,11 +119,19 @@ func loadBedrockAmbientConfig(ctx context.Context, region string) (aws.Config, e
 	return cfg, nil
 }
 
-func bedrockSigningRegion(u *url.URL) (string, error) {
-	if _, region := bedrockEndpointClassAndRegion(u.String()); region != "" {
-		return region, nil
-	}
-	return "", canonical.BadEndpoint("bedrock signing region is required")
+// bedrockSigningRegionForTarget is the signing region for a target, drawn from
+// the durable BedrockRegion fact rather than parsed from the endpoint host. The
+// endpoint host never owns the signing region once region is first-class.
+func bedrockSigningRegionForTarget(target provider.TargetSnapshot) string {
+	return target.BedrockRegion()
+}
+
+// bedrockHostRegion returns the region implied by a recognized AWS Mantle host
+// (canonical or PrivateLink), or "" for an unrecognized/custom host. Used by the
+// validator to enforce region↔host consistency only for known AWS hosts.
+func bedrockHostRegion(baseURL string) string {
+	_, region := bedrockEndpointClassAndRegion(baseURL)
+	return region
 }
 
 func sha256Hex(payload []byte) string {

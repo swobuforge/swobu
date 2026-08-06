@@ -366,7 +366,7 @@ func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *tes
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-bedrock", "bedrock", upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages"),
+		provider.NewBedrockTargetSnapshot("backend-bedrock", upstream.URL+"/anthropic/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages", "us-east-1"),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-bedrock-strict-drop"
@@ -474,11 +474,17 @@ func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 			}))
 			defer upstream.Close()
 			composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
+			var target provider.TargetSnapshot
+			if providerSpec == "custom" {
+				target = provider.NewCustomTargetSnapshot("backend-b", upstream.URL, "cred-1", protocolkind.Messages, "", "messages", "Authorization")
+			} else {
+				target = provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "", "messages")
+			}
 			req := newTestProviderRequest(
 				"test-ex", protocolkind.Responses, request,
 				carrier.Document{},
 				exchange.NewExecutionContract(delivery.BufferedDelivery()),
-				provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "", "messages"),
+				target,
 			)
 			req.ExchangeID = "ex-structured-output"
 			sink := &recordingChanges{}

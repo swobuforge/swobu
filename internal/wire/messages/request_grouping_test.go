@@ -90,3 +90,20 @@ func TestEncodeItemsGroupsToolResultWithFollowingUserText(t *testing.T) {
 		t.Fatalf("user block order = %#v", messages[0].Content)
 	}
 }
+
+func TestEncodeItemsKeepsHostedWebSearchLifecycleAssistantOwned(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_1")
+	input, _ := canonical.NewWebSearchToolInput(canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"news"}})
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	webURL, _ := canonical.NewWebURL("https://example.com/news")
+	source, _ := canonical.NewMessagesWebSource(webURL, canonical.Specify("News"), []byte(`{"type":"web_search_result","url":"https://example.com/news","title":"News","encrypted_content":"opaque-result"}`))
+	search, _ := canonical.NewWebSearchResult([]canonical.WebSource{source})
+	result, _ := canonical.NewWebSearchResultItem(callID, search)
+	messages, err := encodeItems([]canonical.CanonicalItem{call, result}, nil, nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Role != "assistant" || len(messages[0].Content) != 2 || messages[0].Content[1].Type != "web_search_tool_result" {
+		t.Fatalf("hosted-search lifecycle split across roles: %#v", messages)
+	}
+}

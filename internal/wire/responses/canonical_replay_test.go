@@ -37,7 +37,6 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 	}
 	for _, discarded := range [][]byte{
 		[]byte(`"id":"msg_1"`),
-		[]byte(`"id":"rs_1"`),
 		[]byte(`"phase":"final_answer"`),
 		[]byte(`unknown_known_field`),
 	} {
@@ -45,8 +44,80 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 			t.Fatalf("unconsumed wire metadata %q survived: %s", discarded, document.RawBytes())
 		}
 	}
+	// RFC G2 §7.5: a reasoning id paired with encrypted_content is admitted — it
+	// targets the same item on replay — while the message id stays erased.
 	if !bytes.Contains(payload.Input[1], []byte(`"encrypted_content":"cipher"`)) {
 		t.Fatalf("continuation-consumed reasoning state was lost: %s", payload.Input[1])
+	}
+	if !bytes.Contains(payload.Input[1], []byte(`"id":"rs_1"`)) {
+		t.Fatalf("reasoning replay id was lost with its encrypted content: %s", payload.Input[1])
+	}
+	if !bytes.Contains(payload.Input[0], []byte(`"type":"output_text"`)) {
+		t.Fatalf("assistant history did not use Responses output content grammar: %s", payload.Input[0])
+	}
+	if bytes.Contains(payload.Input[0], []byte(`"type":"input_text"`)) {
+		t.Fatalf("assistant history used request input content grammar: %s", payload.Input[0])
+	}
+}
+
+// RFC G2 §7.5: idless reasoning replay stays idless on encode; only an id paired
+// with encrypted_content re-emerges, and message ids never do.
+func TestCanonicalResponsesReplayKeepsReasoningIDPairedWithEncryptedContent(t *testing.T) {
+	for _, table := range []struct {
+		name    string
+		input   string
+		wantID  string
+		wantEnc string
+	}{
+		{
+			name:    "reasoning-id-paired-with-encrypted-content-survives",
+			input:   `{"model":"m","input":[{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher","summary":[{"type":"summary_text","text":"brief"}]}]}`,
+			wantID:  `"id":"rs_1"`,
+			wantEnc: `"encrypted_content":"cipher"`,
+		},
+		{
+			name:    "reasoning-without-encrypted-content-stays-idless",
+			input:   `{"model":"m","input":[{"type":"reasoning","id":"rs_2","status":"completed","summary":[{"type":"summary_text","text":"brief"}]}]}`,
+			wantID:  `"id":"rs_2"`,
+			wantEnc: "",
+		},
+		{
+			name:    "message-id-is-always-erased",
+			input:   `{"model":"m","input":[{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":"done"}]}`,
+			wantID:  `"id":"msg_1"`,
+			wantEnc: "",
+		},
+	} {
+		t.Run(table.name, func(t *testing.T) {
+			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
+				carrier.NewDocument("", "application/json", nil, []byte(table.input), carrier.Meta{}),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, err := EncodeCarrierWithChanges(
+				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
+				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasID := bytes.Contains(document.RawBytes(), []byte(table.wantID))
+			switch table.name {
+			case "reasoning-id-paired-with-encrypted-content-survives":
+				if !hasID {
+					t.Fatalf("reasoning replay id %s was lost: %s", table.wantID, document.RawBytes())
+				}
+				if table.wantEnc != "" && !bytes.Contains(document.RawBytes(), []byte(table.wantEnc)) {
+					t.Fatalf("encrypted content %s was lost: %s", table.wantEnc, document.RawBytes())
+				}
+			default:
+				// idless reasoning and message ids must not survive encode.
+				if hasID {
+					t.Fatalf("id %s should have been erased: %s", table.wantID, document.RawBytes())
+				}
+			}
+		})
 	}
 }
 

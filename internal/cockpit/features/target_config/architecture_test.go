@@ -461,9 +461,9 @@ func TestSharedTargetFieldsContainNoProviderWorkflowPolicy(t *testing.T) {
 		}
 	}
 	bedrock := mustReadFile(t, "provider_bedrock.gsx")
-	for _, forbidden := range []string{"BedrockMantleRegionFromEndpoint", "target.BaseURL"} {
+	for _, forbidden := range []string{"BedrockMantleRegionFromEndpoint", "bedrockNamespaceSuffix", "operationSuffix"} {
 		if strings.Contains(bedrock, forbidden) {
-			t.Fatalf("Bedrock form must author region directly; found %q", forbidden)
+			t.Fatalf("Bedrock form must author region directly and not derive region from the endpoint; found %q", forbidden)
 		}
 	}
 }

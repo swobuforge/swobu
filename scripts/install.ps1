@@ -3,6 +3,7 @@ param(
   [string]$BinDir = '',
   [string]$Checksum = '',
   [switch]$DryRun,
+  [switch]$NoStart,
   [switch]$Verbose,
   [switch]$Help
 )
@@ -18,6 +19,8 @@ if (-not $Version -and $env:VERSION) { $Version = $env:VERSION }
 if (-not $DryRun -and $env:DRY_RUN) { $DryRun = [System.Convert]::ToBoolean($env:DRY_RUN) }
 if (-not $Checksum -and $env:EXPECTED_SHA256) { $Checksum = $env:EXPECTED_SHA256 }
 if (-not $Verbose -and $env:VERBOSE) { $Verbose = [System.Convert]::ToBoolean($env:VERBOSE) }
+$StartSwobu = -not $NoStart
+if (-not $NoStart -and $env:START_SWOBU) { $StartSwobu = [System.Convert]::ToBoolean($env:START_SWOBU) }
 
 function Say { param([string]$Message) Write-Host $Message }
 function Step { param([string]$Message) Write-Host "→ $Message" }
@@ -37,10 +40,10 @@ function Show-Usage {
 Install swobu from GitHub Releases.
 
 Usage:
-  install.ps1 [-Version vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun] [-Verbose]
+  install.ps1 [-Version vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun] [-NoStart] [-Verbose]
 
 Environment overrides:
-  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE
+  REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE, START_SWOBU
 "@
 }
 
@@ -153,6 +156,7 @@ if ($DryRun) {
   Write-Output "archive_url=$archiveUrl"
   Write-Output "checksums_url=$checksumsUrl"
   Write-Output "install_dir=$InstallDir"
+  Write-Output "start_swobu=$($StartSwobu.ToString().ToLowerInvariant())"
   if ($Checksum) {
     Write-Output "expected_sha256=$(Normalize-Sha256 -Value $Checksum)"
   }
@@ -213,19 +217,37 @@ try {
   Step 'Checking installation'
   try {
     & $installPath --version *> $null
+    $InstallationVerified = $true
     Ok "$BinName $Version installed"
   }
   catch {
+    $InstallationVerified = $false
     Warn "$BinName was installed, but '$BinName --version' failed."
     Say "Try:"
     Say "  $installPath --version"
   }
-  Say ''
-  Say 'Try it:'
-  Say "  $installPath --version"
-  Say ''
-  Say 'Start:'
-  Say "  $BinName --help"
+  if ($InstallationVerified -and $StartSwobu) {
+    Say ''
+    Step 'Starting Swobu'
+    try {
+      $process = Start-Process -FilePath $installPath -Wait -PassThru
+      if ($process.ExitCode -ne 0) {
+        Warn "Swobu was installed, but startup exited with code $($process.ExitCode)."
+        Say 'Try again:'
+        Say "  $installPath"
+      }
+    }
+    catch {
+      Warn 'Swobu was installed, but startup failed.'
+      Say 'Try again:'
+      Say "  $installPath"
+    }
+  }
+  elseif ($InstallationVerified) {
+    Say ''
+    Say 'Start Swobu:'
+    Say "  $installPath"
+  }
 
   $pathValue = if ($null -ne $env:PATH) { $env:PATH } else { '' }
   $pathEntries = ($pathValue -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }

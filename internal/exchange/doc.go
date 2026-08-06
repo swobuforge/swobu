@@ -17,6 +17,9 @@
 // prior-history range while emitting previous_response_id. A target change,
 // target-version change, invalid provider reference, or unsupported provider
 // receives the same complete request without that metadata.
+// Routing connections become complete provider TargetSnapshots at this edge.
+// Bedrock endpoint resolution and signing region are supplied atomically during
+// that projection; exchange never patches provider facts after construction.
 //
 // Provider encoding receives an exchange-scoped read-through image resolver
 // backed by the existing fetch policy, limits, fetcher, inspection, and cache.

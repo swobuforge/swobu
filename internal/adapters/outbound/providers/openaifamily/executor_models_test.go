@@ -136,17 +136,18 @@ func TestListModels_CustomUsesSelectedAuthHeader(t *testing.T) {
 			defer srv.Close()
 
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewCustomPolicy())
-			target := provider.NewTargetSnapshot(
+			// Auth header is a custom-endpoint fact fixed at construction via
+			// NewCustomTargetSnapshot (never post-construction mutation).
+			target := provider.NewCustomTargetSnapshot(
 				"draft",
-				"custom",
 				srv.URL+"/v1",
 				"env:OPENAI_API_KEY",
 				protocolkind.ChatCompletions,
 
 				"",
-				"")
+				"",
+				tt.authHeader)
 
-			target.AuthHeader = tt.authHeader
 			models, err := exec.ListDeployments(context.Background(), target)
 			if err != nil {
 				t.Fatalf("ListDeployments returned error: %v", err)

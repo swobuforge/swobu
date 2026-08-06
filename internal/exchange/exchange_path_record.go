@@ -70,43 +70,48 @@ func toProviderTarget(target routing.Target) (provider.TargetSnapshot, error) {
 }
 
 // ProviderTargetFromConnection derives provider execution data from the typed
-// routing connection at the single exchange boundary.
+// routing connection at the single exchange boundary. Each provider arm
+// constructs its snapshot with the provider-specific facts fixed at construction
+// (the Bedrock signing region via NewBedrockTargetSnapshot, the custom auth
+// header via NewCustomTargetSnapshot) — no incomplete snapshot is completed by
+// post-construction mutation. Derived URLs never enter persistence.
 func ProviderTargetFromConnection(targetID string, connection routing.Connection, providerProtocol string) (provider.TargetSnapshot, error) {
 	providerSpec := string(connection.Provider())
-	baseURL := profile.DefaultExecuteBaseURL(providerSpec)
-	credential := ""
-	authHeader := ""
+	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
+	if !ok {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("selected provider protocol is unsupported")
+	}
 	switch connection := connection.(type) {
 	case routing.APIKeyConnection:
-		credential = connection.Credential().String()
+		return provider.NewTargetSnapshot(targetID, providerSpec, profile.DefaultExecuteBaseURL(providerSpec), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.ZAIConnection:
-		baseURL = connection.BaseURL()
-		credential = connection.Credential().String()
+		return provider.NewTargetSnapshot(targetID, providerSpec, connection.BaseURL(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.OllamaConnection:
+		baseURL := profile.DefaultExecuteBaseURL(providerSpec)
 		if configured, ok := connection.BaseURL(); ok {
 			baseURL = configured.String()
 		}
+		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, "", protocolKind, frame, providerProtocol), nil
 	case routing.AzureConnection:
-		baseURL = connection.ProjectEndpoint().String()
-		credential = connection.Credential().String()
+		return provider.NewTargetSnapshot(targetID, providerSpec, connection.ProjectEndpoint().String(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.BedrockConnection:
-		baseURL = profile.BedrockMantleEndpointForRegion(connection.Region().String())
-		credential = connection.Credential().String()
+		region := connection.Region().String()
+		resolution, err := profile.ResolveBedrockEndpoint(connection.Endpoint(), region, protocolKind)
+		if err != nil {
+			return provider.TargetSnapshot{}, canonical.BadEndpoint(err.Error())
+		}
+		return provider.NewBedrockTargetSnapshot(targetID, resolution.BaseURL, connection.Credential().String(), protocolKind, frame, providerProtocol, region), nil
 	case routing.CustomConnection:
-		baseURL = connection.BaseURL().String()
+		baseURL := connection.BaseURL().String()
+		credential := ""
+		authHeader := ""
 		if connection.Auth() != nil {
 			header := connection.Auth().(routing.CustomHeaderAuth)
 			credential = header.Credential().String()
 			authHeader = header.Name()
 		}
+		return provider.NewCustomTargetSnapshot(targetID, baseURL, credential, protocolKind, frame, providerProtocol, authHeader), nil
 	default:
 		return provider.TargetSnapshot{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
-	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
-	if !ok {
-		return provider.TargetSnapshot{}, canonical.BadEndpoint("selected provider protocol is unsupported")
-	}
-	routable := provider.NewTargetSnapshot(targetID, providerSpec, baseURL, credential, protocolKind, frame, providerProtocol)
-	routable.AuthHeader = authHeader
-	return routable, nil
 }

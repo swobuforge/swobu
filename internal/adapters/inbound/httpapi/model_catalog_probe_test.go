@@ -93,7 +93,7 @@ func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "custom" || stub.attempts[0].AuthHeader != "X-Custom-Auth" {
+	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "custom" || stub.attempts[0].AuthHeader() != "X-Custom-Auth" {
 		t.Fatalf("attempt = %#v", stub.attempts)
 	}
 }

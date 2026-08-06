@@ -515,6 +515,10 @@ func (i CanonicalItem) Owner() TurnOwner {
 	case ItemKindToolCall:
 		return TurnOwnerAssistant
 	case ItemKindToolResult:
+		result, _ := i.ToolResult()
+		if _, ok := result.WebSearch(); ok {
+			return TurnOwnerAssistant
+		}
 		return TurnOwnerUser
 	case ItemKindToolDiscoveryResult:
 		result, _ := i.ToolDiscoveryResult()

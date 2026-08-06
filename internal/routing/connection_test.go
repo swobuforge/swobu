@@ -1,6 +1,9 @@
 package routing
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCredentialLocatorsRequirePayload(t *testing.T) {
 	constructors := map[string]func(string) error{
@@ -74,5 +77,101 @@ func TestZAIAccessIsClosedAndRequired(t *testing.T) {
 	}
 	if connection.Access() != ZAIAccessCodingPlan || connection.BaseURL() != "https://api.z.ai/api/coding/paas/v4" {
 		t.Fatalf("whitespace access was not normalized: %#v", connection)
+	}
+}
+
+func TestBedrockConnectionCarriesAuthoredEndpoint(t *testing.T) {
+	region, err := ParseBedrockRegion("us-east-1")
+	if err != nil {
+		t.Fatalf("ParseBedrockRegion: %v", err)
+	}
+
+	// An explicit endpoint round-trips verbatim; the routing package neither
+	// normalizes nor validates it as a Mantle host (that belongs to the profile
+	// layer). Empty endpoint means "derive from region" at a higher layer.
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+	}{
+		{"openai namespace", "https://bedrock-mantle.us-east-1.api.aws/openai/v1"},
+		{"bare v1", "https://bedrock-mantle.us-east-1.api.aws/v1"},
+		{"anthropic namespace", "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1"},
+		{"custom host", "https://my-proxy.internal/openai/v1"},
+		{"derived", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			connection, err := NewBedrockConnection(region, tc.endpoint, "env:AWS_BEARER_TOKEN_BEDROCK")
+			if err != nil {
+				t.Fatalf("NewBedrockConnection(%q): %v", tc.endpoint, err)
+			}
+			if got := connection.Endpoint(); got != strings.TrimSpace(tc.endpoint) {
+				t.Fatalf("Endpoint() = %q, want %q", got, tc.endpoint)
+			}
+			if connection.Region() != region {
+				t.Fatalf("Region() = %#v, want %#v", connection.Region(), region)
+			}
+		})
+	}
+
+	// An endpoint is trimmed; whitespace is not a meaningful endpoint value.
+	padded, err := NewBedrockConnection(region, "  https://bedrock-mantle.us-east-1.api.aws/openai/v1  ", "")
+	if err != nil {
+		t.Fatalf("padded endpoint: %v", err)
+	}
+	if padded.Endpoint() != "https://bedrock-mantle.us-east-1.api.aws/openai/v1" {
+		t.Fatalf("endpoint was not trimmed: %q", padded.Endpoint())
+	}
+
+	// Region is still required and first-class; it is the SigV4 signing source.
+	if _, err := NewBedrockConnection(BedrockRegion{}, "https://bedrock-mantle.us-east-1.api.aws/v1", ""); err == nil {
+		t.Fatalf("NewBedrockConnection accepted an empty region")
+	}
+}
+
+func TestBedrockConnectionEqualityDistinguishesEndpoints(t *testing.T) {
+	region, _ := ParseBedrockRegion("us-east-1")
+	derived, _ := NewBedrockConnection(region, "", "env:AWS_BEARER_TOKEN_BEDROCK")
+	openai, _ := NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK")
+	v1, _ := NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/v1", "env:AWS_BEARER_TOKEN_BEDROCK")
+
+	cases := []struct {
+		name string
+		a, b Connection
+		want bool
+	}{
+		{"both derived equal", derived, derived, true},
+		{"same endpoint equal", openai, openai, true},
+		{"openai vs v1 differ", openai, v1, false},
+		{"explicit vs derived differ", openai, derived, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := connectionsEqual(tc.a, tc.b); got != tc.want {
+				t.Fatalf("connectionsEqual = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBedrockCredentialChangePreservesEndpoint(t *testing.T) {
+	region, _ := ParseBedrockRegion("us-east-1")
+	endpoint := "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+	connection, err := NewBedrockConnection(region, endpoint, "env:AWS_BEARER_TOKEN_BEDROCK")
+	if err != nil {
+		t.Fatalf("NewBedrockConnection: %v", err)
+	}
+	updated, err := setConnectionCredential(connection, "env:AWS_BEARER_TOKEN_ROTATED")
+	if err != nil {
+		t.Fatalf("setConnectionCredential: %v", err)
+	}
+	bedrock, ok := updated.(BedrockConnection)
+	if !ok {
+		t.Fatalf("updated connection is %T, want BedrockConnection", updated)
+	}
+	if bedrock.Endpoint() != endpoint {
+		t.Fatalf("credential change dropped endpoint: got %q, want %q", bedrock.Endpoint(), endpoint)
+	}
+	if bedrock.Region() != region {
+		t.Fatalf("credential change dropped region: got %#v, want %#v", bedrock.Region(), region)
 	}
 }

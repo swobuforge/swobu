@@ -1,14 +1,14 @@
   new target · AWS Bedrock                                                            cancel ↵
      provider          AWS Bedrock                                                    change ↵
      region            Europe (London) · eu-west-2                                    change ↵
+     API URL           https://bedrock-mantle.eu-west-2.api.aws/v1                    edit ↵
+                       Regional default.
      authentication    AWS identity unavailable                                       manage ↵
                        AWS credentials are unavailable or expired
      model             waiting for setup
      protocol          waiting for model
      routing           fallback after step 1                                          change ↵
      create                                                                           complete setup
-
-
 
 
 

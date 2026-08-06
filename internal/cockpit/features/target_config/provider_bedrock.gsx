@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -100,12 +101,113 @@ func bedrockReadiness(w *TargetConfig, base providerSetupState) providerSetupSta
 		setup.Status = setupMissingLocator
 		return setup
 	}
+	kind := bedrockEndpointProtocolKind(w)
+	if kind != "" {
+		if _, err := profile.ResolveBedrockEndpoint(w.Draft.Get().Endpoint, region, kind); err != nil {
+			setup.Status = setupMissingLocator
+			return setup
+		}
+	}
 	setup.Status = setupReady
 	return setup
 }
 
 func (w *TargetConfig) IsBedrockFlow() bool {
 	return profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecBedrock
+}
+
+// BedrockEndpointRow is the single API-URL authoring surface: the complete API
+// base URL including its AWS namespace (e.g. …/openai/v1), as free text in the
+// shared ui.EditableRow — never a Select/SearchPicker (a URL is open text, not a
+// closed set). The row value is the temporary effective editor buffer while
+// Draft.Endpoint remains explicit-or-empty durable intent. Validation and the helper line are pure
+// logic over profile.ResolveBedrockEndpoint (the single endpoint boundary living
+// in internal/profile), kept here as plain functions rather than a new .go file.
+func BedrockEndpointRow(w *TargetConfig) *ui.EditableRow {
+	row := ui.NewEditableRow(TargetAddMountKey(w, "bedrock-endpoint"), "API URL", w.BaseURL)
+	row.ViewAction = "edit ↵"
+	row.EditAction = "save ↵"
+	row.OpenAtStart = true
+	w.syncBedrockEndpointRow(row)
+	row.OnSubmit = func(raw string) {
+		// Submitted input is validated transactionally. Invalid input remains in
+		// the shared row's private editor draft; valid input is canonicalized into
+		// the target draft's one explicit endpoint fact.
+		if _, err := profile.ResolveBedrockEndpoint(raw, strings.TrimSpace(w.Draft.Get().Locator), bedrockEndpointProtocolKind(w)); err != nil {
+			return
+		}
+		kind := bedrockEndpointProtocolKind(w)
+		endpoint := profile.CanonicalBedrockEndpointIntent(strings.TrimSpace(w.Draft.Get().Locator), raw, kind)
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+			d.Endpoint = endpoint
+			return d
+		})
+		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(strings.TrimSpace(w.Draft.Get().Locator), endpoint, kind))
+		w.invalidateCatalogEvidence()
+		w.advanceFromSetup()
+		w.CommitEdit(w.actionContext())
+	}
+	row.CloseAfterSubmit = func() bool {
+		_, err := profile.ResolveBedrockEndpoint(w.BaseURL.Get(), strings.TrimSpace(w.Draft.Get().Locator), bedrockEndpointProtocolKind(w))
+		return err == nil
+	}
+	row.OnClose = func() {
+		draft := w.Draft.Get()
+		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(
+			strings.TrimSpace(draft.Locator),
+			draft.Endpoint,
+			bedrockEndpointProtocolKind(w),
+		))
+	}
+	return row
+}
+
+// syncBedrockEndpointRow recomputes the row's validation and helper line from
+// the last submitted value plus selected protocol before each render. Editing
+// remains transactional; validation does not publish partial text while typing.
+func (w *TargetConfig) syncBedrockEndpointRow(row *ui.EditableRow) {
+	validation, text := bedrockEndpointValidation(w.BaseURL.Get(), strings.TrimSpace(w.Draft.Get().Locator), bedrockEndpointProtocolKind(w))
+	row.Validation = validation
+	row.ValidationText = text
+}
+
+// bedrockEndpointProtocolKind maps the selected provider protocol to its wire
+// kind for the endpoint↔namespace coherence check. An unresolved protocol (e.g.
+// a derived Bedrock protocol before a model is chosen) skips the contradiction
+// check — only forgiveness then applies, and the row stays None.
+func bedrockEndpointProtocolKind(w *TargetConfig) protocolkind.ProtocolKind {
+	draft := w.Draft.Get()
+	if kind, _, ok := profile.ProviderProtocolKindAndFrame(draft.ProviderSpec, draft.ProviderProtocol); ok {
+		return kind
+	}
+	return protocolkind.ProtocolKind("")
+}
+
+// bedrockEndpointValidation is the pure text-input state for the Bedrock API URL
+// row, computed from the row's current value + selected protocol on every render.
+// Required when empty, Invalid when the resolver rejects a recognized cross-family
+// namespace contradiction, otherwise None with an inline helper line. No host or
+// region validation here — that is the adapter validator's job.
+func bedrockEndpointValidation(value, region string, kind protocolkind.ProtocolKind) (ui.EditableRowValidation, string) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		if strings.TrimSpace(region) == "" {
+			return ui.EditableRowValidationNone, "Pick a region to derive the default API URL."
+		}
+		return ui.EditableRowValidationNone, "Regional default: " + profile.EffectiveBedrockAPIURL(region, "", kind)
+	}
+	resolution, err := profile.ResolveBedrockEndpoint(trimmed, region, kind)
+	if err != nil {
+		return ui.EditableRowValidationInvalid, err.Error()
+	}
+	regional, regionalErr := profile.ResolveBedrockEndpoint("", region, kind)
+	if regionalErr == nil && resolution.BaseURL == regional.BaseURL {
+		return ui.EditableRowValidationNone, "Regional default."
+	}
+	if resolution.InputWasComplete {
+		return ui.EditableRowValidationNone, "Complete request URL normalized to its API base."
+	}
+	return ui.EditableRowValidationNone, "Explicit API URL."
 }
 
 func BedrockRegionControl(w *TargetConfig) *ui.Select {
@@ -195,8 +297,9 @@ func BedrockRegionPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 }
 
 templ (f *bedrockProviderForm) Render() {
-	<div class="flex-col w-full" deps={f.target.Draft, f.target.Catalog}>
+	<div class="flex-col w-full" deps={f.target.Draft, f.target.Catalog, f.target.BaseURL}>
 		@BedrockRegionControl(f.target)
+		@BedrockEndpointRow(f.target)
 		@BedrockAuthenticationField(f.target)
 	</div>
 }

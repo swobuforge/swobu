@@ -115,7 +115,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader()); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
