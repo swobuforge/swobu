@@ -501,6 +501,70 @@ func TestProviderCancellationNeverSelectsRecovery(t *testing.T) {
 	}
 }
 
+// genericBackendRejection is the adapter-edge fact for an unclassified backend
+// 4xx: a complete response proves exact-target rejection, not canonical
+// invalidity or absence of execution. The prose is deliberately opaque evidence,
+// not a recognized provider message; the reducer acts on the typed fact.
+func genericBackendRejection(target string) provider.AttemptFailure {
+	return mayHaveExecuted(provider.Rejected(canonical.NewBackendError(
+		target, http.StatusBadRequest,
+		`{"error":{"message":"opaque-unclassified-rejection-7f3a"}}`,
+		"",
+	)))
+}
+
+// A replay-safe backend rejection advances directly to the next route
+// candidate, without the same-target retry reserved for unavailability. This is
+// the ordered-route fallback the candidate count already expresses.
+func TestReplaySafeBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "reject-a"),
+		requestpathTarget(t, "reject-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		providerRound:  0,
+		replaySafety:   providerReplaySafe,
+		retry:          false,
+		status:         providerCallAttemptFailed,
+		failure:        &providerCallFailure{Attempt: genericBackendRejection("reject-a")},
+	}}
+
+	selection, ok := selectNextProviderCall(s)
+	if !ok {
+		t.Fatalf("replay-safe rejection selected nothing")
+	}
+	if selection.candidateIndex != 1 || selection.retry {
+		t.Fatalf("replay-safe rejection selection = %#v, want next candidate without retry", selection)
+	}
+}
+
+// The identical rejection must not advance when execution may have occurred and
+// replay is unsafe (native MCP). Recovery stays gated by execution possibility;
+// widening the advancing cause never grants replay.
+func TestReplayUnsafeBackendRejectionDoesNotAdvance(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "reject-a"),
+		requestpathTarget(t, "reject-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		providerRound:  0,
+		replaySafety:   providerReplayUnsafe,
+		retry:          false,
+		status:         providerCallAttemptFailed,
+		failure:        &providerCallFailure{Attempt: genericBackendRejection("reject-a")},
+	}}
+
+	if selection, ok := selectNextProviderCall(s); ok {
+		t.Fatalf("replay-unsafe rejection selected %#v", selection)
+	}
+}
+
 func TestSynchronousCompletionFailureRetriesBeforeRouteFallback(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
