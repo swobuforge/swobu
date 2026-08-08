@@ -136,9 +136,11 @@ func (e UnavailableError) Error() string {
 func (e UnavailableError) Unwrap() error  { return e.Cause }
 func (UnavailableError) providerFailure() {}
 
-// RejectedError means the backend returned a response rejecting this request.
-// Rejection is terminal unless the adapter has positively identified the
-// narrower IncompatibleTargetError contract.
+// RejectedError means the backend returned a response rejecting this exact
+// target. A complete 4xx is target-local evidence; it does not prove canonical
+// invalidity or absence of execution. Exact-target rejection is combined with
+// execution possibility and replay safety by the route reducer, so this type is
+// never itself a public client error and never grants replay.
 type RejectedError struct{ Cause error }
 
 func (e RejectedError) Error() string {

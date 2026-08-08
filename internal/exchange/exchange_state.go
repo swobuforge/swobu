@@ -616,7 +616,10 @@ func providerFailureTransient(err error) bool {
 
 func providerFailureAdvancesCandidate(err error) bool {
 	var incompatible provider.IncompatibleTargetError
-	return providerFailureTransient(err) || errors.As(err, &incompatible)
+	var rejected provider.RejectedError
+	return providerFailureTransient(err) ||
+		errors.As(err, &incompatible) ||
+		errors.As(err, &rejected)
 }
 
 // previousResponseHandoffEvidence describes only the winning representation.

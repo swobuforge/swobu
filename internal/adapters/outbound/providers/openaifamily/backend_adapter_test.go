@@ -491,6 +491,32 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	}
 }
 
+// An unclassified 4xx defaults to RejectedError with ExecutionMayHaveOccurred.
+// This owns the adapter's fallback for unclassified rejection, not permanent
+// ignorance of any provider's vocabulary: the prose is deliberately opaque so
+// that adding narrower recognition later can only narrow, never break, this
+// path. The route reducer combines this fact with replay safety, not here.
+func TestSendProviderRequest_Unclassified4xxDefaultsToRejectedAndMayHaveExecuted(t *testing.T) {
+	body := io.NopCloser(strings.NewReader(`{"error":{"message":"opaque-unclassified-rejection-7f3a"}}`))
+	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
+	})}
+	exec := NewExecutor(client, nil, NewOllamaPolicy())
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
+	target.Model = "gpt-4o-mini"
+	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini"}`), carrier.Meta{})
+
+	_, err := exec.Send(context.Background(), target, doc)
+	var rejected provider.RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("error = %T, want provider.RejectedError", err)
+	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok || failure.Execution() != provider.ExecutionMayHaveOccurred {
+		t.Fatalf("attempt failure = %#v, %t, want ExecutionMayHaveOccurred", failure, ok)
+	}
+}
+
 func TestSendProviderRequest_MarksPreDispatchValidation(t *testing.T) {
 	exec := NewExecutor(nil, nil, NewOllamaPolicy())
 	target := provider.NewTargetSnapshot(
