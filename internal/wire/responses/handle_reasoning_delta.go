@@ -155,7 +155,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 		return false, canonical.InternalError("responses streamed reasoning item is invalid")
 	}
 	ordinal := uint32(0)
-	s.enqueueItemCompleted(frame.OutputIndex, ordinal, item)
+	s.commitOutputItem(frame.OutputIndex, ordinal, item)
 	output.reasoning = nil
 	return true, nil
 }

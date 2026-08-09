@@ -21,7 +21,7 @@ func decodeResponseStream(request canonical.CanonicalRequest, names wire.ToolNam
 		exchangeID:           exchangeID,
 		responseEnvID:        canonical.EnvelopeID(fmt.Sprintf("%s:response:0", exchangeID)),
 		reader:               core.NewSSEReader(stream.Body),
-		providerOutputs:      map[int]*pendingResponseOutput{},
+		providerOutputs:      map[int]*responsesOutputSlot{},
 		latestUsage:          canonical.NewUnknownTokenUsage(),
 		request:              request.Clone(),
 		toolNames:            names,
@@ -39,7 +39,7 @@ type responsesResponseStream struct {
 	reader                *core.SSEReaderCloser
 	pending               canonical.EventSequence
 	unknownEventDecisions map[string]struct{}
-	providerOutputs       map[int]*pendingResponseOutput
+	providerOutputs       map[int]*responsesOutputSlot
 	outputFrontier        int
 	erasedOutput          bool
 	completedItems        uint32
@@ -52,19 +52,6 @@ type responsesResponseStream struct {
 	nextOrdinal           uint32
 	frameIndex            int
 	continuationEligible  bool
-}
-
-func (s *responsesResponseStream) unresolvedTerminalOutputs(items []json.RawMessage) ([]json.RawMessage, []int) {
-	output := make([]json.RawMessage, 0, len(items))
-	indexes := make([]int, 0, len(items))
-	for index, item := range items {
-		if s.isOutputComplete(index) {
-			continue
-		}
-		output = append(output, item)
-		indexes = append(indexes, index)
-	}
-	return output, indexes
 }
 
 type responsesReasoningStreamPartState struct {
@@ -235,13 +222,17 @@ func (s *responsesResponseStream) enqueueItemStart(outputIndex *int, ordinal uin
 	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: start}})
 }
 
-func (s *responsesResponseStream) enqueueItemCompleted(outputIndex *int, ordinal uint32, item canonical.CanonicalItem) {
+func (s *responsesResponseStream) commitOutputItem(outputIndex *int, ordinal uint32, item canonical.CanonicalItem) {
 	if outputIndex != nil && *outputIndex >= 0 {
 		output := s.outputAt(*outputIndex)
 		output.checkpointItems = append(output.checkpointItems, item.Clone())
 	}
-	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
+	s.enqueueOutputItemCompleted(outputIndex, ordinal, item)
 	s.completedItems++
+}
+
+func (s *responsesResponseStream) enqueueOutputItemCompleted(outputIndex *int, ordinal uint32, item canonical.CanonicalItem) {
+	s.stageOutputEvent(outputIndex, canonical.Event{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: ordinal}, Payload: canonical.ItemCompletedPayload{Item: item}}})
 }
 
 func (s *responsesResponseStream) enqueueUsage(usage canonical.TokenUsage) {
@@ -284,11 +275,20 @@ func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, 
 	if s.completedItems == 0 && s.erasedOutput {
 		return canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 	}
+	s.settleCheckpointedOutputs()
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)
 	s.enqueueFinish(responsesCompletion(normalizedStatus, normalizedStatus))
 	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 	return nil
+}
+
+func (s *responsesResponseStream) settleCheckpointedOutputs() {
+	for _, slot := range s.providerOutputs {
+		if slot.phase == responsesOutputCheckpointed {
+			slot.phase = responsesOutputSettled
+		}
+	}
 }
 
 func (s *responsesResponseStream) discardOpenText() {
@@ -300,7 +300,7 @@ func (s *responsesResponseStream) discardOpenText() {
 func (s *responsesResponseStream) hasOpenKnownOutput() bool {
 	for _, state := range s.providerOutputs {
 		if state.text != nil || state.tool != nil || state.reasoning != nil ||
-			!state.resolved || !state.active || len(state.events) > 0 {
+			!state.checkpointReady() || !state.published || len(state.events) > 0 {
 			return true
 		}
 	}
@@ -378,7 +378,7 @@ func (s *responsesResponseStream) eraseProviderOutput(frame streamFrame, field s
 	if err := s.classifyErasedProviderOutput(frame, field); err != nil {
 		return err
 	}
-	s.completeOutput(frame.OutputIndex)
+	s.checkpointOutput(frame.OutputIndex)
 	return nil
 }
 

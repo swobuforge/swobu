@@ -16,7 +16,7 @@ func TestResponsesEventReader_AcceptsCustomToolCallStreamFrames(t *testing.T) {
 	s := &responsesResponseStream{
 		exchangeID:      "ex",
 		responseEnvID:   "ex:response:0",
-		providerOutputs: map[int]*pendingResponseOutput{},
+		providerOutputs: map[int]*responsesOutputSlot{},
 		latestUsage:     canonical.NewUnknownTokenUsage(),
 		request:         request,
 		toolNames:       testAttemptToolNames(request),

@@ -9,7 +9,7 @@ import (
 )
 
 func TestResponsesEventReaderRejectsKnownProviderMCPStreamStart(t *testing.T) {
-	s := &responsesResponseStream{exchangeID: "ex", responseEnvID: "r", providerOutputs: map[int]*pendingResponseOutput{}, latestUsage: canonical.NewUnknownTokenUsage()}
+	s := &responsesResponseStream{exchangeID: "ex", responseEnvID: "r", providerOutputs: map[int]*responsesOutputSlot{}, latestUsage: canonical.NewUnknownTokenUsage()}
 	outputIndex := 0
 	frame := streamFrame{Type: "response.output_item.added", OutputIndex: &outputIndex}
 	frame.Item.Type = "mcp_call"

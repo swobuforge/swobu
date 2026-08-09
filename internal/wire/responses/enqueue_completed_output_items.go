@@ -26,7 +26,7 @@ func (s *responsesResponseStream) enqueueCompletedOutputItemAt(outputIndex *int,
 				s.enqueueTextDelta(outputIndex, ordinal, uint32(partIndex), text.Text())
 			}
 		}
-		s.enqueueItemCompleted(outputIndex, ordinal, item)
+		s.commitOutputItem(outputIndex, ordinal, item)
 	case canonical.ItemKindToolCall:
 		call, _ := item.ToolCall()
 		start, err := canonical.NewToolCallStart(call.CallID(), call.Tool())
@@ -39,18 +39,18 @@ func (s *responsesResponseStream) enqueueCompletedOutputItemAt(outputIndex *int,
 		} else if text, ok := call.Input().Text(); ok {
 			s.enqueueArgsDelta(outputIndex, ordinal, text)
 		}
-		s.enqueueItemCompleted(outputIndex, ordinal, item)
+		s.commitOutputItem(outputIndex, ordinal, item)
 	case canonical.ItemKindReasoning:
-		s.enqueueItemCompleted(outputIndex, ordinal, item)
+		s.commitOutputItem(outputIndex, ordinal, item)
 	case canonical.ItemKindToolDiscoveryResult:
-		s.enqueueItemCompleted(outputIndex, ordinal, item)
+		s.commitOutputItem(outputIndex, ordinal, item)
 	case canonical.ItemKindToolResult:
 		if result, ok := item.ToolResult(); !ok {
 			return canonical.InternalError("responses completed tool result is invalid")
 		} else if _, search := result.WebSearch(); !search {
 			return canonical.InternalError("canonical Responses output contains a request-only content tool result")
 		}
-		s.enqueueItemCompleted(outputIndex, ordinal, item)
+		s.commitOutputItem(outputIndex, ordinal, item)
 	default:
 		return canonical.InternalError("Responses output received a request-only canonical item kind")
 	}

@@ -54,7 +54,7 @@ func (s *responsesResponseStream) completeMessageItem(frame streamFrame) (bool, 
 		}
 		ordinal = state.ordinal
 		output.text = nil
-		s.enqueueItemCompleted(frame.OutputIndex, ordinal, item)
+		s.commitOutputItem(frame.OutputIndex, ordinal, item)
 		return true, nil
 	}
 	if err := s.enqueueCompletedOutputItemAt(frame.OutputIndex, ordinal, item); err != nil {
