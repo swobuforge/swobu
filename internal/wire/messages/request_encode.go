@@ -348,6 +348,9 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 	}
 	if result, ok := item.ToolDiscoveryResult(); ok {
 		if failure, failed := result.Failure(); failed {
+			if result.Executor() == canonical.DiscoveryExecutorClient {
+				return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: failure.Message(), IsError: true}), nil
+			}
 			code, _ := failure.Code().Get()
 			return append(blocks, contentID{Type: "tool_search_tool_result", ToolUseID: result.CallID().String(), Content: map[string]any{
 				"type": "tool_search_tool_result_error", "error_code": code, "error_message": failure.Message(),
@@ -588,7 +591,7 @@ func messagesDeferredToolKeys(items []canonical.CanonicalItem) map[canonical.Too
 		}
 		if result, ok := item.ToolDiscoveryResult(); ok {
 			for _, declaration := range result.Tools().Declarations() {
-				if declaration.Kind() == canonical.ToolKindFunction || declaration.Kind() == canonical.ToolKindCustom {
+				if messagesToolCanBeDeferred(declaration.Kind()) {
 					deferred[declaration.Key()] = struct{}{}
 				}
 			}

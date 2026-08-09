@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -77,7 +78,7 @@ func TestProjectToolDiscoveryPolyfillRejectsLiveClientDiscoveryBesideUnrelatedFu
 	assertProjectionIncompatible(t, request)
 }
 
-func TestProjectToolDiscoveryPolyfillProjectsCompletedClientDiscovery(t *testing.T) {
+func TestProjectToolDiscoveryPolyfillRejectsLiveClientDeclarationAfterCompletedDiscovery(t *testing.T) {
 	loaded := mustProjectionFunction(t, "loaded")
 	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorClient)
 	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loaded})
@@ -89,14 +90,20 @@ func TestProjectToolDiscoveryPolyfillProjectsCompletedClientDiscovery(t *testing
 	result, _ := canonical.NewToolDiscoveryResultItem(callID, loadedSet, canonical.DiscoveryExecutorClient)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call, result}})
 
-	projection, err := ProjectToolDiscoveryPolyfill(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	items := projection.Request.Items()
-	if len(items) != 1 {
-		t.Fatalf("items=%d want one declaration contribution", len(items))
-	}
+	assertProjectionIncompatible(t, request)
+}
+
+func TestProjectToolDiscoveryPolyfillRejectsPendingDiscoveryBesideMaterializedFunction(t *testing.T) {
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorProvider)
+	function := mustProjectionFunction(t, "unrelated")
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, function})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_pending")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call}})
+
+	assertProjectionIncompatible(t, request)
 }
 
 func TestProjectToolDiscoveryPolyfillPairsReusedCallIDByOccurrence(t *testing.T) {
@@ -153,6 +160,43 @@ func TestProjectToolDiscoveryPolyfillIsNoOpForStaticRequest(t *testing.T) {
 	}
 	if projection.StructuralHistoryChange || len(projection.Changes) != 0 {
 		t.Fatalf("static projection changed request: %+v", projection)
+	}
+}
+
+func TestProjectToolDiscoveryPolyfillReportsDistinctSemanticLosses(t *testing.T) {
+	loaded := mustProjectionFunction(t, "loaded")
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorProvider)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loaded})
+	visibility, _ := canonical.NewToolVisibilityRefinements(tools, []canonical.ToolKey{loaded.Key()})
+	declarationItem, _ := canonical.NewToolDeclarationsItemWithVisibility(tools, canonical.ContextScopeHistory, visibility)
+	callID, _ := canonical.NewToolCallID("search_1")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	loadedSet, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
+	result, _ := canonical.NewToolDiscoveryResultItem(callID, loadedSet, canonical.DiscoveryExecutorProvider)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call, result}})
+
+	projection, err := ProjectToolDiscoveryPolyfill(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[canonical.CapabilityPath]bool{
+		canonical.RequestItemsKind:       false,
+		canonical.RequestToolsKind:       false,
+		canonical.RequestTools:           false,
+		canonical.RequestToolsVisibility: false,
+	}
+	for _, change := range projection.Changes {
+		if change.Kind == compat.Approximation {
+			if _, ok := want[change.Capability]; ok {
+				want[change.Capability] = true
+			}
+		}
+	}
+	for capability, found := range want {
+		if !found {
+			t.Fatalf("changes=%+v missing %s", projection.Changes, capability)
+		}
 	}
 }
 

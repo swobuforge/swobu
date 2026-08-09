@@ -73,6 +73,50 @@ func TestMessagesClientDecodePreservesNativeDiscoveryHistory(t *testing.T) {
 	}
 }
 
+func TestMessagesClientDecodeResolvesDeferredWebSearchReference(t *testing.T) {
+	raw := []byte(`{
+		"model":"m",
+		"tools":[
+			{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},
+			{"type":"web_search_20260209","name":"web_search","defer_loading":true}
+		],
+		"messages":[
+			{"role":"assistant","content":[{"type":"server_tool_use","id":"search_1","name":"tool_search_tool_regex","input":{"pattern":"web"}}]},
+			{"role":"user","content":[{"type":"tool_search_tool_result","tool_use_id":"search_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"web_search"}]}}]}
+		]
+	}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.Request.Items()
+	result, ok := items[len(items)-1].ToolDiscoveryResult()
+	if !ok || len(result.Tools().Declarations()) != 1 || result.Tools().Declarations()[0].Kind() != canonical.ToolKindWebSearch {
+		t.Fatalf("result=%+v ok=%t", result, ok)
+	}
+}
+
+func TestMessagesBufferedDiscoveryResolvesDeferredWebSearchReference(t *testing.T) {
+	discoverySchema, _ := canonical.ParseJSONObject([]byte(`{"type":"object","properties":{"pattern":{"type":"string"}}}`))
+	discovery, _ := canonical.NewToolDiscoveryToolWithQuery("find tools", canonical.NewToolSchemaObject(discoverySchema), canonical.DiscoveryExecutorProvider, canonical.ToolDiscoveryQueryRegex)
+	webSearch := canonical.NewWebSearchDeclaration()
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, webSearch})
+	visibility, _ := canonical.NewToolVisibilityRefinements(tools, []canonical.ToolKey{webSearch.Key()})
+	declarations, _ := canonical.NewToolDeclarationsItemWithVisibility(tools, canonical.ContextScopeRequest, visibility)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations}})
+	names := testAttemptToolNames(request)
+	raw := []byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"search_1","name":"tool_search_tool_regex","input":{"pattern":"web"}},{"type":"tool_search_tool_result","tool_use_id":"search_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"web_search"}]}}]}`)
+	reader, err := decodeResponseBuffered(context.Background(), request, names, raw, "ex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := readNativeDiscoveryResponse(t, reader)
+	result, ok := response.Items()[1].ToolDiscoveryResult()
+	if !ok || len(result.Tools().Declarations()) != 1 || result.Tools().Declarations()[0].Kind() != canonical.ToolKindWebSearch {
+		t.Fatalf("result=%+v ok=%t", result, ok)
+	}
+}
+
 func TestMessagesBufferedDiscoveryFailureIsTyped(t *testing.T) {
 	request, _ := nativeDiscoveryRequest(t)
 	names := testAttemptToolNames(request)
@@ -90,6 +134,32 @@ func TestMessagesBufferedDiscoveryFailureIsTyped(t *testing.T) {
 	code, _ := failure.Code().Get()
 	if !ok || code != "unavailable" || failure.Message() != "search offline" {
 		t.Fatalf("failure=(%+v,%t)", failure, ok)
+	}
+}
+
+func TestMessagesClientDiscoveryFailureUsesOrdinaryToolResult(t *testing.T) {
+	discoverySchema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonical.NewToolSchemaObject(discoverySchema), canonical.DiscoveryExecutorClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery})
+	declarations, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_1")
+	input, _ := canonical.ParseJSONObject([]byte(`{"query":"weather"}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorClient)
+	failure, _ := canonical.NewToolDiscoveryFailureItem(callID, canonical.DiscoveryExecutorClient, canonical.Specify("unavailable"), "search offline")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations, call, failure}})
+	doc, err := EncodeCarrier(request, delivery.BufferedDelivery())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(doc.RawBytes())
+	if !strings.Contains(raw, `"type":"tool_result"`) || !strings.Contains(raw, `"is_error":true`) {
+		t.Fatalf("client discovery failure wire=%s", raw)
+	}
+	if strings.Contains(raw, "tool_search_tool_result_error") || strings.Contains(raw, `"type":"tool_search_tool_result"`) {
+		t.Fatalf("client discovery failure used server grammar: %s", raw)
 	}
 }
 

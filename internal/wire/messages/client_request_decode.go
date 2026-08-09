@@ -656,16 +656,11 @@ func decodeMessagesClientDiscoveryResult(tools []canonical.ToolDeclaration, rawC
 	}
 	loaded := make([]canonical.ToolDeclaration, 0, len(content.ToolReferences))
 	for _, reference := range content.ToolReferences {
-		key, err := canonical.ResolveHistoricalToolKeyByName(tools, strings.TrimSpace(reference.ToolName), canonical.ToolKindFunction)
+		declaration, err := resolveMessagesHistoricalToolReference(tools, strings.TrimSpace(reference.ToolName))
 		if err != nil {
 			return canonical.CanonicalItem{}, err
 		}
-		for _, declaration := range tools {
-			if declaration.Key() == key {
-				loaded = append(loaded, declaration)
-				break
-			}
-		}
+		loaded = append(loaded, declaration)
 	}
 	set, err := canonical.NewToolSet(loaded)
 	if err != nil {
