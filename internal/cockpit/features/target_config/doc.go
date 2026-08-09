@@ -23,6 +23,8 @@
 // inference URL is known; target creation requires the URL after model and
 // protocol selection. Endpoint input is editor-local until successful
 // submission and no model identity selects its namespace.
+// Protocol options retain provider-manifest preference order. Selecting a model
+// initializes the first resolved option and leaves the protocol row editable.
 // Bedrock has one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine

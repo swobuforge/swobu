@@ -22,6 +22,8 @@ workspaces:
               - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
               - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}
+              - {id: lm-studio, model: local-model, protocol: responses, connection: {lmstudio: {credential: env:LM_API_TOKEN}}}
+              - {id: vllm, model: served-model, protocol: messages_stream, connection: {vllm: {base_url: https://inference.example/v1, credential: env:VLLM_API_KEY}}}
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
               - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, endpoint: https://bedrock-mantle.eu-west-2.api.aws/openai/v1, credential: env:BEDROCK_API_KEY}}}
               - {id: custom, model: local, protocol: chat_completions, connection: {custom: {base_url: http://127.0.0.1:8080/v1, auth: {header: {name: x-api-key, credential: env:CUSTOM_KEY}}}}}
@@ -52,8 +54,14 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if strings.Contains(string(raw), "protocol: chat_completions_stream") {
 		t.Fatalf("derived Z.AI protocol was persisted:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "deepseek:") || strings.Contains(string(raw), "protocol: messages_stream") {
+	if !strings.Contains(string(raw), "deepseek:") || strings.Count(string(raw), "protocol: messages_stream") != 1 {
 		t.Fatalf("DeepSeek connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "lmstudio:") || !strings.Contains(string(raw), "credential: env:LM_API_TOKEN") {
+		t.Fatalf("LM Studio connection changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "vllm:") || !strings.Contains(string(raw), "credential: env:VLLM_API_KEY") {
+		t.Fatalf("vLLM connection changed during round trip:\n%s", raw)
 	}
 }
 

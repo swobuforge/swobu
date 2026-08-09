@@ -139,6 +139,8 @@ provider effects fail explicitly.
 - AWS Bedrock
 - OpenRouter
 - Ollama
+- LM Studio
+- vLLM
 - ChatGPT
 - OpenAI/Anthropic Compatible Endpoints
 

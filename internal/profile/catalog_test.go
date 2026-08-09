@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -29,6 +30,12 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	}
 	if !SupportsSpec("custom") {
 		t.Fatal("custom provider spec should be supported")
+	}
+	if !SupportsSpec("lmstudio") {
+		t.Fatal("LM Studio provider spec should be supported")
+	}
+	if !SupportsSpec("vllm") {
+		t.Fatal("vLLM provider spec should be supported")
 	}
 	obsoleteIdentity := "openai_" + "compatible"
 	if SupportsSpec(obsoleteIdentity) {
@@ -96,6 +103,18 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if RequiresCredential("ollama", "http://127.0.0.1:11434/v1") {
 		t.Fatal("ollama should not require credential")
+	}
+	if got := DefaultExecuteBaseURL("lmstudio"); got != "http://127.0.0.1:1234/v1" {
+		t.Fatalf("LM Studio default base URL = %q", got)
+	}
+	if RequiresCredential("lmstudio", DefaultExecuteBaseURL("lmstudio")) {
+		t.Fatal("LM Studio credential should be optional")
+	}
+	if got := DefaultExecuteBaseURL("vllm"); got != "http://127.0.0.1:8000/v1" {
+		t.Fatalf("vLLM default base URL = %q", got)
+	}
+	if RequiresCredential("vllm", DefaultExecuteBaseURL("vllm")) || DefaultEnvKeyForSpec("vllm") != "VLLM_API_KEY" {
+		t.Fatal("vLLM credential should be optional with VLLM_API_KEY suggestion")
 	}
 	if RequiresCredential("custom", "http://localhost:9999/v1") {
 		t.Fatal("localhost custom endpoint should not require credential")
@@ -183,6 +202,8 @@ func TestCatalog_ProviderSetupKeywordsAreSearchOnly(t *testing.T) {
 
 	cases := map[string]string{
 		"ollama":     "model, protocol",
+		"lmstudio":   "local, model, Responses, Chat Completions, Messages, Codex, Claude Code",
+		"vllm":       "inference, server, Responses, Chat Completions, Messages, Codex, Claude Code",
 		"openai":     "credential, model, protocol",
 		"chatgpt":    "sign in, model, protocol",
 		"anthropic":  "credential, model, protocol",
@@ -208,6 +229,8 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		noun       string
 	}{
 		"ollama":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
+		"lmstudio":   {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:1234/v1"}, CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "LM_API_TOKEN"}, "model"},
+		"vllm":       {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:8000/v1"}, CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "VLLM_API_KEY"}, "model"},
 		"openai":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
 		"chatgpt":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialUnsupported}, "model"},
 		"anthropic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
@@ -255,25 +278,30 @@ func TestCatalog_ChatGPTProviderProtocols_AreStreamOnly(t *testing.T) {
 	}
 }
 
-func TestCatalog_OllamaProviderProtocols_ExcludeResponses(t *testing.T) {
+func TestCatalog_AllStandardProvidersSharePreferenceOrderedProtocolSet(t *testing.T) {
 	t.Parallel()
 
-	protocols := SupportedProviderProtocolsForSpec("ollama")
+	want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
+	for _, provider := range []string{"ollama", "lmstudio", "vllm"} {
+		protocols := ConcreteProviderProtocolsForSpec(provider)
+		if !slices.Equal(protocols, want) {
+			t.Fatalf("%s protocols = %v, want %v", provider, protocols, want)
+		}
+		if got, ok := ResolveConcreteProtocolForAutoAtBoundary(provider); !ok || got != protocols[0] || got != "responses" {
+			t.Fatalf("%s default protocol = %q (ok=%v), want first preference responses", provider, got, ok)
+		}
+	}
+}
+
+func TestCatalog_ProtocolOrderingSelectsDefault(t *testing.T) {
+	t.Parallel()
+
+	protocols := ConcreteProviderProtocolsForSpec("lmstudio")
 	if len(protocols) == 0 {
-		t.Fatal("ollama protocols must not be empty")
+		t.Fatal("LM Studio protocols missing")
 	}
-	for _, unsupported := range []string{"responses", "responses_stream"} {
-		if SupportsProviderProtocolForSpec("ollama", unsupported) {
-			t.Fatalf("ollama must not declare %q protocol", unsupported)
-		}
-	}
-	for _, supported := range []string{"chat_completions", "chat_completions_stream"} {
-		if !SupportsProviderProtocolForSpec("ollama", supported) {
-			t.Fatalf("ollama must declare %q protocol; protocols=%v", supported, protocols)
-		}
-	}
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("ollama"); !ok || got != "chat_completions" {
-		t.Fatalf("ollama default protocol = %q (ok=%v), want chat_completions", got, ok)
+	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("lmstudio"); !ok || got != protocols[0] {
+		t.Fatalf("default protocol = %q (ok=%v), want first manifest entry %q", got, ok, protocols[0])
 	}
 }
 

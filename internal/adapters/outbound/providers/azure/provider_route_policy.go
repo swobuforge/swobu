@@ -27,5 +27,9 @@ func (providerRoutePolicy) ToolDiscovery(protocol protocolkind.ProtocolKind) pro
 	return provider.ToolDiscoveryPolyfill
 }
 
+func (providerRoutePolicy) ModelCatalogDialect() openaifamily.ModelCatalogDialect {
+	return openaifamily.ModelCatalogOpenAI
+}
+
 // NewPolicy returns the Azure route policy.
 func NewPolicy() openaifamily.ProviderRoutePolicy { return providerRoutePolicy{} }

@@ -25,6 +25,8 @@ type CredentialSpec struct {
 
 const (
 	ProviderSpecOllama     ProviderID = "ollama"
+	ProviderSpecLMStudio   ProviderID = "lmstudio"
+	ProviderSpecVLLM       ProviderID = "vllm"
 	ProviderSpecOpenAI     ProviderID = "openai"
 	ProviderSpecChatGPT    ProviderID = "chatgpt"
 	ProviderSpecAnthropic  ProviderID = "anthropic"
@@ -69,7 +71,9 @@ type Profile struct {
 	DefaultAuthHeader   string
 	VisibleInOperatorUI bool
 	ProtocolAuthoring   ProtocolAuthoring
-	ProviderProtocols   []ProviderProtocolSpec
+	// ProviderProtocols is ordered by preference. The first concrete protocol
+	// is the provider default; operators may explicitly select any later entry.
+	ProviderProtocols []ProviderProtocolSpec
 }
 
 type ProviderProtocolSpec struct {

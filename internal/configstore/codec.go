@@ -37,16 +37,18 @@ type targetDTO struct {
 }
 
 type connectionDTO struct {
-	OpenAI     *credentialConnectionDTO `yaml:"openai,omitempty"`
-	Anthropic  *credentialConnectionDTO `yaml:"anthropic,omitempty"`
-	DeepSeek   *credentialConnectionDTO `yaml:"deepseek,omitempty"`
-	OpenRouter *credentialConnectionDTO `yaml:"openrouter,omitempty"`
-	ZAI        *zaiConnectionDTO        `yaml:"zai,omitempty"`
-	ChatGPT    *credentialConnectionDTO `yaml:"chatgpt,omitempty"`
-	Ollama     *ollamaConnectionDTO     `yaml:"ollama,omitempty"`
-	Azure      *azureConnectionDTO      `yaml:"azure,omitempty"`
-	Bedrock    *bedrockConnectionDTO    `yaml:"bedrock,omitempty"`
-	Custom     *customConnectionDTO     `yaml:"custom,omitempty"`
+	OpenAI     *credentialConnectionDTO         `yaml:"openai,omitempty"`
+	Anthropic  *credentialConnectionDTO         `yaml:"anthropic,omitempty"`
+	DeepSeek   *credentialConnectionDTO         `yaml:"deepseek,omitempty"`
+	OpenRouter *credentialConnectionDTO         `yaml:"openrouter,omitempty"`
+	ZAI        *zaiConnectionDTO                `yaml:"zai,omitempty"`
+	ChatGPT    *credentialConnectionDTO         `yaml:"chatgpt,omitempty"`
+	Ollama     *ollamaConnectionDTO             `yaml:"ollama,omitempty"`
+	LMStudio   *endpointCredentialConnectionDTO `yaml:"lmstudio,omitempty"`
+	VLLM       *endpointCredentialConnectionDTO `yaml:"vllm,omitempty"`
+	Azure      *azureConnectionDTO              `yaml:"azure,omitempty"`
+	Bedrock    *bedrockConnectionDTO            `yaml:"bedrock,omitempty"`
+	Custom     *customConnectionDTO             `yaml:"custom,omitempty"`
 }
 type credentialConnectionDTO struct {
 	Credential string `yaml:"credential"`
@@ -57,6 +59,10 @@ type zaiConnectionDTO struct {
 }
 type ollamaConnectionDTO struct {
 	BaseURL string `yaml:"base_url,omitempty"`
+}
+type endpointCredentialConnectionDTO struct {
+	BaseURL    string `yaml:"base_url,omitempty"`
+	Credential string `yaml:"credential,omitempty"`
 }
 type azureConnectionDTO struct {
 	ProjectEndpoint string `yaml:"project_endpoint"`
@@ -192,6 +198,12 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 	if dto.Ollama != nil {
 		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: dto.Ollama.BaseURL}
 	}
+	if dto.LMStudio != nil {
+		draft.LMStudio = &routing.EndpointCredentialConnectionDraft{BaseURL: dto.LMStudio.BaseURL, Credential: dto.LMStudio.Credential}
+	}
+	if dto.VLLM != nil {
+		draft.VLLM = &routing.EndpointCredentialConnectionDraft{BaseURL: dto.VLLM.BaseURL, Credential: dto.VLLM.Credential}
+	}
 	if dto.Azure != nil {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: dto.Azure.ProjectEndpoint, Credential: dto.Azure.Credential}
 	}
@@ -272,6 +284,16 @@ func encodeTarget(target routing.Target) (targetDTO, error) {
 	case routing.OllamaConnection:
 		u, _ := c.BaseURL()
 		dto.Connection.Ollama = &ollamaConnectionDTO{BaseURL: u.String()}
+	case routing.EndpointCredentialConnection:
+		u, _ := c.BaseURL()
+		switch c.Provider() {
+		case routing.ProviderLMStudio:
+			dto.Connection.LMStudio = &endpointCredentialConnectionDTO{BaseURL: u.String(), Credential: c.Credential().String()}
+		case routing.ProviderVLLM:
+			dto.Connection.VLLM = &endpointCredentialConnectionDTO{BaseURL: u.String(), Credential: c.Credential().String()}
+		default:
+			return targetDTO{}, fmt.Errorf("encode target %s: unsupported endpoint-credential provider %q", target.ID().String(), c.Provider())
+		}
 	case routing.AzureConnection:
 		dto.Connection.Azure = &azureConnectionDTO{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:

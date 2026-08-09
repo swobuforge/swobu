@@ -19,9 +19,15 @@ var (
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
 	}
-	providerProtocolsOllama = []ProviderProtocolSpec{
+	// providerProtocolsAllStandard is the preference-ordered set for providers
+	// that implement all three standard inference families in both delivery modes.
+	providerProtocolsAllStandard = []ProviderProtocolSpec{
+		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
+		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
 		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
+		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
+		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
 	providerProtocolsZAI = []ProviderProtocolSpec{
 		{Name: routing.ZAIProviderProtocol, Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
@@ -52,16 +58,6 @@ var (
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
 	}
-	// providerProtocolsCustomEndpoint lists every protocol an operator may
-	// explicitly select for a user-supplied HTTP endpoint.
-	providerProtocolsCustomEndpoint = []ProviderProtocolSpec{
-		{Name: "responses", Kind: protocolkind.Responses, Frame: FrameHTTPJSONBody},
-		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
-		{Name: "chat_completions", Kind: protocolkind.ChatCompletions, Frame: FrameHTTPJSONBody},
-		{Name: "chat_completions_stream", Kind: protocolkind.ChatCompletions, Frame: FrameSSEEvent},
-		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
-		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
-	}
 )
 
 func catalog() []Profile {
@@ -78,7 +74,35 @@ func catalog() []Profile {
 			},
 			Credential:          CredentialSpec{Requirement: CredentialUnsupported},
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsOllama),
+			ProviderProtocols:   slices.Clone(providerProtocolsAllStandard),
+		},
+		{
+			ProviderID:          ProviderSpecLMStudio,
+			ProviderDisplayName: "LM Studio",
+			SetupHint:           "local model server",
+			SetupKeywords:       []string{"local", "model", "Responses", "Chat Completions", "Messages", "Codex", "Claude Code"},
+			Locator: LocatorSpec{
+				Kind:    LocatorBaseURL,
+				Default: "http://127.0.0.1:1234/v1",
+				Label:   "base URL",
+			},
+			Credential:          CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "LM_API_TOKEN"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsAllStandard),
+		},
+		{
+			ProviderID:          ProviderSpecVLLM,
+			ProviderDisplayName: "vLLM",
+			SetupHint:           "inference server",
+			SetupKeywords:       []string{"inference", "server", "Responses", "Chat Completions", "Messages", "Codex", "Claude Code"},
+			Locator: LocatorSpec{
+				Kind:    LocatorBaseURL,
+				Default: "http://127.0.0.1:8000/v1",
+				Label:   "base URL",
+			},
+			Credential:          CredentialSpec{Requirement: CredentialOptional, SuggestedEnvVar: "VLLM_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsAllStandard),
 		},
 		{
 			ProviderID:          ProviderSpecOpenAI,
@@ -199,7 +223,7 @@ func catalog() []Profile {
 			Credential:          CredentialSpec{Requirement: CredentialRequiredOutsideLoopback},
 			DefaultAuthHeader:   "Authorization",
 			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsCustomEndpoint),
+			ProviderProtocols:   slices.Clone(providerProtocolsAllStandard),
 		},
 	}
 }

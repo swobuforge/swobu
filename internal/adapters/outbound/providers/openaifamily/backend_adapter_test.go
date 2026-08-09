@@ -45,6 +45,8 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 		{name: "official_openai_kernel", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy()},
 		{name: "openrouter", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy()},
 		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
+		{name: "lmstudio", providerID: profile.ProviderSpecLMStudio, policy: NewLMStudioPolicy()},
+		{name: "vllm", providerID: profile.ProviderSpecVLLM, policy: NewVLLMPolicy()},
 		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -130,8 +132,10 @@ func TestCommodityResponsesTargetsUseFlatNamespaceGrammar(t *testing.T) {
 		baseURL  string
 	}{
 		{name: "ollama", provider: profile.ProviderSpecOllama, policy: NewOllamaPolicy(), baseURL: "http://127.0.0.1:11434/v1"},
+		{name: "lmstudio", provider: profile.ProviderSpecLMStudio, policy: NewLMStudioPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
+		{name: "vllm", provider: profile.ProviderSpecVLLM, policy: NewVLLMPolicy(), baseURL: "http://127.0.0.1:8000/v1"},
 		{name: "custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8080/v1"},
-		{name: "lm_studio_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
+		{name: "lmstudio_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
 		{name: "llama_cpp_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8081/v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

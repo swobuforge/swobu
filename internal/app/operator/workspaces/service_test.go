@@ -58,6 +58,8 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"zai":        {"", Connection{ZAI: &ZAIConnection{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}}, routing.ProviderZAI},
 		"chatgpt":    {"", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
 		"ollama":     {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
+		"lmstudio":   {"responses", Connection{LMStudio: &EndpointCredentialConnection{Credential: "env:LM_API_TOKEN"}}, routing.ProviderLMStudio},
+		"vllm":       {"responses", Connection{VLLM: &EndpointCredentialConnection{Credential: "env:VLLM_API_KEY"}}, routing.ProviderVLLM},
 		"azure":      {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
 		"bedrock":    {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2", Endpoint: "https://bedrock-mantle.eu-west-2.api.aws/v1"}}, routing.ProviderBedrock},
 		"custom":     {"chat_completions", Connection{Custom: &CustomConnection{BaseURL: "https://example.test/v1", Header: &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}}}, routing.ProviderCustom},

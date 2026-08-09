@@ -41,7 +41,19 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 			name:     "ollama",
 			provider: "ollama",
 			model:    readmodel.ModelDeploymentReadModel{ID: "llama3.2", ModelName: "llama3.2"},
-			want:     []string{"chat_completions", "chat_completions_stream"},
+			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
+		},
+		{
+			name:     "lm studio",
+			provider: "lmstudio",
+			model:    readmodel.ModelDeploymentReadModel{ID: "local-model", ModelName: "local-model"},
+			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
+		},
+		{
+			name:     "vllm",
+			provider: "vllm",
+			model:    readmodel.ModelDeploymentReadModel{ID: "served-model", ModelName: "served-model"},
+			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 		{
 			name:     "azure sparse catalog uses provider manifest",
@@ -118,14 +130,14 @@ func TestResolveProtocolOptions_DeploymentMetadataCannotWidenProviderRules(t *te
 			want: []string{"responses_stream"},
 		},
 		{
-			name:     "ollama rejects catalog responses",
+			name:     "ollama intersects catalog protocols",
 			provider: "ollama",
 			model: readmodel.ModelDeploymentReadModel{
 				ID:                         "llama3.2",
 				ModelName:                  "llama3.2",
 				SupportedProviderProtocols: []string{"responses_stream", "responses", "chat_completions"},
 			},
-			want: []string{"chat_completions"},
+			want: []string{"responses", "responses_stream", "chat_completions"},
 		},
 		{
 			name:     "anthropic rejects catalog openai protocols",

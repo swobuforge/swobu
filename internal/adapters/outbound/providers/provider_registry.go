@@ -43,6 +43,8 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		openrouter.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
 		openaifamily.NewRuntime(client, credentials, openaifamily.NewOllamaPolicy()),
+		openaifamily.NewRuntime(client, credentials, openaifamily.NewLMStudioPolicy()),
+		openaifamily.NewRuntime(client, credentials, openaifamily.NewVLLMPolicy()),
 		openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy()),
 	})
 }

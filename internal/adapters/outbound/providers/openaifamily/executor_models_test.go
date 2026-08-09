@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -103,6 +105,80 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	}
 	if hits != 0 {
 		t.Fatalf("upstream hits = %d, want 0", hits)
+	}
+}
+
+func TestListModels_LMStudioUsesNativeCatalogAndOptionalBearerAuth(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		credentialRef string
+		wantAuth      string
+	}{
+		{name: "unauthenticated"},
+		{name: "bearer token", credentialRef: "env:LM_API_TOKEN", wantAuth: "Bearer token_test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/v1/models" {
+					t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
+				}
+				if got := r.Header.Get("Authorization"); got != tc.wantAuth {
+					t.Fatalf("Authorization = %q, want %q", got, tc.wantAuth)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"models":[{"type":"llm","key":"local-model","display_name":"Local Model","publisher":"Acme","architecture":"qwen"}]}`))
+			}))
+			defer srv.Close()
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
+				"draft", "lmstudio", srv.URL+"/v1", tc.credentialRef,
+				protocolkind.Responses, "", "responses"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(models) != 1 || models[0].Name != "local-model" || models[0].ModelName != "Local Model" || models[0].ModelPublisher != "Acme" || models[0].Family != "qwen" {
+				t.Fatalf("models = %#v", models)
+			}
+		})
+	}
+}
+
+func TestListModels_VLLMUsesSparseOpenAICatalogAndOptionalBearerAuth(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		credentialRef string
+		wantAuth      string
+	}{
+		{name: "unauthenticated"},
+		{name: "bearer token", credentialRef: "env:VLLM_API_KEY", wantAuth: "Bearer token_test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/serve/models" {
+					t.Fatalf("request method/path = %s %s", r.Method, r.URL.Path)
+				}
+				if got := r.Header.Get("Authorization"); got != tc.wantAuth {
+					t.Fatalf("Authorization = %q, want %q", got, tc.wantAuth)
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"served/model"}]}`))
+			}))
+			defer srv.Close()
+
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewVLLMPolicy())
+			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
+				"draft", "vllm", srv.URL+"/serve", tc.credentialRef,
+				protocolkind.Responses, "", "responses"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(models) != 1 || models[0].Name != "served/model" || len(models[0].SupportedProviderProtocols) != 0 || models[0].DefaultProviderProtocol != "" {
+				t.Fatalf("models = %#v", models)
+			}
+			want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
+			if got := profile.ResolveProviderDeployment("vllm", models[0]).ProtocolOptions(); !slices.Equal(got, want) {
+				t.Fatalf("resolved protocols = %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 

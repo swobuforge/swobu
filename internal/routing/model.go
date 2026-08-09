@@ -95,6 +95,8 @@ const (
 	ProviderZAI        Provider = "zai"
 	ProviderChatGPT    Provider = "chatgpt"
 	ProviderOllama     Provider = "ollama"
+	ProviderLMStudio   Provider = "lmstudio"
+	ProviderVLLM       Provider = "vllm"
 	ProviderAzure      Provider = "azure"
 	ProviderBedrock    Provider = "bedrock"
 	ProviderCustom     Provider = "custom"
