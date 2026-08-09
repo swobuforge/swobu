@@ -9,11 +9,15 @@
 // boundary. Buffered and streamed delivery must converge on the same completed
 // canonical semantics. Terminal-checkpoint mismatch diagnostics expose only
 // canonical item shape and a closed mismatch category; provider frames and
-// inference content never enter logs. An indexed output's first non-empty
-// identity remains authoritative when later terminal snapshots omit it, while
-// repeated non-empty identity must agree. Reasoning checkpoint equivalence is
-// defined by ordered readable parts and opaque Responses replay semantics, not
-// private nil-versus-empty storage shape.
+// inference content never enter logs. Each provider output index has one slot
+// with an explicit accumulating, terminal-dependent, checkpointed, or settled
+// phase. Checkpointed output may publish incrementally before response-terminal
+// verification; only settled ends provider semantics. Every terminal item is
+// observed once through that slot. Its first non-empty identity remains
+// authoritative when later snapshots omit it, while repeated non-empty
+// identity must agree. Reasoning checkpoint equivalence is defined by ordered
+// readable parts and opaque Responses replay semantics, not private
+// nil-versus-empty storage shape.
 //
 // An unfamiliar web-search status erases only that lifecycle refinement. The
 // known call survives without a synthesized result, and provider completion

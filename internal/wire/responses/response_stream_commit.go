@@ -18,37 +18,52 @@ type committedOutputIdentity struct {
 	toolName string
 }
 
-// pendingResponseOutput is the sole lifecycle owner for one provider
+// responsesOutputSlot is the sole lifecycle owner for one provider
 // output index. Identity, progressive kind state, buffered canonical events,
 // erasure evidence, and resolution cannot be looked up through any other key.
 //
+// responsesOutputPhase is the closed provider lifecycle for one output index.
+// Publication is orthogonal: checkpointed output may stream to the client
+// before the response terminal verifies it and advances the slot to settled.
+type responsesOutputPhase uint8
+
+const (
+	responsesOutputAccumulating responsesOutputPhase = iota
+	responsesOutputAwaitingTerminal
+	responsesOutputCheckpointed
+	responsesOutputSettled
+)
+
 // State transitions:
 //
-//	absent → active(progressive frames) → resolved(known canonical group)
-//	   │              │
-//	   │              └→ deferred(partial item; terminal contract required)
-//	   └────────────────→ resolved(erased; zero canonical items)
+//	absent → accumulating → checkpointed → settled
+//	                    └→ awaiting terminal → settled
+//	                    └→ settled (terminal-only output)
 //
-// Resolved states are terminal. Provider order commits only while the
-// contiguous resolved frontier advances; known groups contribute their span
-// and erased groups contribute zero.
-type pendingResponseOutput struct {
-	identity           committedOutputIdentity
-	events             canonical.EventSequence
-	text               *responsesTextState
-	tool               *responsesToolState
-	reasoning          *responsesReasoningState
-	checkpointItems    []canonical.CanonicalItem
-	checkpointStatus   string
-	deferredItem       json.RawMessage
-	base               uint32
-	span               uint32
-	active             bool
-	resolved           bool
-	erased             bool
-	ignoredAtAdded     bool
-	erasureRecorded    bool
-	statusDropRecorded bool
+// Provider order publishes while the contiguous checkpoint-ready frontier
+// advances; known groups contribute their span and erased groups contribute
+// zero. Only settled is terminal for provider semantics.
+type responsesOutputSlot struct {
+	identity            committedOutputIdentity
+	events              canonical.EventSequence
+	text                *responsesTextState
+	tool                *responsesToolState
+	reasoning           *responsesReasoningState
+	checkpointItems     []canonical.CanonicalItem
+	checkpointStatus    string
+	terminalPendingItem json.RawMessage
+	base                uint32
+	span                uint32
+	published           bool
+	phase               responsesOutputPhase
+	erased              bool
+	ignoredAtAdded      bool
+	erasureRecorded     bool
+	statusDropRecorded  bool
+}
+
+func (s *responsesOutputSlot) checkpointReady() bool {
+	return s.phase == responsesOutputCheckpointed || s.phase == responsesOutputSettled
 }
 
 func responsesIdentityForFrame(frameType string, frame streamFrame) committedOutputIdentity {
@@ -98,7 +113,7 @@ func (s *responsesResponseStream) acceptOutputFrame(frameType string, frame stre
 	}
 	state := s.outputAt(index)
 	identity := responsesIdentityForFrame(frameType, frame)
-	if state.resolved {
+	if state.checkpointReady() {
 		if err := state.identity.validateFrozen(identity); err != nil {
 			return false, err
 		}
@@ -107,7 +122,7 @@ func (s *responsesResponseStream) acceptOutputFrame(frameType string, frame stre
 		}
 		return true, nil
 	}
-	if len(state.deferredItem) > 0 {
+	if state.phase == responsesOutputAwaitingTerminal {
 		return false, canonical.NewBackendError("responses", 0, "responses output lifecycle continued after deferred completion", "")
 	}
 	// An unknown announcement is deliberately open, not erased. Its unknown
@@ -131,7 +146,7 @@ func (s *responsesResponseStream) acceptTerminalOutput(index int, item responses
 		callID:   strings.TrimSpace(item.CallID),
 		toolName: strings.TrimSpace(item.Name),
 	}
-	if state.resolved {
+	if state.checkpointReady() {
 		return state.identity.validateFrozen(identity)
 	}
 	if state.ignoredAtAdded && state.identity.kind == "" && identity.kind != "" {
@@ -192,13 +207,13 @@ func mergeResponsesIdentityField(field string, admitted *string, next string) er
 	return nil
 }
 
-func (s *responsesResponseStream) outputAt(index int) *pendingResponseOutput {
+func (s *responsesResponseStream) outputAt(index int) *responsesOutputSlot {
 	if s.providerOutputs == nil {
-		s.providerOutputs = make(map[int]*pendingResponseOutput)
+		s.providerOutputs = make(map[int]*responsesOutputSlot)
 	}
 	state := s.providerOutputs[index]
 	if state == nil {
-		state = &pendingResponseOutput{}
+		state = &responsesOutputSlot{}
 		s.providerOutputs[index] = state
 	}
 	return state
@@ -220,13 +235,13 @@ func (s *responsesResponseStream) stageOutputEvent(outputIndex *int, event canon
 		return
 	}
 	state := s.outputAt(*outputIndex)
-	if state.resolved {
+	if state.checkpointReady() {
 		return
 	}
 	if itemEvent.Position.Item+1 > state.span {
 		state.span = itemEvent.Position.Item + 1
 	}
-	if state.active {
+	if state.published {
 		s.enqueue(rebaseResponsesOutputEvent(event, state.base))
 		return
 	}
@@ -240,12 +255,12 @@ func rebaseResponsesOutputEvent(event canonical.Event, base uint32) canonical.Ev
 	return event
 }
 
-func (s *responsesResponseStream) completeOutput(outputIndex *int) {
+func (s *responsesResponseStream) checkpointOutput(outputIndex *int) {
 	if outputIndex == nil || *outputIndex < 0 {
 		return
 	}
 	state := s.outputAt(*outputIndex)
-	state.resolved = true
+	state.phase = responsesOutputCheckpointed
 	s.publishReadyOutputs()
 }
 
@@ -255,25 +270,20 @@ func (s *responsesResponseStream) publishReadyOutputs() {
 		if state == nil {
 			return
 		}
-		if !state.active {
-			state.active = true
+		if !state.published {
+			state.published = true
 			state.base = s.nextOrdinal
 			for _, event := range state.events {
 				s.enqueue(rebaseResponsesOutputEvent(event, state.base))
 			}
 			state.events = nil
 		}
-		if !state.resolved {
+		if !state.checkpointReady() {
 			return
 		}
 		s.nextOrdinal = state.base + state.span
 		s.outputFrontier++
 	}
-}
-
-func (s *responsesResponseStream) isOutputComplete(index int) bool {
-	state := s.providerOutputs[index]
-	return state != nil && state.resolved
 }
 
 func (s *responsesResponseStream) dropOutput(outputIndex *int) {

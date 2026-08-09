@@ -267,6 +267,22 @@ func TestResponsesStreamReconcilesTerminalReasoningWithOmittedCommittedID(t *tes
 	}
 }
 
+func TestResponsesStreamReconcilesTerminalDependentReasoningWithOmittedCommittedID(t *testing.T) {
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n" +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"incomplete\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"partial\"}]}}\n\n" +
+		"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"incomplete\",\"output\":[{\"type\":\"reasoning\",\"status\":\"incomplete\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"partial\"}]}]}}\n\n"
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
+	response := readResponsesStreamResponse(t, request, raw)
+	if response.Completion().Reason() != "incomplete" || len(response.Items()) != 1 {
+		t.Fatalf("terminal-dependent reasoning completion=%q items=%#v", response.Completion().Reason(), response.Items())
+	}
+	reasoning, ok := response.Items()[0].Reasoning()
+	if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "partial" {
+		t.Fatalf("terminal-dependent reasoning = %#v", response.Items()[0])
+	}
+}
+
 func firstReasoningReplay(t *testing.T, stream canonical.ResponseStream) (canonical.ResponsesReasoningReplay, bool) {
 	t.Helper()
 	for {

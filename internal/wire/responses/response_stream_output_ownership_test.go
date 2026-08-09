@@ -10,6 +10,28 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
+func TestResponsesOutputSlotPhaseSeparatesCheckpointFromSettlement(t *testing.T) {
+	slot := &responsesOutputSlot{}
+	if slot.checkpointReady() {
+		t.Fatal("new output slot is checkpoint-ready")
+	}
+	slot.phase = responsesOutputAwaitingTerminal
+	if slot.checkpointReady() {
+		t.Fatal("terminal-dependent output published before response terminal")
+	}
+	slot.phase = responsesOutputCheckpointed
+	if !slot.checkpointReady() {
+		t.Fatal("completed item checkpoint is not publication-ready")
+	}
+	if slot.phase == responsesOutputSettled {
+		t.Fatal("checkpointed output masquerades as response-settled")
+	}
+	slot.phase = responsesOutputSettled
+	if !slot.checkpointReady() {
+		t.Fatal("settled output lost its committed checkpoint")
+	}
+}
+
 func TestDecodeResponseStreamCorrelatesProgressiveStateByOutputIndex(t *testing.T) {
 	t.Run("tool item id appears at terminal", func(t *testing.T) {
 		raw := responsesCreatedFrame() +
@@ -88,7 +110,7 @@ func TestDecodeResponseStreamFreezesErasedOutputLifecycle(t *testing.T) {
 	})
 
 	t.Run("resolved erasure cannot change span or emit", func(t *testing.T) {
-		stream := &responsesResponseStream{providerOutputs: map[int]*pendingResponseOutput{}}
+		stream := &responsesResponseStream{providerOutputs: map[int]*responsesOutputSlot{}}
 		outputIndex := 0
 		unknownDone := streamFrame{Type: "response.output_item.done", OutputIndex: &outputIndex}
 		unknownDone.Item.Type = "future_output"

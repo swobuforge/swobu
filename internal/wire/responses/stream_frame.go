@@ -91,7 +91,7 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 				if err := json.Unmarshal(frame.RawItem, &item); err != nil {
 					return false, canonical.Event{}, canonical.InternalError("responses duplicate completed item is invalid JSON")
 				}
-				if err := s.validateResolvedTerminalOutput(ctx, *frame.OutputIndex, frame.RawItem, item, "completed"); err != nil {
+				if err := s.validateCheckpoint(ctx, *frame.OutputIndex, frame.RawItem, item, "completed", false); err != nil {
 					return false, canonical.Event{}, err
 				}
 			}
@@ -103,10 +103,11 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 			return false, canonical.Event{}, canonical.InternalError("responses deferred completed item is missing")
 		}
 		state := s.outputAt(*frame.OutputIndex)
-		if len(state.deferredItem) > 0 {
+		if len(state.terminalPendingItem) > 0 {
 			return false, canonical.Event{}, canonical.NewBackendError("responses", 0, "responses output item repeated before terminal response", "")
 		}
-		state.deferredItem = append(json.RawMessage(nil), frame.RawItem...)
+		state.terminalPendingItem = append(json.RawMessage(nil), frame.RawItem...)
+		state.phase = responsesOutputAwaitingTerminal
 		return true, canonical.Event{}, nil
 	}
 	if frameType == "response.output_item.done" && completedAdmission.disposition == responsesOutputErase {
@@ -182,7 +183,7 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		if err != nil {
 			return false, canonical.Event{}, err
 		}
-		s.completeOutput(frame.OutputIndex)
+		s.checkpointOutput(frame.OutputIndex)
 		if !handled {
 			return false, canonical.Event{}, nil
 		}
@@ -533,7 +534,7 @@ func (s *responsesResponseStream) completeToolState(frame streamFrame, toolType 
 		if itemErr != nil {
 			return false, canonical.InternalError("responses streamed tool call is invalid")
 		}
-		s.enqueueItemCompleted(frame.OutputIndex, state.ordinal, item)
+		s.commitOutputItem(frame.OutputIndex, state.ordinal, item)
 		state.closed = true
 		emitted = true
 		output.tool = nil
@@ -565,77 +566,34 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 		}
 		usedFallback := false
 		fallbackItems := []canonical.CanonicalItem(nil)
+		observed := make(map[int]struct{}, len(frame.Response.Output))
 		for index, raw := range frame.Response.Output {
-			var item responsesWireOutputItemDTO
-			if err := json.Unmarshal(raw, &item); err != nil {
-				return canonical.InternalError("responses terminal output item is invalid JSON")
-			}
-			if _, err := admitCompletedResponsesOutputItem(item, terminalStatus); err != nil {
+			fallback, items, err := s.observeTerminalOutput(ctx, index, raw, terminalStatus)
+			if err != nil {
 				return err
 			}
-			wasResolved := s.isOutputComplete(index)
-			if err := s.acceptTerminalOutput(index, item); err != nil {
-				return err
-			}
-			if state := s.outputAt(index); len(state.deferredItem) > 0 {
-				if err := s.validateDeferredTerminalOutput(ctx, index, state.deferredItem, raw, terminalStatus); err != nil {
-					return err
-				}
-				state.deferredItem = nil
-			}
-			if wasResolved {
-				if err := s.validateResolvedTerminalOutput(ctx, index, raw, item, terminalStatus); err != nil {
-					return err
-				}
-			}
+			observed[index] = struct{}{}
+			usedFallback = usedFallback || fallback
+			fallbackItems = append(fallbackItems, items...)
 		}
-		if err := s.completeProgressiveItemsFromTerminal(frame.Response.Output); err != nil {
+		if err := s.settleTerminalOmissions(ctx, observed, terminalStatus); err != nil {
 			return err
 		}
-		if err := s.completeDeferredItemsFromTerminal(ctx, terminalStatus); err != nil {
-			return err
-		}
-		wireItems, originalIndexes := s.unresolvedTerminalOutputs(frame.Response.Output)
 		if s.hasOpenText() && s.completedItems == 0 && strings.TrimSpace(frame.Response.OutputText) != "" {
 			if err := s.completeOpenTextFromTerminal(frame.Response.OutputText); err != nil {
 				return err
 			}
 		}
-		if len(wireItems) > 0 || s.completedItems == 0 && strings.TrimSpace(frame.Response.OutputText) != "" {
-			for position, raw := range wireItems {
-				index := originalIndexes[position]
-				projectionSink := s.changeLog
-				if state := s.outputAt(index); state.erased && state.erasureRecorded {
-					projectionSink = nil
-				}
-				items, err := decodeCompletedResponsesItemSetAtIndexes(ctx, s.request, s.toolNames, []json.RawMessage{raw}, "", []int{index}, true, terminalStatus, s.exchangeID, projectionSink)
-				if err != nil {
-					return err
-				}
-				if len(items) > 0 {
-					if err := s.enqueueCompletedOutputItems(&index, items); err != nil {
-						return err
-					}
-					usedFallback = true
-					fallbackItems = append(fallbackItems, items...)
-				} else {
-					s.erasedOutput = true
-					s.omitProviderOutput(&index)
-				}
-				s.outputAt(index).checkpointStatus = responsesCompletedItemStatus(itemStatusAt(frame.Response.Output, index))
-				s.completeOutput(&index)
+		if s.completedItems == 0 && !s.hasOpenText() && strings.TrimSpace(frame.Response.OutputText) != "" {
+			item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(frame.Response.OutputText)})
+			if err != nil {
+				return canonical.InternalError("responses output text is invalid")
 			}
-			if s.completedItems == 0 && !s.hasOpenText() && strings.TrimSpace(frame.Response.OutputText) != "" {
-				item, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart(frame.Response.OutputText)})
-				if err != nil {
-					return canonical.InternalError("responses output text is invalid")
-				}
-				if err := s.enqueueCompletedOutputItems(nil, []canonical.CanonicalItem{item}); err != nil {
-					return err
-				}
-				usedFallback = true
-				fallbackItems = append(fallbackItems, item)
+			if err := s.enqueueCompletedOutputItems(nil, []canonical.CanonicalItem{item}); err != nil {
+				return err
 			}
+			usedFallback = true
+			fallbackItems = append(fallbackItems, item)
 		}
 		if s.hasOpenKnownOutput() {
 			return canonical.NewBackendError("responses", 0, "responses stream ended with unfinished output", "")
@@ -652,25 +610,70 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 	}
 }
 
-func itemStatusAt(items []json.RawMessage, index int) string {
-	if index < 0 || index >= len(items) {
-		return ""
-	}
+func (s *responsesResponseStream) observeTerminalOutput(ctx context.Context, index int, raw json.RawMessage, responseStatus string) (bool, []canonical.CanonicalItem, error) {
 	var item responsesWireOutputItemDTO
-	if json.Unmarshal(items[index], &item) != nil {
-		return ""
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return false, nil, canonical.InternalError("responses terminal output item is invalid JSON")
 	}
-	return item.Status
+	if _, err := admitCompletedResponsesOutputItem(item, responseStatus); err != nil {
+		return false, nil, err
+	}
+	if err := s.acceptTerminalOutput(index, item); err != nil {
+		return false, nil, err
+	}
+	slot := s.outputAt(index)
+	resolvedRaw, err := restoreResponsesTerminalIdentity(raw, item, slot.identity)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := json.Unmarshal(resolvedRaw, &item); err != nil {
+		return false, nil, canonical.InternalError("responses terminal output item is invalid JSON")
+	}
+	switch slot.phase {
+	case responsesOutputCheckpointed:
+		if err := s.validateCheckpoint(ctx, index, resolvedRaw, item, responseStatus, true); err != nil {
+			return false, nil, err
+		}
+		slot.phase = responsesOutputSettled
+		return false, nil, nil
+	case responsesOutputAwaitingTerminal:
+		if err := s.validatePendingTerminal(ctx, index, resolvedRaw, responseStatus); err != nil {
+			return false, nil, err
+		}
+		if _, _, err := s.completeObservedOutput(ctx, index, resolvedRaw, item, responseStatus); err != nil {
+			return false, nil, err
+		}
+		slot.terminalPendingItem = nil
+		slot.phase = responsesOutputSettled
+		return false, nil, nil
+	case responsesOutputAccumulating:
+		fallback, items, err := s.completeObservedOutput(ctx, index, resolvedRaw, item, responseStatus)
+		if err != nil {
+			return false, nil, err
+		}
+		slot.phase = responsesOutputSettled
+		return fallback, items, nil
+	case responsesOutputSettled:
+		if err := s.validateCheckpoint(ctx, index, resolvedRaw, item, responseStatus, true); err != nil {
+			return false, nil, err
+		}
+		return false, nil, nil
+	default:
+		return false, nil, canonical.InternalError("responses output slot has invalid phase")
+	}
 }
 
-// validateResolvedTerminalOutput compares the terminal projection with the
-// canonical group already committed for this output index. Projecting first
-// preserves local additive erasure and records terminal-only child evidence.
-func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Context, index int, raw json.RawMessage, item responsesWireOutputItemDTO, responseStatus string) error {
+// validateCheckpoint compares one repeated observation with the canonical
+// checkpoint already committed by the indexed slot.
+func (s *responsesResponseStream) validateCheckpoint(ctx context.Context, index int, raw json.RawMessage, item responsesWireOutputItemDTO, responseStatus string, identityResolved bool) error {
 	state := s.outputAt(index)
-	resolvedRaw, err := restoreResponsesTerminalIdentity(raw, item, state.identity)
-	if err != nil {
-		return err
+	resolvedRaw := raw
+	var err error
+	if !identityResolved {
+		resolvedRaw, err = restoreResponsesTerminalIdentity(raw, item, state.identity)
+		if err != nil {
+			return err
+		}
 	}
 	changeLog := s.changeLog
 	if (state.erased && state.erasureRecorded) || state.statusDropRecorded {
@@ -686,8 +689,8 @@ func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Con
 	if err != nil {
 		return err
 	}
-	if !responsesCanonicalItemsEqual(state.checkpointItems, terminalItems) {
-		logResponsesTerminalCheckpointMismatch(s.exchangeID, index, state.checkpointItems, terminalItems)
+	if mismatch := compareResponsesCanonicalItems(state.checkpointItems, terminalItems); mismatch != "" {
+		logResponsesTerminalCheckpointMismatch(s.exchangeID, index, state.checkpointItems, terminalItems, mismatch)
 		return canonical.NewBackendError("responses", 0, "responses terminal output contradicts completed semantic checkpoint", "")
 	}
 	if state.checkpointStatus != responsesCompletedItemStatus(item.Status) {
@@ -738,9 +741,18 @@ func restoreResponsesTerminalIdentity(raw json.RawMessage, item responsesWireOut
 	return restored, nil
 }
 
-func (s *responsesResponseStream) validateDeferredTerminalOutput(ctx context.Context, index int, deferred json.RawMessage, terminal json.RawMessage, responseStatus string) error {
-	deferredItems, err := decodeCompletedResponsesItemSetAtIndexes(
-		ctx, s.request, s.toolNames, []json.RawMessage{deferred}, "", []int{index}, true,
+func (s *responsesResponseStream) validatePendingTerminal(ctx context.Context, index int, terminal json.RawMessage, responseStatus string) error {
+	slot := s.outputAt(index)
+	var pendingItem responsesWireOutputItemDTO
+	if err := json.Unmarshal(slot.terminalPendingItem, &pendingItem); err != nil {
+		return canonical.InternalError("responses terminal-dependent item is invalid JSON")
+	}
+	pending, err := restoreResponsesTerminalIdentity(slot.terminalPendingItem, pendingItem, slot.identity)
+	if err != nil {
+		return err
+	}
+	pendingItems, err := decodeCompletedResponsesItemSetAtIndexes(
+		ctx, s.request, s.toolNames, []json.RawMessage{pending}, "", []int{index}, true,
 		responseStatus, s.exchangeID, nil,
 	)
 	if err != nil {
@@ -753,77 +765,191 @@ func (s *responsesResponseStream) validateDeferredTerminalOutput(ctx context.Con
 	if err != nil {
 		return err
 	}
-	if !responsesCanonicalItemsEqual(deferredItems, terminalItems) {
+	if compareResponsesCanonicalItems(pendingItems, terminalItems) != "" {
 		return canonical.NewBackendError("responses", 0, "responses terminal output contradicts deferred partial checkpoint", "")
 	}
 	return nil
 }
 
-func (s *responsesResponseStream) completeDeferredItemsFromTerminal(ctx context.Context, responseStatus string) error {
-	indexes := make([]int, 0)
-	for index, state := range s.providerOutputs {
-		if !state.resolved && len(state.deferredItem) > 0 {
+func (s *responsesResponseStream) completeObservedOutput(ctx context.Context, index int, raw json.RawMessage, item responsesWireOutputItemDTO, responseStatus string) (bool, []canonical.CanonicalItem, error) {
+	slot := s.outputAt(index)
+	frame := responsesCompletedStreamFrame(index, raw, item)
+	slot.checkpointStatus = responsesCompletedItemStatus(item.Status)
+	progressive := false
+	switch strings.TrimSpace(item.Type) {
+	case "message":
+		if slot.text != nil {
+			progressive = true
+			if _, err := s.completeMessageItem(frame); err != nil {
+				return false, nil, err
+			}
+		}
+	case "function_call", "custom_tool_call":
+		if slot.tool != nil {
+			progressive = true
+			toolType := canonical.ToolTypeFunction
+			if strings.TrimSpace(item.Type) == "custom_tool_call" {
+				toolType = canonical.ToolTypeCustom
+			} else {
+				arguments, err := responsesTerminalFunctionInput(item.Arguments)
+				if err != nil {
+					return false, nil, canonical.InternalError("responses terminal tool arguments are invalid")
+				}
+				frame.Item.Arguments = arguments
+			}
+			if _, err := s.completeToolState(frame, toolType, false, true); err != nil {
+				return false, nil, err
+			}
+		}
+	case "reasoning":
+		if slot.reasoning != nil {
+			progressive = true
+			if _, err := s.completeReasoningState(frame); err != nil {
+				return false, nil, err
+			}
+		}
+	}
+	if progressive {
+		s.checkpointOutput(&index)
+		return false, nil, nil
+	}
+	projectionSink := s.changeLog
+	if slot.erased && slot.erasureRecorded {
+		projectionSink = nil
+	}
+	items, err := decodeCompletedResponsesItemSetAtIndexes(ctx, s.request, s.toolNames, []json.RawMessage{raw}, "", []int{index}, true, responseStatus, s.exchangeID, projectionSink)
+	if err != nil {
+		return false, nil, err
+	}
+	if len(items) > 0 {
+		if err := s.enqueueCompletedOutputItems(&index, items); err != nil {
+			return false, nil, err
+		}
+	} else {
+		s.erasedOutput = true
+		s.omitProviderOutput(&index)
+	}
+	s.checkpointOutput(&index)
+	return len(items) > 0, items, nil
+}
+
+func (s *responsesResponseStream) settleTerminalOmissions(ctx context.Context, observed map[int]struct{}, responseStatus string) error {
+	indexes := make([]int, 0, len(s.providerOutputs))
+	for index := range s.providerOutputs {
+		if _, ok := observed[index]; !ok {
 			indexes = append(indexes, index)
 		}
 	}
 	sort.Ints(indexes)
 	for _, index := range indexes {
-		state := s.outputAt(index)
-		var item responsesWireOutputItemDTO
-		if err := json.Unmarshal(state.deferredItem, &item); err != nil {
-			return canonical.InternalError("responses deferred partial item is invalid JSON")
+		slot := s.outputAt(index)
+		switch slot.phase {
+		case responsesOutputCheckpointed:
+			slot.phase = responsesOutputSettled
+		case responsesOutputAwaitingTerminal:
+			var item responsesWireOutputItemDTO
+			if err := json.Unmarshal(slot.terminalPendingItem, &item); err != nil {
+				return canonical.InternalError("responses terminal-dependent item is invalid JSON")
+			}
+			if _, err := admitCompletedResponsesOutputItem(item, responseStatus); err != nil {
+				return err
+			}
+			raw, err := restoreResponsesTerminalIdentity(slot.terminalPendingItem, item, slot.identity)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &item); err != nil {
+				return canonical.InternalError("responses terminal-dependent item is invalid JSON")
+			}
+			if _, _, err := s.completeObservedOutput(ctx, index, raw, item, responseStatus); err != nil {
+				return err
+			}
+			slot.terminalPendingItem = nil
+			slot.phase = responsesOutputSettled
+		case responsesOutputSettled:
+			continue
+		case responsesOutputAccumulating:
+			continue
+		default:
+			return canonical.InternalError("responses output slot has invalid phase")
 		}
-		if _, err := admitCompletedResponsesOutputItem(item, responseStatus); err != nil {
-			return err
-		}
-		frame := responsesCompletedStreamFrame(index, state.deferredItem, item)
-		if _, err := s.handleOutputItemDone(ctx, frame); err != nil {
-			return err
-		}
-		state.checkpointStatus = responsesCompletedItemStatus(item.Status)
-		state.deferredItem = nil
-		s.completeOutput(&index)
 	}
 	return nil
 }
 
-func responsesCanonicalItemsEqual(left []canonical.CanonicalItem, right []canonical.CanonicalItem) bool {
+// compareResponsesCanonicalItems returns an empty string for equal canonical
+// semantics or one content-free closed category for the first mismatch.
+func compareResponsesCanonicalItems(left []canonical.CanonicalItem, right []canonical.CanonicalItem) string {
 	if len(left) != len(right) {
-		return false
+		return "item_count"
 	}
 	for index := range left {
-		if left[index].Kind() == canonical.ItemKindReasoning && right[index].Kind() == canonical.ItemKindReasoning {
-			if !responsesReasoningItemsEqual(left[index], right[index]) {
-				return false
+		if left[index].Kind() != right[index].Kind() {
+			return "item_kind"
+		}
+		if left[index].Kind() == canonical.ItemKindReasoning {
+			if mismatch := compareResponsesReasoningItems(left[index], right[index]); mismatch != "" {
+				return mismatch
 			}
 			continue
 		}
 		if !reflect.DeepEqual(left[index], right[index]) {
-			return false
+			switch left[index].Kind() {
+			case canonical.ItemKindMessage:
+				return "message_content"
+			case canonical.ItemKindToolDeclarations:
+				return "tool_declarations"
+			case canonical.ItemKindToolCall:
+				return "tool_call"
+			case canonical.ItemKindToolResult:
+				return "tool_result"
+			case canonical.ItemKindToolDiscoveryResult:
+				return "tool_discovery_result"
+			default:
+				return "canonical_item"
+			}
 		}
 	}
-	return true
+	return ""
 }
 
-func responsesReasoningItemsEqual(left canonical.CanonicalItem, right canonical.CanonicalItem) bool {
+func compareResponsesReasoningItems(left canonical.CanonicalItem, right canonical.CanonicalItem) string {
 	leftReasoning, leftOK := left.Reasoning()
 	rightReasoning, rightOK := right.Reasoning()
 	if !leftOK || !rightOK {
-		return false
+		return "reasoning_shape"
 	}
 	leftParts := leftReasoning.Parts()
 	rightParts := rightReasoning.Parts()
 	if len(leftParts) != len(rightParts) {
-		return false
+		return "reasoning_part_count"
 	}
 	for index := range leftParts {
-		if leftParts[index].Kind() != rightParts[index].Kind() || leftParts[index].Text() != rightParts[index].Text() {
-			return false
+		if leftParts[index].Kind() != rightParts[index].Kind() {
+			return "reasoning_part_kind"
+		}
+		if leftParts[index].Text() != rightParts[index].Text() {
+			return "reasoning_part_content"
 		}
 	}
 	leftReplay, leftReplayOK := leftReasoning.Opaque().Responses()
 	rightReplay, rightReplayOK := rightReasoning.Opaque().Responses()
-	return leftReplayOK == rightReplayOK && (!leftReplayOK || leftReplay == rightReplay)
+	if leftReplayOK != rightReplayOK {
+		return "reasoning_replay_presence"
+	}
+	if !leftReplayOK {
+		return ""
+	}
+	if leftReplay.EncryptedContent != rightReplay.EncryptedContent {
+		return "reasoning_replay_content"
+	}
+	if (leftReplay.ItemID == "") != (rightReplay.ItemID == "") {
+		return "reasoning_replay_id_presence"
+	}
+	if leftReplay.ItemID != rightReplay.ItemID {
+		return "reasoning_replay_id"
+	}
+	return ""
 }
 
 func responsesTerminalSuffix(progressive string, terminal string) (string, error) {
@@ -860,9 +986,10 @@ func (s *responsesResponseStream) completeOpenTextFromTerminal(terminal string) 
 	if err != nil {
 		return canonical.InternalError("responses terminal output text is invalid")
 	}
-	s.enqueueItemCompleted(outputIndex, state.ordinal, item)
+	s.commitOutputItem(outputIndex, state.ordinal, item)
 	s.outputAt(*outputIndex).checkpointStatus = "completed"
-	s.completeOutput(outputIndex)
+	s.checkpointOutput(outputIndex)
+	s.outputAt(*outputIndex).phase = responsesOutputSettled
 	s.outputAt(*outputIndex).text = nil
 	return nil
 }
@@ -891,59 +1018,6 @@ func (s *responsesResponseStream) onlyOpenText() (*int, *responsesTextState) {
 		found = output.text
 	}
 	return foundIndex, found
-}
-
-func (s *responsesResponseStream) completeProgressiveItemsFromTerminal(items []json.RawMessage) error {
-	for index, raw := range items {
-		if s.isOutputComplete(index) {
-			continue
-		}
-		var item responsesWireOutputItemDTO
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return canonical.InternalError("responses terminal output item is invalid JSON")
-		}
-		outputIndex := index
-		frame := responsesCompletedStreamFrame(index, raw, item)
-		s.outputAt(outputIndex).checkpointStatus = responsesCompletedItemStatus(item.Status)
-		switch strings.TrimSpace(item.Type) {
-		case "message":
-			state := s.outputAt(outputIndex).text
-			if state == nil {
-				continue
-			}
-			if _, err := s.completeMessageItem(frame); err != nil {
-				return err
-			}
-		case "function_call", "custom_tool_call":
-			if s.outputAt(outputIndex).tool == nil {
-				continue
-			}
-			toolType := canonical.ToolTypeFunction
-			if strings.TrimSpace(item.Type) == "custom_tool_call" {
-				toolType = canonical.ToolTypeCustom
-			} else {
-				arguments, err := responsesTerminalFunctionInput(item.Arguments)
-				if err != nil {
-					return canonical.InternalError("responses terminal tool arguments are invalid")
-				}
-				frame.Item.Arguments = arguments
-			}
-			if _, err := s.completeToolState(frame, toolType, false, true); err != nil {
-				return err
-			}
-		case "reasoning":
-			if s.outputAt(outputIndex).reasoning == nil {
-				continue
-			}
-			if _, err := s.completeReasoningState(frame); err != nil {
-				return err
-			}
-		default:
-			continue
-		}
-		s.completeOutput(&outputIndex)
-	}
-	return nil
 }
 
 func responsesCompletedStreamFrame(index int, raw json.RawMessage, item responsesWireOutputItemDTO) streamFrame {
