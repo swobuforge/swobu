@@ -190,6 +190,8 @@ func connectionCredentialRef(connection routing.Connection) string {
 		return c.Credential().String()
 	case routing.BedrockConnection:
 		return c.Credential().String()
+	case routing.EndpointCredentialConnection:
+		return c.Credential().String()
 	case routing.CustomConnection:
 		if auth, ok := c.Auth().(routing.CustomHeaderAuth); ok {
 			return auth.Credential().String()

@@ -157,7 +157,8 @@ func genericCredentialRowVisible(w *TargetConfig) bool {
 	if strings.TrimSpace(w.Draft.Get().CredentialRef) != "" {
 		return true
 	}
-	return setup.CredentialRequired
+	provider, ok := providerProfileForSpec(setup.ProviderSpec)
+	return setup.CredentialRequired || ok && provider.Credential.Requirement == profile.CredentialOptional
 }
 
 func providerAllowsNoCredential(w *TargetConfig) bool {

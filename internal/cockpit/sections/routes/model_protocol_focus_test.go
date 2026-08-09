@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
-func TestAddTargetModelSelectionStaysLocalOnRequiredProtocol(t *testing.T) {
+func TestAddTargetModelSelectionStaysLocalOnDefaultedProtocol(t *testing.T) {
 	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Enabled: true}
 	section := Section(readmodel.WorkspaceReadModel{
 		ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting,
@@ -37,16 +37,16 @@ func TestAddTargetModelSelectionStaysLocalOnRequiredProtocol(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 
 	frame := h.Frame()
-	if !strings.Contains(frame, "> protocol") {
+	if !strings.Contains(frame, "protocol          OpenAI · Responses") || !strings.Contains(frame, "> create") {
 		t.Fatalf("selection escaped target form after model choice:\n%s", frame)
 	}
 	if got := strings.Count(frame, ">"); got != 1 {
-		t.Fatalf("selection markers = %d, want exactly one on protocol:\n%s", got, frame)
+		t.Fatalf("selection markers = %d, want exactly one on create:\n%s", got, frame)
 	}
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	frame = h.Frame()
-	if !strings.Contains(frame, "> add model route") || strings.Contains(frame, "> protocol") || strings.Contains(frame, "> create") {
-		t.Fatalf("protocol handoff must skip incomplete create and continue to the next action:\n%s", frame)
+	if !strings.Contains(frame, "> add model route") || strings.Contains(frame, "> create") {
+		t.Fatalf("create handoff must continue to the next section action:\n%s", frame)
 	}
 }

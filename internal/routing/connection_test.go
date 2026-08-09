@@ -35,6 +35,43 @@ func TestCredentialLocatorsMatchResolverSyntax(t *testing.T) {
 	}
 }
 
+func TestLMStudioConnectionRequiresExecutionNamespace(t *testing.T) {
+	t.Parallel()
+
+	for _, valid := range []string{"", "http://127.0.0.1:1234/v1", "https://models.example/proxy/v1/"} {
+		if _, err := NewEndpointCredentialConnection(ProviderLMStudio, valid, ""); err != nil {
+			t.Errorf("NewEndpointCredentialConnection(LM Studio, %q): %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"https://models.example", "https://models.example/proxy", "https://models.example/v10"} {
+		if _, err := NewEndpointCredentialConnection(ProviderLMStudio, invalid, ""); err == nil {
+			t.Errorf("NewEndpointCredentialConnection(LM Studio, %q) accepted a base outside /v1", invalid)
+		}
+	}
+}
+
+func TestEndpointCredentialConnectionPreservesProviderAndDurableFacts(t *testing.T) {
+	t.Parallel()
+
+	lmstudio, err := NewEndpointCredentialConnection(ProviderLMStudio, "https://models.example/v1", "env:LM_API_TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vllm, err := NewEndpointCredentialConnection(ProviderVLLM, "https://models.example/serve", "env:VLLM_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lmstudio.Provider() != ProviderLMStudio || vllm.Provider() != ProviderVLLM {
+		t.Fatalf("providers = %q, %q", lmstudio.Provider(), vllm.Provider())
+	}
+	if connectionsEqual(lmstudio, vllm) {
+		t.Fatal("distinct provider identities compared equal")
+	}
+	if _, err := NewEndpointCredentialConnection(ProviderOllama, "", ""); err == nil {
+		t.Fatal("unsupported provider accepted endpoint-credential connection")
+	}
+}
+
 func TestZAIAccessIsClosedAndRequired(t *testing.T) {
 	accesses := []struct {
 		access  ZAIAccess

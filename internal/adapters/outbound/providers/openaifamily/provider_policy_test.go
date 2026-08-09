@@ -19,6 +19,12 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	if got := NewOllamaPolicy().ProviderID(); got != profile.ProviderSpecOllama {
 		t.Fatalf("ollama policy provider=%s", got)
 	}
+	if got := NewLMStudioPolicy().ProviderID(); got != profile.ProviderSpecLMStudio {
+		t.Fatalf("LM Studio policy provider=%s", got)
+	}
+	if got := NewVLLMPolicy().ProviderID(); got != profile.ProviderSpecVLLM {
+		t.Fatalf("vLLM policy provider=%s", got)
+	}
 	if got := NewCustomPolicy().ProviderID(); got != profile.ProviderSpecCustom {
 		t.Fatalf("custom policy provider=%s", got)
 	}
@@ -31,6 +37,12 @@ func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
 	if got := NewOllamaPolicy().AuthStrategy().Style; got != AuthStyleNone {
 		t.Fatalf("ollama auth style=%s", got)
 	}
+	if got := NewLMStudioPolicy().AuthStrategy().Style; got != AuthStyleBearer {
+		t.Fatalf("LM Studio auth style=%s", got)
+	}
+	if got := NewVLLMPolicy().AuthStrategy().Style; got != AuthStyleBearer || NewVLLMPolicy().ModelCatalogDialect() != ModelCatalogOpenAI {
+		t.Fatalf("vLLM policy auth/catalog = %s/%d", got, NewVLLMPolicy().ModelCatalogDialect())
+	}
 	if got := NewCustomPolicy().AuthStrategy().Header; got != AuthHeaderAuthorization {
 		t.Fatalf("custom endpoint auth header=%s", got)
 	}
@@ -41,6 +53,8 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 	for _, profile := range []ProviderRoutePolicy{
 		NewOpenAIPolicy(),
 		NewOllamaPolicy(),
+		NewLMStudioPolicy(),
+		NewVLLMPolicy(),
 		NewCustomPolicy(),
 		NewOpenRouterPolicy(),
 	} {

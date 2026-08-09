@@ -45,6 +45,12 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.CredentialRef = target.Connection.ChatGPT.Credential
 	case target.Connection.Ollama != nil:
 		out.BaseURL = target.Connection.Ollama.BaseURL
+	case target.Connection.LMStudio != nil:
+		out.BaseURL = target.Connection.LMStudio.BaseURL
+		out.CredentialRef = target.Connection.LMStudio.Credential
+	case target.Connection.VLLM != nil:
+		out.BaseURL = target.Connection.VLLM.BaseURL
+		out.CredentialRef = target.Connection.VLLM.Credential
 	case target.Connection.Azure != nil:
 		out.BaseURL = target.Connection.Azure.ProjectEndpoint
 		out.CredentialRef = target.Connection.Azure.Credential

@@ -17,6 +17,8 @@ These docs contain practical setup recipes and troubleshooting references that a
 - [OpenRouter](./backends/openrouter.md)
 - [AWS Bedrock](./backends/aws-bedrock.md)
 - [Ollama](./backends/ollama.md)
+- [LM Studio](./backends/lm-studio.md)
+- [vLLM](./backends/vllm.md)
 - [ChatGPT](./backends/chatgpt.md)
 - [Custom Endpoint](./backends/custom-endpoint.md)
 

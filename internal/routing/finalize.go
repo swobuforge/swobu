@@ -17,12 +17,14 @@ type TargetDraft struct {
 
 // ConnectionDraft is a raw tagged union. Exactly one arm must be present.
 type ConnectionDraft struct {
-	APIKey  *APIKeyConnectionDraft
-	ZAI     *ZAIConnectionDraft
-	Ollama  *OllamaConnectionDraft
-	Azure   *AzureConnectionDraft
-	Bedrock *BedrockConnectionDraft
-	Custom  *CustomConnectionDraft
+	APIKey   *APIKeyConnectionDraft
+	ZAI      *ZAIConnectionDraft
+	Ollama   *OllamaConnectionDraft
+	LMStudio *EndpointCredentialConnectionDraft
+	VLLM     *EndpointCredentialConnectionDraft
+	Azure    *AzureConnectionDraft
+	Bedrock  *BedrockConnectionDraft
+	Custom   *CustomConnectionDraft
 }
 
 // APIKeyConnectionDraft carries one fixed provider identity and unresolved
@@ -40,6 +42,13 @@ type ZAIConnectionDraft struct {
 
 // OllamaConnectionDraft carries an optional local base URL.
 type OllamaConnectionDraft struct{ BaseURL string }
+
+// EndpointCredentialConnectionDraft carries the endpoint and credential
+// payload shared by distinct endpoint-credential provider arms.
+type EndpointCredentialConnectionDraft struct {
+	BaseURL    string
+	Credential string
+}
 
 // AzureConnectionDraft carries the project endpoint before catalog normalization.
 type AzureConnectionDraft struct {
@@ -115,7 +124,7 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 // requiring unrelated target identity, model, or protocol fields.
 func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (Connection, error) {
 	count := 0
-	for _, present := range []bool{draft.APIKey != nil, draft.ZAI != nil, draft.Ollama != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
+	for _, present := range []bool{draft.APIKey != nil, draft.ZAI != nil, draft.Ollama != nil, draft.LMStudio != nil, draft.VLLM != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
 			count++
 		}
@@ -135,6 +144,12 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 	}
 	if draft.Ollama != nil {
 		return NewOllamaConnection(draft.Ollama.BaseURL)
+	}
+	if draft.LMStudio != nil {
+		return NewEndpointCredentialConnection(ProviderLMStudio, draft.LMStudio.BaseURL, draft.LMStudio.Credential)
+	}
+	if draft.VLLM != nil {
+		return NewEndpointCredentialConnection(ProviderVLLM, draft.VLLM.BaseURL, draft.VLLM.Credential)
 	}
 	if draft.Azure != nil {
 		if facts.NormalizeAzureProjectEndpoint == nil {

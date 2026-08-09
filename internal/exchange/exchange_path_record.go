@@ -92,6 +92,12 @@ func ProviderTargetFromConnection(targetID string, connection routing.Connection
 			baseURL = configured.String()
 		}
 		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, "", protocolKind, frame, providerProtocol), nil
+	case routing.EndpointCredentialConnection:
+		baseURL := profile.DefaultExecuteBaseURL(providerSpec)
+		if configured, ok := connection.BaseURL(); ok {
+			baseURL = configured.String()
+		}
+		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.AzureConnection:
 		return provider.NewTargetSnapshot(targetID, providerSpec, connection.ProjectEndpoint().String(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.BedrockConnection:

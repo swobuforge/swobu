@@ -12,10 +12,22 @@ type ProviderRoutePolicy interface {
 	ProviderID() profile.ProviderID
 	AuthStrategy() AuthStrategy
 	ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode
+	ModelCatalogDialect() ModelCatalogDialect
 }
+
+// ModelCatalogDialect selects the provider-owned model-list wire contract.
+// Inference protocol selection remains independent of this operator-side fact.
+type ModelCatalogDialect uint8
+
+const (
+	ModelCatalogOpenAI ModelCatalogDialect = iota + 1
+	ModelCatalogLMStudioV1
+)
 
 type openAIProviderRoutePolicy struct{}
 type ollamaProviderRoutePolicy struct{}
+type lmStudioProviderRoutePolicy struct{}
+type vllmProviderRoutePolicy struct{}
 type customProviderRoutePolicy struct{}
 type openRouterProviderRoutePolicy struct{}
 type zaiProviderRoutePolicy struct{}
@@ -30,6 +42,9 @@ func (openAIProviderRoutePolicy) ToolDiscovery(protocol protocolkind.ProtocolKin
 	}
 	return provider.ToolDiscoveryPolyfill
 }
+func (openAIProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
+}
 
 func (ollamaProviderRoutePolicy) ProviderID() profile.ProviderID {
 	return profile.ProviderSpecOllama
@@ -37,6 +52,29 @@ func (ollamaProviderRoutePolicy) ProviderID() profile.ProviderID {
 func (ollamaProviderRoutePolicy) AuthStrategy() AuthStrategy { return NoAuthStrategy() }
 func (ollamaProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
 	return provider.ToolDiscoveryPolyfill
+}
+func (ollamaProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
+}
+
+func (lmStudioProviderRoutePolicy) ProviderID() profile.ProviderID {
+	return profile.ProviderSpecLMStudio
+}
+func (lmStudioProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
+func (lmStudioProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
+	return provider.ToolDiscoveryPolyfill
+}
+func (lmStudioProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogLMStudioV1
+}
+
+func (vllmProviderRoutePolicy) ProviderID() profile.ProviderID { return profile.ProviderSpecVLLM }
+func (vllmProviderRoutePolicy) AuthStrategy() AuthStrategy     { return BearerAuthStrategy() }
+func (vllmProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
+	return provider.ToolDiscoveryPolyfill
+}
+func (vllmProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
 }
 
 func (customProviderRoutePolicy) ProviderID() profile.ProviderID {
@@ -46,6 +84,9 @@ func (customProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuth
 func (customProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
 	return provider.ToolDiscoveryPolyfill
 }
+func (customProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
+}
 
 func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 	return profile.ProviderSpecOpenRouter
@@ -53,6 +94,9 @@ func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
 func (openRouterProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
 func (openRouterProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
 	return provider.ToolDiscoveryPolyfill
+}
+func (openRouterProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
 }
 
 func (zaiProviderRoutePolicy) ProviderID() profile.ProviderID {
@@ -62,12 +106,21 @@ func (zaiProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStr
 func (zaiProviderRoutePolicy) ToolDiscovery(protocolkind.ProtocolKind) provider.ToolDiscoveryMode {
 	return provider.ToolDiscoveryPolyfill
 }
+func (zaiProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
+	return ModelCatalogOpenAI
+}
 
 // NewOpenAIPolicy returns the OpenAI route policy.
 func NewOpenAIPolicy() ProviderRoutePolicy { return openAIProviderRoutePolicy{} }
 
 // NewOllamaPolicy returns the Ollama route policy.
 func NewOllamaPolicy() ProviderRoutePolicy { return ollamaProviderRoutePolicy{} }
+
+// NewLMStudioPolicy returns the LM Studio route policy.
+func NewLMStudioPolicy() ProviderRoutePolicy { return lmStudioProviderRoutePolicy{} }
+
+// NewVLLMPolicy returns the vLLM standard-serving route policy.
+func NewVLLMPolicy() ProviderRoutePolicy { return vllmProviderRoutePolicy{} }
 
 // NewCustomPolicy returns the custom-endpoint route policy.
 func NewCustomPolicy() ProviderRoutePolicy {

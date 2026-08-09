@@ -35,7 +35,7 @@ opens Cockpit against the same address. Address and config path are
 restart-bound startup configuration, not routing state, and workspace edits
 never rewrite them.
 
-Each target uses exactly one connection arm: `openai`, `anthropic`, `openrouter`, `chatgpt`, `ollama`, `azure`, `bedrock`, or `custom`. Credentials are locators such as `env:OPENAI_API_KEY`, not secret values. Protocols must be concrete; `auto` is rejected.
+Each target uses exactly one connection arm: `openai`, `anthropic`, `openrouter`, `chatgpt`, `ollama`, `lmstudio`, `vllm`, `azure`, `bedrock`, or `custom`. Credentials are locators such as `env:OPENAI_API_KEY`, not secret values. Protocols must be concrete; `auto` is rejected.
 
 Swobu rejects unknown fields and obsolete schemas at startup. The file is
 replaced atomically after every successful command. Failures before rename keep

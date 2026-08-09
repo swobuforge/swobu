@@ -161,14 +161,21 @@ func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploym
 				return true
 			}
 		}
-		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
+		defaultProtocol := ""
+		if !w.derivesProviderProtocol() && len(options) > 0 {
+			defaultProtocol = options[0].ID
+		}
+		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+			d.ProviderProtocol = defaultProtocol
+			return d
+		})
 		return true
 	}
 	return false
 }
 
-// SelectModel commits a model choice and advances to the explicit protocol
-// decision required before target creation.
+// SelectModel commits a model choice with the provider's first resolved
+// protocol as its editable default.
 func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 	w.SelectedModel.Set(model)
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
@@ -178,19 +185,15 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 		return
 	}
 	options := resolveProtocolOptions(w.Draft.Get().ProviderSpec, model)
-	switch len(options) {
-	case 0:
+	if len(options) == 0 {
 		w.Error.Set("no supported protocol for selected model")
-	case 1:
-		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
-			d.ProviderProtocol = options[0].ID
-			return d
-		})
-		w.CommitEdit(w.actionContext())
-	default:
-		// Multiple protocols: the protocol ui.Select row becomes enterable; the
-		// operator opens it manually (no auto-open).
+		return
 	}
+	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.ProviderProtocol = options[0].ID
+		return d
+	})
+	w.CommitEdit(w.actionContext())
 }
 
 func (w *TargetConfig) selectModelByID(id string) {

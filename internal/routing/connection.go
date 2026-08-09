@@ -29,6 +29,9 @@ func connectionsEqual(left, right Connection) bool {
 	case OllamaConnection:
 		right, ok := right.(OllamaConnection)
 		return ok && left.baseURL.String() == right.baseURL.String()
+	case EndpointCredentialConnection:
+		right, ok := right.(EndpointCredentialConnection)
+		return ok && left.provider == right.provider && left.baseURL.String() == right.baseURL.String() && left.credential.String() == right.credential.String()
 	case AzureConnection:
 		right, ok := right.(AzureConnection)
 		return ok && left.projectEndpoint.String() == right.projectEndpoint.String() && left.credential.String() == right.credential.String()
@@ -207,6 +210,47 @@ func (OllamaConnection) Provider() Provider     { return ProviderOllama }
 func (OllamaConnection) isConnection()          {}
 func (c OllamaConnection) BaseURL() (URL, bool) { return c.baseURL, c.baseURL.value != "" }
 
+// EndpointCredentialConnection is the durable shape for providers whose only
+// authored connection facts are an optional endpoint override and credential
+// reference. Authentication semantics remain provider-adapter policy.
+type EndpointCredentialConnection struct {
+	provider   Provider
+	baseURL    URL
+	credential credentialref.Ref
+}
+
+func NewEndpointCredentialConnection(provider Provider, rawBaseURL, rawCredential string) (EndpointCredentialConnection, error) {
+	switch provider {
+	case ProviderLMStudio, ProviderVLLM:
+	default:
+		return EndpointCredentialConnection{}, pathError("connection.provider", fmt.Sprintf("provider %q does not use an endpoint-credential connection", provider))
+	}
+	connection := EndpointCredentialConnection{provider: provider}
+	path := "connection." + string(provider)
+	if strings.TrimSpace(rawBaseURL) != "" {
+		u, err := ParseURL(path+".base_url", rawBaseURL)
+		if err != nil {
+			return EndpointCredentialConnection{}, err
+		}
+		if provider == ProviderLMStudio && !strings.HasSuffix(strings.TrimRight(u.String(), "/"), "/v1") {
+			return EndpointCredentialConnection{}, pathError(path+".base_url", "must end in /v1")
+		}
+		connection.baseURL = u
+	}
+	if strings.TrimSpace(rawCredential) != "" {
+		ref, err := parseCredential(path+".credential", rawCredential)
+		if err != nil {
+			return EndpointCredentialConnection{}, err
+		}
+		connection.credential = ref
+	}
+	return connection, nil
+}
+func (c EndpointCredentialConnection) Provider() Provider            { return c.provider }
+func (EndpointCredentialConnection) isConnection()                   {}
+func (c EndpointCredentialConnection) BaseURL() (URL, bool)          { return c.baseURL, c.baseURL.value != "" }
+func (c EndpointCredentialConnection) Credential() credentialref.Ref { return c.credential }
+
 type AzureConnection struct {
 	projectEndpoint URL
 	credential      credentialref.Ref
@@ -333,6 +377,9 @@ func setConnectionCredential(connection Connection, raw string) (Connection, err
 		return NewAPIKeyConnection(c.provider, raw)
 	case ZAIConnection:
 		return NewZAIConnection(c.access, raw)
+	case EndpointCredentialConnection:
+		baseURL, _ := c.BaseURL()
+		return NewEndpointCredentialConnection(c.provider, baseURL.String(), raw)
 	case AzureConnection:
 		ref, err := parseCredential("connection.azure.credential", raw)
 		if err != nil {

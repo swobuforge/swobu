@@ -33,6 +33,10 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 		return routing.NewAPIKeyConnection(routing.ProviderChatGPT, credential)
 	case profile.ProviderSpecOllama:
 		return routing.NewOllamaConnection(locator)
+	case profile.ProviderSpecLMStudio:
+		return routing.NewEndpointCredentialConnection(routing.ProviderLMStudio, locator, credential)
+	case profile.ProviderSpecVLLM:
+		return routing.NewEndpointCredentialConnection(routing.ProviderVLLM, locator, credential)
 	case profile.ProviderSpecAzure:
 		return routing.NewAzureConnection(locator, credential)
 	case profile.ProviderSpecBedrock:

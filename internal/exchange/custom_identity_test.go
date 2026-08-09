@@ -25,6 +25,20 @@ func TestProviderTargetFromCustomConnectionPreservesProviderIdentity(t *testing.
 	}
 }
 
+func TestProviderTargetFromLMStudioConnectionUsesProfileDefaultsAndOptionalCredential(t *testing.T) {
+	connection, err := routing.NewEndpointCredentialConnection(routing.ProviderLMStudio, "", "env:LM_API_TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := ProviderTargetFromConnection("lm-studio-a", connection, "responses")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.ProviderSpec != "lmstudio" || target.BaseURL != "http://127.0.0.1:1234/v1" || target.CredentialRef != "env:LM_API_TOKEN" {
+		t.Fatalf("LM Studio target = %#v", target)
+	}
+}
+
 func TestProviderTargetProjectionCarriesRoutingIdentityAndVersion(t *testing.T) {
 	target := requestpathTarget(t, "custom-a")
 	snapshot, err := toProviderTarget(target)

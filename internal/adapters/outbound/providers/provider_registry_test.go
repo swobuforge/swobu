@@ -90,7 +90,15 @@ func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 func TestAdvertisedProviderProtocolsDeclareToolDiscoveryAuthority(t *testing.T) {
 	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
 	expected := map[string]provider.ToolDiscoveryMode{
+		"ollama/responses": provider.ToolDiscoveryPolyfill, "ollama/responses_stream": provider.ToolDiscoveryPolyfill,
 		"ollama/chat_completions": provider.ToolDiscoveryPolyfill, "ollama/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"ollama/messages": provider.ToolDiscoveryPolyfill, "ollama/messages_stream": provider.ToolDiscoveryPolyfill,
+		"lmstudio/responses": provider.ToolDiscoveryPolyfill, "lmstudio/responses_stream": provider.ToolDiscoveryPolyfill,
+		"lmstudio/chat_completions": provider.ToolDiscoveryPolyfill, "lmstudio/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"lmstudio/messages": provider.ToolDiscoveryPolyfill, "lmstudio/messages_stream": provider.ToolDiscoveryPolyfill,
+		"vllm/responses": provider.ToolDiscoveryPolyfill, "vllm/responses_stream": provider.ToolDiscoveryPolyfill,
+		"vllm/chat_completions": provider.ToolDiscoveryPolyfill, "vllm/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"vllm/messages": provider.ToolDiscoveryPolyfill, "vllm/messages_stream": provider.ToolDiscoveryPolyfill,
 		"openai/responses": provider.ToolDiscoveryNative, "openai/responses_stream": provider.ToolDiscoveryNative,
 		"openai/chat_completions": provider.ToolDiscoveryPolyfill, "openai/chat_completions_stream": provider.ToolDiscoveryPolyfill,
 		"chatgpt/responses_stream": provider.ToolDiscoveryPolyfill,

@@ -49,6 +49,9 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 			return routing.NewAPIKeyConnection(routing.ProviderChatGPT, "secret:chatgpt/session")
 		}, func(c targetConnection) bool { return c.chatGPT }},
 		{"ollama", func() (routing.Connection, error) { return routing.NewOllamaConnection("http://127.0.0.1:11434") }, func(c targetConnection) bool { return c.ollama }},
+		{"lm studio", func() (routing.Connection, error) {
+			return routing.NewEndpointCredentialConnection(routing.ProviderLMStudio, "http://127.0.0.1:1234/v1", "env:LM_API_TOKEN")
+		}, func(c targetConnection) bool { return c.lmStudio }},
 		{"azure", func() (routing.Connection, error) {
 			return routing.NewAzureConnection("https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 		}, func(c targetConnection) bool { return c.azure }},
@@ -76,7 +79,7 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 			arms := targetConnection{
 				openAI: target.Connection.OpenAI != nil, anthropic: target.Connection.Anthropic != nil,
 				openRouter: target.Connection.OpenRouter != nil, zai: target.Connection.ZAI != nil, chatGPT: target.Connection.ChatGPT != nil,
-				ollama: target.Connection.Ollama != nil, azure: target.Connection.Azure != nil,
+				ollama: target.Connection.Ollama != nil, lmStudio: target.Connection.LMStudio != nil, azure: target.Connection.Azure != nil,
 				bedrock: target.Connection.Bedrock != nil, custom: target.Connection.Custom != nil,
 			}
 			if !test.arm(arms) {
@@ -87,7 +90,7 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 }
 
 type targetConnection struct {
-	openAI, anthropic, openRouter, zai, chatGPT, ollama, azure, bedrock, custom bool
+	openAI, anthropic, openRouter, zai, chatGPT, ollama, lmStudio, azure, bedrock, custom bool
 }
 
 func TestPlacementFromReadModelHasOnlyOptionalBalanceTarget(t *testing.T) {

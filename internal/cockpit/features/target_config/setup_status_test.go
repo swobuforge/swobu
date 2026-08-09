@@ -23,6 +23,8 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 		{"anthropic missing credential", profile.ProviderSpecAnthropic, "", "", setupMissingCredential},
 		{"openrouter missing credential", profile.ProviderSpecOpenRouter, "", "", setupMissingCredential},
 		{"ollama default ready", profile.ProviderSpecOllama, "", "", setupReady},
+		{"LM Studio default ready without credential", profile.ProviderSpecLMStudio, "", "", setupReady},
+		{"vLLM default ready without credential", profile.ProviderSpecVLLM, "", "", setupReady},
 		{"custom missing backend", profile.ProviderSpecCustom, "", "", setupMissingLocator},
 		{"custom remote missing credential", profile.ProviderSpecCustom, "https://example.com/v1", "", setupMissingCredential},
 		{"custom loopback ready", profile.ProviderSpecCustom, "http://127.0.0.1:8080/v1", "", setupReady},
@@ -58,6 +60,14 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 				t.Fatalf("status = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestLMStudioOffersOptionalCredentialControl(t *testing.T) {
+	config := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+	config.SelectProvider(string(profile.ProviderSpecLMStudio))
+	if !genericCredentialRowVisible(config) {
+		t.Fatal("LM Studio must offer credential authoring when no credential is configured")
 	}
 }
 

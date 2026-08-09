@@ -55,16 +55,18 @@ type TargetSettingsDraft struct {
 }
 
 type Connection struct {
-	OpenAI     *CredentialConnection `json:"openai,omitempty"`
-	Anthropic  *CredentialConnection `json:"anthropic,omitempty"`
-	DeepSeek   *CredentialConnection `json:"deepseek,omitempty"`
-	OpenRouter *CredentialConnection `json:"openrouter,omitempty"`
-	ZAI        *ZAIConnection        `json:"zai,omitempty"`
-	ChatGPT    *CredentialConnection `json:"chatgpt,omitempty"`
-	Ollama     *OllamaConnection     `json:"ollama,omitempty"`
-	Azure      *AzureConnection      `json:"azure,omitempty"`
-	Bedrock    *BedrockConnection    `json:"bedrock,omitempty"`
-	Custom     *CustomConnection     `json:"custom,omitempty"`
+	OpenAI     *CredentialConnection         `json:"openai,omitempty"`
+	Anthropic  *CredentialConnection         `json:"anthropic,omitempty"`
+	DeepSeek   *CredentialConnection         `json:"deepseek,omitempty"`
+	OpenRouter *CredentialConnection         `json:"openrouter,omitempty"`
+	ZAI        *ZAIConnection                `json:"zai,omitempty"`
+	ChatGPT    *CredentialConnection         `json:"chatgpt,omitempty"`
+	Ollama     *OllamaConnection             `json:"ollama,omitempty"`
+	LMStudio   *EndpointCredentialConnection `json:"lmstudio,omitempty"`
+	VLLM       *EndpointCredentialConnection `json:"vllm,omitempty"`
+	Azure      *AzureConnection              `json:"azure,omitempty"`
+	Bedrock    *BedrockConnection            `json:"bedrock,omitempty"`
+	Custom     *CustomConnection             `json:"custom,omitempty"`
 }
 type CredentialConnection struct {
 	Credential string `json:"credential"`
@@ -75,6 +77,10 @@ type ZAIConnection struct {
 }
 type OllamaConnection struct {
 	BaseURL string `json:"base_url,omitempty"`
+}
+type EndpointCredentialConnection struct {
+	BaseURL    string `json:"base_url,omitempty"`
+	Credential string `json:"credential,omitempty"`
 }
 type AzureConnection struct {
 	ProjectEndpoint string `json:"project_endpoint"`
@@ -145,6 +151,14 @@ func ConnectionFromRouting(connection routing.Connection) Connection {
 	case routing.OllamaConnection:
 		value, _ := c.BaseURL()
 		out.Ollama = &OllamaConnection{BaseURL: value.String()}
+	case routing.EndpointCredentialConnection:
+		value, _ := c.BaseURL()
+		switch c.Provider() {
+		case routing.ProviderLMStudio:
+			out.LMStudio = &EndpointCredentialConnection{BaseURL: value.String(), Credential: c.Credential().String()}
+		case routing.ProviderVLLM:
+			out.VLLM = &EndpointCredentialConnection{BaseURL: value.String(), Credential: c.Credential().String()}
+		}
 	case routing.AzureConnection:
 		out.Azure = &AzureConnection{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
 	case routing.BedrockConnection:
@@ -212,6 +226,12 @@ func (c Connection) routingDraft() (routing.ConnectionDraft, error) {
 	}
 	if c.Ollama != nil {
 		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: c.Ollama.BaseURL}
+	}
+	if c.LMStudio != nil {
+		draft.LMStudio = &routing.EndpointCredentialConnectionDraft{BaseURL: c.LMStudio.BaseURL, Credential: c.LMStudio.Credential}
+	}
+	if c.VLLM != nil {
+		draft.VLLM = &routing.EndpointCredentialConnectionDraft{BaseURL: c.VLLM.BaseURL, Credential: c.VLLM.Credential}
 	}
 	if c.Azure != nil {
 		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: c.Azure.ProjectEndpoint, Credential: c.Azure.Credential}
