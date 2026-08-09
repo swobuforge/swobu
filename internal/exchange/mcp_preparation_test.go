@@ -26,6 +26,20 @@ type toolDiscoveryResponsesRuntime struct {
 	transport testProviderTransport
 }
 
+type nativeMessagesDiscoveryRuntime struct {
+	testRuntimeResolver
+	transport testProviderTransport
+}
+
+func (r nativeMessagesDiscoveryRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	return provider.Backend{
+		Target:        target,
+		Codec:         protocolcodec.Codec{Protocol: protocolkind.Messages},
+		Transport:     provider.BindTransport(target, r.transport),
+		ToolDiscovery: provider.ToolDiscoveryNative,
+	}, nil
+}
+
 func (r toolDiscoveryResponsesRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
 		Target:        target,
@@ -131,6 +145,66 @@ func TestProviderPreparationProjectsClaudeDiscoveryHistoryBeforeResponsesEncodin
 	}
 	if len(changes) == 0 {
 		t.Fatal("discovery projection did not record compatibility evidence")
+	}
+}
+
+func TestProviderPreparationFallsBackWhenNativeDiscoverySubtypeIsUnrepresentable(t *testing.T) {
+	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	function := canonicaltest.MustFunctionTool(
+		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"),
+		"weather", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
+	)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, function})
+	declarations, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{declarations, canonicaltest.Message(t, canonical.MessageRoleUser, "weather")},
+	})
+	prepared := mustBeginSession(t, request)
+	state := reducerTestState(t)
+	state.input.request = request
+	state.prepared = &prepared
+	state.route = routePlan{targets: []routing.Target{requestpathTargetWithProtocol(t, "native-messages", "messages")}}
+	runner := withRuntime(bufferedProviderTransport(nil))
+	runner.Runtime = nativeMessagesDiscoveryRuntime{transport: bufferedProviderTransport(nil)}
+
+	call, _, changes, _, err := prepareProviderCall(
+		context.Background(), state,
+		providerCallSelection{candidateIndex: 0, requestChoice: providerRequestFullHistory},
+		runner,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireRequest := call.document.RawBytes()
+	if bytes.Contains(wireRequest, []byte("tool_search")) || !bytes.Contains(wireRequest, []byte(`"name":"weather"`)) {
+		t.Fatalf("native fallback wire=%s", wireRequest)
+	}
+	if len(changes) == 0 {
+		t.Fatal("native fallback did not report projection evidence")
+	}
+}
+
+func TestNativeDiscoveryFallbackClassifierRejectsUnrelatedIncompatibility(t *testing.T) {
+	if isNativeDiscoveryRepresentationError(provider.NewIncompatibleTarget("unrelated codec incompatibility")) {
+		t.Fatal("generic target incompatibility selected discovery fallback")
+	}
+	if isNativeDiscoveryRepresentationError(provider.IncompatibleCapability(
+		canonical.RequestOutputFormat,
+		canonical.Occurrence{},
+		"unrelated output format",
+	)) {
+		t.Fatal("unrelated capability selected discovery fallback")
+	}
+	if !isNativeDiscoveryRepresentationError(provider.IncompatibleCapability(
+		canonical.RequestToolsKind,
+		canonical.ToolOccurrence(canonical.ToolDiscoveryKey()),
+		"native discovery subtype is unrepresentable",
+	)) {
+		t.Fatal("typed discovery declaration incompatibility did not select fallback")
 	}
 }
 

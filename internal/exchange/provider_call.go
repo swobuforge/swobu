@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -103,6 +104,32 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	doc, changes, err := backend.Codec.Encode(providerRequest)
 	requestChanges = append(requestChanges, changes...)
+	if err != nil && backend.ToolDiscovery == provider.ToolDiscoveryNative && isNativeDiscoveryRepresentationError(err) {
+		var incompatible provider.IncompatibleTargetError
+		if errors.As(err, &incompatible) {
+			projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)
+			if projectionErr == nil && projection.Changed {
+				attemptRequest = projection.Request
+				projectedToolNames, projectedNamingChanges, namingErr := provider.BuildAttemptToolNames(attemptRequest)
+				if namingErr != nil {
+					return providerCall{}, path.target, nil, s.mediaFetchCache, namingErr
+				}
+				projectedReplaySafety, replayErr := providerReplaySafetyFor(attemptRequest)
+				if replayErr != nil {
+					return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("provider attempt replay safety: %w", replayErr)
+				}
+				toolNames = projectedToolNames
+				namingChanges = projectedNamingChanges
+				replaySafety = projectedReplaySafety
+				providerRequest.Canonical = bindRequestToTarget(attemptRequest, path.target.Model)
+				providerRequest.ToolNames = toolNames
+				providerRequest.ResponsesPrevious = nil
+				requestChanges = append(compat.CloneChanges(projection.Changes), namingChanges...)
+				doc, changes, err = backend.Codec.Encode(providerRequest)
+				requestChanges = append(requestChanges, changes...)
+			}
+		}
+	}
 	if err != nil {
 		return providerCall{}, path.target, requestChanges, fetchCache, fmt.Errorf("provider request encoding: %w", err)
 	}
@@ -119,6 +146,20 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		providerRound:      len(s.providerUsage),
 		replaySafety:       replaySafety,
 	}, path.target, requestChanges, fetchCache, nil
+}
+
+func isNativeDiscoveryRepresentationError(err error) bool {
+	var unsupported compat.UnsupportedError
+	if !errors.As(err, &unsupported) {
+		return false
+	}
+	discoveryOccurrence := canonical.ToolOccurrence(canonical.ToolDiscoveryKey()).Key()
+	for _, issue := range unsupported.Issues() {
+		if issue.Capability() == canonical.RequestToolsKind && issue.Occurrence().Key() == discoveryOccurrence {
+			return true
+		}
+	}
+	return false
 }
 
 func delayClientHandoffFor(run *mcp.Run) bool {

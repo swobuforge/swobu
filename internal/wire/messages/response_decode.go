@@ -323,11 +323,10 @@ func decodeMessagesDiscoveryResult(request canonical.CanonicalRequest, names wir
 	}
 	declarations := make([]canonical.ToolDeclaration, 0, len(content.ToolReferences))
 	for _, reference := range content.ToolReferences {
-		key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, strings.TrimSpace(reference.ToolName))
+		declaration, err := resolveMessagesProviderToolReference(names, environment, reference.ToolName)
 		if err != nil {
-			return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages discovery result references an unknown tool", "")
+			return canonical.CanonicalItem{}, err
 		}
-		declaration, _ := environment.Lookup(key)
 		declarations = append(declarations, declaration)
 	}
 	tools, err := canonical.NewToolSet(declarations)

@@ -12,6 +12,7 @@ import (
 type ToolDiscoveryProjection struct {
 	Request                 canonical.CanonicalRequest
 	Changes                 []compat.Change
+	Changed                 bool
 	StructuralHistoryChange bool
 }
 
@@ -25,19 +26,24 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		return ToolDiscoveryProjection{}, err
 	}
 	completedDiscovery := make(map[int]struct{})
-	completedEffects := make([]canonical.ToolEffect, 0)
-	pendingDiscovery := false
+	pendingDiscoveryIndex := -1
 	for _, effect := range effects {
 		if effect.Kind != canonical.ToolKindDiscovery {
 			continue
 		}
 		if effect.ResultIndex < 0 {
-			pendingDiscovery = true
+			pendingDiscoveryIndex = effect.CallIndex
 			continue
 		}
 		completedDiscovery[effect.CallIndex] = struct{}{}
 		completedDiscovery[effect.ResultIndex] = struct{}{}
-		completedEffects = append(completedEffects, effect)
+	}
+	if pendingDiscoveryIndex >= 0 {
+		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
+			canonical.RequestItemsKind,
+			canonical.RequestItemOccurrence(uint32(pendingDiscoveryIndex)),
+			"portable tool-discovery projection cannot erase an unresolved discovery call",
+		)
 	}
 
 	environment, err := canonical.EffectiveTools(request)
@@ -57,46 +63,29 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		}
 		portable = append(portable, declaration)
 	}
+	if clientDiscoveryDeclared {
+		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
+			canonical.RequestToolsKind,
+			canonical.ToolOccurrence(canonical.ToolDiscoveryKey()),
+			"portable tool-discovery projection cannot replace live client discovery inventory",
+		)
+	}
 
 	hasDeferred := HasDeferredTools(items)
 	hasHistoricalDeclarations := false
-	hasDeclarationContribution := false
 	hasDiscoveryItem := false
-	discoverySources := make([]struct {
-		index    int
-		executor canonical.DiscoveryExecutor
-	}, 0)
-	for index, item := range items {
+	for _, item := range items {
 		if declaration, ok := item.ToolDeclarations(); ok {
-			hasDeclarationContribution = true
 			if declaration.Scope() == canonical.ContextScopeHistory {
 				hasHistoricalDeclarations = true
-			}
-			for _, tool := range declaration.Tools().Declarations() {
-				if discovery, ok := tool.Discovery(); ok {
-					discoverySources = append(discoverySources, struct {
-						index    int
-						executor canonical.DiscoveryExecutor
-					}{index: index, executor: discovery.Executor()})
-				}
 			}
 		}
 		if call, ok := item.ToolCall(); ok && call.Tool().Kind() == canonical.ToolKindDiscovery {
 			hasDiscoveryItem = true
-			if _, completed := completedDiscovery[index]; !completed {
-				pendingDiscovery = true
-			}
 		}
 		if result, ok := item.ToolDiscoveryResult(); ok {
 			hasDiscoveryItem = true
-			for _, tool := range result.Tools().Declarations() {
-				if discovery, ok := tool.Discovery(); ok {
-					discoverySources = append(discoverySources, struct {
-						index    int
-						executor canonical.DiscoveryExecutor
-					}{index: index, executor: discovery.Executor()})
-				}
-			}
+			_ = result
 		}
 	}
 
@@ -104,38 +93,6 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 	if !needsProjection {
 		return ToolDiscoveryProjection{Request: request.Clone()}, nil
 	}
-	for _, source := range discoverySources {
-		consumed := false
-		for _, effect := range completedEffects {
-			executor, _ := effect.Executor.Get()
-			if effect.CallIndex > source.index && executor == source.executor {
-				consumed = true
-				break
-			}
-		}
-		if source.executor == canonical.DiscoveryExecutorClient && !consumed {
-			return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-				canonical.RequestTools,
-				canonical.RequestItemOccurrence(uint32(source.index)),
-				"portable tool-discovery projection cannot preserve live client discovery inventory",
-			)
-		}
-	}
-	if clientDiscoveryDeclared && len(discoverySources) == 0 {
-		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-			canonical.RequestTools,
-			canonical.Occurrence{},
-			"portable tool-discovery projection cannot prove the source of live client discovery inventory",
-		)
-	}
-	if pendingDiscovery && len(portable) == 0 {
-		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-			canonical.RequestTools,
-			canonical.Occurrence{},
-			"portable tool-discovery projection has no materialized callable catalog",
-		)
-	}
-
 	for index, item := range items {
 		result, ok := item.ToolDiscoveryResult()
 		if !ok {
@@ -216,10 +173,13 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 	projectedItems = append(projectedItems, retainedHistory...)
 
 	changes := make([]compat.Change, 0, 3)
-	if hasDiscoveryDeclaration || hasDiscoveryItem {
+	if hasDiscoveryItem {
 		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestItemsKind, canonical.RequestTools, canonical.Occurrence{}))
 	}
-	if hasDeclarationContribution {
+	if hasDiscoveryDeclaration {
+		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestToolsKind, canonical.RequestTools, canonical.Occurrence{}))
+	}
+	if hasHistoricalDeclarations {
 		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestTools, canonical.RequestTools, canonical.Occurrence{}))
 	}
 	if hasDeferred {
@@ -228,6 +188,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 	return ToolDiscoveryProjection{
 		Request:                 request.WithItems(projectedItems),
 		Changes:                 changes,
+		Changed:                 true,
 		StructuralHistoryChange: hasHistoricalDeclarations || hasDiscoveryItem,
 	}, nil
 }
