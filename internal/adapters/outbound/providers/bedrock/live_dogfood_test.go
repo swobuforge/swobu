@@ -26,9 +26,9 @@ func TestLiveBedrockMantleCatalogAuthenticationPrecedence(t *testing.T) {
 		t.Skip("set SWOBU_LIVE_BEDROCK_DOGFOOD=1 to probe live Bedrock Mantle auth modes")
 	}
 	region := firstNonEmpty(os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION"), "us-east-1")
-	endpoint := firstNonEmpty(os.Getenv("SWOBU_BEDROCK_MANTLE_ENDPOINT"), profile.EffectiveBedrockAPIURL(region, "", protocolkind.Responses))
+	endpoint := strings.TrimSpace(os.Getenv("SWOBU_BEDROCK_MANTLE_ENDPOINT"))
 	if endpoint == "" {
-		t.Fatal("Bedrock Mantle endpoint is empty")
+		t.Fatal("set SWOBU_BEDROCK_MANTLE_ENDPOINT to the API URL published for the selected model")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -76,21 +76,17 @@ func assertLiveCatalog(t *testing.T, ctx context.Context, exec BackendAdapter, r
 // is now drawn from the durable region fact rather than parsed from the endpoint
 // host (the endpoint namespace no longer touches signing).
 //
-// Gated behind SWOBU_LIVE_BEDROCK_DOGFOOD=1. Defaults to gpt-oss over the
-// resolver's Responses endpoint; set SWOBU_BEDROCK_MANTLE_ENDPOINT when AWS
-// documents a different API base for the selected model.
+// Gated behind SWOBU_LIVE_BEDROCK_DOGFOOD=1. The model and its AWS-published
+// API URL are both explicit; Swobu never maps model identity to a namespace.
 func TestLiveBedrockMantleSendSignsBedrockRegion(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_BEDROCK_DOGFOOD")) != "1" {
 		t.Skip("set SWOBU_LIVE_BEDROCK_DOGFOOD=1 to probe live Bedrock Mantle SigV4 Send")
 	}
 	region := firstNonEmpty(os.Getenv("AWS_REGION"), os.Getenv("AWS_DEFAULT_REGION"), "us-east-1")
 	model := firstNonEmpty(os.Getenv("SWOBU_BEDROCK_MODEL"), "openai.gpt-oss-120b")
-	endpoint := firstNonEmpty(
-		os.Getenv("SWOBU_BEDROCK_MANTLE_ENDPOINT"),
-		profile.EffectiveBedrockAPIURL(region, "", protocolkind.Responses),
-	)
+	endpoint := strings.TrimSpace(os.Getenv("SWOBU_BEDROCK_MANTLE_ENDPOINT"))
 	if endpoint == "" {
-		t.Fatal("Bedrock Mantle endpoint is empty")
+		t.Fatal("set SWOBU_BEDROCK_MANTLE_ENDPOINT to the API URL published for the selected model")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

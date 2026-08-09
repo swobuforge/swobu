@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
-func TestDeferredFunctionRefinementMaterializesEagerlyFromEveryRequestDeclarationCarrier(t *testing.T) {
+func TestDeferredFunctionRefinementRemainsNativeFromEveryRequestDeclarationCarrier(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
@@ -49,24 +49,24 @@ func TestDeferredFunctionRefinementMaterializesEagerlyFromEveryRequestDeclaratio
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(string(encoded.RawBytes()), `"defer_loading"`) {
-				t.Fatalf("eager lowering retained deferred visibility: %s", encoded.RawBytes())
+			if !strings.Contains(string(encoded.RawBytes()), `"defer_loading":true`) {
+				t.Fatalf("native lowering omitted deferred visibility: %s", encoded.RawBytes())
 			}
-			if !hasResponseChange(changes, canonical.RequestToolsVisibility) {
-				t.Fatalf("eager materialization change = %#v", changes)
+			if hasResponseChange(changes, canonical.RequestToolsVisibility) {
+				t.Fatalf("native lowering reported visibility approximation: %#v", changes)
 			}
 		})
 	}
 }
 
-func TestDeferredFunctionRefinementMaterializesEagerlyFromDiscoveryResult(t *testing.T) {
+func TestDeferredFunctionRefinementRemainsNativeFromDiscoveryResult(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "loaded")
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	tool, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{tool})
-	refinements, _ := canonical.NewResponsesToolRefinements(set, []canonical.ToolKey{key})
+	refinements, _ := canonical.NewToolVisibilityRefinements(set, []canonical.ToolKey{key})
 	callID, _ := canonical.NewToolCallID("search_1")
-	result, err := canonical.NewToolDiscoveryResultItemWithResponses(callID, set, canonical.DiscoveryExecutorClient, refinements)
+	result, err := canonical.NewToolDiscoveryResultItemWithVisibility(callID, set, canonical.DiscoveryExecutorClient, refinements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +80,10 @@ func TestDeferredFunctionRefinementMaterializesEagerlyFromDiscoveryResult(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded.RawBytes()), `"defer_loading"`) {
-		t.Fatalf("eager lowering retained discovery-result deferred visibility: %s", encoded.RawBytes())
+	if !strings.Contains(string(encoded.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("native lowering omitted discovery-result deferred visibility: %s", encoded.RawBytes())
 	}
-	if !hasResponseChange(changes, canonical.RequestToolsVisibility) {
-		t.Fatalf("discovery eager materialization change = %#v", changes)
+	if hasResponseChange(changes, canonical.RequestToolsVisibility) {
+		t.Fatalf("native lowering reported discovery-result visibility approximation: %#v", changes)
 	}
 }

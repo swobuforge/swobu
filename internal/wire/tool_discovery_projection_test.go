@@ -8,193 +8,180 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
-func TestPrepareStaticToolSetRetainsActivatedDeclarations(t *testing.T) {
-	discovery, call, result, loaded := staticDiscoveryFixture(t)
-	declarationItem, err := canonical.NewToolDeclarationsItem(
-		mustToolSet(t, discovery), canonical.ContextScopeHistory,
-	)
+func TestProjectToolDiscoveryPolyfillRetainsMaterializedDeclarations(t *testing.T) {
+	loaded := mustProjectionFunction(t, "loaded")
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorProvider)
+	declarations, err := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loaded})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, _ := canonical.NewMessageItem(
-		canonical.MessageRoleUser,
-		[]canonical.MessagePart{canonical.NewTextMessagePart("continue")},
-	)
-	projection, err := PrepareStaticToolSet(
-		[]canonical.CanonicalItem{declarationItem, call, result, message},
-		[]canonical.ToolDeclaration{discovery, loaded},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(projection.Items) != 2 || projection.Items[0].Kind() != canonical.ItemKindToolDeclarations ||
-		projection.Items[1].Kind() != canonical.ItemKindMessage ||
-		len(projection.Declarations) != 1 || projection.Declarations[0].Key() != loaded.Key() {
-		t.Fatalf("static discovery projection = %#v", projection)
-	}
-	if projection.RemovedEffects != 1 || projection.RemovedDeclarations != 1 {
-		t.Fatalf("projection evidence counts = %#v", projection)
-	}
-}
-
-func TestPrepareStaticToolSetRetainsUnresolvedCall(t *testing.T) {
-	discovery, call, _, loaded := staticDiscoveryFixture(t)
-	projection, err := PrepareStaticToolSet(
-		[]canonical.CanonicalItem{call},
-		[]canonical.ToolDeclaration{discovery, loaded},
-	)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
-	}
-	if len(projection.Items) != 0 || len(projection.Declarations) != 0 {
-		t.Fatalf("failed projection leaked output = %#v", projection)
-	}
-}
-
-func TestPrepareStaticToolSetRetainsOrphanResult(t *testing.T) {
-	discovery, _, result, loaded := staticDiscoveryFixture(t)
-	projection, err := PrepareStaticToolSet(
-		[]canonical.CanonicalItem{result},
-		[]canonical.ToolDeclaration{discovery, loaded},
-	)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
-	}
-	if len(projection.Items) != 0 || len(projection.Declarations) != 0 {
-		t.Fatalf("failed projection leaked output = %#v", projection)
-	}
-}
-
-func TestPrepareStaticToolSetRejectsLiveDeclaration(t *testing.T) {
-	discovery, _, _, _ := staticDiscoveryFixture(t)
-	projection, err := PrepareStaticToolSet(
-		nil,
-		[]canonical.ToolDeclaration{discovery},
-	)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
-	}
-	if len(projection.Items) != 0 || len(projection.Declarations) != 0 {
-		t.Fatalf("failed projection leaked output = %#v", projection)
-	}
-}
-
-func TestPrepareStaticToolSetPairsReusedIDByOccurrence(t *testing.T) {
-	discovery, firstCall, firstResult, loaded := staticDiscoveryFixture(t)
-	declarationItem, err := canonical.NewToolDeclarationsItem(
-		mustToolSet(t, discovery), canonical.ContextScopeHistory,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	declarationItem, _ := canonical.NewToolDeclarationsItem(declarations, canonical.ContextScopeRequest)
 	callID, _ := canonical.NewToolCallID("search_1")
-	input, _ := canonical.ParseJSONObject([]byte(`{}`))
-	secondCall, _ := canonical.NewToolDiscoveryCallItem(
-		callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorClient,
-	)
-	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
-	secondResult, _ := canonical.NewToolDiscoveryResultItem(
-		callID, set, canonical.DiscoveryExecutorClient,
-	)
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	loadedSet, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
+	result, _ := canonical.NewToolDiscoveryResultItem(callID, loadedSet, canonical.DiscoveryExecutorProvider)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call, result}})
 
-	projection, err := PrepareStaticToolSet(
-		[]canonical.CanonicalItem{declarationItem, firstCall, firstResult, secondCall, secondResult},
-		[]canonical.ToolDeclaration{discovery, loaded},
-	)
+	projection, err := ProjectToolDiscoveryPolyfill(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projection.Items) != 1 || projection.Items[0].Kind() != canonical.ItemKindToolDeclarations {
-		t.Fatalf("reused completed lifecycle projection = %#v", projection.Items)
+	items := projection.Request.Items()
+	if len(items) != 1 {
+		t.Fatalf("projected items=%d want 1", len(items))
 	}
-	if len(projection.Declarations) != 1 || projection.Declarations[0].Key() != loaded.Key() ||
-		projection.RemovedEffects != 2 || projection.RemovedDeclarations != 1 {
-		t.Fatalf("projection = %#v", projection)
+	contribution, ok := items[0].ToolDeclarations()
+	if !ok {
+		t.Fatal("projected item is not tool declarations")
+	}
+	got := contribution.Tools().Declarations()
+	if len(got) != 1 || got[0].Key() != loaded.Key() {
+		t.Fatalf("projected tools=%v want loaded tool", got)
+	}
+	if !projection.StructuralHistoryChange || len(projection.Changes) == 0 {
+		t.Fatal("projection did not report structural compatibility change")
 	}
 }
 
-func TestPrepareStaticToolSetRejectsRequestScopedDeclarationAfterCompletedPair(t *testing.T) {
-	discovery, call, result, loaded := staticDiscoveryFixture(t)
-	declarationItem, err := canonical.NewToolDeclarationsItem(
-		mustToolSet(t, discovery), canonical.ContextScopeRequest,
-	)
+func TestProjectToolDiscoveryPolyfillRejectsUnknownPendingInventory(t *testing.T) {
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorClient)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_1")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorClient)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call}})
+
+	if _, err := ProjectToolDiscoveryPolyfill(request); err == nil {
+		t.Fatal("expected unknown pending inventory rejection")
+	}
+}
+
+func TestProjectToolDiscoveryPolyfillRejectsBareLiveClientDiscovery(t *testing.T) {
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorClient)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem}})
+
+	assertProjectionIncompatible(t, request)
+}
+
+func TestProjectToolDiscoveryPolyfillRejectsLiveClientDiscoveryBesideUnrelatedFunction(t *testing.T) {
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorClient)
+	function := mustProjectionFunction(t, "unrelated")
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, function})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem}})
+
+	assertProjectionIncompatible(t, request)
+}
+
+func TestProjectToolDiscoveryPolyfillProjectsCompletedClientDiscovery(t *testing.T) {
+	loaded := mustProjectionFunction(t, "loaded")
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorClient)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loaded})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_1")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorClient)
+	loadedSet, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
+	result, _ := canonical.NewToolDiscoveryResultItem(callID, loadedSet, canonical.DiscoveryExecutorClient)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call, result}})
+
+	projection, err := ProjectToolDiscoveryPolyfill(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = PrepareStaticToolSet(
-		[]canonical.CanonicalItem{declarationItem, call, result},
-		[]canonical.ToolDeclaration{discovery, loaded},
-	)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
+	items := projection.Request.Items()
+	if len(items) != 1 {
+		t.Fatalf("items=%d want one declaration contribution", len(items))
 	}
 }
 
-func TestValidateMaterializedRequestRejectsInterleavedDuplicatePendingDiscoveryID(t *testing.T) {
-	discovery, call, _, loaded := staticDiscoveryFixture(t)
-	declarations, err := canonical.NewToolDeclarationsItem(
-		mustToolSet(t, discovery, loaded), canonical.ContextScopeHistory,
-	)
+func TestProjectToolDiscoveryPolyfillPairsReusedCallIDByOccurrence(t *testing.T) {
+	loadedA := mustProjectionFunction(t, "loaded_a")
+	loadedB := mustProjectionFunction(t, "loaded_b")
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorProvider)
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loadedA, loadedB})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_reused")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	firstCall, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	firstSet, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loadedA})
+	firstResult, _ := canonical.NewToolDiscoveryResultItem(callID, firstSet, canonical.DiscoveryExecutorProvider)
+	secondCall, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	secondSet, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loadedB})
+	secondResult, _ := canonical.NewToolDiscoveryResultItem(callID, secondSet, canonical.DiscoveryExecutorProvider)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, firstCall, firstResult, secondCall, secondResult}})
+
+	projection, err := ProjectToolDiscoveryPolyfill(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{
-			declarations,
-			call,
-			call,
-		},
-	})
-	err = canonical.ValidateMaterializedRequest(request)
-	if err == nil {
-		t.Fatal("duplicate pending discovery ID was accepted")
+	items := projection.Request.Items()
+	if len(items) != 1 {
+		t.Fatalf("items=%d want one declaration contribution", len(items))
 	}
 }
 
-func mustToolSet(t *testing.T, declarations ...canonical.ToolDeclaration) canonical.ToolSet {
+func TestProjectToolDiscoveryPolyfillRejectsDuplicatePendingCallID(t *testing.T) {
+	discovery := mustProjectionDiscovery(t, canonical.DiscoveryExecutorProvider)
+	loaded := mustProjectionFunction(t, "loaded")
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, loaded})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("search_duplicate")
+	inputObject, _ := canonical.ParseJSONObject([]byte(`{}`))
+	firstCall, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	secondCall, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, firstCall, secondCall}})
+
+	if _, err := ProjectToolDiscoveryPolyfill(request); err == nil {
+		t.Fatal("duplicate pending discovery call id was accepted")
+	}
+}
+
+func TestProjectToolDiscoveryPolyfillIsNoOpForStaticRequest(t *testing.T) {
+	function := mustProjectionFunction(t, "static")
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{function})
+	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem}})
+
+	projection, err := ProjectToolDiscoveryPolyfill(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.StructuralHistoryChange || len(projection.Changes) != 0 {
+		t.Fatalf("static projection changed request: %+v", projection)
+	}
+}
+
+func mustProjectionFunction(t *testing.T, name string) canonical.ToolDeclaration {
 	t.Helper()
-	set, err := canonical.NewToolSet(declarations)
+	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, name)
+	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	tool, err := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return set
+	return tool
 }
 
-func staticDiscoveryFixture(t *testing.T) (
-	canonical.ToolDeclaration,
-	canonical.CanonicalItem,
-	canonical.CanonicalItem,
-	canonical.ToolDeclaration,
-) {
+func mustProjectionDiscovery(t *testing.T, executor canonical.DiscoveryExecutor) canonical.ToolDeclaration {
 	t.Helper()
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	schema := canonical.NewToolSchemaObject(schemaObject)
-	discovery, err := canonical.NewToolDiscoveryTool(
-		"find tools", schema, canonical.DiscoveryExecutorProvider,
-	)
+	tool, err := canonical.NewToolDiscoveryTool("find tools", canonical.NewToolSchemaObject(schemaObject), executor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "read_file")
-	loaded, err := canonical.NewFunctionTool(
-		key, "", schema, canonical.Unspecified[bool](),
-	)
-	if err != nil {
-		t.Fatal(err)
+	return tool
+}
+
+func assertProjectionIncompatible(t *testing.T, request canonical.CanonicalRequest) {
+	t.Helper()
+	_, err := ProjectToolDiscoveryPolyfill(request)
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error=%T %v want target incompatibility", err, err)
 	}
-	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
-	callID, _ := canonical.NewToolCallID("search_1")
-	input, _ := canonical.ParseJSONObject([]byte(`{}`))
-	call, _ := canonical.NewToolDiscoveryCallItem(
-		callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider,
-	)
-	result, _ := canonical.NewToolDiscoveryResultItem(
-		callID, set, canonical.DiscoveryExecutorProvider,
-	)
-	return discovery, call, result, loaded
 }

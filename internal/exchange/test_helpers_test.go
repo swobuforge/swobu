@@ -329,7 +329,7 @@ func newTestBackend(target provider.TargetSnapshot, transport testProviderTransp
 	if target.Model == "" {
 		target.Model = "m"
 	}
-	return provider.Backend{Target: target, Codec: testBackendCodec{}, Transport: provider.BindTransport(target, transport)}, nil
+	return provider.Backend{Target: target, Codec: testBackendCodec{}, Transport: provider.BindTransport(target, transport), ToolDiscovery: provider.ToolDiscoveryPolyfill}, nil
 }
 
 type testClientCodec struct{}

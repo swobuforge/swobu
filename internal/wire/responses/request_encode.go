@@ -88,11 +88,6 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	}
 
 	items := req.Items()
-	if wire.HasDeferredResponsesTools(items) {
-		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	fullEnvironment, err := canonical.ToolEnvironmentAt(items, len(items))
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -158,7 +153,11 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if storeValue, specified := req.Responses().Store(); specified {
 		store = &storeValue
 	}
-	wireTools, err := encodeResponsesTools(requestTools, input.ToolNames, input.Access, changeLog, exchangeID)
+	requestVisibility, err := responsesToolVisibilityAt(preludeItems)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	wireTools, err := encodeResponsesTools(requestTools, requestVisibility, input.ToolNames, input.Access, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -209,6 +208,27 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		ToolChoice:     choice,
 		Store:          store,
 	}, nil
+}
+
+func responsesToolVisibilityAt(items []canonical.CanonicalItem) (canonical.ToolVisibilityRefinements, error) {
+	environment, err := canonical.ToolEnvironmentAt(items, len(items))
+	if err != nil {
+		return canonical.ToolVisibilityRefinements{}, err
+	}
+	var deferred []canonical.ToolKey
+	for _, item := range items {
+		if declarations, ok := item.ToolDeclarations(); ok {
+			deferred = append(deferred, declarations.Visibility().DeferredKeys()...)
+		}
+		if result, ok := item.ToolDiscoveryResult(); ok {
+			deferred = append(deferred, result.Visibility().DeferredKeys()...)
+		}
+	}
+	tools, err := canonical.NewToolSet(environment.Declarations())
+	if err != nil {
+		return canonical.ToolVisibilityRefinements{}, err
+	}
+	return canonical.NewToolVisibilityRefinements(tools, deferred)
 }
 
 // EncodeProviderRequestDocument performs the single serialization boundary
@@ -428,7 +448,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if declarations.Scope() == canonical.ContextScopeRequest {
 				continue
 			}
-			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), names, access, changeLog, exchangeID)
+			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), declarations.Visibility(), names, access, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -436,12 +456,12 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 		case canonical.ItemKindToolCall:
 			call, _ := current.ToolCall()
 			tool := call.Tool()
-			name, err := wire.EncodeToolName(names, tool)
-			if err != nil {
-				return nil, err
-			}
 			switch tool.Kind() {
 			case canonical.ToolKindFunction:
+				name, err := wire.EncodeToolName(names, tool)
+				if err != nil {
+					return nil, err
+				}
 				if _, exists := pendingContentCalls[call.CallID()]; exists {
 					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
 				}
@@ -453,6 +473,10 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				encoded = append(encoded, item)
 				pendingContentCalls[call.CallID()] = canonical.ToolKindFunction
 			case canonical.ToolKindCustom:
+				name, err := wire.EncodeToolName(names, tool)
+				if err != nil {
+					return nil, err
+				}
 				if _, exists := pendingContentCalls[call.CallID()]; exists {
 					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
 				}
@@ -569,7 +593,10 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			encoded = append(encoded, item)
 		case canonical.ItemKindToolDiscoveryResult:
 			result, _ := current.ToolDiscoveryResult()
-			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), names, access, changeLog, exchangeID)
+			if _, failed := result.Failure(); failed {
+				return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.CallOccurrence(result.CallID()), "Responses cannot represent a typed failed discovery result")
+			}
+			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), names, access, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}

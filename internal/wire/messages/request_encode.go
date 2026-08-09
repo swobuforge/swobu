@@ -18,6 +18,10 @@ const (
 	defaultMessagesMaxTokens         = 256
 	directWebSearchToolType          = "web_search_20260209"
 	directWebSearchAllowedCallerType = "direct"
+	toolSearchRegexType              = "tool_search_tool_regex_20251119"
+	toolSearchRegexName              = "tool_search_tool_regex"
+	toolSearchNaturalLanguageType    = "tool_search_tool_bm25_20251119"
+	toolSearchNaturalLanguageName    = "tool_search_tool_bm25"
 )
 
 type messageBody struct {
@@ -78,11 +82,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
-	if wire.HasDeferredResponsesTools(items) {
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	environment, err := canonical.ToolEnvironmentAt(items, len(items))
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -95,22 +94,10 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		*changeLog = append(*changeLog, projectionDecisions...)
 	}
 	tools := environment.Declarations()
-	staticTools, err := wire.PrepareStaticToolSet(items, tools)
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	items, tools = staticTools.Items, staticTools.Declarations
-	for range staticTools.RemovedEffects {
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
-	for range staticTools.RemovedDeclarations {
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
+		if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorProvider {
+			return tool.Key().Name(), nil
+		}
 		name, err := wire.EncodeToolName(names, tool.Key())
 		return strings.TrimSpace(name), err
 	})
@@ -150,7 +137,8 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 	if loweredInstructions.Text != "" {
 		payload["system"] = loweredInstructions.Text
 	}
-	wireTools, err := encodeMessagesTools(tools, names, changeLog, exchangeID)
+	deferred := messagesDeferredToolKeys(items)
+	wireTools, err := encodeMessagesTools(tools, deferred, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -338,7 +326,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		return blocks, nil
 	}
 	if item.Kind() == canonical.ItemKindToolCall {
-		block, err := encodeMessagesToolCall(item, names)
+		block, err := encodeMessagesToolCall(item, tools, names)
 		if err != nil {
 			return nil, err
 		}
@@ -358,6 +346,28 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		}
 		return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content, IsError: result.IsError()}), nil
 	}
+	if result, ok := item.ToolDiscoveryResult(); ok {
+		if failure, failed := result.Failure(); failed {
+			code, _ := failure.Code().Get()
+			return append(blocks, contentID{Type: "tool_search_tool_result", ToolUseID: result.CallID().String(), Content: map[string]any{
+				"type": "tool_search_tool_result_error", "error_code": code, "error_message": failure.Message(),
+			}}), nil
+		}
+		content := make([]map[string]string, 0, len(result.Tools().Declarations()))
+		for _, declaration := range result.Tools().Declarations() {
+			name, err := wire.EncodeToolName(names, declaration.Key())
+			if err != nil {
+				return nil, err
+			}
+			content = append(content, map[string]string{"type": "tool_reference", "tool_name": name})
+		}
+		if result.Executor() == canonical.DiscoveryExecutorClient {
+			return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content}), nil
+		}
+		return append(blocks, contentID{Type: "tool_search_tool_result", ToolUseID: result.CallID().String(), Content: map[string]any{
+			"type": "tool_search_tool_search_result", "tool_references": content,
+		}}), nil
+	}
 	if reasoning, ok := item.Reasoning(); ok {
 		opaque, exact := reasoning.Opaque().Messages()
 		if !exact {
@@ -374,7 +384,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 	return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent this canonical item kind")
 }
 
-func encodeMessagesToolCall(item canonical.CanonicalItem, names wire.ToolNames) (contentID, error) {
+func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames) (contentID, error) {
 	call, ok := item.ToolCall()
 	if !ok {
 		return contentID{}, canonical.InternalError("messages tool-call item is invalid")
@@ -390,6 +400,32 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, names wire.ToolNames) 
 			return contentID{}, canonical.InternalError("messages web-search call could not be encoded")
 		}
 		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: "web_search", Input: input}, nil
+	}
+	if tool.Kind() == canonical.ToolKindDiscovery {
+		executor, ok := call.DiscoveryExecutor()
+		if !ok {
+			return contentID{}, canonical.InternalError("messages discovery call is missing execution owner")
+		}
+		object, ok := call.Input().Object()
+		if !ok {
+			return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallInput, canonical.CallOccurrence(call.CallID()), "Messages discovery calls require object input")
+		}
+		if executor == canonical.DiscoveryExecutorClient {
+			name, err := wire.EncodeToolName(names, tool)
+			if err != nil {
+				return contentID{}, err
+			}
+			return contentID{Type: "tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
+		}
+		discovery, err := messagesDiscoveryDeclaration(tools)
+		if err != nil {
+			return contentID{}, err
+		}
+		name, err := messagesProviderDiscoveryName(discovery)
+		if err != nil {
+			return contentID{}, err
+		}
+		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
 	}
 	if tool.Kind() != canonical.ToolKindFunction {
 		return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Messages cannot represent this canonical tool-call kind")
@@ -470,7 +506,7 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 	return nil
 }
 
-func encodeMessagesTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+func encodeMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -491,20 +527,108 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, names wire.ToolNames
 			if err != nil {
 				return nil, err
 			}
+			_, wireTool.DeferLoading = deferred[tool.Key()]
 			out = append(out, wireTool)
 			continue
 		}
 		if tool.Kind() == canonical.ToolKindWebSearch {
-			out = append(out, ProviderRequestTool{
+			wireTool := ProviderRequestTool{
 				Type:           directWebSearchToolType,
 				Name:           canonical.WebSearchToolKey().Name(),
 				AllowedCallers: []string{directWebSearchAllowedCallerType},
-			})
+			}
+			_, wireTool.DeferLoading = deferred[tool.Key()]
+			out = append(out, wireTool)
+			continue
+		}
+		if discovery, ok := tool.Discovery(); ok {
+			if discovery.Executor() == canonical.DiscoveryExecutorClient {
+				schema, err := messagesToolSchema(discovery.InputSchema())
+				if err != nil {
+					return nil, err
+				}
+				name, err := wire.EncodeToolName(names, tool.Key())
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, ProviderRequestTool{Name: name, Description: discovery.Description(), InputSchema: schema})
+				continue
+			}
+			typeName, name, err := messagesProviderDiscoveryTool(discovery)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ProviderRequestTool{Type: typeName, Name: name})
 			continue
 		}
 		return nil, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages cannot represent this canonical tool declaration")
 	}
+	if len(out) > 0 && len(deferred) > 0 {
+		allDeferred := true
+		for _, tool := range out {
+			if !tool.DeferLoading {
+				allDeferred = false
+				break
+			}
+		}
+		if allDeferred {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolsVisibility, canonical.Occurrence{}, "Messages requires at least one non-deferred tool")
+		}
+	}
 	return out, nil
+}
+
+func messagesDeferredToolKeys(items []canonical.CanonicalItem) map[canonical.ToolKey]struct{} {
+	deferred := make(map[canonical.ToolKey]struct{})
+	for _, item := range items {
+		if declarations, ok := item.ToolDeclarations(); ok {
+			for _, key := range declarations.Visibility().DeferredKeys() {
+				deferred[key] = struct{}{}
+			}
+		}
+		if result, ok := item.ToolDiscoveryResult(); ok {
+			for _, declaration := range result.Tools().Declarations() {
+				if declaration.Kind() == canonical.ToolKindFunction || declaration.Kind() == canonical.ToolKindCustom {
+					deferred[declaration.Key()] = struct{}{}
+				}
+			}
+			for _, key := range result.Visibility().DeferredKeys() {
+				deferred[key] = struct{}{}
+			}
+		}
+	}
+	return deferred
+}
+
+func messagesDiscoveryDeclaration(tools []canonical.ToolDeclaration) (canonical.ToolDiscoveryTool, error) {
+	for _, declaration := range tools {
+		if discovery, ok := declaration.Discovery(); ok {
+			return discovery, nil
+		}
+	}
+	return canonical.ToolDiscoveryTool{}, canonical.InternalError("messages discovery declaration is missing")
+}
+
+func messagesProviderDiscoveryTool(discovery canonical.ToolDiscoveryTool) (string, string, error) {
+	name, err := messagesProviderDiscoveryName(discovery)
+	if err != nil {
+		return "", "", err
+	}
+	if discovery.QueryKind() == canonical.ToolDiscoveryQueryRegex {
+		return toolSearchRegexType, name, nil
+	}
+	return toolSearchNaturalLanguageType, name, nil
+}
+
+func messagesProviderDiscoveryName(discovery canonical.ToolDiscoveryTool) (string, error) {
+	switch discovery.QueryKind() {
+	case canonical.ToolDiscoveryQueryRegex:
+		return toolSearchRegexName, nil
+	case canonical.ToolDiscoveryQueryNaturalLanguage:
+		return toolSearchNaturalLanguageName, nil
+	default:
+		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.ToolDiscoveryKey()), "Messages provider discovery requires regex or natural-language query semantics")
+	}
 }
 
 func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {

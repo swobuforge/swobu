@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,12 +9,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire/messages"
 )
+
+type toolDiscoveryResponsesRuntime struct {
+	testRuntimeResolver
+	transport testProviderTransport
+}
+
+func (r toolDiscoveryResponsesRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	return provider.Backend{
+		Target:        target,
+		Codec:         protocolcodec.Codec{Protocol: protocolkind.Responses},
+		Transport:     provider.BindTransport(target, r.transport),
+		ToolDiscovery: provider.ToolDiscoveryPolyfill,
+	}, nil
+}
 
 func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
 	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
@@ -59,6 +79,58 @@ func TestMCPAccessIsOpaqueInsideExchangeContainers(t *testing.T) {
 				t.Fatalf("%T exposed bearer as %q", value, formatted)
 			}
 		}
+	}
+}
+
+func TestProviderPreparationProjectsClaudeDiscoveryHistoryBeforeResponsesEncoding(t *testing.T) {
+	raw := []byte(`{
+		"model":"claude",
+		"tools":[
+			{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},
+			{"name":"weather","input_schema":{"type":"object"},"defer_loading":true}
+		],
+		"messages":[
+			{"role":"assistant","content":[{"type":"server_tool_use","id":"search_1","name":"tool_search_tool_regex","input":{"pattern":"weather"}}]},
+			{"role":"user","content":[{"type":"tool_search_tool_result","tool_use_id":"search_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"weather"}]}}]},
+			{"role":"user","content":"continue"}
+		]
+	}`)
+	decoded, err := (messages.ClientRequestDecoder{}).DecodeClientRequest(
+		carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := decoded.Request.Request
+	prepared := mustBeginSession(t, request)
+	state := reducerTestState(t)
+	state.input.clientFamily = canonical.ClientFamilyMessages
+	state.input.clientDelivery = delivery.BufferedDelivery()
+	state.input.request = request
+	state.prepared = &prepared
+	state.route = routePlan{targets: []routing.Target{requestpathTarget(t, "claude-discovery-to-responses")}}
+	runner := withRuntime(bufferedProviderTransport(nil))
+	runner.Runtime = toolDiscoveryResponsesRuntime{
+		transport: bufferedProviderTransport(nil),
+	}
+
+	call, _, changes, _, err := prepareProviderCall(
+		context.Background(), state,
+		providerCallSelection{candidateIndex: 0, requestChoice: providerRequestFullHistory},
+		runner,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerWire := call.document.RawBytes()
+	if bytes.Contains(providerWire, []byte("tool_search")) {
+		t.Fatalf("Responses provider wire retained unsupported discovery lifecycle: %s", providerWire)
+	}
+	if !bytes.Contains(providerWire, []byte(`"name":"weather"`)) {
+		t.Fatalf("Responses provider wire lost the discovered function: %s", providerWire)
+	}
+	if len(changes) == 0 {
+		t.Fatal("discovery projection did not record compatibility evidence")
 	}
 }
 

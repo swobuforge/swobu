@@ -36,7 +36,7 @@ type ProviderRequestTool struct {
 	DeferLoading      *bool                 `json:"defer_loading,omitempty"`
 }
 
-func encodeResponsesTools(tools []canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+func encodeResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -62,6 +62,10 @@ func encodeResponsesTools(tools []canonical.ToolDeclaration, names wire.ToolName
 		wireTool, err := encodeResponsesTool(tool, names, access)
 		if err != nil {
 			return nil, err
+		}
+		if visibility.Deferred(tool.Key()) {
+			deferred := true
+			wireTool.DeferLoading = &deferred
 		}
 		out = append(out, wireTool)
 	}

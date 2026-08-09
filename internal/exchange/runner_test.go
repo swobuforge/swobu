@@ -341,7 +341,7 @@ func (r testExecutionRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 	if target.Model == "" {
 		target.Model = "m"
 	}
-	return provider.Backend{Target: target, Codec: testBackendCodec{protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, r.providerTransport)}, nil
+	return provider.Backend{Target: target, Codec: testBackendCodec{protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, r.providerTransport), ToolDiscovery: provider.ToolDiscoveryPolyfill}, nil
 }
 
 type testRuntimeResolver struct{}

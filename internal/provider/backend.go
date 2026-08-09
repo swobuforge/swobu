@@ -62,12 +62,28 @@ type BackendResolver interface {
 	ResolveBackend(TargetSnapshot) (Backend, error)
 }
 
+// ToolDiscoveryMode states whether one exact backend has an implemented native
+// lowering for canonical tool discovery or requires the portable projection.
+// The zero value is invalid so every backend composition must decide explicitly.
+type ToolDiscoveryMode uint8
+
+const (
+	ToolDiscoveryUnspecified ToolDiscoveryMode = iota
+	ToolDiscoveryNative
+	ToolDiscoveryPolyfill
+)
+
+func (m ToolDiscoveryMode) valid() bool {
+	return m == ToolDiscoveryNative || m == ToolDiscoveryPolyfill
+}
+
 // Backend binds one exact target generation to its codec and
 // document-only transport.
 type Backend struct {
-	Target    TargetSnapshot
-	Codec     Codec
-	Transport Transport
+	Target        TargetSnapshot
+	Codec         Codec
+	Transport     Transport
+	ToolDiscovery ToolDiscoveryMode
 }
 
 // Validate proves the backend is complete before exchange execution.
@@ -83,6 +99,9 @@ func (b Backend) Validate() error {
 	}
 	if b.Transport == nil {
 		return errors.New("provider backend transport is nil")
+	}
+	if !b.ToolDiscovery.valid() {
+		return errors.New("provider backend tool-discovery mode is unspecified")
 	}
 	return nil
 }

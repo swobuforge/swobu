@@ -14,7 +14,6 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -188,10 +187,10 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			return renderBedrockVisual(t, width, "aws_identity", "", readmodel.AWSIdentityReadModel{
 				State: "resolved", Account: "123456789012",
 				ARN: "arn:aws:sts::123456789012:assumed-role/Developer/session",
-			}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
+			}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 		}},
 		{name: "credential_optional_remove", render: func(t *testing.T, width int) string {
-			return renderBedrockVisual(t, width, "explicit_api_key", "secret:bedrock-target", readmodel.AWSIdentityReadModel{}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
+			return renderBedrockVisual(t, width, "explicit_api_key", "secret:bedrock-target", readmodel.AWSIdentityReadModel{}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 		}},
 		{name: "chatgpt_signed_out", build: func(t *testing.T) tui.Component {
 			return authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
@@ -324,7 +323,7 @@ func runeKeys(value string) []tui.KeyEvent {
 
 func bedrockVisualConfig(t *testing.T, authentication, credential string, identity readmodel.AWSIdentityReadModel) *TargetConfig {
 	t.Helper()
-	w := authoringConfig(t, profile.ProviderSpecBedrock, profile.EffectiveBedrockAPIURL("eu-west-2", "", protocolkind.Responses), credential)
+	w := authoringConfig(t, profile.ProviderSpecBedrock, "https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1", credential)
 	diagnosticAuthentication := strings.TrimSuffix(authentication, "_failure")
 	catalog := readmodel.ModelCatalogReadModel{
 		BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationKind(diagnosticAuthentication), AWSIdentity: &identity},
@@ -530,6 +529,7 @@ func authoringConfig(t *testing.T, provider profile.ProviderID, locator, credent
 			d.Locator = locator
 			if provider == profile.ProviderSpecBedrock {
 				d.Locator = profile.BedrockMantleRegionFromEndpoint(locator)
+				d.Endpoint = locator
 			}
 			return d
 		})
@@ -551,5 +551,4 @@ func selectReadyModel(w *TargetConfig, model, protocol string) {
 		d.ProviderProtocol = protocol
 		return d
 	})
-	w.reseedDerivedBedrockEndpointBuffer()
 }

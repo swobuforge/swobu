@@ -1,12 +1,12 @@
   new target · AWS Bedrock                                                            cancel ↵
      provider          AWS Bedrock                                                    change ↵
      region            Europe (London) · eu-west-2                                    change ↵
-     API URL           https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1          edit ↵
-                       Regional default.
      authentication    Bedrock API key · stored                                       manage ↵
                        bedrock-target
      model             Claude Sonnet 4.6                                              change ↵
      protocol          Anthropic · Messages · stream                                  change ↵
+     API URL           https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1          edit ↵
+                       Explicit API URL.
      routing           fallback after step 1                                          change ↵
    > create                                                                           create ↵
 

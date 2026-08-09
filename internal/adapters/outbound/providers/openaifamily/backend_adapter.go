@@ -62,9 +62,10 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, canonical.BadEndpoint("provider policy is unsupported for exact backend")
 	}
 	backend := provider.Backend{
-		Target:    target.Clone(),
-		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport: provider.BindTransport(target, e.Send),
+		Target:        target.Clone(),
+		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport:     provider.BindTransport(target, e.Send),
+		ToolDiscovery: e.profile.ToolDiscovery(target.ProtocolKind),
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

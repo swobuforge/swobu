@@ -117,11 +117,11 @@ func TestTransformToolContributionsRetainsResponsesRefinementsByExactCallableKey
 	if err != nil {
 		t.Fatal(err)
 	}
-	refinements, err := NewResponsesToolRefinements(before, []ToolKey{removedKey, survivingKey})
+	refinements, err := NewToolVisibilityRefinements(before, []ToolKey{removedKey, survivingKey})
 	if err != nil {
 		t.Fatal(err)
 	}
-	declarations, err := NewToolDeclarationsItemWithResponses(before, ContextScopeRequest, refinements)
+	declarations, err := NewToolDeclarationsItemWithVisibility(before, ContextScopeRequest, refinements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestTransformToolContributionsRetainsResponsesRefinementsByExactCallableKey
 	if !ok {
 		t.Fatalf("transformed item = %#v, want tool declarations", transformed.Items()[0])
 	}
-	got := occurrence.Responses()
+	got := occurrence.Visibility()
 	if !got.Deferred(survivingKey) {
 		t.Fatal("surviving exact key lost its Responses refinement")
 	}
@@ -156,5 +156,34 @@ func TestTransformToolContributionsRetainsResponsesRefinementsByExactCallableKey
 	}
 	if keys := got.DeferredKeys(); len(keys) != 1 {
 		t.Fatalf("retained deferred keys = %#v, want only %q", keys, survivingKey)
+	}
+}
+
+func TestTransformToolContributionsPreservesDiscoveryFailure(t *testing.T) {
+	callID, _ := NewToolCallID("search_failed")
+	failure, err := NewToolDiscoveryFailureItem(callID, DiscoveryExecutorProvider, Specify("unavailable"), "search offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := NewCanonicalRequest(RequestParams{Items: []CanonicalItem{failure}})
+	functionKey, _ := NewRequestToolKey(ToolKindFunction, "unexpected")
+	schemaObject, _ := ParseJSONObject([]byte(`{"type":"object"}`))
+	function, _ := NewFunctionTool(functionKey, "", NewToolSchemaObject(schemaObject), Unspecified[bool]())
+	functionSet, _ := NewToolSet([]ToolDeclaration{function})
+
+	transformed, err := TransformToolContributions(request, func(ToolSet) (ToolSet, error) {
+		return functionSet, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := transformed.Items()[0].ToolDiscoveryResult()
+	if !ok {
+		t.Fatal("transformed item is not discovery result")
+	}
+	got, ok := result.Failure()
+	code, _ := got.Code().Get()
+	if !ok || code != "unavailable" || got.Message() != "search offline" || !result.Tools().IsEmpty() {
+		t.Fatalf("failure=(%+v,%t) tools=%v", got, ok, result.Tools().Declarations())
 	}
 }

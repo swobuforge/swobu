@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -52,7 +53,7 @@ func TestBedrockRetryLaunchesAnotherProbe(t *testing.T) {
 	}
 }
 
-func TestDerivedBedrockEndpointSurvivesEditRegionChangeAndSaveAsAbsent(t *testing.T) {
+func TestBedrockEditRequiresPersistedEndpoint(t *testing.T) {
 	target := readmodel.TargetReadModel{
 		ID:               "bedrock-primary",
 		Model:            "xai.grok-4.3",
@@ -61,44 +62,25 @@ func TestDerivedBedrockEndpointSurvivesEditRegionChangeAndSaveAsAbsent(t *testin
 		BedrockRegion:    "us-east-1",
 	}
 	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
-	var saved ports.SaveTargetRequest
-	w := NewEditTargetConfig("personal", route, target, func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
-		saved = request
-		updated := target
-		updated.BedrockRegion = "eu-west-2"
-		return ports.SaveTargetResult{Target: updated, Route: route}, nil
-	}, nil)
+	w := NewEditTargetConfig("personal", route, target, nil, nil)
 	w.Open()
-
-	if got := w.Draft.Get().Endpoint; got != "" {
-		t.Fatalf("initial explicit endpoint = %q, want absent", got)
+	if got := w.BaseURL.Get(); got != "" {
+		t.Fatalf("endpoint editor = %q, want empty", got)
 	}
-	wantInitial := "https://bedrock-mantle.us-east-1.api.aws/v1"
-	if got := w.BaseURL.Get(); got != wantInitial {
-		t.Fatalf("initial editor endpoint = %q, want effective %q", got, wantInitial)
-	}
-
-	w.SelectBedrockRegion("eu-west-2")
-
-	connection, ok := saved.Connection.(routing.BedrockConnection)
-	if !ok {
-		t.Fatalf("saved connection = %T, want routing.BedrockConnection", saved.Connection)
-	}
-	if got := connection.Region().String(); got != "eu-west-2" {
-		t.Fatalf("saved region = %q, want eu-west-2", got)
-	}
-	if got := connection.Endpoint(); got != "" {
-		t.Fatalf("saved endpoint = %q, want absent derived intent", got)
+	validation, detail := bedrockEndpointValidation("", "us-east-1", protocolkind.Responses)
+	if validation != ui.EditableRowValidationRequired || !strings.Contains(detail, "AWS") {
+		t.Fatalf("empty endpoint validation = (%v, %q), want required paste guidance", validation, detail)
 	}
 }
 
-func TestDerivedBedrockEndpointRemainsVisibleWhenEditorOpensAndSubmitsAsAbsent(t *testing.T) {
+func TestBedrockEndpointPersistsNormalizedAuthoredURL(t *testing.T) {
 	target := readmodel.TargetReadModel{
 		ID:               "bedrock-primary",
 		Model:            "xai.grok-4.3",
 		Provider:         string(profile.ProviderSpecBedrock),
 		ProviderProtocol: "responses_stream",
 		BedrockRegion:    "eu-west-2",
+		BaseURL:          "https://bedrock-mantle.eu-west-2.api.aws/openai/v1",
 	}
 	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
 	var saved ports.SaveTargetRequest
@@ -108,27 +90,18 @@ func TestDerivedBedrockEndpointRemainsVisibleWhenEditorOpensAndSubmitsAsAbsent(t
 	}, nil)
 	w.Open()
 
-	wantURL := "https://bedrock-mantle.eu-west-2.api.aws/v1"
-	frame := testkit.RenderMountedTrimmed(t, BedrockProviderForm(w), 120, 18)
-	if !strings.Contains(frame, wantURL) {
-		t.Fatalf("derived API URL row does not show full effective URL %q:\n%s", wantURL, frame)
-	}
 	row := BedrockEndpointRow(w)
-	row.Open()
-	frame = testkit.RenderMountedTrimmed(t, row, 100, 4)
-	if !strings.Contains(frame, "https://bedrock-mantle.eu-west-2") {
-		t.Fatalf("opened editor hides the effective destination at normal width:\n%s", frame)
-	}
-	row.OnSubmit(wantURL)
-	if got := w.Draft.Get().Endpoint; got != "" {
-		t.Fatalf("unchanged regional default persisted explicit endpoint %q", got)
+	row.OnSubmit("https://bedrock-mantle.eu-west-2.api.aws/openai/v1/responses")
+	wantURL := "https://bedrock-mantle.eu-west-2.api.aws/openai/v1"
+	if got := w.Draft.Get().Endpoint; got != wantURL {
+		t.Fatalf("authored endpoint = %q, want %q", got, wantURL)
 	}
 	connection, ok := saved.Connection.(routing.BedrockConnection)
 	if !ok {
 		t.Fatalf("saved connection = %T, want routing.BedrockConnection", saved.Connection)
 	}
-	if got := connection.Endpoint(); got != "" {
-		t.Fatalf("saved endpoint = %q, want absent derived intent", got)
+	if got := connection.Endpoint(); got != wantURL {
+		t.Fatalf("saved endpoint = %q, want %q", got, wantURL)
 	}
 }
 
@@ -231,7 +204,7 @@ func TestBedrockEndpointCancelRestoresDurableEffectiveValueAfterInvalidSubmit(t 
 		wantRestored string
 	}{
 		{"explicit", "https://proxy.example/openai/v1", "https://proxy.example/openai/v1"},
-		{"derived", "", "https://bedrock-mantle.eu-west-2.api.aws/v1"},
+		{"empty", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := readmodel.TargetReadModel{
@@ -480,24 +453,25 @@ func readyBedrockConfig(t *testing.T) *TargetConfig {
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ModelID = "model-1"
 		d.ProviderProtocol = "responses"
+		d.Endpoint = "https://bedrock-mantle.eu-west-2.api.aws/v1"
 		return d
 	})
+	w.BaseURL.Set("https://bedrock-mantle.eu-west-2.api.aws/v1")
 	return w
 }
 
 func TestRemovingBedrockCredentialReprobesWithoutTargetOverride(t *testing.T) {
 	w := readyBedrockConfig(t)
-	var probed routing.Connection
+	var probed ports.BedrockCatalogProbe
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(_ context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-		probed = req.Connection
+		probed, _ = req.Probe.(ports.BedrockCatalogProbe)
 		return readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity}}, nil
 	})
 	row := newCredentialRow(w, false)
 	row.props.Apply("")
 	w.ProbeCatalog()
-	connection, ok := probed.(routing.BedrockConnection)
-	if !ok || connection.Credential().String() != "" {
-		t.Fatalf("probe connection = %#v", probed)
+	if probed.Region != "eu-west-2" || probed.CredentialRef != "" {
+		t.Fatalf("probe intent = %#v", probed)
 	}
 	if got := w.catalogResult().BedrockAuthentication.Authentication; got != readmodel.BedrockAuthenticationAWSIdentity {
 		t.Fatalf("authentication = %q", got)

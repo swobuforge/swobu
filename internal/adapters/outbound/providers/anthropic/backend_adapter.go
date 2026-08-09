@@ -24,33 +24,35 @@ const (
 )
 
 type BackendAdapter struct {
-	providerID  profile.ProviderID
-	client      *http.Client
-	credentials providersruntime.CredentialProvider
+	providerID    profile.ProviderID
+	client        *http.Client
+	credentials   providersruntime.CredentialProvider
+	toolDiscovery provider.ToolDiscoveryMode
 }
 
 func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
-	return NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials)
+	return NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials, provider.ToolDiscoveryNative)
 }
 
 // NewBackendAdapter builds the shared Messages transport for one provider
 // whose profile declares Anthropic Messages protocols and x-api-key auth.
-func NewBackendAdapter(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
+func NewBackendAdapter(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider, toolDiscovery provider.ToolDiscoveryMode) BackendAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	return BackendAdapter{
-		providerID:  providerID,
-		client:      client,
-		credentials: credentials,
+		providerID:    providerID,
+		client:        client,
+		credentials:   credentials,
+		toolDiscovery: toolDiscovery,
 	}
 }
 
 // NewRuntime builds a complete Anthropic provider runtime.
-func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	executor := NewBackendAdapter(providerID, client, credentials)
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
+	executor := NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials, provider.ToolDiscoveryNative)
 	return providersruntime.ProviderRuntimeBundle{
-		ProviderID:         providerID,
+		ProviderID:         profile.ProviderSpecAnthropic,
 		BackendResolver:    executor,
 		CredentialProvider: credentials,
 		Discovery:          executor,
@@ -63,9 +65,10 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
-		Target:    target.Clone(),
-		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
-		Transport: provider.BindTransport(target, e.Send),
+		Target:        target.Clone(),
+		Codec:         protocolcodec.Codec{Protocol: protocolkind.Messages},
+		Transport:     provider.BindTransport(target, e.Send),
+		ToolDiscovery: e.toolDiscovery,
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

@@ -3,8 +3,10 @@
 Configure AWS Bedrock Mantle in Swobu Cockpit by selecting a region and an API
 URL. Region is selected and persisted explicitly; process region variables never
 become route state. The API URL is the complete Bedrock base URL including its
-AWS namespace (`/v1`, `/openai/v1`, or `/anthropic/v1`); it defaults from region
-and may be edited. Swobu appends only the protocol operation
+AWS namespace (`/v1`, `/openai/v1`, or `/anthropic/v1`). It is required because
+AWS publishes model-dependent inference namespaces and Swobu does not infer one
+from model identity. Paste the API URL shown by AWS for the selected model.
+Swobu appends only the protocol operation
 (`/responses`, `/chat/completions`, `/messages`).
 
 Authentication precedence is:
@@ -29,7 +31,8 @@ Current adapter scope is explicit:
   model); the host may be canonical AWS
   (`bedrock-mantle.<region>.api.aws`), AWS PrivateLink, or custom — all allowed,
   only the first two have a verified SigV4 contract
-- model catalog: Mantle `/v1/models`, derived from the service root
+- model catalog: canonical regional Mantle `/v1/models`, independent from the
+  authored inference endpoint and available before API URL entry
 
 If model loading or authentication fails, record:
 - whether authentication was an explicit target credential or SigV4

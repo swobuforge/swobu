@@ -86,3 +86,72 @@ func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 		t.Fatalf("backend target = %#v, want %#v", backend.Target, target)
 	}
 }
+
+func TestAdvertisedProviderProtocolsDeclareToolDiscoveryAuthority(t *testing.T) {
+	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
+	expected := map[string]provider.ToolDiscoveryMode{
+		"ollama/chat_completions": provider.ToolDiscoveryPolyfill, "ollama/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"openai/responses": provider.ToolDiscoveryNative, "openai/responses_stream": provider.ToolDiscoveryNative,
+		"openai/chat_completions": provider.ToolDiscoveryPolyfill, "openai/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"chatgpt/responses_stream": provider.ToolDiscoveryPolyfill,
+		"anthropic/messages":       provider.ToolDiscoveryNative, "anthropic/messages_stream": provider.ToolDiscoveryNative,
+		"deepseek/messages_stream": provider.ToolDiscoveryPolyfill,
+		"openrouter/responses":     provider.ToolDiscoveryPolyfill, "openrouter/responses_stream": provider.ToolDiscoveryPolyfill,
+		"openrouter/chat_completions": provider.ToolDiscoveryPolyfill, "openrouter/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"zai/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"bedrock/responses":           provider.ToolDiscoveryPolyfill, "bedrock/responses_stream": provider.ToolDiscoveryPolyfill,
+		"bedrock/chat_completions": provider.ToolDiscoveryPolyfill, "bedrock/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"bedrock/messages": provider.ToolDiscoveryPolyfill, "bedrock/messages_stream": provider.ToolDiscoveryPolyfill,
+		"azure/responses": provider.ToolDiscoveryNative, "azure/responses_stream": provider.ToolDiscoveryNative,
+		"azure/chat_completions": provider.ToolDiscoveryPolyfill, "azure/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"azure/messages": provider.ToolDiscoveryPolyfill, "azure/messages_stream": provider.ToolDiscoveryPolyfill,
+		"custom/responses": provider.ToolDiscoveryPolyfill, "custom/responses_stream": provider.ToolDiscoveryPolyfill,
+		"custom/chat_completions": provider.ToolDiscoveryPolyfill, "custom/chat_completions_stream": provider.ToolDiscoveryPolyfill,
+		"custom/messages": provider.ToolDiscoveryPolyfill, "custom/messages_stream": provider.ToolDiscoveryPolyfill,
+	}
+	seen := make(map[string]struct{}, len(expected))
+	for _, manifest := range profile.All() {
+		resolver, ok := registry.BackendResolver(manifest.ProviderID)
+		if !ok {
+			t.Fatalf("provider %q has no backend resolver", manifest.ProviderID)
+		}
+		for _, protocol := range manifest.ProviderProtocols {
+			key := string(manifest.ProviderID) + "/" + protocol.Name
+			want, ok := expected[key]
+			if !ok {
+				t.Fatalf("advertised provider protocol %q has no expected tool-discovery authority", key)
+			}
+			target := advertisedProtocolTarget(manifest.ProviderID, protocol)
+			backend, err := resolver.ResolveBackend(target)
+			if err != nil {
+				t.Fatalf("ResolveBackend(%s): %v", key, err)
+			}
+			if backend.ToolDiscovery == provider.ToolDiscoveryUnspecified || backend.ToolDiscovery != want {
+				t.Fatalf("%s tool discovery = %v, want %v", key, backend.ToolDiscovery, want)
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	for key := range expected {
+		if _, ok := seen[key]; !ok {
+			t.Fatalf("tool-discovery expectation %q no longer matches an advertised provider protocol", key)
+		}
+	}
+}
+
+func advertisedProtocolTarget(providerID profile.ProviderID, protocol profile.ProviderProtocolSpec) provider.TargetSnapshot {
+	const credentialRef = "credential"
+	var target provider.TargetSnapshot
+	switch providerID {
+	case profile.ProviderSpecBedrock:
+		target = provider.NewBedrockTargetSnapshot("target", "https://bedrock-mantle.eu-west-2.api.aws", credentialRef, protocol.Kind, protocol.Frame, protocol.Name, "eu-west-2")
+	case profile.ProviderSpecCustom:
+		target = provider.NewCustomTargetSnapshot("target", "https://example.test/v1", credentialRef, protocol.Kind, protocol.Frame, protocol.Name, "Authorization")
+	case profile.ProviderSpecAzure:
+		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.openai.azure.com", credentialRef, protocol.Kind, protocol.Frame, protocol.Name)
+	default:
+		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.test/v1", credentialRef, protocol.Kind, protocol.Frame, protocol.Name)
+	}
+	target.Model = "model"
+	return target
+}

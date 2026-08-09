@@ -59,7 +59,7 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"chatgpt":    {"", Connection{ChatGPT: &CredentialConnection{Credential: "secretfile:chatgpt/default"}}, routing.ProviderChatGPT},
 		"ollama":     {"chat_completions", Connection{Ollama: &OllamaConnection{}}, routing.ProviderOllama},
 		"azure":      {"responses", Connection{Azure: &AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/prod", Credential: "env:AZURE_KEY"}}, routing.ProviderAzure},
-		"bedrock":    {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2"}}, routing.ProviderBedrock},
+		"bedrock":    {"responses_stream", Connection{Bedrock: &BedrockConnection{Region: "eu-west-2", Endpoint: "https://bedrock-mantle.eu-west-2.api.aws/v1"}}, routing.ProviderBedrock},
 		"custom":     {"chat_completions", Connection{Custom: &CustomConnection{BaseURL: "https://example.test/v1", Header: &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}}}, routing.ProviderCustom},
 	} {
 		t.Run(name, func(t *testing.T) {

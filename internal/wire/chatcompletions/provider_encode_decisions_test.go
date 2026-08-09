@@ -43,8 +43,8 @@ func deferredChatRequest(t *testing.T) canonical.CanonicalRequest {
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{tool})
-	refinements, _ := canonical.NewResponsesToolRefinements(set, []canonical.ToolKey{key})
-	item, _ := canonical.NewToolDeclarationsItemWithResponses(set, canonical.ContextScopeRequest, refinements)
+	refinements, _ := canonical.NewToolVisibilityRefinements(set, []canonical.ToolKey{key})
+	item, _ := canonical.NewToolDeclarationsItemWithVisibility(set, canonical.ContextScopeRequest, refinements)
 	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item, canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}})
 }
 

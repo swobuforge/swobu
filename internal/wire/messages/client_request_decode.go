@@ -80,7 +80,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto messag
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	tools, err := decodeMessagesTools(dto.Tools, changeLog, exchangeID)
+	tools, deferredTools, err := decodeMessagesTools(dto.Tools, changeLog, exchangeID)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -166,7 +166,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto messag
 		params.Items = append(params.Items, directive)
 	}
 	if len(tools) > 0 {
-		declarations, err := canonical.NewToolDeclarationsItem(toolSet, canonical.ContextScopeRequest)
+		visibility, err := canonical.NewToolVisibilityRefinements(toolSet, deferredTools)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("messages deferred tools are invalid")
+		}
+		declarations, err := canonical.NewToolDeclarationsItemWithVisibility(toolSet, canonical.ContextScopeRequest, visibility)
 		if err != nil {
 			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 		}
@@ -302,7 +306,35 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			}
 			decoded = append(decoded, item)
 		case "server_tool_use":
-			if strings.TrimSpace(part.Name) != "web_search" { // swobu:io-string source=boundary
+			name := strings.TrimSpace(part.Name) // swobu:io-string source=boundary
+			if name == toolSearchRegexName || name == toolSearchNaturalLanguageName {
+				if author != canonical.MessageRoleAssistant {
+					return canonical.BadRequest("messages server_tool_use blocks require assistant role")
+				}
+				if err := flushMessage(); err != nil {
+					return err
+				}
+				toolUseID := strings.TrimSpace(part.ID)
+				if toolUseID == "" {
+					return canonical.BadRequest("messages server_tool_use parts require an id")
+				}
+				if _, err := messagesProviderDiscoveryFromDeclarations(tools, name); err != nil {
+					return canonical.BadRequest("messages server_tool_use does not match a declared discovery tool")
+				}
+				input, err := canonical.ParseJSONObject(part.Input)
+				if err != nil {
+					return canonical.BadRequest("messages server_tool_use input is invalid")
+				}
+				callID, _ := canonical.NewToolCallID(toolUseID)
+				item, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider)
+				if err != nil {
+					return canonical.BadRequest("messages server_tool_use is invalid")
+				}
+				decoded = append(decoded, item)
+				pending = append(pending, toolUseID)
+				return nil
+			}
+			if name != "web_search" {
 				return appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(msgIdx), Part: uint32(partIdx)}))
 			}
 			if author != canonical.MessageRoleAssistant {
@@ -357,6 +389,20 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 			})
 			if err != nil {
 				return canonical.BadRequest("messages web_search_tool_result is invalid")
+			}
+			decoded = append(decoded, item)
+			pending = removePendingToolUseID(pending, toolUseID)
+		case "tool_search_tool_result":
+			if err := flushMessage(); err != nil {
+				return err
+			}
+			toolUseID := strings.TrimSpace(part.ToolUseID)
+			if toolUseID == "" {
+				return canonical.BadRequest("messages tool_search_tool_result requires tool_use_id")
+			}
+			item, err := decodeMessagesClientDiscoveryResult(tools, toolUseID, part.Content)
+			if err != nil {
+				return canonical.BadRequest("messages tool_search_tool_result is invalid")
 			}
 			decoded = append(decoded, item)
 			pending = removePendingToolUseID(pending, toolUseID)
@@ -493,45 +539,139 @@ func decodeMessagesImageSource(raw json.RawMessage, limits shared.ImageDecodeLim
 	}
 }
 
-func decodeMessagesTools(tools []ProviderRequestTool, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
+func decodeMessagesTools(tools []ProviderRequestTool, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, []canonical.ToolKey, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make([]canonical.ToolDeclaration, 0, len(tools))
+	deferred := make([]canonical.ToolKey, 0)
 	for index, tool := range tools {
-		if strings.HasPrefix(strings.TrimSpace(tool.Type), "web_search_") { // swobu:io-string source=boundary
-			declaration, err := decodeMessagesWebSearchTool(tool)
+		kind := strings.TrimSpace(tool.Type)
+		if kind == toolSearchRegexType || kind == toolSearchNaturalLanguageType {
+			if tool.DeferLoading {
+				return nil, nil, canonical.BadRequest("messages discovery tool cannot be deferred")
+			}
+			declaration, err := decodeMessagesDiscoveryTool(tool)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			out = append(out, declaration)
 			continue
 		}
-		if kind := strings.TrimSpace(tool.Type); kind != "" && kind != "custom" { // swobu:io-string source=boundary
+		if strings.HasPrefix(strings.TrimSpace(tool.Type), "web_search_") { // swobu:io-string source=boundary
+			declaration, err := decodeMessagesWebSearchTool(tool)
+			if err != nil {
+				return nil, nil, err
+			}
+			out = append(out, declaration)
+			if tool.DeferLoading {
+				deferred = append(deferred, declaration.Key())
+			}
+			continue
+		}
+		if kind != "" && kind != "custom" { // swobu:io-string source=boundary
 			if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission, canonical.ToolIndexOccurrence(uint32(index))); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			continue
 		}
 		schema, err := messagesToolSchemaFromWire(tool.InputSchema)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		name := strings.TrimSpace(tool.Name) // swobu:io-string source=boundary
 		if name == "" {
-			return nil, canonical.BadRequest("messages request tool declarations require a name")
+			return nil, nil, canonical.BadRequest("messages request tool declarations require a name")
 		}
 		id, err := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		declaration, err := canonical.NewFunctionTool(id, tool.Description, schema, canonical.Unspecified[bool]())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, declaration)
+		if tool.DeferLoading {
+			deferred = append(deferred, declaration.Key())
+		}
 	}
-	return out, nil
+	return out, deferred, nil
+}
+
+func decodeMessagesDiscoveryTool(tool ProviderRequestTool) (canonical.ToolDeclaration, error) {
+	queryKind := canonical.ToolDiscoveryQueryRegex
+	schemaRaw := `{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`
+	if strings.TrimSpace(tool.Type) == toolSearchNaturalLanguageType {
+		queryKind = canonical.ToolDiscoveryQueryNaturalLanguage
+		schemaRaw = `{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`
+	}
+	object, err := canonical.ParseJSONObject([]byte(schemaRaw))
+	if err != nil {
+		return canonical.ToolDeclaration{}, canonical.InternalError("messages discovery schema is invalid")
+	}
+	return canonical.NewToolDiscoveryToolWithQuery(tool.Description, canonical.NewToolSchemaObject(object), canonical.DiscoveryExecutorProvider, queryKind)
+}
+
+func messagesProviderDiscoveryFromDeclarations(tools []canonical.ToolDeclaration, name string) (canonical.ToolDiscoveryTool, error) {
+	for _, declaration := range tools {
+		discovery, ok := declaration.Discovery()
+		if !ok || discovery.Executor() != canonical.DiscoveryExecutorProvider {
+			continue
+		}
+		wireName, err := messagesProviderDiscoveryName(discovery)
+		if err == nil && wireName == name {
+			return discovery, nil
+		}
+	}
+	return canonical.ToolDiscoveryTool{}, canonical.BadRequest("messages discovery declaration is missing")
+}
+
+func decodeMessagesClientDiscoveryResult(tools []canonical.ToolDeclaration, rawCallID string, raw json.RawMessage) (canonical.CanonicalItem, error) {
+	callID, err := canonical.NewToolCallID(rawCallID)
+	if err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	var content struct {
+		Type           string `json:"type"`
+		ErrorCode      string `json:"error_code"`
+		ErrorMessage   string `json:"error_message"`
+		ToolReferences []struct {
+			Type     string `json:"type"`
+			ToolName string `json:"tool_name"`
+		} `json:"tool_references"`
+	}
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	if content.Type == "tool_search_tool_result_error" {
+		code := canonical.Unspecified[string]()
+		if strings.TrimSpace(content.ErrorCode) != "" {
+			code = canonical.Specify(strings.TrimSpace(content.ErrorCode))
+		}
+		return canonical.NewToolDiscoveryFailureItem(callID, canonical.DiscoveryExecutorProvider, code, content.ErrorMessage)
+	}
+	if content.Type != "tool_search_tool_search_result" {
+		return canonical.CanonicalItem{}, canonical.BadRequest("messages discovery result type is invalid")
+	}
+	loaded := make([]canonical.ToolDeclaration, 0, len(content.ToolReferences))
+	for _, reference := range content.ToolReferences {
+		key, err := canonical.ResolveHistoricalToolKeyByName(tools, strings.TrimSpace(reference.ToolName), canonical.ToolKindFunction)
+		if err != nil {
+			return canonical.CanonicalItem{}, err
+		}
+		for _, declaration := range tools {
+			if declaration.Key() == key {
+				loaded = append(loaded, declaration)
+				break
+			}
+		}
+	}
+	set, err := canonical.NewToolSet(loaded)
+	if err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	return canonical.NewToolDiscoveryResultItem(callID, set, canonical.DiscoveryExecutorProvider)
 }
 
 func decodeMessagesWebSearchTool(tool ProviderRequestTool) (canonical.ToolDeclaration, error) {

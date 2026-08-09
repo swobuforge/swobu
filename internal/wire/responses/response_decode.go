@@ -291,11 +291,11 @@ func decodeCompletedResponsesItemSetAtIndexes(
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output tools are ambiguous")
 			}
-			refinements, err := canonical.NewResponsesToolRefinements(set, projected.deferred)
+			refinements, err := canonical.NewToolVisibilityRefinements(set, projected.deferred)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output deferred tools are invalid")
 			}
-			result, err := canonical.NewToolDiscoveryResultItemWithResponsesWireID(callID, set, executor, refinements, wireIDNull)
+			result, err := canonical.NewToolDiscoveryResultItemWithVisibilityWireID(callID, set, executor, refinements, wireIDNull)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool discovery output is invalid")
 			}

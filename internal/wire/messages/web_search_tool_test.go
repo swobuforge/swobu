@@ -41,7 +41,7 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 }
 
 func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
-	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, "")
+	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

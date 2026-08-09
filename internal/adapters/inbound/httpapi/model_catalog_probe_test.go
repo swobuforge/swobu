@@ -73,7 +73,11 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "bedrock" || stub.attempts[0].CredentialRef != "env:AWS_BEARER_TOKEN_BEDROCK" {
+	if len(stub.attempts) != 1 ||
+		stub.attempts[0].ProviderSpec != "bedrock" ||
+		stub.attempts[0].BaseURL != "" ||
+		stub.attempts[0].BedrockRegion() != "eu-west-2" ||
+		stub.attempts[0].CredentialRef != "env:AWS_BEARER_TOKEN_BEDROCK" {
 		t.Fatalf("attempts = %#v", stub.attempts)
 	}
 	var out TargetProbeResult

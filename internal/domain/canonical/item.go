@@ -69,9 +69,9 @@ type MessageItem struct {
 // ToolDeclarationsItem is one ordered contribution to the model-visible tool
 // environment. Its scope belongs to this occurrence, not to the ToolSet.
 type ToolDeclarationsItem struct {
-	tools     ToolSet
-	scope     ContextScope
-	responses ResponsesToolRefinements
+	tools      ToolSet
+	scope      ContextScope
+	visibility ToolVisibilityRefinements
 }
 
 // ToolCallID is the canonical correlation identity shared by one tool call and
@@ -145,40 +145,47 @@ type ToolResultItem struct {
 type ToolDiscoveryResultItem struct {
 	callID              ToolCallID
 	tools               ToolSet
+	failure             *ToolDiscoveryFailure
 	executor            DiscoveryExecutor
-	responses           ResponsesToolRefinements
+	visibility          ToolVisibilityRefinements
 	responsesNullCallID bool
 }
 
-// ResponsesToolRefinements owns Responses-only visibility facts for one
-// declaration occurrence. Keys must name declarations inside that occurrence;
-// permanent callable contracts remain protocol-neutral.
-type ResponsesToolRefinements struct {
+// ToolDiscoveryFailure is one typed failed discovery outcome. The provider's
+// code remains opaque while failure versus successful zero matches is portable.
+type ToolDiscoveryFailure struct {
+	code    Specified[string]
+	message string
+}
+
+// ToolVisibilityRefinements owns occurrence-local deferred visibility shared
+// by native Responses and Messages lowering.
+type ToolVisibilityRefinements struct {
 	deferred map[ToolKey]struct{}
 }
 
-// NewResponsesToolRefinements validates one occurrence-local deferred set.
-func NewResponsesToolRefinements(tools ToolSet, deferred []ToolKey) (ResponsesToolRefinements, error) {
-	known := callableToolKeys(tools)
-	refinement := ResponsesToolRefinements{deferred: make(map[ToolKey]struct{}, len(deferred))}
+// NewToolVisibilityRefinements validates one occurrence-local deferred set.
+func NewToolVisibilityRefinements(tools ToolSet, deferred []ToolKey) (ToolVisibilityRefinements, error) {
+	known := deferrableToolKeys(tools)
+	refinement := ToolVisibilityRefinements{deferred: make(map[ToolKey]struct{}, len(deferred))}
 	for _, key := range deferred {
-		if key.IsZero() || (key.Kind() != ToolKindFunction && key.Kind() != ToolKindCustom) {
-			return ResponsesToolRefinements{}, fmt.Errorf("Responses deferred tool refinement requires a callable key")
+		if key.IsZero() || !deferrableToolKind(key.Kind()) {
+			return ToolVisibilityRefinements{}, fmt.Errorf("deferred tool visibility requires a deferrable tool key")
 		}
 		if _, ok := known[key]; !ok {
-			return ResponsesToolRefinements{}, fmt.Errorf("Responses deferred tool refinement references an undeclared tool")
+			return ToolVisibilityRefinements{}, fmt.Errorf("deferred tool visibility references an undeclared tool")
 		}
 		refinement.deferred[key.Clone()] = struct{}{}
 	}
 	return refinement, nil
 }
 
-func callableToolKeys(tools ToolSet) map[ToolKey]struct{} {
+func deferrableToolKeys(tools ToolSet) map[ToolKey]struct{} {
 	known := make(map[ToolKey]struct{})
 	var observe func([]ToolDeclaration)
 	observe = func(declarations []ToolDeclaration) {
 		for _, declaration := range declarations {
-			if declaration.Kind() == ToolKindFunction || declaration.Kind() == ToolKindCustom {
+			if deferrableToolKind(declaration.Kind()) {
 				known[declaration.Key()] = struct{}{}
 			}
 			if namespace, ok := declaration.Namespace(); ok {
@@ -190,12 +197,16 @@ func callableToolKeys(tools ToolSet) map[ToolKey]struct{} {
 	return known
 }
 
-func (r ResponsesToolRefinements) Deferred(key ToolKey) bool {
+func deferrableToolKind(kind ToolKind) bool {
+	return kind == ToolKindFunction || kind == ToolKindCustom || kind == ToolKindWebSearch
+}
+
+func (r ToolVisibilityRefinements) Deferred(key ToolKey) bool {
 	_, ok := r.deferred[key]
 	return ok
 }
 
-func (r ResponsesToolRefinements) DeferredKeys() []ToolKey {
+func (r ToolVisibilityRefinements) DeferredKeys() []ToolKey {
 	keys := make([]ToolKey, 0, len(r.deferred))
 	for key := range r.deferred {
 		keys = append(keys, key.Clone())
@@ -203,8 +214,8 @@ func (r ResponsesToolRefinements) DeferredKeys() []ToolKey {
 	return keys
 }
 
-func (r ResponsesToolRefinements) Clone() ResponsesToolRefinements {
-	cloned := ResponsesToolRefinements{deferred: make(map[ToolKey]struct{}, len(r.deferred))}
+func (r ToolVisibilityRefinements) Clone() ToolVisibilityRefinements {
+	cloned := ToolVisibilityRefinements{deferred: make(map[ToolKey]struct{}, len(r.deferred))}
 	for key := range r.deferred {
 		cloned.deferred[key.Clone()] = struct{}{}
 	}
@@ -281,20 +292,20 @@ func NewScopedMessageItem(role MessageRole, content []MessagePart, scope Context
 
 // NewToolDeclarationsItem constructs one ordered declaration contribution.
 func NewToolDeclarationsItem(tools ToolSet, scope ContextScope) (CanonicalItem, error) {
-	return NewToolDeclarationsItemWithResponses(tools, scope, ResponsesToolRefinements{})
+	return NewToolDeclarationsItemWithVisibility(tools, scope, ToolVisibilityRefinements{})
 }
 
-// NewToolDeclarationsItemWithResponses constructs a declaration contribution
-// with occurrence-local Responses refinements.
-func NewToolDeclarationsItemWithResponses(tools ToolSet, scope ContextScope, responses ResponsesToolRefinements) (CanonicalItem, error) {
+// NewToolDeclarationsItemWithVisibility constructs a declaration contribution
+// with occurrence-local visibility refinements.
+func NewToolDeclarationsItemWithVisibility(tools ToolSet, scope ContextScope, visibility ToolVisibilityRefinements) (CanonicalItem, error) {
 	if !validContextScope(scope) {
 		return CanonicalItem{}, fmt.Errorf("canonical tool declaration context scope is invalid")
 	}
-	validated, err := NewResponsesToolRefinements(tools, responses.DeferredKeys())
+	validated, err := NewToolVisibilityRefinements(tools, visibility.DeferredKeys())
 	if err != nil {
 		return CanonicalItem{}, err
 	}
-	item := ToolDeclarationsItem{tools: tools.Clone(), scope: scope, responses: validated}
+	item := ToolDeclarationsItem{tools: tools.Clone(), scope: scope, visibility: validated}
 	return CanonicalItem{toolDeclarations: &item}, nil
 }
 
@@ -389,29 +400,39 @@ func NewToolResultItem(callID ToolCallID, content []ToolResultPart, isError bool
 // NewToolDiscoveryResultItem constructs one correlated declaration-loading
 // result. The loaded declarations are historical facts at this position.
 func NewToolDiscoveryResultItem(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor) (CanonicalItem, error) {
-	return NewToolDiscoveryResultItemWithResponses(callID, tools, executor, ResponsesToolRefinements{})
+	return NewToolDiscoveryResultItemWithVisibility(callID, tools, executor, ToolVisibilityRefinements{})
 }
 
-// NewToolDiscoveryResultItemWithResponses constructs one loaded declaration
-// occurrence with its exact Responses visibility refinements.
-func NewToolDiscoveryResultItemWithResponses(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, responses ResponsesToolRefinements) (CanonicalItem, error) {
-	return NewToolDiscoveryResultItemWithResponsesWireID(callID, tools, executor, responses, false)
+// NewToolDiscoveryResultItemWithVisibility constructs one loaded declaration
+// occurrence with its exact visibility refinements.
+func NewToolDiscoveryResultItemWithVisibility(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, visibility ToolVisibilityRefinements) (CanonicalItem, error) {
+	return NewToolDiscoveryResultItemWithVisibilityWireID(callID, tools, executor, visibility, false)
 }
 
-// NewToolDiscoveryResultItemWithResponsesWireID preserves an absent hosted
+// NewToolDiscoveryResultItemWithVisibilityWireID preserves an absent hosted
 // Responses wire ID without weakening portable correlation.
-func NewToolDiscoveryResultItemWithResponsesWireID(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, responses ResponsesToolRefinements, wireCallIDNull bool) (CanonicalItem, error) {
+func NewToolDiscoveryResultItemWithVisibilityWireID(callID ToolCallID, tools ToolSet, executor DiscoveryExecutor, visibility ToolVisibilityRefinements, wireCallIDNull bool) (CanonicalItem, error) {
 	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
 		return CanonicalItem{}, fmt.Errorf("canonical tool discovery result requires a call id")
 	}
 	if wireCallIDNull && executor != DiscoveryExecutorProvider {
 		return CanonicalItem{}, fmt.Errorf("only provider-executed Responses discovery may omit its wire call id")
 	}
-	validated, err := NewResponsesToolRefinements(tools, responses.DeferredKeys())
+	validated, err := NewToolVisibilityRefinements(tools, visibility.DeferredKeys())
 	if err != nil {
 		return CanonicalItem{}, err
 	}
-	result := ToolDiscoveryResultItem{callID: callID, tools: tools.Clone(), executor: executor, responses: validated, responsesNullCallID: wireCallIDNull}
+	result := ToolDiscoveryResultItem{callID: callID, tools: tools.Clone(), executor: executor, visibility: validated, responsesNullCallID: wireCallIDNull}
+	return CanonicalItem{toolDiscoveryResult: &result}, nil
+}
+
+// NewToolDiscoveryFailureItem constructs one completed failed discovery.
+func NewToolDiscoveryFailureItem(callID ToolCallID, executor DiscoveryExecutor, code Specified[string], message string) (CanonicalItem, error) {
+	if callID.IsZero() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
+		return CanonicalItem{}, fmt.Errorf("canonical tool discovery failure requires a call id")
+	}
+	failure := ToolDiscoveryFailure{code: cloneSpecified(code, func(value string) string { return strings.TrimSpace(value) }), message: strings.TrimSpace(message)}
+	result := ToolDiscoveryResultItem{callID: callID, executor: executor, failure: &failure}
 	return CanonicalItem{toolDiscoveryResult: &result}, nil
 }
 
@@ -616,11 +637,11 @@ func (m MessageItem) Clone() MessageItem {
 	return MessageItem{role: m.role, content: cloneMessageParts(m.content), scope: m.scope}
 }
 
-func (d ToolDeclarationsItem) Tools() ToolSet                      { return d.tools.Clone() }
-func (d ToolDeclarationsItem) Scope() ContextScope                 { return d.scope }
-func (d ToolDeclarationsItem) Responses() ResponsesToolRefinements { return d.responses.Clone() }
+func (d ToolDeclarationsItem) Tools() ToolSet                        { return d.tools.Clone() }
+func (d ToolDeclarationsItem) Scope() ContextScope                   { return d.scope }
+func (d ToolDeclarationsItem) Visibility() ToolVisibilityRefinements { return d.visibility.Clone() }
 func (d ToolDeclarationsItem) Clone() ToolDeclarationsItem {
-	return ToolDeclarationsItem{tools: d.tools.Clone(), scope: d.scope, responses: d.responses.Clone()}
+	return ToolDeclarationsItem{tools: d.tools.Clone(), scope: d.scope, visibility: d.visibility.Clone()}
 }
 
 func (c ToolCallItem) CallID() ToolCallID { return c.callID }
@@ -684,13 +705,50 @@ func (r ToolResultItem) Clone() ToolResultItem {
 	}
 	return ToolResultItem{}
 }
-func (r ToolDiscoveryResultItem) CallID() ToolCallID                  { return r.callID }
-func (r ToolDiscoveryResultItem) Tools() ToolSet                      { return r.tools.Clone() }
-func (r ToolDiscoveryResultItem) Executor() DiscoveryExecutor         { return r.executor }
-func (r ToolDiscoveryResultItem) Responses() ResponsesToolRefinements { return r.responses.Clone() }
-func (r ToolDiscoveryResultItem) ResponsesCallIDNull() bool           { return r.responsesNullCallID }
+func (r ToolDiscoveryResultItem) CallID() ToolCallID                    { return r.callID }
+func (r ToolDiscoveryResultItem) Tools() ToolSet                        { return r.tools.Clone() }
+func (r ToolDiscoveryResultItem) Executor() DiscoveryExecutor           { return r.executor }
+func (r ToolDiscoveryResultItem) Visibility() ToolVisibilityRefinements { return r.visibility.Clone() }
+func (r ToolDiscoveryResultItem) ResponsesCallIDNull() bool             { return r.responsesNullCallID }
+func (r ToolDiscoveryResultItem) Failure() (ToolDiscoveryFailure, bool) {
+	if r.failure == nil {
+		return ToolDiscoveryFailure{}, false
+	}
+	return r.failure.Clone(), true
+}
+
+// WithTools replaces only the successful discovery payload. Failed discovery
+// is an atomic outcome and therefore ignores declaration transforms rather
+// than becoming a successful result with fabricated tools.
+func (r ToolDiscoveryResultItem) WithTools(tools ToolSet) (ToolDiscoveryResultItem, error) {
+	if r.failure != nil {
+		return r.Clone(), nil
+	}
+	visibility, err := retainToolVisibilityRefinements(tools, r.Visibility())
+	if err != nil {
+		return ToolDiscoveryResultItem{}, err
+	}
+	item, err := NewToolDiscoveryResultItemWithVisibilityWireID(r.CallID(), tools, r.Executor(), visibility, r.ResponsesCallIDNull())
+	if err != nil {
+		return ToolDiscoveryResultItem{}, err
+	}
+	result, _ := item.ToolDiscoveryResult()
+	return result, nil
+}
 func (r ToolDiscoveryResultItem) Clone() ToolDiscoveryResultItem {
-	return ToolDiscoveryResultItem{callID: r.callID, tools: r.tools.Clone(), executor: r.executor, responses: r.responses.Clone(), responsesNullCallID: r.responsesNullCallID}
+	cloned := ToolDiscoveryResultItem{callID: r.callID, tools: r.tools.Clone(), executor: r.executor, visibility: r.visibility.Clone(), responsesNullCallID: r.responsesNullCallID}
+	if r.failure != nil {
+		failure := r.failure.Clone()
+		cloned.failure = &failure
+	}
+	return cloned
+}
+func (f ToolDiscoveryFailure) Code() Specified[string] {
+	return cloneSpecified(f.code, func(value string) string { return value })
+}
+func (f ToolDiscoveryFailure) Message() string { return f.message }
+func (f ToolDiscoveryFailure) Clone() ToolDiscoveryFailure {
+	return ToolDiscoveryFailure{code: f.Code(), message: f.message}
 }
 func (p ReasoningPart) Kind() ReasoningPartKind { return p.kind }
 func (p ReasoningPart) Text() string            { return p.text }

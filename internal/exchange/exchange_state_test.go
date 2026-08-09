@@ -51,17 +51,19 @@ func (r bedrockStructuredFallbackRuntime) ResolveBackend(target provider.TargetS
 		return backend, nil
 	}
 	return provider.Backend{
-		Target:    target,
-		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport: provider.BindTransport(target, r.transport),
+		Target:        target,
+		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport:     provider.BindTransport(target, r.transport),
+		ToolDiscovery: provider.ToolDiscoveryPolyfill,
 	}, nil
 }
 
 func (r protocolProjectionRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:    target,
-		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport: provider.BindTransport(target, r.transport),
+		Target:        target,
+		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport:     provider.BindTransport(target, r.transport),
+		ToolDiscovery: provider.ToolDiscoveryPolyfill,
 	}, nil
 }
 
@@ -1177,7 +1179,7 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 	targetID, _ := routing.ParseTargetID("mantle-a")
 	model, _ := routing.ParseUpstreamModel("model-a")
 	region, _ := routing.ParseBedrockRegion("us-east-1")
-	connection, err := routing.NewBedrockConnection(region, "", "")
+	connection, err := routing.NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

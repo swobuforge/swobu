@@ -28,6 +28,7 @@ const azureDeploymentListPath = "/deployments?api-version=v1&deploymentType=Mode
 type azureBackendAdapter struct {
 	openAI    openaifamily.BackendAdapter
 	anthropic anthropicprovider.BackendAdapter
+	policy    providerRoutePolicy
 }
 
 type azureProviderModelCatalogClient struct {
@@ -72,9 +73,11 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	if client == nil {
 		client = http.DefaultClient
 	}
+	policy := providerRoutePolicy{}
 	router := azureBackendAdapter{
-		openAI:    openaifamily.NewExecutor(client, credentials, NewPolicy()),
-		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials),
+		openAI:    openaifamily.NewExecutor(client, credentials, policy),
+		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials, provider.ToolDiscoveryPolyfill),
+		policy:    policy,
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
@@ -93,7 +96,7 @@ func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (pro
 		return provider.Backend{}, canonical.BadEndpoint("azure resource locator is required")
 	}
 	codec := protocolcodec.Codec{Protocol: target.ProtocolKind}
-	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, r.Send)}
+	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, r.Send), ToolDiscovery: r.policy.ToolDiscovery(target.ProtocolKind)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

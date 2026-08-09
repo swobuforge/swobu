@@ -220,7 +220,8 @@ func (w *TargetConfig) readyToCreate() bool {
 	protocolReady := w.derivesProviderProtocol() || strings.TrimSpace(w.Draft.Get().ProviderProtocol) != ""
 	return w.setupState().Ready() &&
 		w.modelSelectionValidated() &&
-		protocolReady
+		protocolReady &&
+		validateTargetDraftEndpoint(w.Draft.Get()) == nil
 }
 
 func (w *TargetConfig) modelSelectionValidated() bool {

@@ -15,7 +15,7 @@ func TestEncodeHistoricalToolCallUsesStoredNamespacedKeyWithoutCurrentTools(t *t
 	names := testAttemptToolNames(request)
 	want, _ := names.WireName(key)
 
-	got, err := encodeMessagesToolCall(item, names)
+	got, err := encodeMessagesToolCall(item, nil, names)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -78,17 +78,17 @@ func TestOfficialResponsesLoweringKeepsDuplicateNamespaceLeavesDistinct(t *testi
 	}
 }
 
-func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndEagerVisibility(t *testing.T) {
+func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndNativeVisibility(t *testing.T) {
 	request := responsesFunctionNamespaceRequest(t)
 	declarations := canonicaltest.Tools(request)
 	namespace, _ := declarations[0].Namespace()
 	child := namespace.Tools()[0]
 	set, _ := canonical.NewToolSet(declarations)
-	refinements, err := canonical.NewResponsesToolRefinements(set, []canonical.ToolKey{child.Key()})
+	refinements, err := canonical.NewToolVisibilityRefinements(set, []canonical.ToolKey{child.Key()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := canonical.NewToolDeclarationsItemWithResponses(set, canonical.ContextScopeRequest, refinements)
+	item, err := canonical.NewToolDeclarationsItemWithVisibility(set, canonical.ContextScopeRequest, refinements)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,14 +110,14 @@ func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndEagerVisibility(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Tools) != 1 || document.Tools[0].Type != "function" || document.Tools[0].Name != wireName || document.Tools[0].DeferLoading != nil {
+	if len(document.Tools) != 1 || document.Tools[0].Type != "function" || document.Tools[0].Name != wireName || document.Tools[0].DeferLoading == nil || !*document.Tools[0].DeferLoading {
 		t.Fatalf("lowered Responses tools = %#v", document.Tools)
 	}
 	choice, ok := document.ToolChoice.(map[string]any)
 	if !ok || choice["name"] != wireName {
 		t.Fatalf("lowered Responses choice = %#v", document.ToolChoice)
 	}
-	if !hasResponseChange(changes, canonical.RequestTools) || !hasResponseChange(changes, canonical.RequestToolsVisibility) {
+	if !hasResponseChange(changes, canonical.RequestTools) || hasResponseChange(changes, canonical.RequestToolsVisibility) {
 		t.Fatalf("lowered Responses changes = %#v", changes)
 	}
 }

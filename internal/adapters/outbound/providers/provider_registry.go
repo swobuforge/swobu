@@ -35,7 +35,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 	}
 	return newProviderRegistry(profile.All(), []providersruntime.ProviderRuntimeBundle{
 		openai.NewRuntime(client, credentials),
-		anthropic.NewRuntime(profile.ProviderSpecAnthropic, client, credentials),
+		anthropic.NewRuntime(client, credentials),
 		deepseek.NewRuntime(client, credentials),
 		chatgpt.NewRuntime(profile.ProviderSpecChatGPT, client, credentials),
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),

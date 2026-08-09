@@ -16,12 +16,28 @@ type TargetSetupQueries interface {
 	ProbeProviderModels(ctx context.Context, req ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error)
 }
 
-// ProbeProviderModelsRequest carries the same valid connection meaning used by
-// target persistence and execution.
 type ProbeProviderModelsRequest struct {
-	Connection       routing.Connection
+	Probe            ProviderCatalogProbe
 	ProviderProtocol string
 }
+
+// ProviderCatalogProbe is the closed set of valid catalog-probe inputs.
+type ProviderCatalogProbe interface{ isProviderCatalogProbe() }
+
+// ConnectionCatalogProbe carries a complete durable connection for providers
+// whose catalog access uses the same target facts as inference.
+type ConnectionCatalogProbe struct{ Connection routing.Connection }
+
+func (ConnectionCatalogProbe) isProviderCatalogProbe() {}
+
+// BedrockCatalogProbe carries the region and authentication needed for regional
+// catalog discovery before an inference endpoint is known.
+type BedrockCatalogProbe struct {
+	Region        string
+	CredentialRef string
+}
+
+func (BedrockCatalogProbe) isProviderCatalogProbe() {}
 
 // TargetAuthCommands manages interactive auth session lifecycle for providers
 // that require browser or device login.

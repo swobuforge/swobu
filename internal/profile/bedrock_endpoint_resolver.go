@@ -13,67 +13,32 @@ import (
 type BedrockEndpointResolution struct {
 	BaseURL          string
 	RequestURL       string
-	CatalogURL       string
 	InputWasComplete bool
 }
 
-// ResolveBedrockEndpoint combines the optional explicit endpoint, authored
-// signing region, and selected protocol into one coherent API base, request URL,
-// and catalog URL. Before protocol selection, one recognized terminal operation
-// is stripped without inferring a protocol. After selection, forgiveness strips
-// only that protocol's operation. A conflicting terminal operation, a catalog
-// URL, a recognized namespace contradiction, or a canonical AWS
-// host/signing-region mismatch is rejected rather than reinterpreted.
-func ResolveBedrockEndpoint(explicitEndpoint, region string, kind protocolkind.ProtocolKind) (BedrockEndpointResolution, error) {
-	trimmed := strings.TrimSpace(explicitEndpoint)
+// ResolveBedrockEndpoint normalizes one operator-authored inference API URL and
+// appends only the selected protocol operation. Region validates canonical AWS
+// hosts and supplies signing authority; it never supplies an inference
+// namespace. Before protocol selection, one recognized terminal operation is
+// stripped without inferring a protocol. A conflicting operation, catalog URL,
+// namespace contradiction, or canonical host/region mismatch is rejected.
+func ResolveBedrockEndpoint(endpoint, region string, kind protocolkind.ProtocolKind) (BedrockEndpointResolution, error) {
+	trimmed := strings.TrimSpace(endpoint)
 	if trimmed == "" {
-		trimmed = bedrockMantleEndpointForProtocol(region, kind)
+		return BedrockEndpointResolution{}, fmt.Errorf("endpoint is required")
 	}
 	return resolvedBedrock(trimmed, region, kind)
 }
 
-// EffectiveBedrockAPIURL projects the normalized API base used for display and
-// editor seeding. Invalid explicit input remains visible verbatim so validation
-// can explain it without blanking the field.
-func EffectiveBedrockAPIURL(region, endpoint string, kind protocolkind.ProtocolKind) string {
-	trimmed := strings.TrimSpace(endpoint)
-	resolution, err := ResolveBedrockEndpoint(trimmed, region, kind)
-	if err != nil || resolution.BaseURL == "" {
-		return trimmed
-	}
-	return resolution.BaseURL
-}
-
-// CanonicalBedrockEndpointIntent returns the explicit-or-empty durable intent
-// after a valid submission. Submitting the protocol-aware regional default
-// restores absent intent; another valid endpoint persists as its normalized API
-// base. Invalid input remains visible for the validator to reject.
-func CanonicalBedrockEndpointIntent(region, endpoint string, kind protocolkind.ProtocolKind) string {
-	trimmed := strings.TrimSpace(endpoint)
-	if trimmed == "" {
-		return ""
-	}
-	resolution, err := ResolveBedrockEndpoint(trimmed, region, kind)
-	if err != nil || resolution.BaseURL == "" {
-		return trimmed
-	}
-	regional, err := ResolveBedrockEndpoint("", region, kind)
-	if err == nil && resolution.BaseURL == regional.BaseURL {
-		return ""
-	}
-	return resolution.BaseURL
-}
-
-func bedrockMantleEndpointForProtocol(region string, kind protocolkind.ProtocolKind) string {
+// BedrockCatalogURL returns the canonical regional Mantle model catalog. The
+// catalog service is region-owned and independent from a model's authored
+// inference namespace.
+func BedrockCatalogURL(region string) string {
 	normalized := strings.TrimSpace(strings.ToLower(region))
 	if normalized == "" {
 		return ""
 	}
-	path := "/v1"
-	if kind == protocolkind.Messages {
-		path = "/anthropic/v1"
-	}
-	return "https://bedrock-mantle." + normalized + ".api.aws" + path
+	return "https://bedrock-mantle." + normalized + ".api.aws/v1/models"
 }
 
 func resolvedBedrock(raw, region string, kind protocolkind.ProtocolKind) (BedrockEndpointResolution, error) {
@@ -126,18 +91,9 @@ func resolvedBedrock(raw, region string, kind protocolkind.ProtocolKind) (Bedroc
 		requestURL = joined.String()
 	}
 
-	root := catalogRootPath(path)
-	catalogURL := ""
-	if root != "" {
-		catalog := baseURL
-		catalog.Path = root + "/models"
-		catalogURL = catalog.String()
-	}
-
 	return BedrockEndpointResolution{
 		BaseURL:          baseURL.String(),
 		RequestURL:       requestURL,
-		CatalogURL:       catalogURL,
 		InputWasComplete: inputWasComplete,
 	}, nil
 }
@@ -165,20 +121,6 @@ func normalizeBedrockOperation(path *string, kind protocolkind.ProtocolKind) (bo
 		return true, nil
 	}
 	return false, nil
-}
-
-func catalogRootPath(basePath string) string {
-	trimmed := strings.TrimRight(basePath, "/")
-	if trimmed == "" {
-		return "/v1"
-	}
-	for _, namespace := range []string{"/openai/v1", "/anthropic/v1", "/v1"} {
-		prefix := strings.TrimSuffix(trimmed, namespace)
-		if prefix != trimmed {
-			return strings.TrimRight(prefix, "/") + "/v1"
-		}
-	}
-	return ""
 }
 
 func namespaceCoherentWithKind(classified bedrockEndpointNamespaceClass, kind protocolkind.ProtocolKind) bool {
