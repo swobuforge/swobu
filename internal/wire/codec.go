@@ -97,7 +97,7 @@ type ToolNames interface {
 
 // EncodeToolName projects one model-referenceable callable at the wire edge.
 func EncodeToolName(names ToolNames, key canonical.ToolKey) (string, error) {
-	if key.Kind() == canonical.ToolKindWebSearch || key.Kind() == canonical.ToolKindDiscovery {
+	if key.Kind() == canonical.ToolKindWebSearch {
 		return key.Name(), nil
 	}
 	if names == nil {

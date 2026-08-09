@@ -1,11 +1,15 @@
 package provider
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestProviderContractsHaveNoResumptionSidecar(t *testing.T) {
@@ -30,4 +34,35 @@ func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 	if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {
 		t.Fatalf("delivery = %#v", req.Delivery)
 	}
+}
+
+func TestBackendRejectsUnspecifiedToolDiscoveryMode(t *testing.T) {
+	target := TargetSnapshot{
+		TargetID: "target", TargetVersion: 1, ProviderSpec: "openai", Model: "m",
+		ProtocolKind: protocolkind.Responses, ProviderProtocol: "responses", SelectedFrame: "http_json_body",
+	}
+	backend := Backend{
+		Target: target,
+		Codec:  testBackendContractCodec{},
+		Transport: TransportFunc(func(context.Context, carrier.Document) (Ingress, error) {
+			return nil, nil
+		}),
+	}
+	if err := backend.Validate(); err == nil {
+		t.Fatal("backend accepted unspecified tool-discovery mode")
+	}
+	backend.ToolDiscovery = ToolDiscoveryPolyfill
+	if err := backend.Validate(); err != nil {
+		t.Fatalf("explicit tool-discovery mode rejected: %v", err)
+	}
+}
+
+type testBackendContractCodec struct{}
+
+func (testBackendContractCodec) Encode(Request) (carrier.Document, []compat.Change, error) {
+	return carrier.Document{}, nil, nil
+}
+
+func (testBackendContractCodec) Decode(context.Context, Request, Ingress) (DecodedResponse, error) {
+	return DecodedResponse{}, nil
 }

@@ -241,6 +241,10 @@ templ (t *targetTail) Render() {
 			@InertTargetField("protocol", "waiting for "+TargetModelLabel(t.root), "")
 		}
 
+		if t.root.IsBedrockFlow() {
+			@BedrockEndpointRow(t.root)
+		}
+
 		if t.root.mode != targetConfigModeEdit {
 			if canChangePlacement(t.root) {
 				@PlacementSelect(t.root)

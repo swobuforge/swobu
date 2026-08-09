@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
@@ -42,19 +43,25 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
 	fetchCache := cloneMediaFetchCache(s.mediaFetchCache)
-	semanticFull := resolved.Request()
-	attemptRequest := semanticFull.Clone()
+	attemptRequest := resolved.Request()
 	if s.mcp != nil {
-		semanticFull, err = s.mcp.AttemptRequest(semanticFull)
-		if err != nil {
-			return providerCall{}, path.target, nil, s.mediaFetchCache, err
-		}
 		attemptRequest, err = s.mcp.AttemptRequest(attemptRequest)
 		if err != nil {
 			return providerCall{}, path.target, nil, s.mediaFetchCache, err
 		}
 	}
-	toolNames, namingChanges, err := provider.BuildAttemptToolNames(semanticFull)
+	projectionChanges := []compat.Change(nil)
+	structuralProjection := false
+	if backend.ToolDiscovery == provider.ToolDiscoveryPolyfill {
+		projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)
+		if projectionErr != nil {
+			return providerCall{}, path.target, nil, s.mediaFetchCache, projectionErr
+		}
+		attemptRequest = projection.Request
+		projectionChanges = projection.Changes
+		structuralProjection = projection.StructuralHistoryChange
+	}
+	toolNames, namingChanges, err := provider.BuildAttemptToolNames(attemptRequest)
 	if err != nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
@@ -79,12 +86,13 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		Context:      preparationCtx,
 		ResolveImage: newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
 	}
-	if selection.requestChoice == providerRequestPreferred {
+	if selection.requestChoice == providerRequestPreferred && !structuralProjection {
 		if id, start, end, ok := resolved.ResponsesPrevious(path.target.TargetID, path.target.TargetVersion); ok {
 			providerRequest.ResponsesPrevious = &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}
 		}
 	}
-	requestChanges := compat.CloneChanges(namingChanges)
+	requestChanges := compat.CloneChanges(projectionChanges)
+	requestChanges = append(requestChanges, namingChanges...)
 	workspaceSlug := s.input.workspace.Slug().String()
 	if err := validateCheckpointInput(runner, workspaceSlug); err != nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, err
@@ -100,7 +108,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
-		decodeContext:  bindRequestToTarget(semanticFull, path.target.Model),
+		decodeContext:  bindRequestToTarget(attemptRequest, path.target.Model),
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: resolved.Request(),
 		historyScheme:      s.input.requestFingerprint.Scheme(),

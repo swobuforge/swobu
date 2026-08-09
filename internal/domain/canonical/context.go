@@ -199,11 +199,11 @@ func TransformToolContributions(
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			responses, err := retainResponsesToolRefinements(tools, occurrence.Responses())
+			visibility, err := retainToolVisibilityRefinements(tools, occurrence.Visibility())
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			items[index], err = NewToolDeclarationsItemWithResponses(tools, occurrence.Scope(), responses)
+			items[index], err = NewToolDeclarationsItemWithVisibility(tools, occurrence.Scope(), visibility)
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
@@ -214,32 +214,29 @@ func TransformToolContributions(
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			responses, err := retainResponsesToolRefinements(tools, result.Responses())
+			transformed, err := result.WithTools(tools)
 			if err != nil {
 				return CanonicalRequest{}, err
 			}
-			items[index], err = NewToolDiscoveryResultItemWithResponsesWireID(result.CallID(), tools, result.Executor(), responses, result.ResponsesCallIDNull())
-			if err != nil {
-				return CanonicalRequest{}, err
-			}
+			items[index] = CanonicalItem{toolDiscoveryResult: &transformed}
 		}
 	}
 	return request.WithItems(items), nil
 }
 
-func retainResponsesToolRefinements(after ToolSet, refinements ResponsesToolRefinements) (ResponsesToolRefinements, error) {
+func retainToolVisibilityRefinements(after ToolSet, refinements ToolVisibilityRefinements) (ToolVisibilityRefinements, error) {
 	deferred := refinements.DeferredKeys()
 	if len(deferred) == 0 {
-		return ResponsesToolRefinements{}, nil
+		return ToolVisibilityRefinements{}, nil
 	}
-	known := callableToolKeys(after)
+	known := deferrableToolKeys(after)
 	retained := make([]ToolKey, 0, len(deferred))
 	for _, key := range deferred {
 		if _, ok := known[key]; ok {
 			retained = append(retained, key)
 		}
 	}
-	return NewResponsesToolRefinements(after, retained)
+	return NewToolVisibilityRefinements(after, retained)
 }
 
 func itemScope(item CanonicalItem) ContextScope {

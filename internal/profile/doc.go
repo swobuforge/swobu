@@ -6,9 +6,10 @@
 // login methods are deliberately outside this catalog; Bedrock runtime
 // authentication strategy belongs to the Bedrock adapter.
 // Bedrock endpoint resolution is the exception to static catalog-only data:
-// ResolveBedrockEndpoint is the provider-owned pure boundary that combines
-// optional explicit endpoint, region, and protocol into one normalized API
-// base, request URL, and catalog URL while preserving proxy prefixes.
+// ResolveBedrockEndpoint normalizes the required operator-authored inference
+// endpoint and appends one protocol operation. BedrockCatalogURL independently
+// projects canonical regional catalog connectivity. Region never supplies an
+// inference namespace.
 // Compatibility changes live outside this catalog and never drive routing.
 // Routing construction boundaries obtain concrete provider/protocol, Azure endpoint,
 // and Bedrock region predicates through RoutingConstructionFacts; adapters must not

@@ -247,8 +247,8 @@ func (r BedrockRegion) String() string { return r.value }
 // BedrockConnection owns the durable Bedrock transport identity: region (the
 // SigV4 signing source), endpoint (the complete API base URL including its AWS
 // namespace, e.g. "https://bedrock-mantle.us-east-1.api.aws/openai/v1"), and
-// credential. An empty endpoint means "derive from region at a higher layer";
-// the routing package never normalizes or validates it as a Mantle host.
+// credential. The routing package requires but does not normalize or validate
+// the operator-authored endpoint as a Mantle host.
 type BedrockConnection struct {
 	region     BedrockRegion
 	endpoint   string
@@ -259,6 +259,10 @@ func NewBedrockConnection(region BedrockRegion, endpoint, rawCredential string) 
 	if region.value == "" {
 		return BedrockConnection{}, pathError("connection.bedrock.region", "region is required")
 	}
+	endpoint = strings.TrimSpace(endpoint) // swobu:io-string source=boundary
+	if endpoint == "" {
+		return BedrockConnection{}, pathError("connection.bedrock.endpoint", "endpoint is required")
+	}
 	var ref *credentialref.Ref
 	if strings.TrimSpace(rawCredential) != "" { // swobu:io-string source=boundary
 		parsed, err := parseCredential("connection.bedrock.credential", rawCredential)
@@ -267,14 +271,14 @@ func NewBedrockConnection(region BedrockRegion, endpoint, rawCredential string) 
 		}
 		ref = &parsed
 	}
-	return BedrockConnection{region: region, endpoint: strings.TrimSpace(endpoint), credential: ref}, nil // swobu:io-string source=boundary
+	return BedrockConnection{region: region, endpoint: endpoint, credential: ref}, nil
 }
 func (BedrockConnection) Provider() Provider      { return ProviderBedrock }
 func (BedrockConnection) isConnection()           {}
 func (c BedrockConnection) Region() BedrockRegion { return c.region }
 
-// Endpoint returns the authored complete API base URL, or "" when the endpoint
-// is derived from region. Returned verbatim; no normalization happens here.
+// Endpoint returns the authored complete API base URL. No normalization happens
+// here.
 func (c BedrockConnection) Endpoint() string { return c.endpoint }
 func (c BedrockConnection) Credential() credentialref.Ref {
 	if c.credential == nil {

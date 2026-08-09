@@ -88,7 +88,7 @@ func TestBedrockConnectionCarriesAuthoredEndpoint(t *testing.T) {
 
 	// An explicit endpoint round-trips verbatim; the routing package neither
 	// normalizes nor validates it as a Mantle host (that belongs to the profile
-	// layer). Empty endpoint means "derive from region" at a higher layer.
+	// layer).
 	for _, tc := range []struct {
 		name     string
 		endpoint string
@@ -97,7 +97,6 @@ func TestBedrockConnectionCarriesAuthoredEndpoint(t *testing.T) {
 		{"bare v1", "https://bedrock-mantle.us-east-1.api.aws/v1"},
 		{"anthropic namespace", "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1"},
 		{"custom host", "https://my-proxy.internal/openai/v1"},
-		{"derived", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			connection, err := NewBedrockConnection(region, tc.endpoint, "env:AWS_BEARER_TOKEN_BEDROCK")
@@ -128,9 +127,20 @@ func TestBedrockConnectionCarriesAuthoredEndpoint(t *testing.T) {
 	}
 }
 
+func TestBedrockConnectionRequiresAuthoredEndpoint(t *testing.T) {
+	t.Parallel()
+
+	region, err := ParseBedrockRegion("us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewBedrockConnection(region, "", ""); err == nil {
+		t.Fatal("NewBedrockConnection accepted an empty endpoint")
+	}
+}
+
 func TestBedrockConnectionEqualityDistinguishesEndpoints(t *testing.T) {
 	region, _ := ParseBedrockRegion("us-east-1")
-	derived, _ := NewBedrockConnection(region, "", "env:AWS_BEARER_TOKEN_BEDROCK")
 	openai, _ := NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/openai/v1", "env:AWS_BEARER_TOKEN_BEDROCK")
 	v1, _ := NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/v1", "env:AWS_BEARER_TOKEN_BEDROCK")
 
@@ -139,10 +149,8 @@ func TestBedrockConnectionEqualityDistinguishesEndpoints(t *testing.T) {
 		a, b Connection
 		want bool
 	}{
-		{"both derived equal", derived, derived, true},
 		{"same endpoint equal", openai, openai, true},
 		{"openai vs v1 differ", openai, v1, false},
-		{"explicit vs derived differ", openai, derived, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

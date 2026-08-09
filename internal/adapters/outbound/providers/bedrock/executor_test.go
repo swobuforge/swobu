@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -472,7 +473,7 @@ func TestListModels_AbsentCredentialReferenceIgnoresAmbientBearer(t *testing.T) 
 	}))
 	defer upstream.Close()
 
-	exec := NewExecutor(nil)
+	exec := NewExecutor(catalogTestClient(t, upstream))
 	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "", protocolkind.Responses))
 	if err != nil {
 		t.Fatalf("ListDeployments error: %v", err)
@@ -496,7 +497,7 @@ func TestListModels_TargetCredential_PrecedesAmbientBearerToken(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	exec := NewExecutor(nil)
+	exec := NewExecutor(catalogTestClient(t, upstream))
 	exec.credentials = testCredentialProvider{token: "target-token"}
 	if _, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "secret:target", protocolkind.Responses)); err != nil {
 		t.Fatalf("ListDeployments error: %v", err)
@@ -577,7 +578,7 @@ func TestListModels_EnvMode_UsesMantleHTTP(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	exec := NewExecutor(nil)
+	exec := NewExecutor(catalogTestClient(t, upstream))
 	exec.credentials = testCredentialProvider{}
 	models, err := exec.ListDeployments(context.Background(), newBedrockTarget(upstream.URL, "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Responses))
 	if err != nil {
@@ -596,6 +597,27 @@ type captureRoundTripper struct {
 	statusCode    int
 	responseBody  string
 	responseError error
+}
+
+type catalogTestRoundTripper struct {
+	target    *url.URL
+	transport http.RoundTripper
+}
+
+func catalogTestClient(t *testing.T, upstream *httptest.Server) *http.Client {
+	t.Helper()
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Transport: catalogTestRoundTripper{target: target, transport: upstream.Client().Transport}}
+}
+
+func (r catalogTestRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rewritten := req.Clone(req.Context())
+	rewritten.URL.Scheme = r.target.Scheme
+	rewritten.URL.Host = r.target.Host
+	return r.transport.RoundTrip(rewritten)
 }
 
 func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {

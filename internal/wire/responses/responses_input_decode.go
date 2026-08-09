@@ -255,11 +255,11 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output tools are invalid")
 			}
-			refinements, err := canonical.NewResponsesToolRefinements(set, projected.deferred)
+			refinements, err := canonical.NewToolVisibilityRefinements(set, projected.deferred)
 			if err != nil {
 				return nil, canonical.BadRequest("responses tool_search_output deferred tools are invalid")
 			}
-			result, err := canonical.NewToolDiscoveryResultItemWithResponsesWireID(callID, set, executor, refinements, wireIDNull)
+			result, err := canonical.NewToolDiscoveryResultItemWithVisibilityWireID(callID, set, executor, refinements, wireIDNull)
 			if err != nil {
 				return nil, err
 			}

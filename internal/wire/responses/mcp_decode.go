@@ -280,11 +280,11 @@ func decodeResponsesToolOccurrences(tools []responsesToolDefinitionDTO, scope ca
 	if err != nil {
 		return nil, nil, access, err
 	}
-	refinements, err := canonical.NewResponsesToolRefinements(set, deferred)
+	refinements, err := canonical.NewToolVisibilityRefinements(set, deferred)
 	if err != nil {
 		return nil, nil, access, err
 	}
-	item, err := canonical.NewToolDeclarationsItemWithResponses(set, scope, refinements)
+	item, err := canonical.NewToolDeclarationsItemWithVisibility(set, scope, refinements)
 	if err != nil {
 		return nil, nil, access, err
 	}

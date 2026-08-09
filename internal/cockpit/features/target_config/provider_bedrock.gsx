@@ -101,13 +101,6 @@ func bedrockReadiness(w *TargetConfig, base providerSetupState) providerSetupSta
 		setup.Status = setupMissingLocator
 		return setup
 	}
-	kind := bedrockEndpointProtocolKind(w)
-	if kind != "" {
-		if _, err := profile.ResolveBedrockEndpoint(w.Draft.Get().Endpoint, region, kind); err != nil {
-			setup.Status = setupMissingLocator
-			return setup
-		}
-	}
 	setup.Status = setupReady
 	return setup
 }
@@ -119,8 +112,8 @@ func (w *TargetConfig) IsBedrockFlow() bool {
 // BedrockEndpointRow is the single API-URL authoring surface: the complete API
 // base URL including its AWS namespace (e.g. …/openai/v1), as free text in the
 // shared ui.EditableRow — never a Select/SearchPicker (a URL is open text, not a
-// closed set). The row value is the temporary effective editor buffer while
-// Draft.Endpoint remains explicit-or-empty durable intent. Validation and the helper line are pure
+// closed set). Draft.Endpoint is the durable operator-authored value. Validation
+// and the helper line are pure
 // logic over profile.ResolveBedrockEndpoint (the single endpoint boundary living
 // in internal/profile), kept here as plain functions rather than a new .go file.
 func BedrockEndpointRow(w *TargetConfig) *ui.EditableRow {
@@ -136,15 +129,13 @@ func BedrockEndpointRow(w *TargetConfig) *ui.EditableRow {
 		if _, err := profile.ResolveBedrockEndpoint(raw, strings.TrimSpace(w.Draft.Get().Locator), bedrockEndpointProtocolKind(w)); err != nil {
 			return
 		}
-		kind := bedrockEndpointProtocolKind(w)
-		endpoint := profile.CanonicalBedrockEndpointIntent(strings.TrimSpace(w.Draft.Get().Locator), raw, kind)
+		resolution, _ := profile.ResolveBedrockEndpoint(raw, strings.TrimSpace(w.Draft.Get().Locator), bedrockEndpointProtocolKind(w))
 		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
-			d.Endpoint = endpoint
+			d.Endpoint = resolution.BaseURL
 			return d
 		})
-		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(strings.TrimSpace(w.Draft.Get().Locator), endpoint, kind))
-		w.invalidateCatalogEvidence()
-		w.advanceFromSetup()
+		w.BaseURL.Set(resolution.BaseURL)
+		w.Error.Set("")
 		w.CommitEdit(w.actionContext())
 	}
 	row.CloseAfterSubmit = func() bool {
@@ -152,12 +143,7 @@ func BedrockEndpointRow(w *TargetConfig) *ui.EditableRow {
 		return err == nil
 	}
 	row.OnClose = func() {
-		draft := w.Draft.Get()
-		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(
-			strings.TrimSpace(draft.Locator),
-			draft.Endpoint,
-			bedrockEndpointProtocolKind(w),
-		))
+		w.BaseURL.Set(strings.TrimSpace(w.Draft.Get().Endpoint))
 	}
 	return row
 }
@@ -191,18 +177,11 @@ func bedrockEndpointProtocolKind(w *TargetConfig) protocolkind.ProtocolKind {
 func bedrockEndpointValidation(value, region string, kind protocolkind.ProtocolKind) (ui.EditableRowValidation, string) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		if strings.TrimSpace(region) == "" {
-			return ui.EditableRowValidationNone, "Pick a region to derive the default API URL."
-		}
-		return ui.EditableRowValidationNone, "Regional default: " + profile.EffectiveBedrockAPIURL(region, "", kind)
+		return ui.EditableRowValidationRequired, "Paste the API URL shown by AWS."
 	}
 	resolution, err := profile.ResolveBedrockEndpoint(trimmed, region, kind)
 	if err != nil {
 		return ui.EditableRowValidationInvalid, err.Error()
-	}
-	regional, regionalErr := profile.ResolveBedrockEndpoint("", region, kind)
-	if regionalErr == nil && resolution.BaseURL == regional.BaseURL {
-		return ui.EditableRowValidationNone, "Regional default."
 	}
 	if resolution.InputWasComplete {
 		return ui.EditableRowValidationNone, "Complete request URL normalized to its API base."
@@ -299,7 +278,6 @@ func BedrockRegionPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 templ (f *bedrockProviderForm) Render() {
 	<div class="flex-col w-full" deps={f.target.Draft, f.target.Catalog, f.target.BaseURL}>
 		@BedrockRegionControl(f.target)
-		@BedrockEndpointRow(f.target)
 		@BedrockAuthenticationField(f.target)
 	</div>
 }

@@ -52,21 +52,40 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		http.Error(w, "target probe request is invalid", http.StatusBadRequest)
 		return
 	}
-	connection, err := input.Connection.RoutingConnection()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	var connection routing.Connection
+	providerSpec := ""
+	credentialRef := ""
+	if input.Connection.Bedrock != nil && strings.TrimSpace(input.Connection.Bedrock.Endpoint) == "" {
+		providerSpec = string(profile.ProviderSpecBedrock)
+		credentialRef = strings.TrimSpace(input.Connection.Bedrock.Credential)
+	} else {
+		var err error
+		connection, err = input.Connection.RoutingConnection()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerSpec = string(connection.Provider())
+		credentialRef = connectionCredentialRef(connection)
 	}
-	providerSpec := string(connection.Provider())
 	result := TargetProbeResult{}
-	probe, resolvedVariant, probeErr := probeDeployments(req.Context(), h.providers, connection, input.ProviderProtocol)
+	var probe provider.TargetProbeResult
+	var resolvedVariant string
+	var probeErr error
+	if input.Connection.Bedrock != nil && strings.TrimSpace(input.Connection.Bedrock.Endpoint) == "" {
+		probe, resolvedVariant, probeErr = probeBedrockCatalog(
+			req.Context(), h.providers, *input.Connection.Bedrock, input.ProviderProtocol,
+		)
+	} else {
+		probe, resolvedVariant, probeErr = probeDeployments(req.Context(), h.providers, connection, input.ProviderProtocol)
+	}
 	if probeErr != nil {
 		slog.Warn("model catalog probe failed",
 			"provider_spec", providerSpec,
 			"provider_protocol", input.ProviderProtocol,
 			"error", probeErr.Error(),
 		)
-		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), connectionCredentialRef(connection))
+		result.Error = normalizeModelCatalogProbeError(probeErr.Error(), credentialRef)
 		result.Diagnostics = json.RawMessage(probe.Diagnostics)
 	} else {
 		slog.Debug("model catalog probe succeeded",
@@ -80,6 +99,41 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+func probeBedrockCatalog(
+	ctx context.Context,
+	providers provider.Discovery,
+	connection workspaceapi.BedrockConnection,
+	providerProtocol string,
+) (provider.TargetProbeResult, string, error) {
+	region, err := routing.ParseBedrockRegion(connection.Region)
+	if err != nil {
+		return provider.TargetProbeResult{}, "", err
+	}
+	var lastErr error
+	var lastProbe provider.TargetProbeResult
+	for _, variant := range modelCatalogProbeVariants(string(profile.ProviderSpecBedrock), providerProtocol) {
+		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(string(profile.ProviderSpecBedrock), variant)
+		if !ok {
+			continue
+		}
+		target := provider.NewBedrockTargetSnapshot(
+			"draft", "", strings.TrimSpace(connection.Credential), protocol, frame,
+			variant, region.String(),
+		)
+		probe, probeErr := providers.ProbeTarget(ctx, target)
+		if probeErr == nil {
+			probe.Deployments = profile.CloneProviderDeployments(probe.Deployments)
+			return probe, variant, nil
+		}
+		lastErr = probeErr
+		lastProbe = probe
+	}
+	if lastErr != nil {
+		return lastProbe, "", lastErr
+	}
+	return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 }
 
 func credentialRefKindForProbe(credentialRef string) string {

@@ -56,9 +56,10 @@ type imageIncidentRuntime struct {
 
 func (r imageIncidentRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:    target,
-		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport: provider.BindTransport(target, r.transport.Send),
+		Target:        target,
+		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport:     provider.BindTransport(target, r.transport.Send),
+		ToolDiscovery: provider.ToolDiscoveryPolyfill,
 	}, nil
 }
 

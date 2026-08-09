@@ -54,6 +54,7 @@ type ProviderRequestTool struct {
 	UserLocation      json.RawMessage `json:"user_location,omitempty"`
 	ResponseInclusion string          `json:"response_inclusion,omitempty"`
 	AllowedCallers    []string        `json:"allowed_callers,omitempty"`
+	DeferLoading      bool            `json:"defer_loading,omitempty"`
 }
 
 type messagesResponseDTO struct {

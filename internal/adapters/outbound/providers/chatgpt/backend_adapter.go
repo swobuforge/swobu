@@ -67,7 +67,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
-		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send),
+		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send), ToolDiscovery: provider.ToolDiscoveryPolyfill,
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

@@ -78,37 +78,6 @@ func TestProviderTargetFromBedrockConnectionCarriesEndpointAndSigningRegion(t *t
 		}
 	})
 
-	t.Run("empty endpoint falls back to the region-derived default", func(t *testing.T) {
-		connection, err := routing.NewBedrockConnection(region, "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := ProviderTargetFromConnection("grok-b", connection, responsesStream)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if snapshot.BaseURL == "" {
-			t.Fatal("derived base URL is empty")
-		}
-		if snapshot.BedrockRegion() != region.String() {
-			t.Fatalf("BedrockRegion = %q, want %q (signing source)", snapshot.BedrockRegion(), region.String())
-		}
-	})
-
-	t.Run("empty messages endpoint derives anthropic namespace", func(t *testing.T) {
-		connection, err := routing.NewBedrockConnection(region, "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		snapshot, err := ProviderTargetFromConnection("claude-derived", connection, "messages_stream")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if snapshot.BaseURL != "https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1" {
-			t.Fatalf("messages base URL = %q", snapshot.BaseURL)
-		}
-	})
-
 	t.Run("canonical host region mismatch is rejected before snapshot", func(t *testing.T) {
 		connection, err := routing.NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/openai/v1", "")
 		if err != nil {

@@ -1,11 +1,14 @@
 package messages
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -20,25 +23,56 @@ func TestProviderEncodeDecisionsDescribeActualMessagesProjection(t *testing.T) {
 	assertDecision(t, result.Changes, canonical.RequestOutputFormat, compat.Approximation)
 }
 
-func TestDeferredResponsesVisibilityIsEagerlyMaterializedOnce(t *testing.T) {
+func TestNativeDeferredVisibilityEmitsNoApproximation(t *testing.T) {
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
-	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{tool})
-	refinements, _ := canonical.NewResponsesToolRefinements(set, []canonical.ToolKey{key})
-	item, _ := canonical.NewToolDeclarationsItemWithResponses(set, canonical.ContextScopeRequest, refinements)
+	discoverySchema := canonicaltest.Schema(t, `{"type":"object","properties":{"pattern":{"type":"string"}}}`)
+	discovery, err := canonical.NewToolDiscoveryToolWithQuery("find tools", discoverySchema, canonical.DiscoveryExecutorProvider, canonical.ToolDiscoveryQueryRegex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, tool})
+	refinements, _ := canonical.NewToolVisibilityRefinements(set, []canonical.ToolKey{key})
+	item, _ := canonical.NewToolDeclarationsItemWithVisibility(set, canonical.ContextScopeRequest, refinements)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item, canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}})
 	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	count := 0
 	for _, change := range result.Changes {
 		if change.Capability == canonical.RequestToolsVisibility && change.Kind == compat.Approximation {
-			count++
+			t.Fatalf("native deferred visibility reported approximation: %#v", result.Changes)
 		}
 	}
-	if count != 1 {
-		t.Fatalf("visibility changes = %#v, want one request-wide approximation", result.Changes)
+	if !strings.Contains(string(result.Document.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("native Messages omitted defer_loading: %s", result.Document.RawBytes())
+	}
+}
+
+func TestDeferredWebSearchRoundTripsNatively(t *testing.T) {
+	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"search"}],"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},{"type":"web_search_20260209","name":"web_search","defer_loading":true}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), "exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(result.Document.RawBytes()), `"type":"web_search_20260209"`) || !strings.Contains(string(result.Document.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("deferred web search did not round trip: %s", result.Document.RawBytes())
+	}
+}
+
+func TestMessagesRejectsAllToolsDeferred(t *testing.T) {
+	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[{"name":"lookup","input_schema":{"type":"object"},"defer_loading":true}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), "exchange")
+	if err == nil {
+		t.Fatal("all-deferred Messages tools were accepted")
 	}
 }
 

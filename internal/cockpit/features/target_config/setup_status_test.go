@@ -7,7 +7,6 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -31,7 +30,7 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 		{"azure missing credential", profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "", setupMissingCredential},
 		{"azure ready", profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY", setupReady},
 		{"bedrock missing region", profile.ProviderSpecBedrock, "", "", setupMissingLocator},
-		{"bedrock AWS identity ready", profile.ProviderSpecBedrock, profile.EffectiveBedrockAPIURL("eu-west-1", "", protocolkind.Responses), "", setupReady},
+		{"bedrock AWS identity ready", profile.ProviderSpecBedrock, "eu-west-1", "", setupReady},
 		{"chatgpt signed out", profile.ProviderSpecChatGPT, "", "", setupMissingInteractiveAuth},
 		{"chatgpt signed in", profile.ProviderSpecChatGPT, "", "secret:chatgpt/session", setupReady},
 	}
@@ -43,7 +42,7 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 			if test.locator != "" {
 				if test.provider == profile.ProviderSpecBedrock {
 					config.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
-						d.Locator = profile.BedrockMantleRegionFromEndpoint(test.locator)
+						d.Locator = test.locator
 						return d
 					})
 					config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model"}}}})

@@ -186,10 +186,6 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 			d.ProviderProtocol = options[0].ID
 			return d
 		})
-		if err := validateTargetDraftEndpoint(w.Draft.Get()); err != nil {
-			w.Error.Set(err.Error())
-			return
-		}
 		w.CommitEdit(w.actionContext())
 	default:
 		// Multiple protocols: the protocol ui.Select row becomes enterable; the
@@ -214,11 +210,12 @@ func (w *TargetConfig) selectProtocol(protocol string) {
 			continue
 		}
 		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = protocol; return d })
-		if err := validateTargetDraftEndpoint(w.Draft.Get()); err != nil {
-			w.Error.Set(err.Error())
-			return
+		if endpoint := strings.TrimSpace(w.Draft.Get().Endpoint); endpoint != "" {
+			if err := validateTargetDraftEndpoint(w.Draft.Get()); err != nil {
+				w.Error.Set(err.Error())
+				return
+			}
 		}
-		w.reseedDerivedBedrockEndpointBuffer()
 		w.Error.Set("")
 		w.CommitEdit(w.actionContext())
 		return
@@ -374,19 +371,10 @@ func (w *TargetConfig) SelectBedrockRegion(region string) {
 		d.Locator = region
 		return d
 	})
-	w.reseedDerivedBedrockEndpointBuffer()
 	w.invalidateCatalogEvidence()
 	w.Error.Set("")
 	w.advanceFromSetup()
 	w.CommitEdit(w.actionContext())
-}
-
-func (w *TargetConfig) reseedDerivedBedrockEndpointBuffer() {
-	draft := w.Draft.Get()
-	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock || strings.TrimSpace(draft.Endpoint) != "" {
-		return
-	}
-	w.BaseURL.Set(profile.EffectiveBedrockAPIURL(strings.TrimSpace(draft.Locator), "", bedrockEndpointProtocolKind(w)))
 }
 
 // SelectZAIAccess commits one closed Z.AI access product. The operator-authored
@@ -491,14 +479,20 @@ func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries,
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		providerProtocol, _ := profile.ResolveConcreteProtocolForAutoAtBoundary(provider)
-		connection, err := connectionFromDraft(draft)
-		if err != nil {
-			return readmodel.ModelCatalogReadModel{}, err
+		request := ports.ProbeProviderModelsRequest{ProviderProtocol: providerProtocol}
+		if profile.ProviderID(provider) == profile.ProviderSpecBedrock {
+			request.Probe = ports.BedrockCatalogProbe{
+				Region:        strings.TrimSpace(draft.Locator),
+				CredentialRef: strings.TrimSpace(draft.CredentialRef),
+			}
+		} else {
+			connection, err := connectionFromDraft(draft)
+			if err != nil {
+				return readmodel.ModelCatalogReadModel{}, err
+			}
+			request.Probe = ports.ConnectionCatalogProbe{Connection: connection}
 		}
-		result, err := queries.ProbeProviderModels(ctx, ports.ProbeProviderModelsRequest{
-			Connection:       connection,
-			ProviderProtocol: providerProtocol,
-		})
+		result, err := queries.ProbeProviderModels(ctx, request)
 		if err != nil {
 			return result, err
 		}

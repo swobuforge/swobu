@@ -311,7 +311,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		if err != nil {
 			return canonical.InternalError("messages stream tool environment is ambiguous")
 		}
-		key, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKindFunction, payload.ContentBlock.Name)
+		key, _, err := decodeMessagesNamedCallable(s.toolNames, environment, payload.ContentBlock.Name)
 		if err != nil {
 			return canonical.InternalError("messages stream tool_use references an unknown or ambiguous tool")
 		}
@@ -335,7 +335,26 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		block.reasoningType = "redacted_thinking"
 		block.data = payload.ContentBlock.Data
 	case "server_tool_use":
-		if strings.TrimSpace(payload.ContentBlock.Name) != "web_search" { // swobu:io-string source=provider-wire
+		name := strings.TrimSpace(payload.ContentBlock.Name) // swobu:io-string source=provider-wire
+		if name == toolSearchRegexName || name == toolSearchNaturalLanguageName {
+			if _, err := messagesProviderDiscoveryForName(s.request, name); err != nil {
+				return err
+			}
+			block.ItemKind = canonical.ItemKindToolCall
+			callID, err := canonical.NewToolCallID(payload.ContentBlock.ID)
+			if err != nil {
+				return canonical.NewBackendError("messages", 0, "messages streamed discovery call is missing id", "")
+			}
+			block.CallID, block.Tool = callID, canonical.ToolDiscoveryKey()
+			block.initialInput = append(json.RawMessage(nil), payload.ContentBlock.Input...)
+			start, err := canonical.NewToolCallStart(callID, block.Tool)
+			if err != nil {
+				return err
+			}
+			s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: block.Ordinal}, Payload: start}})
+			break
+		}
+		if name != "web_search" {
 			s.erasedBlock = true
 			if err := appendMessagesOccurrenceChange(s.changeLog, s.exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(block.Ordinal)); err != nil {
 				return err
@@ -363,6 +382,14 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 		block.CallID = callID
 		block.searchResult = append(json.RawMessage(nil), payload.ContentBlock.Content...)
 		block.searchError = payload.ContentBlock.IsError
+	case "tool_search_tool_result":
+		block.ItemKind = canonical.ItemKindToolDiscoveryResult
+		callID, err := canonical.NewToolCallID(payload.ContentBlock.ToolUseID)
+		if err != nil {
+			return canonical.NewBackendError("messages", 0, "messages streamed discovery result is missing tool_use_id", "")
+		}
+		block.CallID = callID
+		block.searchResult = append(json.RawMessage(nil), payload.ContentBlock.Content...)
 	default:
 		// Retain the index until content_block_stop so deltas for an unknown
 		// additive block cannot affect known siblings.
@@ -528,12 +555,30 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 		if parseErr != nil {
 			return canonical.InternalError("messages streamed tool_use input is invalid")
 		}
-		item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
+		if block.Tool.Kind() == canonical.ToolKindDiscovery {
+			environment, envErr := canonical.EffectiveTools(s.request)
+			if envErr != nil {
+				return canonical.InternalError("messages streamed discovery environment is ambiguous")
+			}
+			declaration, ok := environment.Lookup(block.Tool)
+			if !ok {
+				return canonical.InternalError("messages streamed discovery declaration is missing")
+			}
+			discovery, _ := declaration.Discovery()
+			item, err = canonical.NewToolDiscoveryCallItem(block.CallID, canonical.NewJSONObjectToolInput(object), discovery.Executor())
+		} else {
+			item, err = canonical.NewToolCallItem(block.CallID, block.Tool, canonical.NewJSONObjectToolInput(object))
+		}
 	case canonical.ItemKindToolResult:
 		item, err = decodeMessagesWebSearchResult(block.CallID.String(), block.searchResult, block.searchError, messagesProjectionEvidence{
 			feature: canonical.ResponseItemsKind, changeLog: s.changeLog, exchangeID: s.exchangeID,
 			occurrence: canonical.ResponseItemOccurrence(block.Ordinal),
 		})
+		if err != nil {
+			return err
+		}
+	case canonical.ItemKindToolDiscoveryResult:
+		item, err = decodeMessagesDiscoveryResult(s.request, s.toolNames, block.CallID.String(), block.searchResult)
 		if err != nil {
 			return err
 		}

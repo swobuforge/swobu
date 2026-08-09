@@ -668,6 +668,10 @@ func itemStatusAt(items []json.RawMessage, index int) string {
 // preserves local additive erasure and records terminal-only child evidence.
 func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Context, index int, raw json.RawMessage, item responsesWireOutputItemDTO, responseStatus string) error {
 	state := s.outputAt(index)
+	resolvedRaw, err := restoreResponsesTerminalIdentity(raw, item, state.identity)
+	if err != nil {
+		return err
+	}
 	changeLog := s.changeLog
 	if (state.erased && state.erasureRecorded) || state.statusDropRecorded {
 		// The resolved top-level erasure already recorded its one occurrence
@@ -676,19 +680,62 @@ func (s *responsesResponseStream) validateResolvedTerminalOutput(ctx context.Con
 		changeLog = nil
 	}
 	terminalItems, err := decodeCompletedResponsesItemSetAtIndexes(
-		ctx, s.request, s.toolNames, []json.RawMessage{raw}, "", []int{index}, true,
+		ctx, s.request, s.toolNames, []json.RawMessage{resolvedRaw}, "", []int{index}, true,
 		responseStatus, s.exchangeID, changeLog,
 	)
 	if err != nil {
 		return err
 	}
 	if !responsesCanonicalItemsEqual(state.checkpointItems, terminalItems) {
+		logResponsesTerminalCheckpointMismatch(s.exchangeID, index, state.checkpointItems, terminalItems)
 		return canonical.NewBackendError("responses", 0, "responses terminal output contradicts completed semantic checkpoint", "")
 	}
 	if state.checkpointStatus != responsesCompletedItemStatus(item.Status) {
 		return canonical.NewBackendError("responses", 0, "responses terminal output status contradicts completed checkpoint", "")
 	}
 	return nil
+}
+
+// restoreResponsesTerminalIdentity makes the indexed output owner authoritative
+// when a later terminal snapshot omits identity already validated earlier in
+// the lifecycle. It edits only absent fields and retains the original JSON so
+// terminal-only additive evidence still reaches semantic projection.
+func restoreResponsesTerminalIdentity(raw json.RawMessage, item responsesWireOutputItemDTO, identity committedOutputIdentity) (json.RawMessage, error) {
+	fields := map[string]string{
+		"id":      identity.itemID,
+		"call_id": identity.callID,
+		"name":    identity.toolName,
+	}
+	missing := make(map[string]string, len(fields))
+	observed := map[string]string{
+		"id":      item.ID,
+		"call_id": item.CallID,
+		"name":    item.Name,
+	}
+	for field, value := range fields {
+		if strings.TrimSpace(observed[field]) == "" && value != "" {
+			missing[field] = value
+		}
+	}
+	if len(missing) == 0 {
+		return raw, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, canonical.InternalError("responses terminal output item is invalid JSON")
+	}
+	for field, value := range missing {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, canonical.InternalError("responses terminal output identity is invalid")
+		}
+		object[field] = encoded
+	}
+	restored, err := json.Marshal(object)
+	if err != nil {
+		return nil, canonical.InternalError("responses terminal output identity is invalid")
+	}
+	return restored, nil
 }
 
 func (s *responsesResponseStream) validateDeferredTerminalOutput(ctx context.Context, index int, deferred json.RawMessage, terminal json.RawMessage, responseStatus string) error {
@@ -745,11 +792,38 @@ func responsesCanonicalItemsEqual(left []canonical.CanonicalItem, right []canoni
 		return false
 	}
 	for index := range left {
+		if left[index].Kind() == canonical.ItemKindReasoning && right[index].Kind() == canonical.ItemKindReasoning {
+			if !responsesReasoningItemsEqual(left[index], right[index]) {
+				return false
+			}
+			continue
+		}
 		if !reflect.DeepEqual(left[index], right[index]) {
 			return false
 		}
 	}
 	return true
+}
+
+func responsesReasoningItemsEqual(left canonical.CanonicalItem, right canonical.CanonicalItem) bool {
+	leftReasoning, leftOK := left.Reasoning()
+	rightReasoning, rightOK := right.Reasoning()
+	if !leftOK || !rightOK {
+		return false
+	}
+	leftParts := leftReasoning.Parts()
+	rightParts := rightReasoning.Parts()
+	if len(leftParts) != len(rightParts) {
+		return false
+	}
+	for index := range leftParts {
+		if leftParts[index].Kind() != rightParts[index].Kind() || leftParts[index].Text() != rightParts[index].Text() {
+			return false
+		}
+	}
+	leftReplay, leftReplayOK := leftReasoning.Opaque().Responses()
+	rightReplay, rightReplayOK := rightReasoning.Opaque().Responses()
+	return leftReplayOK == rightReplayOK && (!leftReplayOK || leftReplay == rightReplay)
 }
 
 func responsesTerminalSuffix(progressive string, terminal string) (string, error) {

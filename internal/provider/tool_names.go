@@ -47,16 +47,31 @@ func buildAttemptToolNames(
 		appendAttemptDeclarationKeys(&keys, declared, declaration)
 	}
 	for _, item := range semantic.Items() {
-		if call, ok := item.ToolCall(); ok && attemptCallable(call.Tool()) {
+		if call, ok := item.ToolCall(); ok && attemptCallable(call) {
 			keys = appendUniqueToolKey(keys, call.Tool())
 		}
 	}
-	changes := make([]compat.Change, 0)
+	baseNames := make(map[canonical.ToolKey]string, len(keys))
+	baseCounts := make(map[string]int, len(keys))
 	for _, key := range keys {
 		wireName := key.Name()
 		if key.Namespace() != canonical.ToolNamespaceRequest || !toolname.PreservableLiteral(wireName) {
 			scope := readableScope(key.Namespace())
 			wireName = generated(key.String(), scope, key.Name())
+		}
+		baseNames[key] = wireName
+		baseCounts[wireName]++
+	}
+	changes := make([]compat.Change, 0)
+	usedWireNames := make(map[string]canonical.ToolKey)
+	for _, key := range keys {
+		wireName := baseNames[key]
+		if baseCounts[wireName] > 1 {
+			scope := readableScope(key.Namespace())
+			wireName = generated(key.String(), scope, key.Name())
+		}
+		if prior, exists := usedWireNames[wireName]; exists && prior != key {
+			return AttemptToolNames{}, nil, canonical.InternalError("attempt tool wire-name collision")
 		}
 		ref := wireToolRef{kind: key.Kind(), name: wireName}
 		if prior, exists := names.byWire[ref]; exists && prior != key {
@@ -64,6 +79,7 @@ func buildAttemptToolNames(
 		}
 		names.byCanonical[key.Clone()] = wireName
 		names.byWire[ref] = key.Clone()
+		usedWireNames[wireName] = key.Clone()
 		if _, ok := declared[key]; ok && wireName != key.Name() {
 			changes = append(changes, compat.NewApproximation(
 				canonical.RequestToolsName,
@@ -96,12 +112,19 @@ func appendAttemptDeclarationKeys(keys *[]canonical.ToolKey, declared map[canoni
 		key := declaration.Key()
 		*keys = appendUniqueToolKey(*keys, key)
 		declared[key] = struct{}{}
+	case canonical.ToolKindDiscovery:
+		discovery, _ := declaration.Discovery()
+		if discovery.Executor() == canonical.DiscoveryExecutorClient {
+			key := declaration.Key()
+			*keys = appendUniqueToolKey(*keys, key)
+			declared[key] = struct{}{}
+		}
 	case canonical.ToolKindNamespace:
 		namespace, _ := declaration.Namespace()
 		for _, child := range namespace.Tools() {
 			appendAttemptDeclarationKeys(keys, declared, child)
 		}
-	case canonical.ToolKindMCP, canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
+	case canonical.ToolKindMCP, canonical.ToolKindWebSearch:
 		return
 	}
 }
@@ -115,8 +138,13 @@ func appendUniqueToolKey(keys []canonical.ToolKey, key canonical.ToolKey) []cano
 	return append(keys, key.Clone())
 }
 
-func attemptCallable(key canonical.ToolKey) bool {
-	return key.Kind() == canonical.ToolKindFunction || key.Kind() == canonical.ToolKindCustom
+func attemptCallable(call canonical.ToolCallItem) bool {
+	key := call.Tool()
+	if key.Kind() == canonical.ToolKindFunction || key.Kind() == canonical.ToolKindCustom {
+		return true
+	}
+	executor, ok := call.DiscoveryExecutor()
+	return ok && executor == canonical.DiscoveryExecutorClient
 }
 
 func readableScope(namespace string) []string {

@@ -58,6 +58,11 @@ func TestDecodeResponseStreamRejectsTerminalSemanticMutation(t *testing.T) {
 			terminal: `{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"goodbye"}]}`,
 		},
 		{
+			name:     "reasoning encrypted replay",
+			doneItem: `{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher-one","summary":[]}`,
+			terminal: `{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher-two","summary":[]}`,
+		},
+		{
 			name:     "web search action",
 			doneItem: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one"],"sources":[]}}`,
 			terminal: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["two"],"sources":[]}}`,

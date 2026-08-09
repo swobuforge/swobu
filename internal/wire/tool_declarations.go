@@ -26,15 +26,14 @@ func ValidateFlatToolPolicy(policy canonical.ToolPolicy, declarations []canonica
 	return nil
 }
 
-// HasDeferredResponsesTools reports whether any declaration contribution or
-// loaded discovery result carries Responses-only deferred visibility. Static
-// codecs use this semantic fact only to report eager materialization.
-func HasDeferredResponsesTools(items []canonical.CanonicalItem) bool {
+// HasDeferredTools reports whether any declaration contribution or loaded
+// discovery result carries deferred visibility.
+func HasDeferredTools(items []canonical.CanonicalItem) bool {
 	for _, item := range items {
-		if declarations, ok := item.ToolDeclarations(); ok && len(declarations.Responses().DeferredKeys()) > 0 {
+		if declarations, ok := item.ToolDeclarations(); ok && len(declarations.Visibility().DeferredKeys()) > 0 {
 			return true
 		}
-		if result, ok := item.ToolDiscoveryResult(); ok && len(result.Responses().DeferredKeys()) > 0 {
+		if result, ok := item.ToolDiscoveryResult(); ok && len(result.Visibility().DeferredKeys()) > 0 {
 			return true
 		}
 	}

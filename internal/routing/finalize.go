@@ -47,8 +47,8 @@ type AzureConnectionDraft struct {
 	Credential      string
 }
 
-// BedrockConnectionDraft carries the durable Bedrock region and the optional
-// authored endpoint. An empty endpoint means "derive from region".
+// BedrockConnectionDraft carries the durable Bedrock region and required
+// operator-authored inference endpoint.
 type BedrockConnectionDraft struct {
 	Region     string
 	Endpoint   string

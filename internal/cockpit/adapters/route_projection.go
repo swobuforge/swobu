@@ -49,11 +49,8 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadM
 		out.BaseURL = target.Connection.Azure.ProjectEndpoint
 		out.CredentialRef = target.Connection.Azure.Credential
 	case target.Connection.Bedrock != nil:
-		// The read model preserves authored truth: region as a first-class field
-		// and the explicit endpoint verbatim, empty when the endpoint is derived.
-		// The Cockpit derives the effective URL it will display from (region,
-		// endpoint) via profile.EffectiveBedrockAPIURL; the read model never
-		// materializes that derivation, so the durable fact has one shape.
+		// The read model preserves the independently authored signing region and
+		// complete inference API URL verbatim.
 		out.BaseURL = target.Connection.Bedrock.Endpoint
 		out.BedrockRegion = target.Connection.Bedrock.Region
 		out.CredentialRef = target.Connection.Bedrock.Credential

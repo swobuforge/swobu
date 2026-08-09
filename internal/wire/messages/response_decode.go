@@ -120,11 +120,16 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			if err != nil {
 				return nil, canonical.InternalError("messages tool environment is ambiguous")
 			}
-			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, strings.TrimSpace(block.Name)) // swobu:io-string source=boundary
+			key, executor, err := decodeMessagesNamedCallable(names, environment, strings.TrimSpace(block.Name)) // swobu:io-string source=boundary
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use references an unknown or ambiguous tool")
 			}
-			item, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
+			var item canonical.CanonicalItem
+			if key.Kind() == canonical.ToolKindDiscovery {
+				item, err = canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(object), executor)
+			} else {
+				item, err = canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
+			}
 			if err != nil {
 				return nil, canonical.InternalError("messages response tool_use is invalid")
 			}
@@ -164,7 +169,30 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 			}
 			items = append(items, item)
 		case "server_tool_use":
-			if strings.TrimSpace(block.Name) != "web_search" { // swobu:io-string source=provider-wire
+			name := strings.TrimSpace(block.Name) // swobu:io-string source=provider-wire
+			if name == toolSearchRegexName || name == toolSearchNaturalLanguageName {
+				if err := flushMessage(); err != nil {
+					return nil, canonical.InternalError("messages response message item is invalid")
+				}
+				callID, err := canonical.NewToolCallID(block.ID)
+				if err != nil {
+					return nil, canonical.InternalError("messages response discovery call is missing id")
+				}
+				object, err := canonical.ParseJSONObject(block.Input)
+				if err != nil {
+					return nil, canonical.InternalError("messages response discovery call input is invalid")
+				}
+				if _, err := messagesProviderDiscoveryForName(request, name); err != nil {
+					return nil, err
+				}
+				item, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(object), canonical.DiscoveryExecutorProvider)
+				if err != nil {
+					return nil, canonical.InternalError("messages response discovery call is invalid")
+				}
+				items = append(items, item)
+				continue
+			}
+			if name != "web_search" {
 				if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 					return nil, err
 				}
@@ -193,6 +221,15 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 				return nil, err
 			}
 			items = append(items, item)
+		case "tool_search_tool_result":
+			if err := flushMessage(); err != nil {
+				return nil, canonical.InternalError("messages response message item is invalid")
+			}
+			item, err := decodeMessagesDiscoveryResult(request, names, block.ToolUseID, block.Content)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
 		default:
 			if err := appendMessagesOccurrenceChange(changeLog, exchangeID, canonical.ResponseItemsKind, compat.Omission, canonical.ResponseItemOccurrence(uint32(index))); err != nil {
 				return nil, err
@@ -214,6 +251,94 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		messagesCompletion(dto.StopReason),
 		usage,
 	)), nil
+}
+
+func messagesProviderDiscoveryForName(request canonical.CanonicalRequest, name string) (canonical.ToolDiscoveryTool, error) {
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return canonical.ToolDiscoveryTool{}, canonical.InternalError("messages discovery tool environment is ambiguous")
+	}
+	declaration, ok := environment.Lookup(canonical.ToolDiscoveryKey())
+	if !ok {
+		return canonical.ToolDiscoveryTool{}, canonical.NewBackendError("messages", 0, "messages discovery call has no declared search tool", "")
+	}
+	discovery, ok := declaration.Discovery()
+	if !ok || discovery.Executor() != canonical.DiscoveryExecutorProvider {
+		return canonical.ToolDiscoveryTool{}, canonical.NewBackendError("messages", 0, "messages discovery call does not match provider execution", "")
+	}
+	want, err := messagesProviderDiscoveryName(discovery)
+	if err != nil || want != name {
+		return canonical.ToolDiscoveryTool{}, canonical.NewBackendError("messages", 0, "messages discovery call does not match declared query semantics", "")
+	}
+	return discovery, nil
+}
+
+func decodeMessagesNamedCallable(names wire.ToolNames, environment canonical.ToolEnvironment, name string) (canonical.ToolKey, canonical.DiscoveryExecutor, error) {
+	if key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, name); err == nil {
+		return key, 0, nil
+	}
+	key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindDiscovery, name)
+	if err != nil {
+		return canonical.ToolKey{}, 0, err
+	}
+	declaration, _ := environment.Lookup(key)
+	discovery, _ := declaration.Discovery()
+	return key, discovery.Executor(), nil
+}
+
+func decodeMessagesDiscoveryResult(request canonical.CanonicalRequest, names wire.ToolNames, rawCallID string, raw json.RawMessage) (canonical.CanonicalItem, error) {
+	callID, err := canonical.NewToolCallID(rawCallID)
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("messages discovery result is missing tool_use_id")
+	}
+	var content struct {
+		Type           string `json:"type"`
+		ErrorCode      string `json:"error_code"`
+		ErrorMessage   string `json:"error_message"`
+		ToolReferences []struct {
+			Type     string `json:"type"`
+			ToolName string `json:"tool_name"`
+		} `json:"tool_references"`
+	}
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages discovery result is invalid", "")
+	}
+	if content.Type == "tool_search_tool_result_error" {
+		code := canonical.Unspecified[string]()
+		if strings.TrimSpace(content.ErrorCode) != "" {
+			code = canonical.Specify(strings.TrimSpace(content.ErrorCode))
+		}
+		item, err := canonical.NewToolDiscoveryFailureItem(callID, canonical.DiscoveryExecutorProvider, code, content.ErrorMessage)
+		if err != nil {
+			return canonical.CanonicalItem{}, canonical.InternalError("messages discovery failure is invalid")
+		}
+		return item, nil
+	}
+	if content.Type != "tool_search_tool_search_result" {
+		return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages discovery result is invalid", "")
+	}
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("messages discovery result tool environment is ambiguous")
+	}
+	declarations := make([]canonical.ToolDeclaration, 0, len(content.ToolReferences))
+	for _, reference := range content.ToolReferences {
+		key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, strings.TrimSpace(reference.ToolName))
+		if err != nil {
+			return canonical.CanonicalItem{}, canonical.NewBackendError("messages", 0, "messages discovery result references an unknown tool", "")
+		}
+		declaration, _ := environment.Lookup(key)
+		declarations = append(declarations, declaration)
+	}
+	tools, err := canonical.NewToolSet(declarations)
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("messages discovery result tools are invalid")
+	}
+	item, err := canonical.NewToolDiscoveryResultItem(callID, tools, canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("messages discovery result is invalid")
+	}
+	return item, nil
 }
 
 func validateMessagesResponseResidual(items []canonical.CanonicalItem, stopReason string, wireItems int) error {

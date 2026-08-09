@@ -78,7 +78,7 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
-	if wire.HasDeferredResponsesTools(items) {
+	if wire.HasDeferredTools(items) {
 		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
 			return ProviderRequestDocument{}, err
 		}
@@ -88,22 +88,10 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		return ProviderRequestDocument{}, err
 	}
 	tools := environment.Declarations()
-	staticTools, err := wire.PrepareStaticToolSet(items, tools)
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	items, tools = staticTools.Items, staticTools.Declarations
-	for range staticTools.RemovedEffects {
-		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
-	for range staticTools.RemovedDeclarations {
-		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
+		if tool.Kind() == canonical.ToolKindDiscovery {
+			return string(tool.Kind()) + "\x00" + tool.Key().Name(), nil
+		}
 		name, err := wire.EncodeToolName(names, tool.Key())
 		return string(tool.Kind()) + "\x00" + strings.TrimSpace(name), err
 	})

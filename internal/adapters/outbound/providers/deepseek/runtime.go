@@ -28,7 +28,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecDeepSeek,
-		BackendResolver:    anthropic.NewBackendAdapter(profile.ProviderSpecDeepSeek, client, credentials),
+		BackendResolver:    anthropic.NewBackendAdapter(profile.ProviderSpecDeepSeek, client, credentials, provider.ToolDiscoveryPolyfill),
 		CredentialProvider: credentials,
 		Discovery: Discovery{
 			client:      client,

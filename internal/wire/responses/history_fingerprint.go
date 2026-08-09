@@ -455,7 +455,7 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		return canonical.InternalError("responses web-search result has no prior call")
 	case canonical.ItemKindToolDiscoveryResult:
 		result, _ := item.ToolDiscoveryResult()
-		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), nil, mcp.Access{}, nil, "")
+		wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), nil, mcp.Access{}, nil, "")
 		if err != nil {
 			return err
 		}

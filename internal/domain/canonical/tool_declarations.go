@@ -26,11 +26,22 @@ const (
 	DiscoveryExecutorProvider
 )
 
+// ToolDiscoveryQueryKind identifies the model-produced search input semantics
+// without embedding any provider's versioned tool type in canonical state.
+type ToolDiscoveryQueryKind uint8
+
+const (
+	ToolDiscoveryQueryStructured ToolDiscoveryQueryKind = iota + 1
+	ToolDiscoveryQueryRegex
+	ToolDiscoveryQueryNaturalLanguage
+)
+
 // ToolDiscoveryTool declares provider-neutral dynamic tool discovery.
 type ToolDiscoveryTool struct {
 	description string
 	inputSchema ToolSchema
 	executor    DiscoveryExecutor
+	queryKind   ToolDiscoveryQueryKind
 }
 
 // ToolNamespace preserves one ordered namespace tree.
@@ -89,10 +100,18 @@ func NewWebSearchDeclaration() ToolDeclaration {
 }
 
 func NewToolDiscoveryTool(description string, inputSchema ToolSchema, executor DiscoveryExecutor) (ToolDeclaration, error) {
+	return NewToolDiscoveryToolWithQuery(description, inputSchema, executor, ToolDiscoveryQueryStructured)
+}
+
+// NewToolDiscoveryToolWithQuery constructs discovery with explicit query semantics.
+func NewToolDiscoveryToolWithQuery(description string, inputSchema ToolSchema, executor DiscoveryExecutor, queryKind ToolDiscoveryQueryKind) (ToolDeclaration, error) {
 	if inputSchema.IsEmpty() || (executor != DiscoveryExecutorClient && executor != DiscoveryExecutorProvider) {
 		return ToolDeclaration{}, fmt.Errorf("canonical tool discovery declaration is invalid")
 	}
-	return ToolDeclaration{discovery: &ToolDiscoveryTool{description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), executor: executor}}, nil
+	if queryKind != ToolDiscoveryQueryStructured && queryKind != ToolDiscoveryQueryRegex && queryKind != ToolDiscoveryQueryNaturalLanguage {
+		return ToolDeclaration{}, fmt.Errorf("canonical tool discovery query kind is invalid")
+	}
+	return ToolDeclaration{discovery: &ToolDiscoveryTool{description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), executor: executor, queryKind: queryKind}}, nil
 }
 
 func NewToolNamespace(key ToolKey, description string, tools []ToolDeclaration) (ToolDeclaration, error) {
@@ -273,7 +292,7 @@ func (d ToolDeclaration) Equivalent(other ToolDeclaration) bool {
 		right, rightOK := other.Discovery()
 		return rightOK && left.Description() == right.Description() &&
 			left.InputSchema().RawObject() == right.InputSchema().RawObject() &&
-			left.Executor() == right.Executor()
+			left.Executor() == right.Executor() && left.QueryKind() == right.QueryKind()
 	}
 	if left, ok := d.MCP(); ok {
 		right, rightOK := other.MCP()
@@ -303,11 +322,12 @@ func (s MCPToolSource) Tools() []ToolDeclaration { return cloneToolDeclarations(
 func (s MCPToolSource) Clone() MCPToolSource {
 	return MCPToolSource{key: s.key.Clone(), description: s.description, source: s.source.Clone(), tools: cloneToolDeclarations(s.tools)}
 }
-func (d ToolDiscoveryTool) Description() string         { return d.description }
-func (d ToolDiscoveryTool) InputSchema() ToolSchema     { return d.inputSchema.Clone() }
-func (d ToolDiscoveryTool) Executor() DiscoveryExecutor { return d.executor }
+func (d ToolDiscoveryTool) Description() string               { return d.description }
+func (d ToolDiscoveryTool) InputSchema() ToolSchema           { return d.inputSchema.Clone() }
+func (d ToolDiscoveryTool) Executor() DiscoveryExecutor       { return d.executor }
+func (d ToolDiscoveryTool) QueryKind() ToolDiscoveryQueryKind { return d.queryKind }
 func (d ToolDiscoveryTool) Clone() ToolDiscoveryTool {
-	return ToolDiscoveryTool{description: d.description, inputSchema: d.inputSchema.Clone(), executor: d.executor}
+	return ToolDiscoveryTool{description: d.description, inputSchema: d.inputSchema.Clone(), executor: d.executor, queryKind: d.queryKind}
 }
 
 func (f FunctionTool) Key() ToolKey            { return f.key.Clone() }

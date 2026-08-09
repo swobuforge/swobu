@@ -27,11 +27,11 @@ func TestAttemptRequestPreservesDeferredFunctionAndInlineImageBesideLocalMCPExpa
 	occurrence, _ := canonical.NewToolSet([]canonical.ToolDeclaration{mcpSource, deferredDecl})
 
 	// The deferred refinement names the ordinary function, not the MCP source.
-	refinement, err := canonical.NewResponsesToolRefinements(occurrence, []canonical.ToolKey{deferredKey})
+	refinement, err := canonical.NewToolVisibilityRefinements(occurrence, []canonical.ToolKey{deferredKey})
 	if err != nil {
 		t.Fatalf("refinement construction = %v", err)
 	}
-	item, err := canonical.NewToolDeclarationsItemWithResponses(occurrence, canonical.ContextScopeRequest, refinement)
+	item, err := canonical.NewToolDeclarationsItemWithVisibility(occurrence, canonical.ContextScopeRequest, refinement)
 	if err != nil {
 		t.Fatalf("item construction = %v", err)
 	}
@@ -75,7 +75,7 @@ func TestAttemptRequestPreservesDeferredFunctionAndInlineImageBesideLocalMCPExpa
 	if !ok {
 		t.Fatalf("declaration occurrence missing after rewrite")
 	}
-	if !occ.Responses().Deferred(deferredKey) {
+	if !occ.Visibility().Deferred(deferredKey) {
 		t.Fatalf("deferred refinement for %q was lost even though the rewrite succeeded", deferredKey.String())
 	}
 	declarations := occ.Tools().Declarations()
@@ -91,5 +91,26 @@ func TestAttemptRequestPreservesDeferredFunctionAndInlineImageBesideLocalMCPExpa
 	}
 	if _, ok := messageItem.Content()[0].Image(); !ok {
 		t.Fatal("inline image part was lost beside MCP expansion")
+	}
+}
+
+func TestAttemptRequestPreservesTypedDiscoveryFailure(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_1")
+	failureItem, err := canonical.NewToolDiscoveryFailureItem(callID, canonical.DiscoveryExecutorProvider, canonical.Specify("unavailable"), "search offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := (&Run{}).AttemptRequest(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{failureItem}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := attempt.Items()[0].ToolDiscoveryResult()
+	if !ok {
+		t.Fatal("discovery failure item was lost")
+	}
+	failure, ok := result.Failure()
+	code, specified := failure.Code().Get()
+	if !ok || !specified || code != "unavailable" || failure.Message() != "search offline" || !result.Tools().IsEmpty() {
+		t.Fatalf("failure after MCP transform = (%+v,%t), tools=%#v", failure, ok, result.Tools().Declarations())
 	}
 }

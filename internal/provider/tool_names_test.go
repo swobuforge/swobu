@@ -69,6 +69,9 @@ func TestAttemptToolNamesKeepSameNameAcrossCallableKindsDistinct(t *testing.T) {
 	}
 	functionName, _ := names.WireName(function)
 	customName, _ := names.WireName(custom)
+	if functionName == customName {
+		t.Fatalf("cross-kind wire names collide at %q", functionName)
+	}
 	for _, test := range []struct {
 		kind canonical.ToolKind
 		name string
@@ -82,6 +85,82 @@ func TestAttemptToolNamesKeepSameNameAcrossCallableKindsDistinct(t *testing.T) {
 			t.Fatalf("reverse lookup (%s, %q) = %q, %t", test.kind, test.name, got, ok)
 		}
 	}
+}
+
+func TestAttemptToolNamesCrossKindCollisionIsOrderIndependent(t *testing.T) {
+	function, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, canonical.ToolDiscoveryKey().Name())
+	discovery := canonical.ToolDiscoveryKey()
+	first, _, err := BuildAttemptToolNames(mixedToolNamesTestRequest(t, function, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := BuildAttemptToolNames(mixedToolNamesTestRequest(t, function, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []canonical.ToolKey{function, discovery} {
+		left, _ := first.WireName(key)
+		right, _ := second.WireName(key)
+		if left != right {
+			t.Fatalf("wire name for %q changed with order: %q != %q", key, left, right)
+		}
+	}
+}
+
+func TestProviderDiscoveryDoesNotAffectOrdinaryWireNames(t *testing.T) {
+	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, canonical.ToolDiscoveryKey().Name())
+	function := canonicaltest.MustFunctionTool(functionKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{discovery, function})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, changes, err := BuildAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireName, err := names.WireName(functionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wireName != functionKey.Name() {
+		t.Fatalf("function wire name = %q, want literal %q", wireName, functionKey.Name())
+	}
+	if _, err := names.WireName(discovery.Key()); err == nil {
+		t.Fatal("provider discovery received an unused ordinary callable alias")
+	}
+	if len(changes) != 0 {
+		t.Fatalf("provider discovery caused naming changes: %#v", changes)
+	}
+}
+
+func mixedToolNamesTestRequest(t *testing.T, functionKey canonical.ToolKey, functionFirst bool) canonical.CanonicalRequest {
+	t.Helper()
+	function := canonicaltest.MustFunctionTool(functionKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := []canonical.ToolDeclaration{discovery, function}
+	if functionFirst {
+		declarations = []canonical.ToolDeclaration{function, discovery}
+	}
+	set, err := canonical.NewToolSet(declarations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
 }
 
 func TestAttemptToolNamesRejectInjectedGeneratedCollisionWithoutOrdinalFallback(t *testing.T) {

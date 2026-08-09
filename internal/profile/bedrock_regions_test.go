@@ -1,10 +1,6 @@
 package profile
 
-import (
-	"testing"
-
-	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-)
+import "testing"
 
 func TestBedrockMantleRegions_AreCanonicalAndCurrent(t *testing.T) {
 	t.Parallel()
@@ -21,8 +17,8 @@ func TestBedrockMantleRegions_AreCanonicalAndCurrent(t *testing.T) {
 	if got := BedrockMantleRegionLabel("eu-west-2"); got != "Europe (London) · eu-west-2" {
 		t.Fatalf("region label = %q", got)
 	}
-	if got := EffectiveBedrockAPIURL("eu-west-2", "", protocolkind.Responses); got != "https://bedrock-mantle.eu-west-2.api.aws/v1" {
-		t.Fatalf("derived endpoint = %q", got)
+	if got := BedrockCatalogURL("eu-west-2"); got != "https://bedrock-mantle.eu-west-2.api.aws/v1/models" {
+		t.Fatalf("catalog URL = %q", got)
 	}
 	if got := BedrockMantleRegionFromEndpoint("https://bedrock-mantle.eu-west-2.api.aws/v1"); got != "eu-west-2" {
 		t.Fatalf("derived region = %q", got)

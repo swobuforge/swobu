@@ -52,7 +52,9 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 		{"azure", func() (routing.Connection, error) {
 			return routing.NewAzureConnection("https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 		}, func(c targetConnection) bool { return c.azure }},
-		{"bedrock", func() (routing.Connection, error) { return routing.NewBedrockConnection(bedrockRegion, "", "") }, func(c targetConnection) bool { return c.bedrock }},
+		{"bedrock", func() (routing.Connection, error) {
+			return routing.NewBedrockConnection(bedrockRegion, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
+		}, func(c targetConnection) bool { return c.bedrock }},
 		{"custom", func() (routing.Connection, error) {
 			return routing.NewCustomConnection("https://example.com/v1", customAuth)
 		}, func(c targetConnection) bool { return c.custom }},

@@ -59,7 +59,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		// of the reasoning wire id would land (see mantleResponsesCodec).
 		codec = mantleResponsesCodec{Codec: codec}
 	}
-	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
+	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send), ToolDiscovery: provider.ToolDiscoveryPolyfill}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}
@@ -157,11 +157,13 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 var _ provider.BackendResolver = BackendAdapter{}
 
 func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
-	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
-		return nil, canonical.BadEndpoint("bedrock provider base URL is required")
+	if strings.TrimSpace(target.BaseURL) != "" {
+		if err := validateBedrockMantleEndpoint(target.BaseURL, target.BedrockRegion()); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateBedrockMantleEndpoint(target.BaseURL, target.BedrockRegion()); err != nil {
-		return nil, err
+	if strings.TrimSpace(target.BedrockRegion()) == "" {
+		return nil, canonical.BadEndpoint("bedrock signing region is required")
 	}
 	region := bedrockSigningRegionForTarget(target)
 	resolved, err := resolveBedrockAuth(ctx, e.credentials, target.CredentialRef, region)
@@ -173,18 +175,11 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 
 func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target provider.TargetSnapshot, resolved resolvedBedrockAuthState, region string) ([]profile.ProviderDeploymentRecord, error) {
 
-	// Catalog discovery is internal normalization (not operator intent): the
-	// resolver collapses the terminal namespace to the bare /v1 service root
-	// while preserving any reverse-proxy prefix, then appends /models. The kind
-	// is irrelevant to the catalog, so pass the zero value to skip the coherence
-	// check — a Messages target's catalog must still resolve.
-	resolution, err := profile.ResolveBedrockEndpoint(target.BaseURL, target.BedrockRegion(), protocolkind.ProtocolKind(""))
-	if err != nil {
-		return nil, canonical.BadEndpoint("bedrock provider model catalog could not be derived from endpoint")
-	}
-	catalogURL := resolution.CatalogURL
+	// Catalog discovery is regional service connectivity, independent from the
+	// model-specific inference namespace authored on the target.
+	catalogURL := profile.BedrockCatalogURL(target.BedrockRegion())
 	if catalogURL == "" {
-		return nil, canonical.BadEndpoint("bedrock provider model catalog could not be derived from endpoint")
+		return nil, canonical.BadEndpoint("bedrock provider model catalog requires a region")
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL, nil)
 	if err != nil {

@@ -23,7 +23,7 @@ workspaces:
               - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
-              - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, credential: env:BEDROCK_API_KEY}}}
+              - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, endpoint: https://bedrock-mantle.eu-west-2.api.aws/openai/v1, credential: env:BEDROCK_API_KEY}}}
               - {id: custom, model: local, protocol: chat_completions, connection: {custom: {base_url: http://127.0.0.1:8080/v1, auth: {header: {name: x-api-key, credential: env:CUSTOM_KEY}}}}}
 `
 
@@ -227,27 +227,11 @@ func TestCodecRoundTripsAuthoredBedrockEndpoint(t *testing.T) {
 	}
 }
 
-// A legacy config authored before the endpoint field existed loads unchanged:
-// absence is a null that resolves to a derived endpoint, and that derivation
-// survives a full decode -> encode -> decode loop — the migration is
-// behavior-preserving (no synthesized endpoint key persists on reload).
-func TestCodecMigratesLegacyBedrockConfigToDerivedEndpoint(t *testing.T) {
-	config, err := decode([]byte(allVariantsYAML))
-	if err != nil {
-		t.Fatalf("decode legacy bedrock: %v", err)
-	}
-	if connection := bedrockTarget(t, config); connection.Endpoint() != "" {
-		t.Fatalf("legacy endpoint = %q, want derived (empty)", connection.Endpoint())
-	}
-	encoded, err := encode(config)
-	if err != nil {
-		t.Fatalf("encode legacy bedrock: %v", err)
-	}
-	decoded, err := decode(encoded)
-	if err != nil {
-		t.Fatalf("re-decode legacy bedrock: %v", err)
-	}
-	if connection := bedrockTarget(t, decoded); connection.Endpoint() != "" {
-		t.Fatalf("round-tripped derived endpoint = %q, want still derived (empty)", connection.Endpoint())
+// A legacy region-only Bedrock target is no longer executable because its
+// inference namespace is unknown. Decode fails rather than inventing `/v1`.
+func TestCodecRejectsLegacyBedrockConfigWithoutEndpoint(t *testing.T) {
+	legacy := strings.Replace(allVariantsYAML, "endpoint: https://bedrock-mantle.eu-west-2.api.aws/openai/v1, ", "", 1)
+	if _, err := decode([]byte(legacy)); err == nil {
+		t.Fatal("decoded legacy Bedrock target without an endpoint")
 	}
 }

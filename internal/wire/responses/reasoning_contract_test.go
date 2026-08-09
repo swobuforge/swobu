@@ -245,6 +245,28 @@ func TestResponsesStreamAndBufferedReasoningReplayAreEqual(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamReconcilesTerminalReasoningWithOmittedCommittedID(t *testing.T) {
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n" +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher\",\"summary\":[]}]}}\n\n"
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	replay, ok := firstReasoningReplay(t, stream)
+	if !ok || replay.EncryptedContent != "cipher" || replay.ItemID != "rs_7" {
+		t.Fatalf("streamed reasoning replay = %+v, present=%v", replay, ok)
+	}
+	for {
+		_, err := stream.Next(context.Background())
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("terminal reconciliation failed: %v", err)
+		}
+	}
+}
+
 func firstReasoningReplay(t *testing.T, stream canonical.ResponseStream) (canonical.ResponsesReasoningReplay, bool) {
 	t.Helper()
 	for {

@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func targetConfigTitle(w *TargetConfig) string {
@@ -276,15 +275,9 @@ func selectedModelSeedFromTarget(target readmodel.TargetReadModel) readmodel.Mod
 	}
 }
 
-// seedEndpointFromTarget initializes the temporary editor buffer on edit entry.
-// Bedrock keeps explicit-or-empty durable intent in Draft.Endpoint while the
-// editor receives the protocol-aware effective API base.
+// seedEndpointFromTarget initializes the endpoint editor from durable target
+// state.
 func seedEndpointFromTarget(w *TargetConfig, target readmodel.TargetReadModel) {
-	if profile.ProviderID(target.Provider) == profile.ProviderSpecBedrock {
-		kind, _, _ := profile.ProviderProtocolKindAndFrame(target.Provider, target.ProviderProtocol)
-		w.BaseURL.Set(profile.EffectiveBedrockAPIURL(target.BedrockRegion, target.BaseURL, kind))
-		return
-	}
 	w.BaseURL.Set(strings.TrimSpace(target.BaseURL))
 }
 

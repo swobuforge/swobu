@@ -286,10 +286,25 @@ func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req por
 	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
 }
 func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-	if req.Connection == nil {
+	connection := workspaceapi.Connection{}
+	bedrockProbe := false
+	switch probe := req.Probe.(type) {
+	case ports.BedrockCatalogProbe:
+		bedrockProbe = true
+		connection.Bedrock = &workspaceapi.BedrockConnection{
+			Region:     strings.TrimSpace(probe.Region),
+			Credential: strings.TrimSpace(probe.CredentialRef),
+		}
+	case ports.ConnectionCatalogProbe:
+		if probe.Connection == nil {
+			return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")
+		}
+		connection = workspaceapi.ConnectionFromRouting(probe.Connection)
+		_, bedrockProbe = probe.Connection.(routing.BedrockConnection)
+	default:
 		return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")
 	}
-	result, err := a.client.ProbeTarget(ctx, workspaceapi.ConnectionFromRouting(req.Connection), req.ProviderProtocol)
+	result, err := a.client.ProbeTarget(ctx, connection, req.ProviderProtocol)
 	if err != nil {
 		return readmodel.ModelCatalogReadModel{}, err
 	}
@@ -298,7 +313,7 @@ func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports
 		deployments = append(deployments, readmodel.ModelDeploymentReadModel{ID: d.Name, Name: d.Name, ModelName: d.ModelName, ModelPublisher: d.ModelPublisher, ModelVersion: d.ModelVersion, Family: d.Family, SupportedProviderProtocols: d.SupportedProviderProtocols, DefaultProviderProtocol: d.DefaultProviderProtocol})
 	}
 	model := readmodel.ModelCatalogReadModel{Deployments: deployments, ResolvedProviderProtocol: result.ResolvedProviderProtocol}
-	if _, ok := req.Connection.(routing.BedrockConnection); ok && len(result.Diagnostics) > 0 {
+	if bedrockProbe && len(result.Diagnostics) > 0 {
 		evidence, err := decodeBedrockAuthenticationDiagnostics(result.Diagnostics)
 		if err != nil {
 			return readmodel.ModelCatalogReadModel{}, err
