@@ -52,10 +52,9 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 	}
 
 	rows := []string{
-		"current version: " + nonEmptyOr(currentRaw, "dev"),
-		"latest version: " + latest,
-		"update now: " + installCommand,
-		"skip this notice: export " + platformconfig.EnvSkipVersionNotice + "=1",
+		"versions: " + nonEmptyOr(currentRaw, "dev") + " → " + latest,
+		"update: " + installCommand,
+		"hide: export " + platformconfig.EnvSkipVersionNotice + "=1",
 	}
 
 	return versionNoticeDecision{

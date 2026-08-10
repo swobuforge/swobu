@@ -34,6 +34,7 @@ const (
 	RequestItemsResponsesReasoningReplay    CapabilityPath = "request.items.reasoning.responses_replay"
 	RequestTools                            CapabilityPath = "request.tools"
 	RequestToolsKind                        CapabilityPath = "request.tools.kind"
+	RequestToolsDiscovery                   CapabilityPath = "request.tools.discovery"
 	RequestToolsName                        CapabilityPath = "request.tools.name"
 	RequestToolsDescription                 CapabilityPath = "request.tools.description"
 	RequestToolsSchema                      CapabilityPath = "request.tools.schema"

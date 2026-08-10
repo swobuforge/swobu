@@ -1,0 +1,2 @@
+  activity
+   14:32:01  gpt                 openai/gpt-4.1-with-a-long-evidence-label · claude-cli/2.1.204             200  145ms

@@ -36,7 +36,7 @@ func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 	}
 }
 
-func TestBackendRejectsUnspecifiedToolDiscoveryMode(t *testing.T) {
+func TestBackendValidationDoesNotOwnTargetSupport(t *testing.T) {
 	target := TargetSnapshot{
 		TargetID: "target", TargetVersion: 1, ProviderSpec: "openai", Model: "m",
 		ProtocolKind: protocolkind.Responses, ProviderProtocol: "responses", SelectedFrame: "http_json_body",
@@ -48,12 +48,8 @@ func TestBackendRejectsUnspecifiedToolDiscoveryMode(t *testing.T) {
 			return nil, nil
 		}),
 	}
-	if err := backend.Validate(); err == nil {
-		t.Fatal("backend accepted unspecified tool-discovery mode")
-	}
-	backend.ToolDiscovery = ToolDiscoveryPolyfill
 	if err := backend.Validate(); err != nil {
-		t.Fatalf("explicit tool-discovery mode rejected: %v", err)
+		t.Fatalf("complete backend rejected: %v", err)
 	}
 }
 

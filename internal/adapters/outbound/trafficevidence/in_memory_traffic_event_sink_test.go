@@ -8,6 +8,47 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 )
 
+func TestProjectStatus_ReconcilesInflightIntoTerminalRow(t *testing.T) {
+	store := NewTrafficEventStore(StoreConfig{})
+	requestID, _ := trafficevidence.ParseRequestID("req_live_reconcile")
+	route, _ := trafficevidence.NewRoute("target-a", "model-a")
+	base := trafficevidence.TrafficEventInput{
+		RequestID: requestID, Workspace: "acme", RequestPath: "/responses",
+		Route: route, ProviderSpec: "openai", ProviderModel: "model-a",
+		WorkspaceRouteModelID: "chatgpt-dmytrii",
+	}
+	inflight, err := trafficevidence.NewProviderInflightTrafficEvent(base, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Append(context.Background(), inflight)
+
+	projection := store.ProjectStatus(ProjectionInput{Scope: ProjectionScope{Kind: ProjectionScopeAll}})
+	if len(projection.RecentTraffic) != 1 {
+		t.Fatalf("in-flight rows = %d, want one", len(projection.RecentTraffic))
+	}
+	row := projection.RecentTraffic[0]
+	if row.Result != "in_progress" || row.StatusCode != 0 || row.Timing != nil {
+		t.Fatalf("in-flight projection = result=%q status=%d timing=%#v", row.Result, row.StatusCode, row.Timing)
+	}
+
+	terminal, err := trafficevidence.NewTerminalTrafficEvent(base, trafficevidence.TerminalOutcome{
+		Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded", AttemptCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Append(context.Background(), terminal)
+	projection = store.ProjectStatus(ProjectionInput{Scope: ProjectionScope{Kind: ProjectionScopeAll}})
+	if len(projection.RecentTraffic) != 1 {
+		t.Fatalf("terminal rows = %d, want same request reconciled to one row", len(projection.RecentTraffic))
+	}
+	row = projection.RecentTraffic[0]
+	if row.Result != "success" || row.StatusCode != 200 {
+		t.Fatalf("terminal projection = result=%q status=%d", row.Result, row.StatusCode)
+	}
+}
+
 func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *testing.T) {
 	store := NewTrafficEventStore(StoreConfig{})
 	requestID, err := trafficevidence.ParseRequestID("req_shape")

@@ -55,6 +55,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		BackendResolver:    executor,
+		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery:          executor,
 	}
@@ -67,7 +68,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
-		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send), ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

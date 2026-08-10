@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -39,6 +41,25 @@ func TestProviderRegistry_BuildsFacetRegistriesForSupportedSpecs(t *testing.T) {
 		if discovery, ok := registry.Discovery(providerID); !ok || discovery == nil {
 			t.Fatalf("discovery lookup failed for %q", spec)
 		}
+		if resolver, ok := registry.TargetSupportResolver(providerID); !ok || resolver == nil {
+			t.Fatalf("target support resolver lookup failed for %q", spec)
+		}
+	}
+}
+
+func TestProviderRegistryRejectsRuntimeWithoutTargetSupportFacet(t *testing.T) {
+	var manifest profile.Profile
+	for _, candidate := range profile.All() {
+		if candidate.ProviderID == profile.ProviderSpecOpenAI {
+			manifest = candidate
+			break
+		}
+	}
+	runtime := openaiadapter.NewRuntime(http.DefaultClient, testCredentialResolver{})
+	runtime.TargetSupport = nil
+	_, err := newProviderRegistry([]profile.Profile{manifest}, []providersruntime.ProviderRuntimeBundle{runtime})
+	if err == nil {
+		t.Fatal("runtime without target support facet must fail composition")
 	}
 }
 
@@ -87,62 +108,16 @@ func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 	}
 }
 
-func TestAdvertisedProviderProtocolsDeclareToolDiscoveryAuthority(t *testing.T) {
+func TestAdvertisedProviderProtocolsLeaveDiscoverySupportUnknownWithoutExactTargetEvidence(t *testing.T) {
 	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
-	expected := map[string]provider.ToolDiscoveryMode{
-		"ollama/responses": provider.ToolDiscoveryPolyfill, "ollama/responses_stream": provider.ToolDiscoveryPolyfill,
-		"ollama/chat_completions": provider.ToolDiscoveryPolyfill, "ollama/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"ollama/messages": provider.ToolDiscoveryPolyfill, "ollama/messages_stream": provider.ToolDiscoveryPolyfill,
-		"lmstudio/responses": provider.ToolDiscoveryPolyfill, "lmstudio/responses_stream": provider.ToolDiscoveryPolyfill,
-		"lmstudio/chat_completions": provider.ToolDiscoveryPolyfill, "lmstudio/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"lmstudio/messages": provider.ToolDiscoveryPolyfill, "lmstudio/messages_stream": provider.ToolDiscoveryPolyfill,
-		"vllm/responses": provider.ToolDiscoveryPolyfill, "vllm/responses_stream": provider.ToolDiscoveryPolyfill,
-		"vllm/chat_completions": provider.ToolDiscoveryPolyfill, "vllm/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"vllm/messages": provider.ToolDiscoveryPolyfill, "vllm/messages_stream": provider.ToolDiscoveryPolyfill,
-		"openai/responses": provider.ToolDiscoveryNative, "openai/responses_stream": provider.ToolDiscoveryNative,
-		"openai/chat_completions": provider.ToolDiscoveryPolyfill, "openai/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"chatgpt/responses_stream": provider.ToolDiscoveryPolyfill,
-		"anthropic/messages":       provider.ToolDiscoveryNative, "anthropic/messages_stream": provider.ToolDiscoveryNative,
-		"deepseek/messages_stream": provider.ToolDiscoveryPolyfill,
-		"openrouter/responses":     provider.ToolDiscoveryPolyfill, "openrouter/responses_stream": provider.ToolDiscoveryPolyfill,
-		"openrouter/chat_completions": provider.ToolDiscoveryPolyfill, "openrouter/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"zai/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"bedrock/responses":           provider.ToolDiscoveryPolyfill, "bedrock/responses_stream": provider.ToolDiscoveryPolyfill,
-		"bedrock/chat_completions": provider.ToolDiscoveryPolyfill, "bedrock/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"bedrock/messages": provider.ToolDiscoveryPolyfill, "bedrock/messages_stream": provider.ToolDiscoveryPolyfill,
-		"azure/responses": provider.ToolDiscoveryNative, "azure/responses_stream": provider.ToolDiscoveryNative,
-		"azure/chat_completions": provider.ToolDiscoveryPolyfill, "azure/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"azure/messages": provider.ToolDiscoveryPolyfill, "azure/messages_stream": provider.ToolDiscoveryPolyfill,
-		"custom/responses": provider.ToolDiscoveryPolyfill, "custom/responses_stream": provider.ToolDiscoveryPolyfill,
-		"custom/chat_completions": provider.ToolDiscoveryPolyfill, "custom/chat_completions_stream": provider.ToolDiscoveryPolyfill,
-		"custom/messages": provider.ToolDiscoveryPolyfill, "custom/messages_stream": provider.ToolDiscoveryPolyfill,
-	}
-	seen := make(map[string]struct{}, len(expected))
 	for _, manifest := range profile.All() {
-		resolver, ok := registry.BackendResolver(manifest.ProviderID)
-		if !ok {
-			t.Fatalf("provider %q has no backend resolver", manifest.ProviderID)
-		}
 		for _, protocol := range manifest.ProviderProtocols {
 			key := string(manifest.ProviderID) + "/" + protocol.Name
-			want, ok := expected[key]
-			if !ok {
-				t.Fatalf("advertised provider protocol %q has no expected tool-discovery authority", key)
-			}
 			target := advertisedProtocolTarget(manifest.ProviderID, protocol)
-			backend, err := resolver.ResolveBackend(target)
-			if err != nil {
-				t.Fatalf("ResolveBackend(%s): %v", key, err)
+			got := registry.ResolveTargetSupport(target).Get(canonical.RequestToolsDiscovery)
+			if got != provider.SupportUnknown {
+				t.Fatalf("%s tool discovery support = %v, want unknown without exact-target evidence", key, got)
 			}
-			if backend.ToolDiscovery == provider.ToolDiscoveryUnspecified || backend.ToolDiscovery != want {
-				t.Fatalf("%s tool discovery = %v, want %v", key, backend.ToolDiscovery, want)
-			}
-			seen[key] = struct{}{}
-		}
-	}
-	for key := range expected {
-		if _, ok := seen[key]; !ok {
-			t.Fatalf("tool-discovery expectation %q no longer matches an advertised provider protocol", key)
 		}
 	}
 }

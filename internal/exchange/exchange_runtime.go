@@ -7,6 +7,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 )
@@ -14,6 +15,7 @@ import (
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
 	Runtime         ExecutionRuntime
+	TrafficEvidence observation.TrafficEventSink
 	CheckpointStore session.Store
 	ResponseIDs     ResponseIDGenerator
 	Policy          WorkspacePolicy

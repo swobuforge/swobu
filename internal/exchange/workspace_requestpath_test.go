@@ -4,13 +4,23 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
+
+type channelTrafficEventSink struct {
+	events chan trafficevidence.TrafficEvent
+}
+
+func (s channelTrafficEventSink) Append(_ context.Context, event trafficevidence.TrafficEvent) {
+	s.events <- event
+}
 
 func requestpathTarget(t *testing.T, id string) routing.Target {
 	t.Helper()
@@ -38,6 +48,50 @@ func requestpathWorkspace(t *testing.T) routing.Workspace {
 		t.Fatal(err)
 	}
 	return workspace
+}
+
+func TestRequestPathPublishesInflightEvidenceBeforeProviderReturns(t *testing.T) {
+	workspace := requestpathWorkspace(t)
+	release := make(chan struct{})
+	providerEntered := make(chan struct{})
+	sink := channelTrafficEventSink{events: make(chan trafficevidence.TrafficEvent, 1)}
+	runner := withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		close(providerEntered)
+		<-release
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
+	})
+	runner.TrafficEvidence = sink
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := runExchange(context.Background(), runner, "req_inflight_live", "codex-tui/0.147.0", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+		done <- err
+	}()
+
+	select {
+	case event := <-sink.events:
+		if event.Result() != trafficevidence.ResultClassInProgress || event.EventKind() != trafficevidence.EventKindProviderInflight {
+			t.Fatalf("in-flight kind/result = %q/%q", event.EventKind(), event.Result())
+		}
+		if event.WorkspaceRouteModelID() != "a" || event.ProviderSpec() != "custom" || event.ProviderModel() != "upstream-target-a" {
+			t.Fatalf("route/target evidence = %q %q/%q", event.WorkspaceRouteModelID(), event.ProviderSpec(), event.ProviderModel())
+		}
+		if event.StatusCode() != 0 {
+			t.Fatalf("in-flight status = %d, want none", event.StatusCode())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight evidence before provider returned")
+	}
+
+	select {
+	case <-providerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("provider transport was not entered")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {

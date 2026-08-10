@@ -20,7 +20,7 @@ func TestCapabilityPathsUseCanonicalGrammar(t *testing.T) {
 		RequestItemsToolCallTool, RequestItemsToolCallName, RequestItemsToolCallInput,
 		RequestItemsToolResultCallID, RequestItemsToolResultContent,
 		RequestItemsToolResultContentBoundaries, RequestItemsToolResultIsError,
-		RequestItemsResponsesReasoningReplay, RequestTools, RequestToolsKind,
+		RequestItemsResponsesReasoningReplay, RequestTools, RequestToolsKind, RequestToolsDiscovery,
 		RequestToolsName, RequestToolsDescription, RequestToolsSchema, RequestToolsVisibility,
 		RequestToolsSchemaStrict, RequestToolPolicy, RequestToolCallBatch,
 		RequestOutputFormat, RequestOutputFormatSchema, RequestControlsMaxOutputTokens,

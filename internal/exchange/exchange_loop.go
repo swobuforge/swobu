@@ -3,12 +3,15 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
+	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
@@ -80,9 +83,61 @@ func runExchange(
 		if tr.command == nil {
 			return RequestOutput{}, canonical.InternalError(fmt.Sprintf("exchange invariant: active phase %T produced no command", s.phase))
 		}
+		if _, ok := tr.command.(callProviderCommand); ok {
+			appendProviderInflightEvidence(ctx, runner.TrafficEvidence, s)
+		}
 		current = executeCommand(ctx, tr.command)
 	}
 	return RequestOutput{}, canonical.InternalError("exchange transition limit reached")
+}
+
+func appendProviderInflightEvidence(ctx context.Context, sink observation.TrafficEventSink, state exchangeState) {
+	if sink == nil || len(state.providerCallAttempts) == 0 {
+		return
+	}
+	attempt := state.providerCallAttempts[len(state.providerCallAttempts)-1]
+	requestID, err := trafficevidence.ParseRequestID(state.input.exchangeID)
+	if err != nil {
+		logInflightEvidenceFailure(state.input.exchangeID, err)
+		return
+	}
+	route, err := trafficevidence.NewRoute(attempt.target.TargetID, state.input.request.Model())
+	if err != nil {
+		logInflightEvidenceFailure(state.input.exchangeID, err)
+		return
+	}
+	timing := trafficevidence.NewUnknownTiming()
+	if state.input.timing != nil {
+		timing = *state.input.timing
+	}
+	event, err := trafficevidence.NewProviderInflightTrafficEvent(trafficevidence.TrafficEventInput{
+		RequestID:             requestID,
+		Workspace:             state.input.workspace.Slug().String(),
+		ClientHandler:         state.input.clientHandler,
+		ClientFamily:          trafficevidence.ClientFamily(state.input.clientFamily),
+		RequestPath:           state.input.requestPath,
+		Route:                 route,
+		Timing:                timing,
+		ModelRequested:        state.input.request.Model(),
+		ModelResolved:         state.input.request.Model(),
+		WorkspaceRouteModelID: state.route.name.String(),
+		ProviderSpec:          profile.ProviderID(attempt.target.ProviderSpec),
+		ProviderModel:         attempt.target.Model,
+	}, len(state.providerCallAttempts))
+	if err != nil {
+		logInflightEvidenceFailure(state.input.exchangeID, err)
+		return
+	}
+	sink.Append(ctx, event)
+}
+
+func logInflightEvidenceFailure(requestID string, err error) {
+	slog.Warn("traffic evidence in-flight commit failed",
+		"component", "exchange",
+		"event", "traffic_evidence_inflight_commit_failed",
+		"request_id", requestID,
+		"error", err,
+	)
 }
 
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {

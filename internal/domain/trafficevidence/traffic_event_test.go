@@ -18,6 +18,40 @@ func successOutcome() TerminalOutcome {
 	return TerminalOutcome{Result: ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"}
 }
 
+func TestNewProviderInflightTrafficEventCarriesOnlyExecutionStartFacts(t *testing.T) {
+	requestID, _ := ParseRequestID("req_inflight")
+	route, _ := NewRoute("target-a", "model-a")
+	event, err := NewProviderInflightTrafficEvent(TrafficEventInput{
+		RequestID: requestID, Workspace: "alpha", RequestPath: "/responses",
+		Route: route, ProviderSpec: "openai", ProviderModel: "model-a",
+		WorkspaceRouteModelID: "chatgpt-dmytrii",
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.EventKind() != EventKindProviderInflight || event.Result() != ResultClassInProgress {
+		t.Fatalf("kind/result = %q/%q", event.EventKind(), event.Result())
+	}
+	if event.StatusCode() != 0 || event.DeliveryKind() != "" || event.CanonicalErrorCode() != "" {
+		t.Fatalf("in-flight event retained terminal facts: status=%d delivery=%q error=%q", event.StatusCode(), event.DeliveryKind(), event.CanonicalErrorCode())
+	}
+	if event.AttemptCount() != 2 || event.WorkspaceRouteModelID() != "chatgpt-dmytrii" {
+		t.Fatalf("attempt/route = %d/%q", event.AttemptCount(), event.WorkspaceRouteModelID())
+	}
+}
+
+func TestNewProviderInflightTrafficEventRequiresIssuedAttempt(t *testing.T) {
+	requestID, _ := ParseRequestID("req_inflight_invalid")
+	route, _ := NewRoute("target-a", "model-a")
+	_, err := NewProviderInflightTrafficEvent(TrafficEventInput{
+		RequestID: requestID, Workspace: "alpha", RequestPath: "/responses",
+		Route: route, ProviderSpec: "openai",
+	}, 0)
+	if err == nil {
+		t.Fatal("expected zero-attempt in-flight event to fail")
+	}
+}
+
 func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	requestID, err := ParseRequestID("req-1")
 	if err != nil {

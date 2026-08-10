@@ -46,9 +46,9 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 	}
 	text := stdout.String()
 	requireClosedNotice(t, text, "Update Available", []string{
-		"latest version: v999.0.0",
-		"update now: " + installCommand,
-		"skip this notice: export " + platformconfig.EnvSkipVersionNotice + "=1",
+		"versions: dev → v999.0.0",
+		"update: " + installCommand,
+		"hide: export " + platformconfig.EnvSkipVersionNotice + "=1",
 	})
 	if !strings.Contains(text, "press Enter to continue") {
 		t.Fatalf("missing continue prompt; stdout=%q", text)

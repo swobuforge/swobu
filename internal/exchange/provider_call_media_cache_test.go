@@ -61,7 +61,7 @@ type mediaCacheTestRuntime struct {
 func (r mediaCacheTestRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	codec := r.codecs[target.TargetID]
 	return provider.Backend{
-		Target: target, Codec: codec, ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target: target, Codec: codec,
 		Transport: provider.TransportFunc(func(context.Context, carrier.Document) (provider.Ingress, error) {
 			panic("media cache preparation tests do not send provider requests")
 		}),

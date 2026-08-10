@@ -157,10 +157,14 @@ func TestLiveBedrockMantleResponsesReasoningReplayRoundTrip(t *testing.T) {
 	exec := NewExecutor(http.DefaultClient)
 	exec.credentials = credentials.NewEnvResolver()
 
+	credentialRef := ""
+	if strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")) != "" {
+		credentialRef = "env:AWS_BEARER_TOKEN_BEDROCK"
+	}
 	target := provider.NewBedrockTargetSnapshot(
 		"live-bedrock-replay",
 		endpoint,
-		"",
+		credentialRef,
 		protocolkind.Responses,
 		profile.FrameHTTPJSONBody,
 		"responses",

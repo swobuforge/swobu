@@ -279,6 +279,30 @@ type TerminalOutcome struct {
 	FallbackRecovered  bool
 }
 
+// NewProviderInflightTrafficEvent records that one concrete provider call has
+// begun. It carries selected route/target evidence but no terminal delivery,
+// error, recovery, or duration claim.
+func NewProviderInflightTrafficEvent(base TrafficEventInput, attemptCount int) (TrafficEvent, error) {
+	normalized, err := normalizeTrafficEventInput(base)
+	if err != nil {
+		return TrafficEvent{}, err
+	}
+	if attemptCount <= 0 {
+		return TrafficEvent{}, fmt.Errorf("in-flight attempt count must be positive")
+	}
+	if !canonical.ValidNormalizedPath(normalized.RequestPath) {
+		return TrafficEvent{}, fmt.Errorf("in-flight traffic event request path %q is not canonical", normalized.RequestPath)
+	}
+	if _, ok := profile.ParseProviderID(string(normalized.ProviderSpec)); !ok {
+		return TrafficEvent{}, fmt.Errorf("in-flight traffic event provider %q is not a catalog id", normalized.ProviderSpec)
+	}
+	event := newTrafficEventBase(normalized)
+	event.eventKind = EventKindProviderInflight
+	event.result = ResultClassInProgress
+	event.attemptCount = attemptCount
+	return event, nil
+}
+
 // validStatus reports whether code is a transport-valid HTTP status for a terminal
 // event: 0 (no response received) or a real status in 100-599. It matches the V1
 // schema's status_code constraint, so every constructed terminal event is
@@ -317,9 +341,24 @@ func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (T
 	if outcome.CanonicalErrorCode != "" && !canonical.ValidErrorCode(outcome.CanonicalErrorCode) {
 		return TrafficEvent{}, fmt.Errorf("terminal traffic event canonical error code %q is not recognized", outcome.CanonicalErrorCode)
 	}
+	event := newTrafficEventBase(normalized)
+	event.eventKind = EventKindProviderTerminal
+	event.result = outcome.Result
+	event.statusCode = outcome.StatusCode
+	event.deliveryKind = outcome.DeliveryKind
+	event.canonicalErrorCode = outcome.CanonicalErrorCode
+	event.attemptCount = outcome.AttemptCount
+	event.fallbackRecovered = outcome.FallbackRecovered
+	event.tokenUsage = normalized.TokenUsage
+	event.wireMutations = cloneMutations(normalized.Mutations)
+	event.exchangeDiagnostics = slices.Clone(normalized.ExchangeDiagnostics)
+	event.exchangeStageReports = cloneStageReports(normalized.StageReports)
+	return event, nil
+}
+
+func newTrafficEventBase(normalized TrafficEventInput) TrafficEvent {
 	return TrafficEvent{
 		requestID:                 normalized.RequestID,
-		eventKind:                 EventKindProviderTerminal,
 		workspace:                 normalized.Workspace,
 		clientProtocol:            normalized.ClientProtocol,
 		requestPath:               normalized.RequestPath,
@@ -330,13 +369,7 @@ func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (T
 		bridgeID:                  normalized.BridgeID,
 		decisionReason:            normalized.DecisionReason,
 		adaptationChain:           slices.Clone(normalized.AdaptationChain),
-		result:                    outcome.Result,
-		statusCode:                outcome.StatusCode,
-		deliveryKind:              outcome.DeliveryKind,
-		canonicalErrorCode:        outcome.CanonicalErrorCode,
 		timing:                    normalized.Timing,
-		attemptCount:              outcome.AttemptCount,
-		fallbackRecovered:         outcome.FallbackRecovered,
 		continuityRecovered:       normalized.ContinuityRecovered,
 		continuityRecoveryTrigger: normalized.ContinuityRecoveryTrigger,
 		modelResolutionMode:       normalized.ModelResolutionMode,
@@ -345,11 +378,7 @@ func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (T
 		workspaceRouteModelID:     normalized.WorkspaceRouteModelID,
 		providerSpec:              normalized.ProviderSpec,
 		providerModel:             strings.TrimSpace(normalized.ProviderModel), // swobu:io-string source=boundary
-		tokenUsage:                normalized.TokenUsage,
-		wireMutations:             cloneMutations(normalized.Mutations),
-		exchangeDiagnostics:       slices.Clone(normalized.ExchangeDiagnostics),
-		exchangeStageReports:      cloneStageReports(normalized.StageReports),
-	}, nil
+	}
 }
 
 func normalizeTrafficEventInput(input TrafficEventInput) (TrafficEventInput, error) {

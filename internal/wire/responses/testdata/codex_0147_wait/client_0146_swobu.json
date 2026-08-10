@@ -1,0 +1,37 @@
+{
+  "model": "gpt-5.6-sol",
+  "instructions": "",
+  "input": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "tools": [
+        {
+          "type": "function",
+          "name": "wait",
+          "description": "Wait for one yielded execution cell.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cell_id": { "type": "string" }
+            },
+            "required": ["cell_id"]
+          }
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "developer",
+      "content": "Use available tools only when their preconditions hold."
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Continue."
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "stream": true
+}

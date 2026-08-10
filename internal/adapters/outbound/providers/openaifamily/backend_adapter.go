@@ -50,6 +50,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderID(),
 		BackendResolver:    executor,
+		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery:          executor,
 	}
@@ -62,10 +63,9 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, canonical.BadEndpoint("provider policy is unsupported for exact backend")
 	}
 	backend := provider.Backend{
-		Target:        target.Clone(),
-		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport:     provider.BindTransport(target, e.Send),
-		ToolDiscovery: e.profile.ToolDiscovery(target.ProtocolKind),
+		Target:    target.Clone(),
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

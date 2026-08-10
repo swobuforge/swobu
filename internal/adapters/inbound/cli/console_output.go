@@ -2,18 +2,18 @@ package cli
 
 import (
 	"io"
+	"os"
 	"strings"
 	"unicode"
 
 	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 )
 
-// noticeBoxWidth is the fixed outer width of every console notice block. It is
-// deterministic so output is terminal-independent and snapshot-testable, and
-// wide enough that the longest real notice row (an install command or a bind
-// error, ~54 cells) renders on a single line. At 76 columns every notice leaves
-// room on an 80-column terminal.
-const noticeBoxWidth = 76
+// noticeBoxMaxWidth keeps normal notices visually compact. Real terminal
+// output clamps this maximum to the available columns so the terminal never
+// performs a second, geometry-breaking wrap outside the box.
+const noticeBoxMaxWidth = 68
 
 // renderNoticeBlock builds a closed, rounded-corner box for a titled console
 // notice: a top border carrying the title, one bordered row per input row, and
@@ -21,7 +21,8 @@ const noticeBoxWidth = 76
 //
 // Invariants this renderer owns:
 //
-//   - Width is fixed (noticeBoxWidth); the box never probes the terminal.
+//   - The pure renderer uses noticeBoxMaxWidth; the writer clamps that width to
+//     a real output terminal before rendering.
 //   - Rows wrap to the content width. A single token wider than the content
 //     width hard-breaks across lines. Rows are never ellipsized — commands and
 //     errors must stay complete and legible.
@@ -31,8 +32,15 @@ const noticeBoxWidth = 76
 //   - Display width is unicode-aware (wide CJK runes count as two cells), so
 //     the right border stays aligned for non-ASCII content.
 func renderNoticeBlock(title string, rows []string) []string {
+	return renderNoticeBlockAtWidth(title, rows, noticeBoxMaxWidth)
+}
+
+func renderNoticeBlockAtWidth(title string, rows []string, outerWidth int) []string {
 	const pad = 1
-	inner := noticeBoxWidth - 2 // space between the two corner glyphs
+	if outerWidth < 8 {
+		outerWidth = 8
+	}
+	inner := outerWidth - 2 // space between the two corner glyphs
 	if inner < 6 {
 		inner = 6
 	}
@@ -60,7 +68,20 @@ func renderNoticeBlock(title string, rows []string) []string {
 // writeNoticeBlock renders a titled notice and writes each line with the CRLF
 // line ending used across startup output.
 func writeNoticeBlock(out io.Writer, title string, rows []string) {
-	writeRawLines(out, renderNoticeBlock(title, rows))
+	writeRawLines(out, renderNoticeBlockAtWidth(title, rows, noticeWidth(out)))
+}
+
+func noticeWidth(out io.Writer) int {
+	width := noticeBoxMaxWidth
+	file, ok := out.(*os.File)
+	if !ok || !term.IsTerminal(int(file.Fd())) {
+		return width
+	}
+	columns, _, err := term.GetSize(int(file.Fd()))
+	if err == nil && columns > 0 && columns < width {
+		return columns
+	}
+	return width
 }
 
 func renderNoticeTop(title string, inner int) string {

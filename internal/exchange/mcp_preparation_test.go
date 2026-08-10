@@ -33,20 +33,22 @@ type nativeMessagesDiscoveryRuntime struct {
 
 func (r nativeMessagesDiscoveryRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:        target,
-		Codec:         protocolcodec.Codec{Protocol: protocolkind.Messages},
-		Transport:     provider.BindTransport(target, r.transport),
-		ToolDiscovery: provider.ToolDiscoveryNative,
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
+		Transport: provider.BindTransport(target, r.transport),
 	}, nil
 }
 
 func (r toolDiscoveryResponsesRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:        target,
-		Codec:         protocolcodec.Codec{Protocol: protocolkind.Responses},
-		Transport:     provider.BindTransport(target, r.transport),
-		ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: protocolkind.Responses},
+		Transport: provider.BindTransport(target, r.transport),
 	}, nil
+}
+
+func (nativeMessagesDiscoveryRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
+	return provider.NewTargetSupport(map[canonical.CapabilityPath]provider.Support{canonical.RequestToolsDiscovery: provider.SupportSupported})
 }
 
 func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
@@ -178,6 +180,9 @@ func TestProviderPreparationFallsBackWhenNativeDiscoverySubtypeIsUnrepresentable
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := call.request.TargetSupport.Get(canonical.RequestToolsDiscovery); got != provider.SupportSupported {
+		t.Fatalf("provider request discovery support=%v want supported", got)
 	}
 	wireRequest := call.document.RawBytes()
 	if bytes.Contains(wireRequest, []byte("tool_search")) || !bytes.Contains(wireRequest, []byte(`"name":"weather"`)) {

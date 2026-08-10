@@ -6,6 +6,9 @@
 // and winning-path changes enter the terminal summary. They never become
 // provider declarations, routing policy, support prediction, or observer-owned
 // truth.
+// A change records what one concrete lowering did. It never answers whether an
+// exact target supports the semantic, how a provider spells it, or which
+// recovery Exchange should attempt.
 //
 // A polyfill is a concrete reducer-integrated execution mechanism, such as the
 // request-scoped MCP runtime. Its execution fact classifies the terminal result

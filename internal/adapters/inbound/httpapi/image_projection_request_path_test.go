@@ -56,11 +56,14 @@ type imageIncidentRuntime struct {
 
 func (r imageIncidentRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:        target,
-		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport:     provider.BindTransport(target, r.transport.Send),
-		ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, r.transport.Send),
 	}, nil
+}
+
+func (imageIncidentRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
+	return provider.TargetSupport{}
 }
 
 func TestResponsesImageIncidentCallsChatWithSyntheticImageOnce(t *testing.T) {

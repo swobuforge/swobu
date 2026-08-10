@@ -24,36 +24,35 @@ const (
 )
 
 type BackendAdapter struct {
-	providerID    profile.ProviderID
-	client        *http.Client
-	credentials   providersruntime.CredentialProvider
-	toolDiscovery provider.ToolDiscoveryMode
+	providerID  profile.ProviderID
+	client      *http.Client
+	credentials providersruntime.CredentialProvider
 }
 
 func NewExecutor(client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
-	return NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials, provider.ToolDiscoveryNative)
+	return NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials)
 }
 
 // NewBackendAdapter builds the shared Messages transport for one provider
 // whose profile declares Anthropic Messages protocols and x-api-key auth.
-func NewBackendAdapter(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider, toolDiscovery provider.ToolDiscoveryMode) BackendAdapter {
+func NewBackendAdapter(providerID profile.ProviderID, client *http.Client, credentials providersruntime.CredentialProvider) BackendAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	return BackendAdapter{
-		providerID:    providerID,
-		client:        client,
-		credentials:   credentials,
-		toolDiscovery: toolDiscovery,
+		providerID:  providerID,
+		client:      client,
+		credentials: credentials,
 	}
 }
 
 // NewRuntime builds a complete Anthropic provider runtime.
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	executor := NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials, provider.ToolDiscoveryNative)
+	executor := NewBackendAdapter(profile.ProviderSpecAnthropic, client, credentials)
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAnthropic,
 		BackendResolver:    executor,
+		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery:          executor,
 	}
@@ -65,10 +64,9 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
-		Target:        target.Clone(),
-		Codec:         protocolcodec.Codec{Protocol: protocolkind.Messages},
-		Transport:     provider.BindTransport(target, e.Send),
-		ToolDiscovery: e.toolDiscovery,
+		Target:    target.Clone(),
+		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
+		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err

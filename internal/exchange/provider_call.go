@@ -35,6 +35,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	if !backend.Target.Equal(path.target) {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("resolved provider backend changed target execution projection")
 	}
+	targetSupport := runner.Runtime.ResolveTargetSupport(path.target)
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("required client codec not resolved")
@@ -53,7 +54,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	projectionChanges := []compat.Change(nil)
 	structuralProjection := false
-	if backend.ToolDiscovery == provider.ToolDiscoveryPolyfill {
+	if targetSupport.Get(canonical.RequestToolsDiscovery) != provider.SupportSupported {
 		projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)
 		if projectionErr != nil {
 			return providerCall{}, path.target, nil, s.mediaFetchCache, projectionErr
@@ -71,11 +72,12 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("provider attempt replay safety: %w", err)
 	}
 	providerRequest := provider.Request{
-		ExchangeID: s.input.exchangeID,
-		Canonical:  bindRequestToTarget(attemptRequest, path.target.Model),
-		Delivery:   path.delivery,
-		ToolNames:  toolNames,
-		MCPAccess:  s.input.mcpAccess,
+		ExchangeID:    s.input.exchangeID,
+		Canonical:     bindRequestToTarget(attemptRequest, path.target.Model),
+		TargetSupport: targetSupport,
+		Delivery:      path.delivery,
+		ToolNames:     toolNames,
+		MCPAccess:     s.input.mcpAccess,
 	}
 	preparationCtx := ctx
 	cancel := func() {}
@@ -104,7 +106,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	doc, changes, err := backend.Codec.Encode(providerRequest)
 	requestChanges = append(requestChanges, changes...)
-	if err != nil && backend.ToolDiscovery == provider.ToolDiscoveryNative && isNativeDiscoveryRepresentationError(err) {
+	if err != nil && targetSupport.Get(canonical.RequestToolsDiscovery) == provider.SupportSupported && isNativeDiscoveryRepresentationError(err) {
 		var incompatible provider.IncompatibleTargetError
 		if errors.As(err, &incompatible) {
 			projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)

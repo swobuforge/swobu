@@ -1,7 +1,8 @@
 // Package trafficevidence owns immutable traffic facts about request handling.
 //
 // It defines the traffic-event vocabulary used to describe what happened during
-// request execution (including normalized client provenance and model-
+// request execution, including provider-inflight and terminal lifecycle facts,
+// normalized client provenance, and model-
 // resolution facts such as requested, resolved, resolution mode, and the
 // selected provider/model target description) plus
 // optional token/cache usage counters, including reasoning-token breakdowns

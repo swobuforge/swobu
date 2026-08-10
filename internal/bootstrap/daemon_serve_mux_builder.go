@@ -27,7 +27,10 @@ func buildDaemonServeMux(
 	exchangeIngress := exchange.NewIngress(
 		daemon.configStore,
 		runtime,
-		exchange.RuntimePoliciesSpec{ImageFetcher: mediaadapter.NewPublicImageFetcher()},
+		exchange.RuntimePoliciesSpec{
+			ImageFetcher:    mediaadapter.NewPublicImageFetcher(),
+			TrafficEvidence: trafficEventSink,
+		},
 	)
 	mux := http.NewServeMux()
 	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress, trafficEventSink))
