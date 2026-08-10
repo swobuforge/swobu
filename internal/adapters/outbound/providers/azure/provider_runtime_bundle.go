@@ -76,12 +76,13 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	policy := providerRoutePolicy{}
 	router := azureBackendAdapter{
 		openAI:    openaifamily.NewExecutor(client, credentials, policy),
-		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials, provider.ToolDiscoveryPolyfill),
+		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials),
 		policy:    policy,
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
 		BackendResolver:    router,
+		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery: azureProviderModelCatalogClient{
 			client:      client,
@@ -96,7 +97,7 @@ func (r azureBackendAdapter) ResolveBackend(target provider.TargetSnapshot) (pro
 		return provider.Backend{}, canonical.BadEndpoint("azure resource locator is required")
 	}
 	codec := protocolcodec.Codec{Protocol: target.ProtocolKind}
-	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, r.Send), ToolDiscovery: r.policy.ToolDiscovery(target.ProtocolKind)}
+	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, r.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

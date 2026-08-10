@@ -60,6 +60,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 
 func (c *Cockpit) KeyMap() tui.KeyMap {
 	return tui.KeyMap{
+		tui.OnPreemptStop(tui.KeyCtrlC, c.quit),
 		tui.OnPreemptStop(tui.KeyTab, c.activateNextTab),
 		tui.OnPreemptStop(tui.KeyTab.Shift(), c.activatePreviousTab),
 		tui.OnStop(tui.KeyF1, c.activateHelpTab),

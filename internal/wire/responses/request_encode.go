@@ -423,7 +423,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 	if err != nil {
 		return nil, err
 	}
-	for _, current := range items {
+	for itemIndex, current := range items {
 		switch current.Kind() {
 		case canonical.ItemKindMessage:
 			message, _ := current.Message()
@@ -612,7 +612,9 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 		case canonical.ItemKindReasoning:
 			reasoning, _ := current.Reasoning()
 			item := map[string]any{"type": "reasoning"}
+			hasResponsesReplay := false
 			if replay, ok := reasoning.Opaque().Responses(); ok {
+				hasResponsesReplay = true
 				item["encrypted_content"] = replay.EncryptedContent
 				// RFC G2 §7.5: replay the paired Responses wire id verbatim when it
 				// was preserved. Idless replay stays idless. The id rides only with
@@ -631,11 +633,25 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 					content = append(content, map[string]any{"type": "reasoning_text", "text": part.Text()})
 				}
 			}
-			if len(summary) > 0 {
+			// Responses reasoning replay requires the summary collection even when
+			// the provider returned no readable summaries. Canonical parts retain
+			// summary meaning, while the replay branch restores the required empty
+			// wire collection after decode/checkpoint materialization.
+			if hasResponsesReplay || len(summary) > 0 {
 				item["summary"] = summary
 			}
 			if len(content) > 0 {
 				item["content"] = content
+			}
+			// A canonical reasoning item may contain only an opaque replay branch
+			// owned by another protocol. Dropping that child leaves no valid
+			// Responses reasoning union member. Erase the whole occurrence instead
+			// of serializing the invalid residual {"type":"reasoning"}.
+			if len(item) == 1 {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			encoded = append(encoded, item)
 		default:

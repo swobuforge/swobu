@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/creack/pty"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -17,14 +19,14 @@ func runeCount(s string) int {
 	return utf8.RuneCountInString(s)
 }
 
-// expectedBox is the test's independent reconstruction of a 76-cell notice box.
-// It hardcodes the spec (outer 76, inner 74, content 72, one-space side padding,
+// expectedBox is the test's independent reconstruction of a 68-cell notice box.
+// It hardcodes the spec (outer 68, inner 66, content 64, one-space side padding,
 // "─ Title " label) rather than calling the renderer, so any drift in the
 // renderer's geometry fails the comparison.
 func expectedBox(t *testing.T, title string, rows []string) string {
 	t.Helper()
-	const inner = 74
-	const contentW = 72
+	const inner = 66
+	const contentW = 64
 	var b strings.Builder
 	label := "─ " + title + " "
 	b.WriteString("╭")
@@ -52,7 +54,7 @@ func expectedBox(t *testing.T, title string, rows []string) string {
 // checks only that the box is closed.
 func requireClosedNotice(t *testing.T, stdout, title string, rows []string) {
 	t.Helper()
-	const inner = 74
+	const inner = 66
 	topMarker := "╭─ " + title + " "
 	bottomBorder := "╰" + strings.Repeat("─", inner) + "╯"
 
@@ -75,10 +77,9 @@ func requireClosedNotice(t *testing.T, stdout, title string, rows []string) {
 
 func TestWriteNoticeBlock_UpdateAvailableGolden(t *testing.T) {
 	rows := []string{
-		"current version: dev",
-		"latest version: 0.9.1",
-		"update now: curl -fsSL https://swobu.com/install.sh | sh",
-		"skip this notice: export SWOBU_SKIP_VERSION_NOTICE=1",
+		"versions: dev → 0.9.1",
+		"update: curl -fsSL https://swobu.com/install.sh | sh",
+		"hide: export SWOBU_SKIP_VERSION_NOTICE=1",
 	}
 	var out strings.Builder
 	writeNoticeBlock(&out, "Update Available", rows)
@@ -135,14 +136,53 @@ func TestWriteNoticeBlock_StartupFailedGolden(t *testing.T) {
 
 func TestRenderNoticeBlock_AllLinesAreUniformWidth(t *testing.T) {
 	lines := renderNoticeBlock("Update Available", []string{
-		"current version: dev",
-		"update now: curl -fsSL https://swobu.com/install.sh | sh",
+		"versions: dev → 0.9.1",
+		"update: curl -fsSL https://swobu.com/install.sh | sh",
 	})
-	const wantWidth = 76
+	const wantWidth = 68
 	for i, line := range lines {
 		if w := runewidth.StringWidth(line); w != wantWidth {
 			t.Fatalf("line %d has display width %d, want %d: %q", i, w, wantWidth, line)
 		}
+	}
+}
+
+func TestRenderNoticeBlockAtWidth_StaysInsideNarrowTerminal(t *testing.T) {
+	const terminalWidth = 60
+	lines := renderNoticeBlockAtWidth("Update Available", []string{
+		"versions: dev → 1.0.0-rc.10",
+		"update: curl -fsSL https://swobu.com/install.sh | sh",
+		"hide: export SWOBU_SKIP_VERSION_NOTICE=1",
+	}, terminalWidth)
+
+	for i, line := range lines {
+		if width := runewidth.StringWidth(line); width > terminalWidth {
+			t.Fatalf("line %d width = %d, exceeds terminal width %d: %q", i, width, terminalWidth, line)
+		}
+		if !strings.HasSuffix(line, "╮") && !strings.HasSuffix(line, "│") && !strings.HasSuffix(line, "╯") {
+			t.Fatalf("line %d lost its right border before terminal wrapping: %q", i, line)
+		}
+	}
+}
+
+func TestNoticeWidth_UsesRealTerminalColumns(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("open pty: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ptmx.Close()
+		_ = tty.Close()
+	})
+	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: 60, Rows: 24}); err != nil {
+		t.Fatalf("set pty size: %v", err)
+	}
+
+	if got := noticeWidth(tty); got != 60 {
+		t.Fatalf("notice width = %d, want terminal width 60", got)
+	}
+	if got := noticeWidth(os.Stdout); got > noticeBoxMaxWidth {
+		t.Fatalf("stdout notice width = %d, exceeds compact maximum %d", got, noticeBoxMaxWidth)
 	}
 }
 
@@ -175,12 +215,12 @@ func TestRenderNoticeBlock_EmptyRowsRenderAsBlankBorderedLines(t *testing.T) {
 		t.Fatalf("expected 5 lines preserving the empty row, got %d: %v", len(lines), lines)
 	}
 	blank := lines[2]
-	wantBlank := "│" + strings.Repeat(" ", 74) + "│"
+	wantBlank := "│" + strings.Repeat(" ", 66) + "│"
 	if blank != wantBlank {
 		t.Fatalf("empty row should render as %q, got %q", wantBlank, blank)
 	}
-	if runewidth.StringWidth(blank) != 76 {
-		t.Fatalf("blank row has width %d, want 76: %q", runewidth.StringWidth(blank), blank)
+	if runewidth.StringWidth(blank) != 68 {
+		t.Fatalf("blank row has width %d, want 68: %q", runewidth.StringWidth(blank), blank)
 	}
 }
 
@@ -192,8 +232,8 @@ func TestRenderNoticeBlock_WrapsLongRowAndHardBreaksTokens(t *testing.T) {
 		t.Fatalf("expected wrapping to produce multiple body lines, got %d: %v", len(lines), lines)
 	}
 	for i, line := range lines {
-		if runewidth.StringWidth(line) != 76 {
-			t.Fatalf("wrapped line %d has width %d, want 76: %q", i, runewidth.StringWidth(line), line)
+		if runewidth.StringWidth(line) != 68 {
+			t.Fatalf("wrapped line %d has width %d, want 68: %q", i, runewidth.StringWidth(line), line)
 		}
 		if strings.Contains(line, "…") {
 			t.Fatalf("row was ellipsized; wrapping must hard-break, never truncate: %q", line)
@@ -207,11 +247,11 @@ func TestRenderNoticeBlock_WrapsLongRowAndHardBreaksTokens(t *testing.T) {
 
 func TestRenderNoticeBlock_UnicodeWidthKeepsBorderAligned(t *testing.T) {
 	// 中 is a width-2 rune. A correct renderer pads by display width so the right
-	// border stays at column 76 regardless of multi-cell content.
+	// border stays at column 68 regardless of multi-cell content.
 	lines := renderNoticeBlock("Notice", []string{"command 中 line"})
 	for i, line := range lines {
-		if w := runewidth.StringWidth(line); w != 76 {
-			t.Fatalf("unicode line %d has display width %d, want 76: %q", i, w, line)
+		if w := runewidth.StringWidth(line); w != 68 {
+			t.Fatalf("unicode line %d has display width %d, want 68: %q", i, w, line)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
@@ -57,6 +58,109 @@ func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T
 	}
 	if bytes.Contains(payload.Input[0], []byte(`"type":"input_text"`)) {
 		t.Fatalf("assistant history used request input content grammar: %s", payload.Input[0])
+	}
+}
+
+func TestResponsesRequestOmitsForeignOpaqueReasoningWithoutDroppingToolHistory(t *testing.T) {
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","thinking":"private","signature":"sig"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem(nil, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
+	function, err := canonical.NewFunctionTool(key, "search", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{function})
+	declarations, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	callID, _ := canonical.NewToolCallID("call_1")
+	input, _ := canonical.ParseJSONObject([]byte(`{"q":"one"}`))
+	call, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("result")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("continue")})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"),
+		Items: []canonical.CanonicalItem{declarations, reasoning, call, result, message},
+	})
+
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
+		delivery.BufferedDelivery(), &changes, "ex", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 3 {
+		t.Fatalf("encoded input=%#v want function call, output, and current message", payload.Input)
+	}
+	wantTypes := []string{"function_call", "function_call_output", "message"}
+	for index, want := range wantTypes {
+		if got, _ := payload.Input[index]["type"].(string); got != want {
+			t.Fatalf("encoded input[%d].type=%q want %q; input=%#v", index, got, want, payload.Input)
+		}
+	}
+	if payload.Input[0]["call_id"] != "call_1" || payload.Input[1]["call_id"] != "call_1" {
+		t.Fatalf("tool correlation was lost: %#v", payload.Input)
+	}
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsKind || changes[0].Kind != compat.Omission {
+		t.Fatalf("changes=%#v want one request-item omission", changes)
+	}
+	if item, ok := changes[0].Occurrence.RequestItem(); !ok || item != 1 {
+		t.Fatalf("omission occurrence=%#v want request item 1", changes[0].Occurrence)
+	}
+}
+
+func TestResponsesRequestRetainsOpaqueResponsesReasoningWithoutPortableParts(t *testing.T) {
+	opaque, err := canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{
+		EncryptedContent: "cipher", ItemID: "rs_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem(nil, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{reasoning},
+	})
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
+		delivery.BufferedDelivery(), &changes, "ex", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(document.RawBytes(), []byte(`"type":"reasoning"`)) ||
+		!bytes.Contains(document.RawBytes(), []byte(`"encrypted_content":"cipher"`)) ||
+		!bytes.Contains(document.RawBytes(), []byte(`"id":"rs_1"`)) ||
+		!bytes.Contains(document.RawBytes(), []byte(`"summary":[]`)) {
+		t.Fatalf("Responses replay state was lost: %s", document.RawBytes())
+	}
+	if len(changes) != 0 {
+		t.Fatalf("exact Responses replay recorded changes: %#v", changes)
 	}
 }
 

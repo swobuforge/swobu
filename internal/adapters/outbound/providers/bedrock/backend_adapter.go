@@ -42,6 +42,7 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         providerID,
 		BackendResolver:    executor,
+		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery:          executor,
 	}
@@ -59,7 +60,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		// of the reasoning wire id would land (see mantleResponsesCodec).
 		codec = mantleResponsesCodec{Codec: codec}
 	}
-	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send), ToolDiscovery: provider.ToolDiscoveryPolyfill}
+	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}

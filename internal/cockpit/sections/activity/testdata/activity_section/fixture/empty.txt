@@ -1,2 +1,2 @@
-  activity ▾
-     latest            no requests yet
+  activity
+                                 no requests yet

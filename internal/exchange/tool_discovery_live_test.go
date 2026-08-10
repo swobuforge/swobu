@@ -44,6 +44,13 @@ func (r capturingExecutionRuntime) ResolveBackend(target provider.TargetSnapshot
 	return backend, backend.Validate()
 }
 
+func (r capturingExecutionRuntime) ResolveTargetSupport(target provider.TargetSnapshot) provider.TargetSupport {
+	if resolver, ok := r.backends.(provider.TargetSupportResolver); ok {
+		return resolver.ResolveTargetSupport(target)
+	}
+	return provider.TargetSupport{}
+}
+
 func TestLiveBedrockMantleResponsesToolDiscoveryPolyfillThroughExchange(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("SWOBU_LIVE_BEDROCK_DOGFOOD")) != "1" {
 		t.Skip("set SWOBU_LIVE_BEDROCK_DOGFOOD=1 to probe live Bedrock Mantle tool-discovery polyfill")
@@ -101,8 +108,8 @@ func TestLiveBedrockMantleResponsesToolDiscoveryPolyfillThroughExchange(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCall.backend.ToolDiscovery != provider.ToolDiscoveryPolyfill {
-		t.Fatalf("Bedrock discovery mode=%v want polyfill", providerCall.backend.ToolDiscovery)
+	if got := providerCall.request.TargetSupport.Get(canonical.RequestToolsDiscovery); got != provider.SupportUnknown {
+		t.Fatalf("Bedrock discovery support=%v want unknown", got)
 	}
 	ingress, err := providerCall.backend.Transport.Send(ctx, providerCall.document)
 	if err != nil {

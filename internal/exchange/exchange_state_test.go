@@ -51,19 +51,17 @@ func (r bedrockStructuredFallbackRuntime) ResolveBackend(target provider.TargetS
 		return backend, nil
 	}
 	return provider.Backend{
-		Target:        target,
-		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport:     provider.BindTransport(target, r.transport),
-		ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, r.transport),
 	}, nil
 }
 
 func (r protocolProjectionRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return provider.Backend{
-		Target:        target,
-		Codec:         protocolcodec.Codec{Protocol: target.ProtocolKind},
-		Transport:     provider.BindTransport(target, r.transport),
-		ToolDiscovery: provider.ToolDiscoveryPolyfill,
+		Target:    target,
+		Codec:     protocolcodec.Codec{Protocol: target.ProtocolKind},
+		Transport: provider.BindTransport(target, r.transport),
 	}, nil
 }
 

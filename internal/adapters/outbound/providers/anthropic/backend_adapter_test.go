@@ -221,7 +221,7 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 }
 
 func TestMessagesAdapterRejectsNonMessagesProviderProtocols(t *testing.T) {
-	adapter := NewBackendAdapter(profile.ProviderSpecAzure, nil, staticCredentialProvider{token: "test-token"}, provider.ToolDiscoveryPolyfill)
+	adapter := NewBackendAdapter(profile.ProviderSpecAzure, nil, staticCredentialProvider{token: "test-token"})
 	for _, test := range []struct {
 		name     string
 		protocol protocolkind.ProtocolKind
@@ -252,7 +252,7 @@ func TestMessagesAdapterAcceptsMessagesProviderProtocols(t *testing.T) {
 		{name: "DeepSeek streamed Messages", providerID: profile.ProviderSpecDeepSeek, token: "messages_stream", frame: profile.FrameSSEEvent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			adapter := NewBackendAdapter(test.providerID, nil, staticCredentialProvider{token: "test-token"}, provider.ToolDiscoveryPolyfill)
+			adapter := NewBackendAdapter(test.providerID, nil, staticCredentialProvider{token: "test-token"})
 			target := provider.NewTargetSnapshot("target", string(test.providerID), "https://example.test", "env:KEY", protocolkind.Messages, test.frame, test.token)
 			target.Model = "model"
 			if _, err := adapter.ResolveBackend(target); err != nil {
@@ -263,7 +263,7 @@ func TestMessagesAdapterAcceptsMessagesProviderProtocols(t *testing.T) {
 }
 
 func TestMessagesAdapterRejectsMismatchedMessagesProjection(t *testing.T) {
-	adapter := NewBackendAdapter(profile.ProviderSpecDeepSeek, nil, staticCredentialProvider{token: "test-token"}, provider.ToolDiscoveryPolyfill)
+	adapter := NewBackendAdapter(profile.ProviderSpecDeepSeek, nil, staticCredentialProvider{token: "test-token"})
 	for _, test := range []struct {
 		name     string
 		protocol protocolkind.ProtocolKind

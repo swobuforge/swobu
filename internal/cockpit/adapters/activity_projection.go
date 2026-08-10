@@ -44,6 +44,7 @@ func activityFromProjection(projection operatorclient.StatusProjection, limit in
 }
 
 func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.ActivityRowReadModel {
+	duration, durationKnown := trafficDuration(row)
 	return readmodel.ActivityRowReadModel{
 		ID:         readmodel.ActivityID(row.RequestID),
 		ObservedAt: strings.TrimSpace(row.ObservedAt), // swobu:io-string source=boundary
@@ -59,7 +60,8 @@ func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.Activ
 		Status:        activityStatus(row.Result, row.StatusCode),
 		HTTPStatus:    row.StatusCode,
 		AttemptCount:  row.AttemptCount,
-		Duration:      trafficDuration(row),
+		Duration:      duration,
+		DurationKnown: durationKnown,
 		Error:         row.StatusCode >= 400 || row.Result == "backend_error" || row.Result == "swobu_error",
 		TokensIn:      inputTokens(row.TokenUsage),
 		TokensOut:     outputTokens(row.TokenUsage),
@@ -69,24 +71,26 @@ func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.Activ
 func activityStatus(result string, statusCode int) readmodel.ActivityStatus {
 	result = strings.ToLower(strings.TrimSpace(result)) // swobu:io-string source=boundary
 	switch {
+	case result == "in_progress":
+		return readmodel.ActivityPending
 	case statusCode >= 400:
 		return readmodel.ActivityFailed
 	case result == "", result == "success":
 		return readmodel.ActivitySucceeded
-	case result == "canceled":
+	case result == "canceled", result == "cancelled":
 		return readmodel.ActivityCanceled
 	default:
 		return readmodel.ActivityFailed
 	}
 }
 
-func trafficDuration(row operatorclient.RecentTrafficRow) time.Duration {
-	// This is a projection of the evidence-layer duration summary, not a control
-	// input. Missing timing stays zero in the read model.
+func trafficDuration(row operatorclient.RecentTrafficRow) (time.Duration, bool) {
+	// Timing knownness is operator evidence: absent timing must not become a
+	// measured zero-duration request at the Cockpit boundary.
 	if row.Timing == nil || row.Timing.DurMillis == nil {
-		return 0
+		return 0, false
 	}
-	return time.Duration(*row.Timing.DurMillis) * time.Millisecond
+	return time.Duration(*row.Timing.DurMillis) * time.Millisecond, true
 }
 
 func inputTokens(usage *operatorclient.RecentTrafficTokenUseRecord) int {

@@ -5,6 +5,8 @@
 //   - explicit checkpoint lookup and exact unique current-head history lookup;
 //   - session Draft preparation, request-scoped MCP opening, and final freeze;
 //   - routing, ordered provider calls, same-target retry, and route failover;
+//   - provider-inflight traffic evidence after concrete target selection and
+//     immediately before each provider call;
 //   - exact-target selection of concrete OpenAI Responses continuation data;
 //   - one exchange-scoped read-through image fetch cache reused across attempts;
 //   - canonical response capture and atomic session start/head advancement before

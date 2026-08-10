@@ -31,6 +31,7 @@ type RequestIngress struct {
 
 type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
+	TrafficEvidence  observation.TrafficEventSink
 	CheckpointStore  session.Store
 	ResponseIDs      ResponseIDGenerator
 	ImageFetcher     provider.ImageFetcher
@@ -80,6 +81,7 @@ type RuntimeResolver interface {
 type ExecutionRuntime interface {
 	RuntimeResolver
 	provider.BackendResolver
+	provider.TargetSupportResolver
 }
 
 func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
@@ -97,6 +99,7 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 		workspaces: workspaces,
 		runner: runtimeBundle{
 			Runtime:         runtime,
+			TrafficEvidence: policies.TrafficEvidence,
 			CheckpointStore: policies.CheckpointStore,
 			ResponseIDs:     policies.ResponseIDs,
 			ImageFetcher:    policies.ImageFetcher,

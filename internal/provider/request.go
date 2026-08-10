@@ -31,8 +31,11 @@ type ResponsesPrevious struct {
 type Request struct {
 	// ExchangeID correlates progressive response events for this invocation. It
 	// is execution context, not part of canonical request semantics.
-	ExchangeID        string
-	Canonical         canonical.CanonicalRequest
+	ExchangeID string
+	Canonical  canonical.CanonicalRequest
+	// TargetSupport is the immutable knowledge snapshot resolved for this exact
+	// attempt. Feature owners decide how Unknown affects their own behavior.
+	TargetSupport     TargetSupport
 	ResponsesPrevious *ResponsesPrevious
 	EncodeContext     EncodeContext
 	Delivery          delivery.Delivery

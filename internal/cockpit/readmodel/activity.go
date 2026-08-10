@@ -1,8 +1,6 @@
 package readmodel
 
 import (
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -36,18 +34,22 @@ type ActivityRowReadModel struct {
 	// AttemptCount is the number of provider calls made while resolving this
 	// request. A value greater than one is operator-visible failover evidence.
 	AttemptCount int
-	Duration     time.Duration
-	Error        bool
-	Attempts     []ActivityAttemptReadModel
-	TokensIn     int
-	TokensOut    int
+	// DurationKnown distinguishes absent timing from a measured zero-duration
+	// request. Pending rows and events without terminal timing leave it false.
+	Duration      time.Duration
+	DurationKnown bool
+	Error         bool
+	Attempts      []ActivityAttemptReadModel
+	TokensIn      int
+	TokensOut     int
 }
 
 // ActivityStatus is the typed result state used by copy and styling.
 type ActivityStatus int
 
 const (
-	ActivitySucceeded ActivityStatus = iota
+	ActivityPending ActivityStatus = iota
+	ActivitySucceeded
 	ActivityFailed
 	ActivityCanceled
 )
@@ -82,49 +84,4 @@ func (a ActivityReadModel) LatestRow() (ActivityRowReadModel, bool) {
 		return ActivityRowReadModel{}, false
 	}
 	return a.Rows[0], true
-}
-
-// RowValue derives the compact activity row used by the activity section.
-func (a ActivityRowReadModel) RowValue() string {
-	route := a.RouteLabel
-	if route == "" {
-		route = string(a.RouteID)
-	}
-	providerSpec := strings.TrimSpace(a.ProviderSpec)   // swobu:io-string source=boundary
-	providerModel := strings.TrimSpace(a.ProviderModel) // swobu:io-string source=boundary
-	if providerSpec != "" && providerModel != "" {
-		route += " → " + providerSpec + "/" + providerModel
-	}
-	observedAt := strings.TrimSpace(a.ObservedAt) // swobu:io-string source=boundary
-	if observedAt == "" {
-		observedAt = "unknown"
-	}
-	status := ""
-	if a.HTTPStatus > 0 {
-		status = fmt.Sprint(a.HTTPStatus)
-	}
-	if status == "" {
-		switch a.Status {
-		case ActivityCanceled:
-			status = "canceled"
-		case ActivityFailed:
-			status = "failed"
-		default:
-			status = "ok"
-		}
-	}
-	value := fmt.Sprintf("%s %s %s %s %s", observedAt, a.ClientLabel, route, status, durationLabel(a.Duration))
-	if a.AttemptCount > 1 {
-		value += fmt.Sprintf(" %d attempts", a.AttemptCount)
-	}
-	return value
-}
-
-// durationLabel renders the projected duration summary.
-// Missing or zero durations both display as 0ms.
-func durationLabel(d time.Duration) string {
-	if d <= 0 {
-		return "0ms"
-	}
-	return fmt.Sprintf("%dms", d.Milliseconds())
 }
