@@ -9,72 +9,84 @@ import (
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
-func routesFromWorkspace(workspace workspaceapi.Workspace) []readmodel.RouteReadModel {
+func routesFromWorkspace(workspace workspaceapi.Workspace) ([]readmodel.RouteReadModel, error) {
 	out := make([]readmodel.RouteReadModel, 0, len(workspace.Routes))
 	for _, route := range workspace.Routes {
-		out = append(out, routeFromWorkspaceRoute(workspace.DefaultRoute, route))
+		projected, err := routeFromWorkspaceRoute(workspace.DefaultRoute, route)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, projected)
 	}
-	return out
+	return out, nil
 }
-func routeFromWorkspaceRoute(defaultRoute string, route workspaceapi.Route) readmodel.RouteReadModel {
+func routeFromWorkspaceRoute(defaultRoute string, route workspaceapi.Route) (readmodel.RouteReadModel, error) {
 	out := readmodel.RouteReadModel{ID: readmodel.RouteID(route.Name), ModelName: route.Name, State: readmodel.RouteNormal, Default: route.Name == defaultRoute, Enabled: true}
 	for _, tier := range route.Tiers {
 		projected := readmodel.TierReadModel{}
 		for _, target := range tier.Targets {
-			projected.Targets = append(projected.Targets, targetFromWorkspaceTarget(target))
+			projectedTarget, err := targetFromWorkspaceTarget(target)
+			if err != nil {
+				return readmodel.RouteReadModel{}, fmt.Errorf("project target %q: %w", target.ID, err)
+			}
+			projected.Targets = append(projected.Targets, projectedTarget)
 		}
 		out.Tiers = append(out.Tiers, projected)
 	}
-	return out
+	return out, nil
 }
-func targetFromWorkspaceTarget(target workspaceapi.Target) readmodel.TargetReadModel {
-	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: target.Provider, Model: target.Model, ProviderProtocol: target.Protocol}
-	switch {
-	case target.Connection.OpenAI != nil:
-		out.CredentialRef = target.Connection.OpenAI.Credential
-	case target.Connection.Anthropic != nil:
-		out.CredentialRef = target.Connection.Anthropic.Credential
-	case target.Connection.OpenRouter != nil:
-		out.CredentialRef = target.Connection.OpenRouter.Credential
-	case target.Connection.ZAI != nil:
-		out.ZAIAccess = target.Connection.ZAI.Access
-		out.CredentialRef = target.Connection.ZAI.Credential
-	case target.Connection.ChatGPT != nil:
-		out.CredentialRef = target.Connection.ChatGPT.Credential
-	case target.Connection.Ollama != nil:
-		out.BaseURL = target.Connection.Ollama.BaseURL
-	case target.Connection.LMStudio != nil:
-		out.BaseURL = target.Connection.LMStudio.BaseURL
-		out.CredentialRef = target.Connection.LMStudio.Credential
-	case target.Connection.VLLM != nil:
-		out.BaseURL = target.Connection.VLLM.BaseURL
-		out.CredentialRef = target.Connection.VLLM.Credential
-	case target.Connection.Azure != nil:
-		out.BaseURL = target.Connection.Azure.ProjectEndpoint
-		out.CredentialRef = target.Connection.Azure.Credential
-	case target.Connection.Bedrock != nil:
+func targetFromWorkspaceTarget(target workspaceapi.Target) (readmodel.TargetReadModel, error) {
+	connection, err := target.Connection.RoutingConnection()
+	if err != nil {
+		return readmodel.TargetReadModel{}, fmt.Errorf("decode operator connection: %w", err)
+	}
+	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: string(connection.Provider()), Model: target.Model, ProviderProtocol: target.Protocol}
+	switch connection := connection.(type) {
+	case routing.APIKeyConnection:
+		out.CredentialRef = connection.Credential().String()
+	case routing.ZAIConnection:
+		out.ZAIAccess = string(connection.Access())
+		out.CredentialRef = connection.Credential().String()
+	case routing.OllamaConnection:
+		baseURL, _ := connection.BaseURL()
+		out.BaseURL = baseURL.String()
+	case routing.EndpointCredentialConnection:
+		baseURL, _ := connection.BaseURL()
+		out.BaseURL = baseURL.String()
+		out.CredentialRef = connection.Credential().String()
+	case routing.AzureConnection:
+		out.BaseURL = connection.ProjectEndpoint().String()
+		out.CredentialRef = connection.Credential().String()
+	case routing.BedrockConnection:
 		// The read model preserves the independently authored signing region and
 		// complete inference API URL verbatim.
-		out.BaseURL = target.Connection.Bedrock.Endpoint
-		out.BedrockRegion = target.Connection.Bedrock.Region
-		out.CredentialRef = target.Connection.Bedrock.Credential
-	case target.Connection.Custom != nil:
-		out.BaseURL = target.Connection.Custom.BaseURL
-		if target.Connection.Custom.Header != nil {
-			out.AuthHeader = target.Connection.Custom.Header.Name
-			out.CredentialRef = target.Connection.Custom.Header.Credential
+		out.BaseURL = connection.Endpoint()
+		out.BedrockRegion = connection.Region().String()
+		out.CredentialRef = connection.Credential().String()
+	case routing.CustomConnection:
+		out.BaseURL = connection.BaseURL().String()
+		if auth := connection.Auth(); auth != nil {
+			header, ok := auth.(routing.CustomHeaderAuth)
+			if !ok {
+				return readmodel.TargetReadModel{}, fmt.Errorf("unsupported custom authentication %T", auth)
+			}
+			out.AuthHeader = header.Name()
+			out.CredentialRef = header.Credential().String()
 		}
+	default:
+		return readmodel.TargetReadModel{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
-	return out
+	return out, nil
 }
 func targetFromWorkspace(workspace workspaceapi.Workspace, id string) (readmodel.TargetReadModel, error) {
 	for _, route := range workspace.Routes {
 		for _, tier := range route.Tiers {
 			for _, target := range tier.Targets {
 				if target.ID == id {
-					return targetFromWorkspaceTarget(target), nil
+					return targetFromWorkspaceTarget(target)
 				}
 			}
 		}

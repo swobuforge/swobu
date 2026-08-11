@@ -2,12 +2,73 @@ package adapters
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
+	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
+	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/routing"
 )
+
+func TestDeepSeekOperatorConnectionSurvivesMountedTargetEdit(t *testing.T) {
+	const credential = "file:/home/metrofun/.config/deepseek.key"
+	operatorTarget := workspaceapi.Target{
+		ID: "tgt_c5ca3ff9-222e-42c1-9c4f-74eb2d240f35", Model: "deepseek-v4-pro", Provider: "deepseek",
+		Connection: workspaceapi.Connection{DeepSeek: &workspaceapi.CredentialConnection{Credential: credential}},
+	}
+	projected, err := targetFromWorkspaceTarget(operatorTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.CredentialRef != credential {
+		t.Fatalf("Cockpit credential = %q, want exact operator credential %q", projected.CredentialRef, credential)
+	}
+	route := readmodel.RouteReadModel{ID: "worker", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{projected}}}}
+	config := target_config.NewEditTargetConfig("demo", route, projected, nil, nil)
+	config.Open()
+	frame := testkit.RenderMountedTrimmed(t, config, 100, 18)
+	if !strings.Contains(frame, "credential        file · /home/metrofun/.config/deepseek.key") {
+		t.Fatalf("mounted DeepSeek edit lost configured credential:\n%s", frame)
+	}
+	if strings.Contains(frame, "credential        required") || strings.Contains(frame, "model             waiting for setup") {
+		t.Fatalf("mounted DeepSeek edit contradicted configured backend:\n%s", frame)
+	}
+}
+
+func TestOperatorConnectionFactsSurviveCockpitProjection(t *testing.T) {
+	tests := []struct {
+		name       string
+		connection workspaceapi.Connection
+		want       readmodel.TargetReadModel
+	}{
+		{name: "openai", connection: workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
+		{name: "anthropic", connection: workspaceapi.Connection{Anthropic: &workspaceapi.CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
+		{name: "deepseek", connection: workspaceapi.Connection{DeepSeek: &workspaceapi.CredentialConnection{Credential: "file:/home/metrofun/.config/deepseek.key"}}, want: readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/metrofun/.config/deepseek.key"}},
+		{name: "openrouter", connection: workspaceapi.Connection{OpenRouter: &workspaceapi.CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
+		{name: "chatgpt", connection: workspaceapi.Connection{ChatGPT: &workspaceapi.CredentialConnection{Credential: "secret:chatgpt/session"}}, want: readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},
+		{name: "zai", connection: workspaceapi.Connection{ZAI: &workspaceapi.ZAIConnection{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "zai", ZAIAccess: "coding_plan", CredentialRef: "env:ZAI_API_KEY"}},
+		{name: "ollama", connection: workspaceapi.Connection{Ollama: &workspaceapi.OllamaConnection{BaseURL: "http://127.0.0.1:11434/v1"}}, want: readmodel.TargetReadModel{Provider: "ollama", BaseURL: "http://127.0.0.1:11434/v1"}},
+		{name: "lmstudio", connection: workspaceapi.Connection{LMStudio: &workspaceapi.EndpointCredentialConnection{BaseURL: "http://127.0.0.1:1234/v1", Credential: "env:LM_API_TOKEN"}}, want: readmodel.TargetReadModel{Provider: "lmstudio", BaseURL: "http://127.0.0.1:1234/v1", CredentialRef: "env:LM_API_TOKEN"}},
+		{name: "vllm", connection: workspaceapi.Connection{VLLM: &workspaceapi.EndpointCredentialConnection{BaseURL: "http://127.0.0.1:8000/v1", Credential: "env:VLLM_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "vllm", BaseURL: "http://127.0.0.1:8000/v1", CredentialRef: "env:VLLM_API_KEY"}},
+		{name: "azure", connection: workspaceapi.Connection{Azure: &workspaceapi.AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/demo", Credential: "env:AZURE_KEY"}}, want: readmodel.TargetReadModel{Provider: "azure", BaseURL: "https://example.services.ai.azure.com/api/projects/demo", CredentialRef: "env:AZURE_KEY"}},
+		{name: "bedrock", connection: workspaceapi.Connection{Bedrock: &workspaceapi.BedrockConnection{Region: "eu-west-2", Endpoint: "https://bedrock-mantle.eu-west-2.api.aws/v1", Credential: "env:BEDROCK_KEY"}}, want: readmodel.TargetReadModel{Provider: "bedrock", BaseURL: "https://bedrock-mantle.eu-west-2.api.aws/v1", BedrockRegion: "eu-west-2", CredentialRef: "env:BEDROCK_KEY"}},
+		{name: "custom", connection: workspaceapi.Connection{Custom: &workspaceapi.CustomConnection{BaseURL: "https://example.test/v1", Header: &workspaceapi.CustomHeader{Name: "x-api-key", Credential: "env:CUSTOM_KEY"}}}, want: readmodel.TargetReadModel{Provider: "custom", BaseURL: "https://example.test/v1", AuthHeader: "x-api-key", CredentialRef: "env:CUSTOM_KEY"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := targetFromWorkspaceTarget(workspaceapi.Target{ID: "target", Model: "model", Connection: test.connection})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Provider != test.want.Provider || got.BaseURL != test.want.BaseURL || got.CredentialRef != test.want.CredentialRef || got.ZAIAccess != test.want.ZAIAccess || got.AuthHeader != test.want.AuthHeader || got.BedrockRegion != test.want.BedrockRegion {
+				t.Fatalf("projection = %#v, want connection facts %#v", got, test.want)
+			}
+		})
+	}
+}
 
 func TestNewTargetIDUsesOpaqueTypedUUID(t *testing.T) {
 	id, err := newTargetID()

@@ -183,7 +183,7 @@ func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveR
 	}
 	for _, route := range workspace.Routes {
 		if route.Name == name {
-			return routeFromWorkspaceRoute(workspace.DefaultRoute, route), nil
+			return routeFromWorkspaceRoute(workspace.DefaultRoute, route)
 		}
 	}
 	return readmodel.RouteReadModel{}, errors.New("committed route missing")
@@ -261,7 +261,11 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 			if projectionErr != nil {
 				return ports.SaveTargetResult{}, projectionErr
 			}
-			return ports.SaveTargetResult{Target: committedTarget, Route: routeFromWorkspaceRoute(workspace.DefaultRoute, route), Workspace: workspaceModel}, nil
+			projectedRoute, projectionErr := routeFromWorkspaceRoute(workspace.DefaultRoute, route)
+			if projectionErr != nil {
+				return ports.SaveTargetResult{}, projectionErr
+			}
+			return ports.SaveTargetResult{Target: committedTarget, Route: projectedRoute, Workspace: workspaceModel}, nil
 		}
 	}
 	return ports.SaveTargetResult{}, errors.New("committed route missing from workspace response")
@@ -273,7 +277,7 @@ func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.De
 	}
 	for _, route := range workspace.Routes {
 		if route.Name == string(request.RouteID) {
-			return routeFromWorkspaceRoute(workspace.DefaultRoute, route), nil
+			return routeFromWorkspaceRoute(workspace.DefaultRoute, route)
 		}
 	}
 	return readmodel.RouteReadModel{}, errors.New("committed route missing from workspace response")

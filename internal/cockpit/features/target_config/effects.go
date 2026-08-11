@@ -292,7 +292,7 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 	if !w.IsBedrockFlow() {
 		w.BaseURL.Set(baseURL)
 	}
-	if w.IsZAIFlow() {
+	if w.usesManualModelInput() {
 		w.invalidateCatalogEvidence()
 		w.Error.Set("")
 		return
@@ -303,7 +303,7 @@ func (w *TargetConfig) ReadyAndProbe(credentialRef, baseURL string) {
 
 // startCatalogProbe owns both the loading transition and probe execution.
 func (w *TargetConfig) startCatalogProbe() {
-	if w.IsZAIFlow() {
+	if w.usesManualModelInput() {
 		w.invalidateCatalogEvidence()
 		return
 	}

@@ -213,6 +213,10 @@ func (w *TargetConfig) derivesProviderProtocol() bool {
 	return derived
 }
 
+func (w *TargetConfig) usesManualModelInput() bool {
+	return profile.ModelCatalogModeForSpec(w.Draft.Get().ProviderSpec) == profile.ModelCatalogModeManual
+}
+
 func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
 func (w *TargetConfig) catalogLoading() bool                           { return w.Catalog.Get().Loading }
 func (w *TargetConfig) catalogFailed() bool                            { return w.Catalog.Get().Err != "" }

@@ -71,6 +71,21 @@ func ModelSelectRow(w *TargetConfig) *ui.Select {
 	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "model-display"), Label: TargetModelLabel(w), Value: value, Action: action, AutoFocus: model == "" && setupAllowsModelChoice(w), CanEnter: func() bool { return setupAllowsModelChoice(w) }, Body: func(backout func()) tui.Component { return ModelPicker(w, backout) }})
 }
 
+// ManualModelInput authors an open-set model identity for providers with no
+// enumerable catalog. The input draft is control-local; only Enter publishes
+// a model selection, while Escape discards the draft through EditableRow.
+func ManualModelInput(w *TargetConfig) *ui.EditableRow {
+	model := strings.TrimSpace(w.SelectedModel.Get().ModelName)
+	row := ui.NewEditableRow(TargetAddMountKey(w, "manual-model-input"), TargetModelLabel(w), tui.NewState(model))
+	row.Placeholder = "required"
+	row.AutoFocus = model == ""
+	row.OnSubmit = func(value string) {
+		w.selectModelByID(strings.TrimSpace(value))
+	}
+	row.CloseAfterSubmit = func() bool { return true }
+	return row
+}
+
 func protocolDisplayLabel(w *TargetConfig, protocol string) string {
 	for _, option := range w.CurrentProtocolOptions() {
 		if option.ID == protocol {
@@ -218,13 +233,14 @@ templ InertTargetField(label string, value string, action string) {
 	</div>
 }
 
-
 templ (t *targetTail) Render() {
 	<div class="flex-col w-full">
 		if targetCatalogLoading(t.root) {
 			@ModelCatalogLoading(t.root)
 		} else if targetCatalogFailed(t.root) && t.root.IsBedrockFlow() {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")
+		} else if setupAllowsModelChoice(t.root) && t.root.usesManualModelInput() {
+			@ManualModelInput(t.root)
 		} else if setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)
 		} else {

@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func newPolicyTarget(providerID profile.ProviderID, baseURL, credential string, kind protocolkind.ProtocolKind, providerProtocol string) provider.TargetSnapshot {
@@ -200,6 +201,45 @@ func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 				t.Fatalf("%s leaked provider dialect reasoning: %s", tc.name, document.RawBytes())
 			}
 		})
+	}
+}
+
+func TestClineReasoningExcludeIsOmittedFromCustomOpenAICompatibleProviderRequest(t *testing.T) {
+	clientDocument := carrier.NewDocument(
+		protocolkind.ChatCompletions,
+		"application/json",
+		nil,
+		[]byte(`{"model":"zai-org/GLM-5.1","messages":[{"role":"user","content":"Hello"}],"temperature":0.25,"reasoning":{"exclude":true}}`),
+		carrier.Meta{},
+	)
+	decoded, err := (chatcompletions.ClientRequestDecoder{}).DecodeClientRequest(clientDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := decoded.Request.Request
+	target := newPolicyTarget(profile.ProviderSpecCustom, "https://api.friendli.ai/serverless/v1", "env:FRIENDLI_TOKEN", protocolkind.ChatCompletions, "chat_completions")
+	target.Model = request.Model()
+	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: decoded.Request.Delivery})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := payload["reasoning"]; present {
+		t.Fatalf("custom OpenAI-compatible provider request retained Cline reasoning dialect: %s", document.RawBytes())
+	}
+	if payload["temperature"] != 0.25 || payload["model"] != "zai-org/GLM-5.1" {
+		t.Fatalf("ordinary Chat fields did not survive normalization: %s", document.RawBytes())
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages did not survive normalization: %s", document.RawBytes())
 	}
 }
 

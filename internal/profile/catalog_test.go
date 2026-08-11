@@ -260,6 +260,18 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 	}
 }
 
+func TestCatalog_ModelCatalogModeIsExplicit(t *testing.T) {
+	t.Parallel()
+	for _, provider := range All() {
+		if provider.ModelCatalog == ModelCatalogModeInvalid {
+			t.Fatalf("provider %q has no explicit model catalog mode", provider.ProviderID)
+		}
+	}
+	if got := ModelCatalogModeForSpec("zai"); got != ModelCatalogModeManual {
+		t.Fatalf("Z.AI model catalog mode = %v, want manual", got)
+	}
+}
+
 func TestCatalog_ChatGPTProviderProtocols_AreStreamOnly(t *testing.T) {
 	t.Parallel()
 

@@ -152,7 +152,7 @@ func (w *TargetConfig) Open() {
 	if w.mode == targetConfigModeEdit &&
 		w.Draft.Get().ProviderSpec != "" &&
 		w.SelectedModel.Get().ModelName != "" &&
-		!w.IsZAIFlow() {
+		!w.usesManualModelInput() {
 		w.Lifecycle.Set(LifecycleOpen)
 		// Persisted catalog-backed edit values are selection seeds, not stale
 		// capability evidence. Keep them visible until the current catalog either

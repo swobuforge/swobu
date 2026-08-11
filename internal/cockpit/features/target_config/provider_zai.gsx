@@ -5,17 +5,12 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
 type zaiProviderForm struct{ target *TargetConfig }
 
 func ZAIProviderForm(w *TargetConfig) tui.Component { return &zaiProviderForm{target: w} }
-
-func (w *TargetConfig) IsZAIFlow() bool {
-	return profile.ProviderID(w.Draft.Get().ProviderSpec) == profile.ProviderSpecZAI
-}
 
 func zaiAccessDisplay(raw string) string {
 	access, err := routing.ParseZAIAccess(raw)

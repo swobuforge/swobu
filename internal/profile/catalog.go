@@ -64,6 +64,7 @@ func catalog() []Profile {
 	return []Profile{
 		{
 			ProviderID:          ProviderSpecOllama,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "Ollama",
 			SetupHint:           "local model catalog",
 			SetupKeywords:       []string{"model", "protocol"},
@@ -78,6 +79,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecLMStudio,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "LM Studio",
 			SetupHint:           "local model server",
 			SetupKeywords:       []string{"local", "model", "Responses", "Chat Completions", "Messages", "Codex", "Claude Code"},
@@ -92,6 +94,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecVLLM,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "vLLM",
 			SetupHint:           "inference server",
 			SetupKeywords:       []string{"inference", "server", "Responses", "Chat Completions", "Messages", "Codex", "Claude Code"},
@@ -106,6 +109,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecOpenAI,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "OpenAI",
 			SetupHint:           "API key",
 			SetupKeywords:       []string{"credential", "model", "protocol"},
@@ -119,6 +123,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecChatGPT,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "ChatGPT",
 			SetupHint:           "browser login",
 			SetupKeywords:       []string{"sign in", "model", "protocol"},
@@ -133,6 +138,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecAnthropic,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "Anthropic",
 			SetupHint:           "API key",
 			SetupKeywords:       []string{"credential", "model", "protocol"},
@@ -146,6 +152,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecDeepSeek,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "DeepSeek",
 			SetupHint:           "API key",
 			SetupKeywords:       []string{"credential", "model", "V4", "Pro", "Flash", "thinking", "web search"},
@@ -160,6 +167,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecOpenRouter,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "OpenRouter",
 			SetupHint:           "API key",
 			SetupKeywords:       []string{"credential", "model", "protocol"},
@@ -173,6 +181,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecZAI,
+			ModelCatalog:        ModelCatalogModeManual,
 			ProviderDisplayName: "Z.AI",
 			SetupHint:           "access / API key",
 			SetupKeywords:       []string{"access", "General API", "Coding Plan", "credential", "model", "GLM"},
@@ -186,6 +195,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecBedrock,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "AWS Bedrock",
 			SetupHint:           "region / AWS identity",
 			SetupKeywords:       []string{"region", "Bedrock API key", "AWS credentials", "model", "protocol"},
@@ -199,6 +209,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecAzure,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "Azure AI",
 			SetupHint:           "endpoint",
 			SetupKeywords:       []string{"endpoint", "credential", "deployment", "protocol"},
@@ -213,6 +224,7 @@ func catalog() []Profile {
 		},
 		{
 			ProviderID:          ProviderSpecCustom,
+			ModelCatalog:        ModelCatalogModeEnumerable,
 			ProviderDisplayName: "Custom Endpoint",
 			SetupHint:           "backend URL",
 			SetupKeywords:       []string{"backend URL", "credential", "credential header", "model", "protocol"},
