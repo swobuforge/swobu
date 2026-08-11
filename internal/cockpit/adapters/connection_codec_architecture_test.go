@@ -27,6 +27,22 @@ func TestTargetSaveAndProbeShareOperatorConnectionCodec(t *testing.T) {
 	}
 }
 
+func TestTargetReadProjectionUsesOperatorConnectionDecoder(t *testing.T) {
+	content, err := os.ReadFile("route_projection.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	if !strings.Contains(source, "target.Connection.RoutingConnection()") {
+		t.Fatal("target read projection bypasses the shared operator connection decoder")
+	}
+	for _, arm := range []string{"Connection.OpenAI", "Connection.Anthropic", "Connection.DeepSeek", "Connection.OpenRouter", "Connection.ZAI", "Connection.ChatGPT", "Connection.Ollama", "Connection.LMStudio", "Connection.VLLM", "Connection.Azure", "Connection.Bedrock", "Connection.Custom"} {
+		if strings.Contains(source, arm) {
+			t.Fatalf("target read projection retains duplicate transport-arm decoding through %q", arm)
+		}
+	}
+}
+
 func TestCockpitDelegatesCredentialPersistenceToDaemon(t *testing.T) {
 	content, err := os.ReadFile("live_operator.go")
 	if err != nil {

@@ -9,12 +9,14 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
@@ -43,6 +45,45 @@ func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 	}
 	if _, exists := payload["max_completion_tokens"]; exists {
 		t.Fatalf("unexpected max_completion_tokens in %s", document.RawBytes())
+	}
+}
+
+func TestContinueEmptyStopListIsOmittedFromAzureChatCompletionsProviderRequest(t *testing.T) {
+	clientDocument := carrier.NewDocument(
+		protocolkind.ChatCompletions,
+		"application/json",
+		nil,
+		[]byte(`{"model":"gpt-5-nano","messages":[{"role":"user","content":"Complete this code"}],"temperature":1,"stop":[]}`),
+		carrier.Meta{},
+	)
+	decoded, err := (chatcompletions.ClientRequestDecoder{}).DecodeClientRequest(clientDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := decoded.Request.Request
+	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target.Model = request.Model()
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: decoded.Request.Delivery})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := payload["stop"]; present {
+		t.Fatalf("Azure provider request retained Continue empty stop list: %s", document.RawBytes())
+	}
+	if payload["temperature"] != float64(1) || payload["model"] != "gpt-5-nano" {
+		t.Fatalf("ordinary Chat fields did not survive normalization: %s", document.RawBytes())
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages did not survive normalization: %s", document.RawBytes())
 	}
 }
 

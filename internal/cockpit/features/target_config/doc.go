@@ -39,9 +39,9 @@
 // mounted pending ChatGPT session is observed through the local daemon until it
 // succeeds or fails; manual refresh remains a recovery action, and the observer
 // ends with the form, mount, app, or session.
-// Custom Endpoint uses best-effort discovery plus the open-set model picker;
-// Z.AI uses the same picker without discovery. In both cases the
-// operator-authored model ID remains authoritative.
+// Custom Endpoint uses best-effort discovery plus an open-set model picker.
+// Z.AI has no discovery surface, so its open-set model ID is authored through
+// a plain text row rather than an empty searchable catalog.
 // An incomplete create row is status, not an interaction target; only a ready
 // create action participates in selection and Enter dispatch.
 //

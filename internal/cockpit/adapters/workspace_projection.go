@@ -13,7 +13,11 @@ func (a *LiveOperatorAdapter) workspaceFromView(ctx context.Context, workspace w
 	id := readmodel.WorkspaceID(workspace.Slug)
 	activity, _ := a.activityForWorkspace(ctx, id)
 	baseURL := a.clientBaseURL(workspace.Slug)
-	return readmodel.WorkspaceReadModel{ID: id, Slug: workspace.Slug, State: readmodel.WorkspaceExisting, ClientBaseURL: baseURL, Routes: routesFromWorkspace(workspace), Activity: activity, ProviderOptions: operatorProviderOptions()}, nil
+	routes, err := routesFromWorkspace(workspace)
+	if err != nil {
+		return readmodel.WorkspaceReadModel{}, err
+	}
+	return readmodel.WorkspaceReadModel{ID: id, Slug: workspace.Slug, State: readmodel.WorkspaceExisting, ClientBaseURL: baseURL, Routes: routes, Activity: activity, ProviderOptions: operatorProviderOptions()}, nil
 }
 func (a *LiveOperatorAdapter) clientBaseURL(slug string) string {
 	return config.BaseURL(a.addr) + "/c/" + strings.Trim(strings.TrimSpace(slug), "/")

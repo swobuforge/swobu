@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
@@ -71,6 +72,73 @@ func TestZAICreateFlow(t *testing.T) {
 	connection, ok := saved.Connection.(routing.ZAIConnection)
 	if !ok || connection.Access() != routing.ZAIAccessCodingPlan || connection.Credential().String() != ref || saved.ModelID != "manual-model" {
 		t.Fatalf("saved Z.AI target = %#v, connection = %#v", saved, saved.Connection)
+	}
+}
+
+func TestMountedZAIModelIsPlainInputAndSubmitsTypedName(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecZAI, "", "env:ZAI_API_KEY")
+	w.SelectZAIAccess(string(routing.ZAIAccessCodingPlan))
+	h, err := testkit.NewHarnessAt(w, 100, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	h.Open()
+
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "> model") || !strings.Contains(frame, "required") {
+		t.Fatalf("Z.AI model input did not own the required field:\n%s", frame)
+	}
+	if strings.Contains(frame, "search") || strings.Contains(frame, "shown") {
+		t.Fatalf("Z.AI model field mounted catalog-picker chrome:\n%s", frame)
+	}
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	for _, key := range runeKeys("glm-5") {
+		h.DispatchKey(key)
+	}
+	editing := h.FrameTrimmed()
+	if !strings.Contains(editing, "glm-5") || !strings.Contains(editing, "save ↵") {
+		t.Fatalf("Z.AI model row did not expose a plain text editor:\n%s", editing)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if got := w.SelectedModel.Get().ModelName; got != "glm-5" {
+		t.Fatalf("submitted Z.AI model = %q, want glm-5", got)
+	}
+	if !w.readyToCreate() {
+		t.Fatal("submitted Z.AI model did not make the target ready")
+	}
+	if frame := h.FrameTrimmed(); strings.Contains(frame, "search") || strings.Contains(frame, "shown") {
+		t.Fatalf("submitted Z.AI model switched to picker chrome:\n%s", frame)
+	}
+}
+
+func TestMountedZAIModelEscapeCancelsInputWithoutClosingTargetConfig(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecZAI, "", "env:ZAI_API_KEY")
+	w.SelectZAIAccess(string(routing.ZAIAccessGeneralAPI))
+	h, err := testkit.NewHarnessAt(w, 100, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	h.Open()
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	for _, key := range runeKeys("discard-me") {
+		h.DispatchKey(key)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if !w.IsOpen() {
+		t.Fatal("Escape from Z.AI model input closed target configuration")
+	}
+	if got := w.SelectedModel.Get().ModelName; got != "" {
+		t.Fatalf("Escape published Z.AI model draft %q", got)
+	}
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "> model") || strings.Contains(frame, "discard-me") || strings.Contains(frame, "search") {
+		t.Fatalf("Escape did not return to the plain model row:\n%s", frame)
 	}
 }
 

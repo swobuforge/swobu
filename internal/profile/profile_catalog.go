@@ -23,6 +23,17 @@ type CredentialSpec struct {
 	SuggestedEnvVar string
 }
 
+// ModelCatalogMode states whether target authoring can enumerate model
+// identities. It is provider capability metadata, not a conclusion drawn from
+// an empty probe result or a model name.
+type ModelCatalogMode uint8
+
+const (
+	ModelCatalogModeInvalid ModelCatalogMode = iota
+	ModelCatalogModeEnumerable
+	ModelCatalogModeManual
+)
+
 const (
 	ProviderSpecOllama     ProviderID = "ollama"
 	ProviderSpecLMStudio   ProviderID = "lmstudio"
@@ -67,6 +78,7 @@ type Profile struct {
 	SetupKeywords       []string
 	Locator             LocatorSpec
 	Credential          CredentialSpec
+	ModelCatalog        ModelCatalogMode
 	CatalogItemLabel    string
 	DefaultAuthHeader   string
 	VisibleInOperatorUI bool
@@ -74,6 +86,14 @@ type Profile struct {
 	// ProviderProtocols is ordered by preference. The first concrete protocol
 	// is the provider default; operators may explicitly select any later entry.
 	ProviderProtocols []ProviderProtocolSpec
+}
+
+func ModelCatalogModeForSpec(spec string) ModelCatalogMode {
+	provider, ok := profileFor(spec)
+	if !ok {
+		return ModelCatalogModeInvalid
+	}
+	return provider.ModelCatalog
 }
 
 type ProviderProtocolSpec struct {
