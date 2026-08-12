@@ -86,8 +86,9 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	defer cancel()
 	providerRequest.EncodeContext = provider.EncodeContext{
-		Context:      preparationCtx,
-		ResolveImage: newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
+		Context:               preparationCtx,
+		ResolveImage:          newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
+		HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
 	}
 	if selection.requestChoice == providerRequestPreferred && !structuralProjection {
 		if id, start, end, ok := resolved.ResponsesPrevious(path.target.TargetID, path.target.TargetVersion); ok {
@@ -148,6 +149,13 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		providerRound:      len(s.providerUsage),
 		replaySafety:       replaySafety,
 	}, path.target, requestChanges, fetchCache, nil
+}
+
+// hasNextRouteCandidate exposes route order only as request-scoped encoding
+// context. It intentionally does not enter the target snapshot or route state.
+func hasNextRouteCandidate(s exchangeState, selection providerCallSelection) bool {
+	_, exists := s.route.at(selection.candidateIndex + 1)
+	return exists
 }
 
 func isNativeDiscoveryRepresentationError(err error) bool {

@@ -4,6 +4,9 @@
 package workspaces
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -38,7 +41,7 @@ type Target struct {
 }
 
 // TargetDraft is create-command input. Provider identity is derived solely
-// from the one populated connection arm.
+// from the one populated provider-keyed connection document.
 type TargetDraft struct {
 	ID         string     `json:"id"`
 	Model      string     `json:"model"`
@@ -54,35 +57,21 @@ type TargetSettingsDraft struct {
 	Connection Connection `json:"connection"`
 }
 
-type Connection struct {
-	OpenAI     *CredentialConnection         `json:"openai,omitempty"`
-	Anthropic  *CredentialConnection         `json:"anthropic,omitempty"`
-	DeepSeek   *CredentialConnection         `json:"deepseek,omitempty"`
-	OpenRouter *CredentialConnection         `json:"openrouter,omitempty"`
-	ZAI        *ZAIConnection                `json:"zai,omitempty"`
-	ChatGPT    *CredentialConnection         `json:"chatgpt,omitempty"`
-	Ollama     *OllamaConnection             `json:"ollama,omitempty"`
-	LMStudio   *EndpointCredentialConnection `json:"lmstudio,omitempty"`
-	VLLM       *EndpointCredentialConnection `json:"vllm,omitempty"`
-	Azure      *AzureConnection              `json:"azure,omitempty"`
-	Bedrock    *BedrockConnection            `json:"bedrock,omitempty"`
-	Custom     *CustomConnection             `json:"custom,omitempty"`
-}
-type CredentialConnection struct {
-	Credential string `json:"credential"`
+// Connection preserves the public provider-keyed JSON shape while storing a
+// shape-oriented routing draft. Profile is the sole catalog-membership owner;
+// unknown keys and fields fail at this boundary rather than becoming maps in
+// routing state.
+type Connection struct{ draft routing.ConnectionDraft }
+
+type standardConnectionDTO struct {
+	BaseURL    string `json:"base_url,omitempty"`
+	Credential string `json:"credential,omitempty"`
 }
 type ZAIConnection struct {
 	Access     string `json:"access"`
 	Credential string `json:"credential"`
 }
-type OllamaConnection struct {
-	BaseURL string `json:"base_url,omitempty"`
-}
-type EndpointCredentialConnection struct {
-	BaseURL    string `json:"base_url,omitempty"`
-	Credential string `json:"credential,omitempty"`
-}
-type AzureConnection struct {
+type azureProjectConnectionDTO struct {
 	ProjectEndpoint string `json:"project_endpoint"`
 	Credential      string `json:"credential"`
 }
@@ -98,6 +87,198 @@ type CustomConnection struct {
 type CustomHeader struct {
 	Name       string `json:"name"`
 	Credential string `json:"credential"`
+}
+
+// StandardConnection returns a JSON connection document for a Standard-shape
+// provider. It is a construction helper for internal callers and tests; JSON
+// marshal still emits the existing provider-keyed public contract.
+func StandardConnection(provider, locator, credential string) Connection {
+	return Connection{draft: routing.ConnectionDraft{Provider: provider, Standard: &routing.StandardConnectionDraft{Locator: locator, Credential: credential}}}
+}
+
+// ZAIConnectionDocument returns a Z.AI provider-keyed connection document.
+func ZAIConnectionDocument(access, credential string) Connection {
+	return Connection{draft: routing.ConnectionDraft{Provider: string(profile.ProviderSpecZAI), ZAI: &routing.ZAIConnectionDraft{Access: access, Credential: credential}}}
+}
+
+// BedrockConnectionDocument returns a Bedrock provider-keyed connection
+// document. It permits an empty endpoint for the catalog-only probe flow;
+// durable target finalization still rejects it.
+func BedrockConnectionDocument(region, endpoint, credential string) Connection {
+	return Connection{draft: routing.ConnectionDraft{Provider: string(profile.ProviderSpecBedrock), Bedrock: &routing.BedrockConnectionDraft{Region: region, Endpoint: endpoint, Credential: credential}}}
+}
+
+// CustomConnectionDocument returns a custom-endpoint provider-keyed connection
+// document with the optional user-authored header behavior.
+func CustomConnectionDocument(baseURL string, header *CustomHeader) Connection {
+	draft := routing.ConnectionDraft{Provider: string(profile.ProviderSpecCustom), Custom: &routing.CustomConnectionDraft{BaseURL: baseURL}}
+	if header != nil {
+		draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name, Credential: header.Credential}
+	}
+	return Connection{draft: draft}
+}
+
+// BedrockDraft returns the boundary-only Bedrock fields for the one special
+// catalog probe that can run before an operator supplies an inference endpoint.
+func (c Connection) BedrockDraft() (BedrockConnection, bool) {
+	if c.draft.Provider != string(profile.ProviderSpecBedrock) || c.draft.Bedrock == nil {
+		return BedrockConnection{}, false
+	}
+	return BedrockConnection{Region: c.draft.Bedrock.Region, Endpoint: c.draft.Bedrock.Endpoint, Credential: c.draft.Bedrock.Credential}, true
+}
+
+func (c Connection) MarshalJSON() ([]byte, error) {
+	provider := strings.TrimSpace(c.draft.Provider)
+	shape, ok := profile.ConnectionShapeForSpec(provider)
+	if !ok {
+		return nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
+	}
+	switch shape {
+	case routing.ConnectionShapeStandard:
+		if c.draft.Standard == nil {
+			return nil, fmt.Errorf("connection.%s: provider connection details are required", provider)
+		}
+		locator, _ := profile.LocatorSpecForProvider(provider)
+		if locator.Kind == profile.LocatorAzureProject {
+			return json.Marshal(map[string]any{provider: azureProjectConnectionDTO{ProjectEndpoint: c.draft.Standard.Locator, Credential: c.draft.Standard.Credential}})
+		}
+		if locator.Kind == profile.LocatorFixed {
+			return json.Marshal(map[string]any{provider: struct {
+				Credential string `json:"credential"`
+			}{Credential: c.draft.Standard.Credential}})
+		}
+		return json.Marshal(map[string]any{provider: standardConnectionDTO{BaseURL: c.draft.Standard.Locator, Credential: c.draft.Standard.Credential}})
+	case routing.ConnectionShapeZAI:
+		if c.draft.ZAI == nil {
+			return nil, fmt.Errorf("connection.%s: Z.AI payload is required", provider)
+		}
+		return json.Marshal(map[string]any{provider: ZAIConnection{Access: c.draft.ZAI.Access, Credential: c.draft.ZAI.Credential}})
+	case routing.ConnectionShapeBedrock:
+		if c.draft.Bedrock == nil {
+			return nil, fmt.Errorf("connection.%s: Bedrock payload is required", provider)
+		}
+		return json.Marshal(map[string]any{provider: BedrockConnection{Region: c.draft.Bedrock.Region, Endpoint: c.draft.Bedrock.Endpoint, Credential: c.draft.Bedrock.Credential}})
+	case routing.ConnectionShapeCustom:
+		if c.draft.Custom == nil {
+			return nil, fmt.Errorf("connection.%s: custom payload is required", provider)
+		}
+		encoded := CustomConnection{BaseURL: c.draft.Custom.BaseURL}
+		if header := c.draft.Custom.Header; header != nil {
+			encoded.Header = &CustomHeader{Name: header.Name, Credential: header.Credential}
+		}
+		return json.Marshal(map[string]any{provider: encoded})
+	default:
+		return nil, fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
+	}
+}
+
+func (c *Connection) UnmarshalJSON(raw []byte) error {
+	provider, payload, err := singleProviderJSON(raw)
+	if err != nil {
+		return err
+	}
+	shape, ok := profile.ConnectionShapeForSpec(provider)
+	if !ok {
+		return fmt.Errorf("connection.%s: provider is unsupported", provider)
+	}
+	draft := routing.ConnectionDraft{Provider: provider}
+	switch shape {
+	case routing.ConnectionShapeStandard:
+		locator, _ := profile.LocatorSpecForProvider(provider)
+		entry, _ := profile.ProfileForSpec(provider)
+		if locator.Kind == profile.LocatorAzureProject {
+			var encoded azureProjectConnectionDTO
+			if err := decodeStrictJSONObject(payload, &encoded); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			if err := validateStandardConnectionJSONKeys(payload, entry); err != nil {
+				return err
+			}
+			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.ProjectEndpoint, Credential: encoded.Credential}
+		} else {
+			var encoded standardConnectionDTO
+			if err := decodeStrictJSONObject(payload, &encoded); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			if err := validateStandardConnectionJSONKeys(payload, entry); err != nil {
+				return err
+			}
+			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.BaseURL, Credential: encoded.Credential}
+		}
+	case routing.ConnectionShapeZAI:
+		var encoded ZAIConnection
+		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: encoded.Access, Credential: encoded.Credential}
+	case routing.ConnectionShapeBedrock:
+		var encoded BedrockConnection
+		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: encoded.Region, Endpoint: encoded.Endpoint, Credential: encoded.Credential}
+	case routing.ConnectionShapeCustom:
+		var encoded CustomConnection
+		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		draft.Custom = &routing.CustomConnectionDraft{BaseURL: encoded.BaseURL}
+		if encoded.Header != nil {
+			draft.Custom.Header = &routing.CustomHeaderDraft{Name: encoded.Header.Name, Credential: encoded.Header.Credential}
+		}
+	default:
+		return fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
+	}
+	c.draft = draft
+	return nil
+}
+
+func singleProviderJSON(raw []byte) (string, json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&object); err != nil {
+		return "", nil, errors.New("connection must be a JSON object")
+	}
+	if len(object) != 1 {
+		return "", nil, errors.New("connection must contain exactly one provider key")
+	}
+	for provider, payload := range object {
+		if !profile.SupportsSpec(provider) {
+			return "", nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
+		}
+		return provider, payload, nil
+	}
+	panic("one-key map had no key")
+}
+
+func decodeStrictJSONObject(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return errors.New("connection payload has trailing data")
+	}
+	return nil
+}
+
+// validateStandardConnectionJSONKeys preserves strict public grammar by
+// inspecting authored keys, not their decoded values. In particular, an empty
+// fixed-provider base_url is still an unrecognized public field.
+func validateStandardConnectionJSONKeys(raw []byte, entry profile.Profile) error {
+	provider := string(entry.ProviderID)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("connection.%s: connection payload must be a JSON object", provider)
+	}
+	if _, present := fields["base_url"]; present && entry.Locator.Kind != profile.LocatorBaseURL {
+		return fmt.Errorf("connection.%s: field \"base_url\" is not recognized", provider)
+	}
+	if _, present := fields["credential"]; present && entry.Credential.Requirement == profile.CredentialUnsupported {
+		return fmt.Errorf("connection.%s: field \"credential\" is not recognized", provider)
+	}
+	return nil
 }
 
 func projectWorkspace(workspace routing.Workspace) Workspace {
@@ -130,48 +311,11 @@ func projectTarget(target routing.Target) Target {
 // ConnectionFromRouting is the shared routing-to-operator transport codec used
 // by both target persistence and target probing.
 func ConnectionFromRouting(connection routing.Connection) Connection {
-	out := Connection{}
-	switch c := connection.(type) {
-	case routing.APIKeyConnection:
-		credential := &CredentialConnection{Credential: c.Credential().String()}
-		switch c.Provider() {
-		case routing.ProviderOpenAI:
-			out.OpenAI = credential
-		case routing.ProviderAnthropic:
-			out.Anthropic = credential
-		case routing.ProviderDeepSeek:
-			out.DeepSeek = credential
-		case routing.ProviderOpenRouter:
-			out.OpenRouter = credential
-		case routing.ProviderChatGPT:
-			out.ChatGPT = credential
-		}
-	case routing.ZAIConnection:
-		out.ZAI = &ZAIConnection{Access: string(c.Access()), Credential: c.Credential().String()}
-	case routing.OllamaConnection:
-		value, _ := c.BaseURL()
-		out.Ollama = &OllamaConnection{BaseURL: value.String()}
-	case routing.EndpointCredentialConnection:
-		value, _ := c.BaseURL()
-		switch c.Provider() {
-		case routing.ProviderLMStudio:
-			out.LMStudio = &EndpointCredentialConnection{BaseURL: value.String(), Credential: c.Credential().String()}
-		case routing.ProviderVLLM:
-			out.VLLM = &EndpointCredentialConnection{BaseURL: value.String(), Credential: c.Credential().String()}
-		}
-	case routing.AzureConnection:
-		out.Azure = &AzureConnection{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
-	case routing.BedrockConnection:
-		out.Bedrock = &BedrockConnection{Region: c.Region().String(), Endpoint: c.Endpoint(), Credential: c.Credential().String()}
-	case routing.CustomConnection:
-		custom := &CustomConnection{BaseURL: c.BaseURL().String()}
-		if c.Auth() != nil {
-			header := c.Auth().(routing.CustomHeaderAuth)
-			custom.Header = &CustomHeader{Name: header.Name(), Credential: header.Credential().String()}
-		}
-		out.Custom = custom
+	draft, err := connectionDraftFromRouting(connection)
+	if err != nil {
+		panic(err)
 	}
-	return out
+	return Connection{draft: draft}
 }
 
 func (t TargetDraft) routingTarget() (routing.Target, error) {
@@ -193,57 +337,30 @@ func finalizeTargetDraft(id, model, protocol string, connection Connection) (rou
 }
 
 func (c Connection) routingDraft() (routing.ConnectionDraft, error) {
-	draft := routing.ConnectionDraft{}
-	if c.OpenAI != nil {
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: c.OpenAI.Credential}
-	}
-	if c.Anthropic != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
+	return c.draft, nil
+}
+
+func connectionDraftFromRouting(connection routing.Connection) (routing.ConnectionDraft, error) {
+	draft := routing.ConnectionDraft{Provider: string(connection.Provider())}
+	switch connection := connection.(type) {
+	case routing.StandardConnection:
+		locator, _ := connection.Locator()
+		draft.Standard = &routing.StandardConnectionDraft{Locator: locator.String(), Credential: connection.Credential().String()}
+	case routing.ZAIConnection:
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: string(connection.Access()), Credential: connection.Credential().String()}
+	case routing.BedrockConnection:
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}
+	case routing.CustomConnection:
+		draft.Custom = &routing.CustomConnectionDraft{BaseURL: connection.BaseURL().String()}
+		if auth := connection.Auth(); auth != nil {
+			header, ok := auth.(routing.CustomHeaderAuth)
+			if !ok {
+				return routing.ConnectionDraft{}, fmt.Errorf("unsupported custom auth %T", auth)
+			}
+			draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name(), Credential: header.Credential().String()}
 		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: c.Anthropic.Credential}
-	}
-	if c.DeepSeek != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: c.DeepSeek.Credential}
-	}
-	if c.OpenRouter != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: c.OpenRouter.Credential}
-	}
-	if c.ZAI != nil {
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: c.ZAI.Access, Credential: c.ZAI.Credential}
-	}
-	if c.ChatGPT != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: c.ChatGPT.Credential}
-	}
-	if c.Ollama != nil {
-		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: c.Ollama.BaseURL}
-	}
-	if c.LMStudio != nil {
-		draft.LMStudio = &routing.EndpointCredentialConnectionDraft{BaseURL: c.LMStudio.BaseURL, Credential: c.LMStudio.Credential}
-	}
-	if c.VLLM != nil {
-		draft.VLLM = &routing.EndpointCredentialConnectionDraft{BaseURL: c.VLLM.BaseURL, Credential: c.VLLM.Credential}
-	}
-	if c.Azure != nil {
-		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: c.Azure.ProjectEndpoint, Credential: c.Azure.Credential}
-	}
-	if c.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: c.Bedrock.Region, Endpoint: c.Bedrock.Endpoint, Credential: c.Bedrock.Credential}
-	}
-	if c.Custom != nil {
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: c.Custom.BaseURL}
-		if c.Custom.Header != nil {
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: c.Custom.Header.Name, Credential: c.Custom.Header.Credential}
-		}
+	default:
+		return routing.ConnectionDraft{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
 	return draft, nil
 }

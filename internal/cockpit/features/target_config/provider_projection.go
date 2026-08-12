@@ -14,38 +14,41 @@ import (
 func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error) {
 	credential := strings.TrimSpace(draft.CredentialRef)
 	locator := strings.TrimSpace(draft.Locator)
-	switch profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) {
-	case profile.ProviderSpecOpenAI:
-		return routing.NewAPIKeyConnection(routing.ProviderOpenAI, credential)
-	case profile.ProviderSpecAnthropic:
-		return routing.NewAPIKeyConnection(routing.ProviderAnthropic, credential)
-	case profile.ProviderSpecDeepSeek:
-		return routing.NewAPIKeyConnection(routing.ProviderDeepSeek, credential)
-	case profile.ProviderSpecOpenRouter:
-		return routing.NewAPIKeyConnection(routing.ProviderOpenRouter, credential)
-	case profile.ProviderSpecZAI:
+	shape, ok := profile.ConnectionShapeForSpec(draft.ProviderSpec)
+	if !ok {
+		return nil, fmt.Errorf("unsupported provider %q", draft.ProviderSpec)
+	}
+	switch shape {
+	case routing.ConnectionShapeStandard:
+		return routing.FinalizeConnection(routing.ConnectionDraft{
+			Provider: draft.ProviderSpec,
+			Standard: &routing.StandardConnectionDraft{Locator: locator, Credential: credential},
+		}, profile.RoutingConstructionFacts())
+	case routing.ConnectionShapeZAI:
+		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
+		if err != nil {
+			return nil, err
+		}
 		access, err := routing.ParseZAIAccess(draft.ZAIAccess)
 		if err != nil {
 			return nil, err
 		}
-		return routing.NewZAIConnection(access, credential)
-	case profile.ProviderSpecChatGPT:
-		return routing.NewAPIKeyConnection(routing.ProviderChatGPT, credential)
-	case profile.ProviderSpecOllama:
-		return routing.NewOllamaConnection(locator)
-	case profile.ProviderSpecLMStudio:
-		return routing.NewEndpointCredentialConnection(routing.ProviderLMStudio, locator, credential)
-	case profile.ProviderSpecVLLM:
-		return routing.NewEndpointCredentialConnection(routing.ProviderVLLM, locator, credential)
-	case profile.ProviderSpecAzure:
-		return routing.NewAzureConnection(locator, credential)
-	case profile.ProviderSpecBedrock:
+		return routing.NewZAIConnection(provider, access, credential)
+	case routing.ConnectionShapeBedrock:
+		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
+		if err != nil {
+			return nil, err
+		}
 		region, err := routing.ParseBedrockRegion(locator)
 		if err != nil {
 			return nil, err
 		}
-		return routing.NewBedrockConnection(region, strings.TrimSpace(draft.Endpoint), credential)
-	case profile.ProviderSpecCustom:
+		return routing.NewBedrockConnection(provider, region, strings.TrimSpace(draft.Endpoint), credential)
+	case routing.ConnectionShapeCustom:
+		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
+		if err != nil {
+			return nil, err
+		}
 		var auth routing.CustomAuth
 		if credential != "" {
 			header, err := routing.NewCustomHeaderAuth(
@@ -57,9 +60,9 @@ func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error
 			}
 			auth = header
 		}
-		return routing.NewCustomConnection(locator, auth)
+		return routing.NewCustomConnection(provider, locator, auth)
 	default:
-		return nil, fmt.Errorf("unsupported provider %q", draft.ProviderSpec)
+		return nil, fmt.Errorf("unsupported connection configuration for provider %q", draft.ProviderSpec)
 	}
 }
 

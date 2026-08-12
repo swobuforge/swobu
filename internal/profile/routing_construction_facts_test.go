@@ -14,10 +14,10 @@ func TestRoutingConstructionFactsUsesDirectProviderIdentity(t *testing.T) {
 		protocol string
 		want     bool
 	}{
-		{name: "custom is the catalog identity", provider: routing.ProviderCustom, protocol: "messages", want: true},
-		{name: "native provider", provider: routing.ProviderOpenAI, protocol: "responses", want: true},
-		{name: "auto fails closed", provider: routing.ProviderOpenAI, protocol: ProviderProtocolAuto, want: false},
-		{name: "unknown fails closed", provider: routing.ProviderOpenAI, protocol: "unknown", want: false},
+		{name: "custom is the catalog identity", provider: routing.Provider("custom"), protocol: "messages", want: true},
+		{name: "native provider", provider: routing.Provider("openai"), protocol: "responses", want: true},
+		{name: "auto fails closed", provider: routing.Provider("openai"), protocol: ProviderProtocolAuto, want: false},
+		{name: "unknown fails closed", provider: routing.Provider("openai"), protocol: "unknown", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRoutingConstructionFactsUsesDirectProviderIdentity(t *testing.T) {
 			}
 		})
 	}
-	if facts.NormalizeAzureProjectEndpoint == nil || facts.BedrockRegionSupported == nil {
+	if facts.ProviderSupported == nil || facts.ConnectionShape == nil || facts.ValidateStandardConnection == nil || facts.BedrockRegionSupported == nil {
 		t.Fatal("routing facts omitted a catalog predicate")
 	}
 }

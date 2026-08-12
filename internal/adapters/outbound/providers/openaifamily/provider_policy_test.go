@@ -12,51 +12,48 @@ import (
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
-func TestProviderConstructors_ExposeExplicitProviderModules(t *testing.T) {
-	if got := NewOpenAIPolicy().ProviderID(); got != profile.ProviderSpecOpenAI {
-		t.Fatalf("openai policy provider=%s", got)
+// TestStandardBearerPolicyAdmitsFutureProviderWithoutNewPolicyType is the
+// policy-specific N+1 proof: provider identity is explicit composition data,
+// not a new empty type in the shared outbound kernel.
+func TestStandardBearerPolicyAdmitsFutureProviderWithoutNewPolicyType(t *testing.T) {
+	policy := StandardBearerPolicy(profile.ProviderID("futurecloud"))
+	if got := policy.ProviderID(); got != "futurecloud" {
+		t.Fatalf("provider = %q", got)
 	}
-	if got := NewOllamaPolicy().ProviderID(); got != profile.ProviderSpecOllama {
-		t.Fatalf("ollama policy provider=%s", got)
+	if got := policy.AuthStrategy(); got != BearerAuthStrategy() {
+		t.Fatalf("auth = %#v, want Bearer", got)
 	}
-	if got := NewLMStudioPolicy().ProviderID(); got != profile.ProviderSpecLMStudio {
-		t.Fatalf("LM Studio policy provider=%s", got)
+	if got := policy.ModelCatalogDialect(); got != ModelCatalogOpenAI {
+		t.Fatalf("catalog dialect = %d, want OpenAI", got)
 	}
-	if got := NewVLLMPolicy().ProviderID(); got != profile.ProviderSpecVLLM {
-		t.Fatalf("vLLM policy provider=%s", got)
+}
+
+func TestPolicyConstructorsRetainOnlyRealRouteDifferences(t *testing.T) {
+	if got := StandardNoAuthPolicy(profile.ProviderSpecOllama).AuthStrategy().Style; got != AuthStyleNone {
+		t.Fatalf("Ollama auth style = %s", got)
 	}
-	if got := NewCustomPolicy().ProviderID(); got != profile.ProviderSpecCustom {
-		t.Fatalf("custom policy provider=%s", got)
+	if got := LMStudioPolicy().ModelCatalogDialect(); got != ModelCatalogLMStudioV1 {
+		t.Fatalf("LM Studio catalog dialect = %d", got)
 	}
-	if got := NewOpenRouterPolicy().ProviderID(); got != profile.ProviderSpecOpenRouter {
-		t.Fatalf("openrouter policy provider=%s", got)
+	if got := APIKeyPolicy(profile.ProviderSpecAzure).AuthStrategy(); got != APIKeyAuthStrategy() {
+		t.Fatalf("Azure auth = %#v, want api-key", got)
 	}
-	if got := NewOpenAIPolicy().AuthStrategy().Style; got != AuthStyleBearer {
-		t.Fatalf("openai auth style=%s", got)
-	}
-	if got := NewOllamaPolicy().AuthStrategy().Style; got != AuthStyleNone {
-		t.Fatalf("ollama auth style=%s", got)
-	}
-	if got := NewLMStudioPolicy().AuthStrategy().Style; got != AuthStyleBearer {
-		t.Fatalf("LM Studio auth style=%s", got)
-	}
-	if got := NewVLLMPolicy().AuthStrategy().Style; got != AuthStyleBearer || NewVLLMPolicy().ModelCatalogDialect() != ModelCatalogOpenAI {
-		t.Fatalf("vLLM policy auth/catalog = %s/%d", got, NewVLLMPolicy().ModelCatalogDialect())
-	}
-	if got := NewCustomPolicy().AuthStrategy().Header; got != AuthHeaderAuthorization {
-		t.Fatalf("custom endpoint auth header=%s", got)
+	if got := GMIPolicy().ProviderID(); got != profile.ProviderSpecGMI {
+		t.Fatalf("GMI provider = %q", got)
 	}
 }
 
 func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *testing.T) {
 	raw := []byte(`{"id":"chatcmpl_1","model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 	for _, profile := range []ProviderRoutePolicy{
-		NewOpenAIPolicy(),
-		NewOllamaPolicy(),
-		NewLMStudioPolicy(),
-		NewVLLMPolicy(),
-		NewCustomPolicy(),
-		NewOpenRouterPolicy(),
+		StandardBearerPolicy(profile.ProviderSpecOpenAI),
+		StandardNoAuthPolicy(profile.ProviderSpecOllama),
+		LMStudioPolicy(),
+		StandardBearerPolicy(profile.ProviderSpecVLLM),
+		StandardBearerPolicy(profile.ProviderSpecCustom),
+		StandardBearerPolicy(profile.ProviderSpecOpenRouter),
+		StandardBearerPolicy(profile.ProviderSpecKimi),
+		StandardBearerPolicy(profile.ProviderSpecNebius),
 	} {
 		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, carrier.Document{Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
 		if err != nil {

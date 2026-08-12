@@ -45,6 +45,37 @@ func TestFlatResponsesFlattensNamespaceInsteadOfDroppingCallableChildren(t *test
 	}
 }
 
+// TestCodex0147EmptyNamespaceWithCustomExecLowersBeforeResponsesDispatch
+// reproduces Codex #37380's shape. Azure rejects the client namespace because
+// its required description is empty; a flat Responses target must receive the
+// callable custom tool, never that namespace envelope.
+func TestCodex0147EmptyNamespaceWithCustomExecLowersBeforeResponsesDispatch(t *testing.T) {
+	request := responsesCustomNamespaceRequest(t)
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := LowerProviderRequestDocument(
+		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), nil, "codex-37380", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tools) != 1 || document.Tools[0].Type != "custom" || document.Tools[0].Name == "" {
+		t.Fatalf("Responses tools = %#v, want one named custom exec tool", document.Tools)
+	}
+	if document.Tools[0].Description == "" {
+		t.Fatal("lowered custom exec lost its required description")
+	}
+	encoded, err := EncodeProviderRequestDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded.RawBytes()) == "" || containsJSONKey(encoded.RawBytes(), "namespace") {
+		t.Fatalf("provider payload retained client namespace: %s", encoded.RawBytes())
+	}
+}
+
 func TestOfficialResponsesLoweringKeepsDuplicateNamespaceLeavesDistinct(t *testing.T) {
 	request := responsesDuplicateLeafNamespacesRequest(t)
 	names, _, err := provider.BuildAttemptToolNames(request)
@@ -201,6 +232,60 @@ func responsesDuplicateLeafNamespacesRequest(t *testing.T) canonical.CanonicalRe
 			canonicaltest.Message(t, canonical.MessageRoleUser, "Read alpha marker"),
 		},
 	})
+}
+
+func responsesCustomNamespaceRequest(t *testing.T) canonical.CanonicalRequest {
+	t.Helper()
+	format, err := canonical.ParseJSONObject([]byte(`{"type":"text"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := canonicaltest.MustCustomTool(
+		canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "functions/exec"),
+		"Run JavaScript code to orchestrate tool calls.",
+		canonical.NewToolFormatObject(format),
+	)
+	namespace, err := canonical.NewToolNamespace(
+		canonicaltest.MustRequestToolKey(canonical.ToolKindNamespace, "functions"),
+		"",
+		[]canonical.ToolDeclaration{child},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.6-sol"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, namespace),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "Reply with exactly: OK"),
+		},
+	})
+}
+
+func containsJSONKey(raw []byte, key string) bool {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return containsJSONKeyValue(value, key)
+}
+
+func containsJSONKeyValue(value any, key string) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		for current, nested := range value {
+			if current == key || containsJSONKeyValue(nested, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range value {
+			if containsJSONKeyValue(nested, key) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func decodeProviderTools(t *testing.T, raw []byte) []ProviderRequestTool {

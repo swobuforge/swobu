@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -29,7 +30,7 @@ func TestResponsesContinuationConsumptionUsesVersionedCanonicalRefinement(t *tes
 		"responses",
 	)
 	target.Model = "gpt-test"
-	backend, err := NewExecutor(nil, stubCredentialResolver{}, NewOpenAIPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestOfficialOpenAIStoreFalseUsesFullHistoryWithoutNativeContinuation(t *tes
 		"responses",
 	)
 	target.Model = "gpt-test"
-	backend, err := NewExecutor(nil, stubCredentialResolver{}, NewOpenAIPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}

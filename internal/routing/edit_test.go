@@ -107,30 +107,6 @@ func TestDeleteFinalTargetAndRouteAreTypedConflicts(t *testing.T) {
 	}
 }
 
-func TestSetCredentialPreservesUnrelatedTargetFields(t *testing.T) {
-	config := testConfig(t, testTarget(t, "a"))
-	slug, _ := ParseWorkspaceSlug("dev")
-	routeName, _ := ParseRouteName("chat")
-	id, _ := ParseTargetID("a")
-	next, err := config.SetCredential(slug, routeName, id, "env:ROTATED")
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspace, _ := next.Workspace(slug)
-	route, _ := workspace.Route(routeName)
-	target := route.Tiers()[0].Targets()[0]
-	if target.ID() != id || target.Model().String() != "upstream-a" || target.Protocol().String() != "responses" {
-		t.Fatalf("unrelated target fields changed: %#v", target)
-	}
-	connection := target.Connection().(APIKeyConnection)
-	if connection.Credential().String() != "env:ROTATED" {
-		t.Fatalf("credential = %q", connection.Credential().String())
-	}
-	if target.Version() != initialTargetVersion+1 {
-		t.Fatalf("credential-save target version = %d, want %d", target.Version(), initialTargetVersion+1)
-	}
-}
-
 func TestNoOpTargetSavesRetainVersion(t *testing.T) {
 	config := testConfig(t, testTarget(t, "a"))
 	slug, _ := ParseWorkspaceSlug("dev")
@@ -152,30 +128,23 @@ func TestNoOpTargetSavesRetainVersion(t *testing.T) {
 		t.Fatalf("no-op settings save version = %d, want %d", got, target.Version())
 	}
 
-	credential := target.Connection().(APIKeyConnection).Credential().String()
-	next, err = next.SetCredential(slug, routeName, id, credential)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nextWorkspace, _ = next.Workspace(slug)
-	nextRoute, _ = nextWorkspace.Route(routeName)
-	if got := nextRoute.Tiers()[0].Targets()[0].Version(); got != target.Version() {
-		t.Fatalf("no-op credential save version = %d, want %d", got, target.Version())
-	}
 }
 
 func TestTargetVersionChangesForIndependentTargetSettingsMutations(t *testing.T) {
 	openAIBase := testTarget(t, "a")
 	modelChanged, _ := ParseUpstreamModel("different-deployment")
-	protocolChanged := testProtocol(t, ProviderOpenAI, "chat_completions")
-	credentialChanged, _ := NewAPIKeyConnection(ProviderOpenAI, "env:ROTATED_OPENAI_KEY")
+	openai := supportedProvider("openai")
+	custom := supportedProvider("custom")
+	bedrockProvider := supportedProvider("bedrock")
+	protocolChanged := testProtocol(t, openai, "chat_completions")
+	credentialChanged, _ := NewStandardConnection(openai, "", "env:ROTATED_OPENAI_KEY")
 	customAuth, _ := NewCustomHeaderAuth("Authorization", "env:CUSTOM_KEY")
-	customA, _ := NewCustomConnection("https://custom-a.example/v1", customAuth)
-	customB, _ := NewCustomConnection("https://custom-b.example/v1", customAuth)
+	customA, _ := NewCustomConnection(custom, "https://custom-a.example/v1", customAuth)
+	customB, _ := NewCustomConnection(custom, "https://custom-b.example/v1", customAuth)
 	regionA, _ := ParseBedrockRegion("eu-west-1")
 	regionB, _ := ParseBedrockRegion("eu-west-2")
-	bedrockA, _ := NewBedrockConnection(regionA, "https://bedrock-mantle.eu-west-1.api.aws/v1", "")
-	bedrockB, _ := NewBedrockConnection(regionB, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
+	bedrockA, _ := NewBedrockConnection(bedrockProvider, regionA, "https://bedrock-mantle.eu-west-1.api.aws/v1", "")
+	bedrockB, _ := NewBedrockConnection(bedrockProvider, regionB, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
 	targetID, _ := ParseTargetID("a")
 	newTarget := func(protocol Protocol, connection Connection) Target {
 		t.Helper()
@@ -185,8 +154,8 @@ func TestTargetVersionChangesForIndependentTargetSettingsMutations(t *testing.T)
 		}
 		return target
 	}
-	customBase := newTarget(testProtocol(t, ProviderCustom, "responses"), customA)
-	bedrockBase := newTarget(testProtocol(t, ProviderBedrock, "responses"), bedrockA)
+	customBase := newTarget(testProtocol(t, custom, "responses"), customA)
+	bedrockBase := newTarget(testProtocol(t, bedrockProvider, "responses"), bedrockA)
 
 	cases := []struct {
 		name     string
@@ -241,14 +210,16 @@ func TestTargetVersionChangesWhenProviderConnectionVariantChanges(t *testing.T) 
 	targetID, _ := ParseTargetID("a")
 	model, _ := ParseUpstreamModel("shared-deployment")
 	region, _ := ParseBedrockRegion("eu-west-1")
-	bedrock, _ := NewBedrockConnection(region, "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1", "")
-	protocol := testProtocol(t, ProviderBedrock, "messages")
+	bedrockProvider := supportedProvider("bedrock")
+	anthropicProvider := supportedProvider("anthropic")
+	bedrock, _ := NewBedrockConnection(bedrockProvider, region, "https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1", "")
+	protocol := testProtocol(t, bedrockProvider, "messages")
 	base, err := NewTarget(targetID, model, protocol, bedrock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
-	anthropicProtocol := testProtocol(t, ProviderAnthropic, "messages")
+	anthropic, _ := NewStandardConnection(anthropicProvider, "", "env:ANTHROPIC_API_KEY")
+	anthropicProtocol := testProtocol(t, anthropicProvider, "messages")
 
 	config := testConfig(t, base)
 	slug, _ := ParseWorkspaceSlug("dev")
@@ -269,8 +240,8 @@ func TestTargetVersionChangesWhenProviderConnectionVariantChanges(t *testing.T) 
 func TestTargetRejectsProtocolFromDifferentProvider(t *testing.T) {
 	targetID, _ := ParseTargetID("a")
 	model, _ := ParseUpstreamModel("shared-deployment")
-	bedrockProtocol := testProtocol(t, ProviderBedrock, "messages")
-	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
+	bedrockProtocol := testProtocol(t, supportedProvider("bedrock"), "messages")
+	anthropic, _ := NewStandardConnection(supportedProvider("anthropic"), "", "env:ANTHROPIC_API_KEY")
 	if _, err := NewTarget(targetID, model, bedrockProtocol, anthropic); err == nil {
 		t.Fatal("target accepted protocol from a provider that contradicts its connection")
 	}
@@ -281,7 +252,7 @@ func TestUpdateTargetSettingsRejectsProviderChangeWithoutMatchingProtocol(t *tes
 	config := testConfig(t, base)
 	slug, _ := ParseWorkspaceSlug("dev")
 	routeName, _ := ParseRouteName("chat")
-	anthropic, _ := NewAPIKeyConnection(ProviderAnthropic, "env:ANTHROPIC_API_KEY")
+	anthropic, _ := NewStandardConnection(supportedProvider("anthropic"), "", "env:ANTHROPIC_API_KEY")
 	if _, err := config.UpdateTargetSettings(slug, routeName, base.ID(), TargetSettings{
 		Model: base.Model(), Protocol: base.Protocol(), Connection: anthropic,
 	}); err == nil {

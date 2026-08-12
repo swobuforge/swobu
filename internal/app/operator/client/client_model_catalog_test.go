@@ -24,8 +24,12 @@ func TestClientProbeTargetEncodesTypedConnectionBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			t.Fatal(err)
 		}
-		if input.Connection.OpenAI == nil || input.Connection.OpenAI.Credential != "env:OPENAI_API_KEY" || input.ProviderProtocol != "responses" {
+		connection, err := input.Connection.RoutingConnection()
+		if err != nil || input.ProviderProtocol != "responses" {
 			t.Fatalf("probe input = %#v", input)
+		}
+		if got := string(connection.Provider()); got != "openai" {
+			t.Fatalf("probe provider = %q, want openai", got)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -40,7 +44,7 @@ func TestClientProbeTargetEncodesTypedConnectionBody(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	result, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "responses")
+	result, err := c.ProbeTarget(context.Background(), workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), "responses")
 	if err != nil {
 		t.Fatalf("ProbeTarget returned error: %v", err)
 	}
@@ -72,7 +76,7 @@ func TestClientProbeTarget404ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "")
+	_, err := c.ProbeTarget(context.Background(), workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), "")
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -90,7 +94,7 @@ func TestClientProbeTarget500ReturnsError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.ProbeTarget(context.Background(), workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, "")
+	_, err := c.ProbeTarget(context.Background(), workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), "")
 	if err == nil {
 		t.Fatal("expected error for 500")
 	}
@@ -119,7 +123,7 @@ func TestClientWorkspaceCommandDecodesFlatCommandError(t *testing.T) {
 		Route:     "chatgpt-rodion",
 		Target: workspaceapi.TargetDraft{
 			Model:      "gpt-5.6-sol",
-			Connection: workspaceapi.Connection{ChatGPT: &workspaceapi.CredentialConnection{Credential: "secretfile:chatgpt/team/sess_x"}},
+			Connection: workspaceapi.StandardConnection("chatgpt", "", "secretfile:chatgpt/team/sess_x"),
 		},
 	})
 	if err == nil {

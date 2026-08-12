@@ -1,5 +1,6 @@
-// Package protocolcodec privately composes reusable wire-family grammar into
-// exact provider codecs. It owns no provider routing or transport behavior.
+// Package protocolcodec composes reusable wire-family grammar, including
+// narrow Chat response carrier composition, into exact provider codecs. It
+// owns no provider routing or transport behavior.
 package protocolcodec
 
 import (

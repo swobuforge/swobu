@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -65,6 +66,13 @@ func (e BackendAdapter) listOpenAIModels(ctx context.Context, target provider.Ta
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// An enumerable provider's catalog is advisory: Cockpit keeps exact model
+	// entry open. A valid inference front door may omit /models, so only that
+	// narrow absence becomes an empty catalog; auth, rate, transport, and decode
+	// failures remain observable probe failures.
+	if (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) && profile.ModelCatalogModeForSpec(target.ProviderID()) == profile.ModelCatalogModeEnumerable {
+		return []profile.ProviderDeploymentRecord{}, nil
+	}
 	if resp.StatusCode >= 400 {
 		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
@@ -86,7 +94,9 @@ func (e BackendAdapter) getModelCatalog(ctx context.Context, target provider.Tar
 	}
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader()); err != nil {
+	// Model catalog reads are an OpenAI-family endpoint, independent of the
+	// target's selected inference protocol and its protocol-only headers.
+	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader(), protocolkind.ChatCompletions); err != nil {
 		return nil, err
 	}
 	resp, err := e.client.Do(httpReq)

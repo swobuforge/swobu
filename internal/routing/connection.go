@@ -9,7 +9,19 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/credentialref"
 )
 
-// Connection is a sealed provider-specific sum type. Exactly one concrete arm
+// ConnectionShape is the closed durable routing sum. It deliberately models
+// durable execution concepts, not catalog membership or runtime wire family.
+type ConnectionShape uint8
+
+const (
+	ConnectionShapeInvalid ConnectionShape = iota
+	ConnectionShapeStandard
+	ConnectionShapeZAI
+	ConnectionShapeBedrock
+	ConnectionShapeCustom
+)
+
+// Connection is a sealed durable connection sum. Exactly one concrete shape
 // is held by Target, so irrelevant field combinations are unrepresentable.
 type Connection interface {
 	Provider() Provider
@@ -20,27 +32,18 @@ type Connection interface {
 // rule in the sealed sum prevents runtime-only fields from changing generation.
 func connectionsEqual(left, right Connection) bool {
 	switch left := left.(type) {
-	case APIKeyConnection:
-		right, ok := right.(APIKeyConnection)
-		return ok && left.provider == right.provider && left.credential.String() == right.credential.String()
+	case StandardConnection:
+		right, ok := right.(StandardConnection)
+		return ok && left.provider == right.provider && left.locator.String() == right.locator.String() && left.credential.String() == right.credential.String()
 	case ZAIConnection:
 		right, ok := right.(ZAIConnection)
-		return ok && left.access == right.access && left.credential.String() == right.credential.String()
-	case OllamaConnection:
-		right, ok := right.(OllamaConnection)
-		return ok && left.baseURL.String() == right.baseURL.String()
-	case EndpointCredentialConnection:
-		right, ok := right.(EndpointCredentialConnection)
-		return ok && left.provider == right.provider && left.baseURL.String() == right.baseURL.String() && left.credential.String() == right.credential.String()
-	case AzureConnection:
-		right, ok := right.(AzureConnection)
-		return ok && left.projectEndpoint.String() == right.projectEndpoint.String() && left.credential.String() == right.credential.String()
+		return ok && left.provider == right.provider && left.access == right.access && left.credential.String() == right.credential.String()
 	case BedrockConnection:
 		right, ok := right.(BedrockConnection)
-		return ok && left.region == right.region && left.endpoint == right.endpoint && left.Credential().String() == right.Credential().String()
+		return ok && left.provider == right.provider && left.region == right.region && left.endpoint == right.endpoint && left.Credential().String() == right.Credential().String()
 	case CustomConnection:
 		right, ok := right.(CustomConnection)
-		return ok && left.baseURL.String() == right.baseURL.String() && customAuthEqual(left.auth, right.auth)
+		return ok && left.provider == right.provider && left.baseURL.String() == right.baseURL.String() && customAuthEqual(left.auth, right.auth)
 	default:
 		return false
 	}
@@ -102,27 +105,50 @@ var (
 	credentialNamePattern    = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$`)
 )
 
-const DeepSeekProviderProtocol = "messages_stream"
+const (
+	DeepSeekProviderProtocol = "messages_stream"
+	// KimiProviderProtocol is the sole Kimi execution protocol. Kimi's
+	// compatibility dialect is handled at its outbound adapter, never in routing.
+	KimiProviderProtocol = "chat_completions_stream"
+)
 
-// APIKeyConnection is the durable shape shared by fixed providers whose only
-// authored connection fact is a credential reference.
-type APIKeyConnection struct {
+// StandardConnection carries the common durable provider identity, optional
+// locator, and optional credential reference. A profile owns the provider's
+// fixed locator, credential policy, and locator grammar; runtime wire behavior
+// remains outside routing.
+type StandardConnection struct {
 	provider   Provider
+	locator    URL
 	credential credentialref.Ref
 }
 
-func NewAPIKeyConnection(provider Provider, raw string) (APIKeyConnection, error) {
-	switch provider {
-	case ProviderOpenAI, ProviderAnthropic, ProviderDeepSeek, ProviderOpenRouter, ProviderChatGPT:
-	default:
-		return APIKeyConnection{}, pathError("connection.provider", fmt.Sprintf("provider %q does not use an API-key connection", provider))
+// NewStandardConnection constructs an already catalog-validated Standard
+// connection. Callers must obtain provider through ParseProvider at a profile
+// construction edge rather than manufacture provider identifiers here.
+func NewStandardConnection(provider Provider, rawLocator, rawCredential string) (StandardConnection, error) {
+	connection := StandardConnection{provider: provider}
+	path := "connection." + string(provider)
+	if strings.TrimSpace(rawLocator) != "" {
+		locator, err := ParseURL(path+".base_url", rawLocator)
+		if err != nil {
+			return StandardConnection{}, err
+		}
+		connection.locator = locator
 	}
-	ref, err := parseCredential("connection."+string(provider)+".credential", raw)
-	return APIKeyConnection{provider: provider, credential: ref}, err
+	if strings.TrimSpace(rawCredential) != "" {
+		credential, err := parseCredential(path+".credential", rawCredential)
+		if err != nil {
+			return StandardConnection{}, err
+		}
+		connection.credential = credential
+	}
+	return connection, nil
 }
-func (c APIKeyConnection) Provider() Provider            { return c.provider }
-func (APIKeyConnection) isConnection()                   {}
-func (c APIKeyConnection) Credential() credentialref.Ref { return c.credential }
+
+func (c StandardConnection) Provider() Provider            { return c.provider }
+func (StandardConnection) isConnection()                   {}
+func (c StandardConnection) Locator() (URL, bool)          { return c.locator, c.locator.value != "" }
+func (c StandardConnection) Credential() credentialref.Ref { return c.credential }
 
 // ZAIAccess identifies the Z.AI commercial API surface selected by the
 // operator. It is durable routing intent because it determines where requests
@@ -138,9 +164,7 @@ const (
 )
 
 // ZAIAccesses returns the closed Z.AI access products for authoring.
-func ZAIAccesses() []ZAIAccess {
-	return []ZAIAccess{ZAIAccessGeneralAPI, ZAIAccessCodingPlan}
-}
+func ZAIAccesses() []ZAIAccess { return []ZAIAccess{ZAIAccessGeneralAPI, ZAIAccessCodingPlan} }
 
 func ParseZAIAccess(raw string) (ZAIAccess, error) {
 	access := ZAIAccess(strings.TrimSpace(raw))
@@ -164,25 +188,29 @@ func (a ZAIAccess) Label() string {
 	}
 }
 
+// ZAIConnection retains Z.AI's durable access-product selection.
 type ZAIConnection struct {
+	provider   Provider
 	access     ZAIAccess
 	credential credentialref.Ref
 }
 
-func NewZAIConnection(access ZAIAccess, raw string) (ZAIConnection, error) {
+func NewZAIConnection(provider Provider, access ZAIAccess, raw string) (ZAIConnection, error) {
 	normalized, err := ParseZAIAccess(string(access))
 	if err != nil {
 		return ZAIConnection{}, err
 	}
-	ref, err := parseCredential("connection.zai.credential", raw)
+	ref, err := parseCredential("connection."+string(provider)+".credential", raw)
 	if err != nil {
 		return ZAIConnection{}, err
 	}
-	return ZAIConnection{access: normalized, credential: ref}, nil
+	return ZAIConnection{provider: provider, access: normalized, credential: ref}, nil
 }
-func (ZAIConnection) Provider() Provider  { return ProviderZAI }
-func (ZAIConnection) isConnection()       {}
-func (c ZAIConnection) Access() ZAIAccess { return c.access }
+
+func (c ZAIConnection) Provider() Provider            { return c.provider }
+func (ZAIConnection) isConnection()                   {}
+func (c ZAIConnection) Access() ZAIAccess             { return c.access }
+func (c ZAIConnection) Credential() credentialref.Ref { return c.credential }
 
 // BaseURL returns the endpoint implied by the validated access product.
 func (c ZAIConnection) BaseURL() string {
@@ -195,85 +223,6 @@ func (c ZAIConnection) BaseURL() string {
 		return ""
 	}
 }
-func (c ZAIConnection) Credential() credentialref.Ref { return c.credential }
-
-type OllamaConnection struct{ baseURL URL }
-
-func NewOllamaConnection(raw string) (OllamaConnection, error) {
-	if strings.TrimSpace(raw) == "" {
-		return OllamaConnection{}, nil
-	}
-	u, err := ParseURL("connection.ollama.base_url", raw)
-	return OllamaConnection{u}, err
-}
-func (OllamaConnection) Provider() Provider     { return ProviderOllama }
-func (OllamaConnection) isConnection()          {}
-func (c OllamaConnection) BaseURL() (URL, bool) { return c.baseURL, c.baseURL.value != "" }
-
-// EndpointCredentialConnection is the durable shape for providers whose only
-// authored connection facts are an optional endpoint override and credential
-// reference. Authentication semantics remain provider-adapter policy.
-type EndpointCredentialConnection struct {
-	provider   Provider
-	baseURL    URL
-	credential credentialref.Ref
-}
-
-func NewEndpointCredentialConnection(provider Provider, rawBaseURL, rawCredential string) (EndpointCredentialConnection, error) {
-	switch provider {
-	case ProviderLMStudio, ProviderVLLM:
-	default:
-		return EndpointCredentialConnection{}, pathError("connection.provider", fmt.Sprintf("provider %q does not use an endpoint-credential connection", provider))
-	}
-	connection := EndpointCredentialConnection{provider: provider}
-	path := "connection." + string(provider)
-	if strings.TrimSpace(rawBaseURL) != "" {
-		u, err := ParseURL(path+".base_url", rawBaseURL)
-		if err != nil {
-			return EndpointCredentialConnection{}, err
-		}
-		if provider == ProviderLMStudio && !strings.HasSuffix(strings.TrimRight(u.String(), "/"), "/v1") {
-			return EndpointCredentialConnection{}, pathError(path+".base_url", "must end in /v1")
-		}
-		connection.baseURL = u
-	}
-	if strings.TrimSpace(rawCredential) != "" {
-		ref, err := parseCredential(path+".credential", rawCredential)
-		if err != nil {
-			return EndpointCredentialConnection{}, err
-		}
-		connection.credential = ref
-	}
-	return connection, nil
-}
-func (c EndpointCredentialConnection) Provider() Provider            { return c.provider }
-func (EndpointCredentialConnection) isConnection()                   {}
-func (c EndpointCredentialConnection) BaseURL() (URL, bool)          { return c.baseURL, c.baseURL.value != "" }
-func (c EndpointCredentialConnection) Credential() credentialref.Ref { return c.credential }
-
-type AzureConnection struct {
-	projectEndpoint URL
-	credential      credentialref.Ref
-}
-
-func NewAzureConnection(endpoint, rawCredential string) (AzureConnection, error) {
-	u, err := ParseURL("connection.azure.project_endpoint", endpoint)
-	if err != nil {
-		return AzureConnection{}, err
-	}
-	if !strings.Contains(u.String(), "/api/projects/") {
-		return AzureConnection{}, pathError("connection.azure.project_endpoint", "must identify an Azure AI project endpoint")
-	}
-	ref, err := parseCredential("connection.azure.credential", rawCredential)
-	if err != nil {
-		return AzureConnection{}, err
-	}
-	return AzureConnection{projectEndpoint: u, credential: ref}, nil
-}
-func (AzureConnection) Provider() Provider              { return ProviderAzure }
-func (AzureConnection) isConnection()                   {}
-func (c AzureConnection) ProjectEndpoint() URL          { return c.projectEndpoint }
-func (c AzureConnection) Credential() credentialref.Ref { return c.credential }
 
 var bedrockRegionPattern = regexp.MustCompile(`^[a-z]{2}(?:-gov)?-[a-z]+-\d$`)
 
@@ -290,16 +239,16 @@ func (r BedrockRegion) String() string { return r.value }
 
 // BedrockConnection owns the durable Bedrock transport identity: region (the
 // SigV4 signing source), endpoint (the complete API base URL including its AWS
-// namespace, e.g. "https://bedrock-mantle.us-east-1.api.aws/openai/v1"), and
-// credential. The routing package requires but does not normalize or validate
-// the operator-authored endpoint as a Mantle host.
+// namespace), and optional credential. Routing requires but does not normalize
+// the operator-authored endpoint.
 type BedrockConnection struct {
+	provider   Provider
 	region     BedrockRegion
 	endpoint   string
 	credential *credentialref.Ref
 }
 
-func NewBedrockConnection(region BedrockRegion, endpoint, rawCredential string) (BedrockConnection, error) {
+func NewBedrockConnection(provider Provider, region BedrockRegion, endpoint, rawCredential string) (BedrockConnection, error) {
 	if region.value == "" {
 		return BedrockConnection{}, pathError("connection.bedrock.region", "region is required")
 	}
@@ -309,21 +258,19 @@ func NewBedrockConnection(region BedrockRegion, endpoint, rawCredential string) 
 	}
 	var ref *credentialref.Ref
 	if strings.TrimSpace(rawCredential) != "" { // swobu:io-string source=boundary
-		parsed, err := parseCredential("connection.bedrock.credential", rawCredential)
+		parsed, err := parseCredential("connection."+string(provider)+".credential", rawCredential)
 		if err != nil {
 			return BedrockConnection{}, err
 		}
 		ref = &parsed
 	}
-	return BedrockConnection{region: region, endpoint: endpoint, credential: ref}, nil
+	return BedrockConnection{provider: provider, region: region, endpoint: endpoint, credential: ref}, nil
 }
-func (BedrockConnection) Provider() Provider      { return ProviderBedrock }
+
+func (c BedrockConnection) Provider() Provider    { return c.provider }
 func (BedrockConnection) isConnection()           {}
 func (c BedrockConnection) Region() BedrockRegion { return c.region }
-
-// Endpoint returns the authored complete API base URL. No normalization happens
-// here.
-func (c BedrockConnection) Endpoint() string { return c.endpoint }
+func (c BedrockConnection) Endpoint() string      { return c.endpoint }
 func (c BedrockConnection) Credential() credentialref.Ref {
 	if c.credential == nil {
 		return credentialref.Ref{}
@@ -334,6 +281,7 @@ func (c BedrockConnection) Credential() credentialref.Ref {
 var headerNamePattern = regexp.MustCompile(`^[!#$%&'*+.^_` + "`" + `|~0-9A-Za-z-]+$`)
 
 type CustomAuth interface{ isCustomAuth() }
+
 type CustomHeaderAuth struct {
 	name       string
 	credential credentialref.Ref
@@ -350,58 +298,28 @@ func NewCustomHeaderAuth(name, raw string) (CustomHeaderAuth, error) {
 	}
 	return CustomHeaderAuth{name, ref}, nil
 }
+
 func (CustomHeaderAuth) isCustomAuth()                   {}
 func (a CustomHeaderAuth) Name() string                  { return a.name }
 func (a CustomHeaderAuth) Credential() credentialref.Ref { return a.credential }
 
+// CustomConnection retains the user-selected auth-header behavior that is not
+// represented by a standard bearer-style credential reference.
 type CustomConnection struct {
-	baseURL URL
-	auth    CustomAuth
+	provider Provider
+	baseURL  URL
+	auth     CustomAuth
 }
 
-func NewCustomConnection(baseURL string, auth CustomAuth) (CustomConnection, error) {
-	u, err := ParseURL("connection.custom.base_url", baseURL)
+func NewCustomConnection(provider Provider, baseURL string, auth CustomAuth) (CustomConnection, error) {
+	u, err := ParseURL("connection."+string(provider)+".base_url", baseURL)
 	if err != nil {
 		return CustomConnection{}, err
 	}
-	return CustomConnection{u, auth}, nil
+	return CustomConnection{provider: provider, baseURL: u, auth: auth}, nil
 }
-func (CustomConnection) Provider() Provider { return ProviderCustom }
-func (CustomConnection) isConnection()      {}
-func (c CustomConnection) BaseURL() URL     { return c.baseURL }
-func (c CustomConnection) Auth() CustomAuth { return c.auth }
 
-func setConnectionCredential(connection Connection, raw string) (Connection, error) {
-	switch c := connection.(type) {
-	case APIKeyConnection:
-		return NewAPIKeyConnection(c.provider, raw)
-	case ZAIConnection:
-		return NewZAIConnection(c.access, raw)
-	case EndpointCredentialConnection:
-		baseURL, _ := c.BaseURL()
-		return NewEndpointCredentialConnection(c.provider, baseURL.String(), raw)
-	case AzureConnection:
-		ref, err := parseCredential("connection.azure.credential", raw)
-		if err != nil {
-			return nil, err
-		}
-		c.credential = ref
-		return c, nil
-	case BedrockConnection:
-		return NewBedrockConnection(c.region, c.endpoint, raw)
-	case CustomConnection:
-		header, ok := c.auth.(CustomHeaderAuth)
-		if !ok {
-			return nil, fmt.Errorf("%w: custom connection has no header auth", ErrCredentialUnsupported)
-		}
-		ref, err := parseCredential("connection.custom.auth.header.credential", raw)
-		if err != nil {
-			return nil, err
-		}
-		header.credential = ref
-		c.auth = header
-		return c, nil
-	default:
-		return nil, fmt.Errorf("%w: provider %q", ErrCredentialUnsupported, connection.Provider())
-	}
-}
+func (c CustomConnection) Provider() Provider { return c.provider }
+func (CustomConnection) isConnection()        {}
+func (c CustomConnection) BaseURL() URL       { return c.baseURL }
+func (c CustomConnection) Auth() CustomAuth   { return c.auth }

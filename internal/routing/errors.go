@@ -13,7 +13,6 @@ var (
 	ErrLastRoute                  = errors.New("last route")
 	ErrDefaultReplacementRequired = errors.New("default replacement required")
 	ErrEmptyRequestedRoute        = errors.New("requested route is empty")
-	ErrCredentialUnsupported      = errors.New("connection does not carry a credential")
 )
 
 type InvariantError struct {

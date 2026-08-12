@@ -42,7 +42,7 @@ type bedrockStructuredFallbackRuntime struct {
 }
 
 func (r bedrockStructuredFallbackRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	if target.ProviderSpec == string(routing.ProviderBedrock) {
+	if target.ProviderSpec == "bedrock" {
 		backend, err := bedrock.NewExecutor(nil).ResolveBackend(target)
 		if err != nil {
 			return provider.Backend{}, err
@@ -322,6 +322,62 @@ func TestReducerRetriesOnceBeforeRouteFailover(t *testing.T) {
 	fallback := activeProviderAttempt(t, fellBack.nextState)
 	if fallback.candidateIndex != 1 || fallback.retry || fallback.id != next.id+1 {
 		t.Fatalf("route fallback attempts = %#v", fellBack.nextState.providerCallAttempts)
+	}
+}
+
+func TestProviderEncodeContextCarriesOnlyImmediateFallbackAvailability(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "deepinfra-a"),
+		requestpathTarget(t, "fallback-b"),
+	}}
+	prepared := mustBeginSession(t, s.input.request)
+	s.prepared = &prepared
+	runner := reducerRuntime()
+
+	first, _, _, _, err := prepareProviderCall(context.Background(), s, providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.request.EncodeContext.HasNextRouteCandidate {
+		t.Fatal("first route candidate must receive transient next-candidate context")
+	}
+	if first.backend.Target == (provider.TargetSnapshot{}) {
+		t.Fatal("prepared provider target is missing")
+	}
+
+	terminal, _, _, _, err := prepareProviderCall(context.Background(), s, providerCallSelection{candidateIndex: 1, requestChoice: providerRequestPreferred}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.request.EncodeContext.HasNextRouteCandidate {
+		t.Fatal("terminal route candidate must omit transient next-candidate context")
+	}
+}
+
+func TestRejectedBeforeExecutionAdvancesNextCandidateWithoutRetry(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "deepinfra-a"),
+		requestpathTarget(t, "fallback-b"),
+	}}
+	prepared := mustBeginSession(t, s.input.request)
+	s.prepared = &prepared
+	started := beginPreparedProviderCall(t, s)
+	active := activeProviderAttempt(t, started.nextState)
+
+	next, err := reduce(context.Background(), started.nextState, providerCallFailed{
+		attemptID: active.id,
+		failure: rejectedBeforeExecution(provider.Rejected(
+			canonical.NewBackendError("deepinfra-a", http.StatusTooManyRequests, `{"error":{"code":"engine_overloaded"}}`, ""),
+		)),
+	}, reducerRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback := activeProviderAttempt(t, next.nextState)
+	if fallback.candidateIndex != 1 || fallback.retry {
+		t.Fatalf("fallback = %#v, want next candidate without retry", fallback.providerCallAttempt)
 	}
 }
 
@@ -1054,8 +1110,9 @@ func requestpathTargetWithProtocol(t *testing.T, id string, rawProtocol string) 
 	t.Helper()
 	targetID, _ := routing.ParseTargetID(id)
 	model, _ := routing.ParseUpstreamModel("upstream-" + id)
-	connection, _ := routing.NewCustomConnection("https://example.test/v1", nil)
-	protocol, err := routing.ParseProtocol(rawProtocol, routing.ProviderCustom, func(routing.Provider, string) bool { return true })
+	provider, _ := routing.ParseProvider("custom", func(candidate string) bool { return candidate == "custom" })
+	connection, _ := routing.NewCustomConnection(provider, "https://example.test/v1", nil)
+	protocol, err := routing.ParseProtocol(rawProtocol, provider, func(routing.Provider, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,13 +1234,14 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 	targetID, _ := routing.ParseTargetID("mantle-a")
 	model, _ := routing.ParseUpstreamModel("model-a")
 	region, _ := routing.ParseBedrockRegion("us-east-1")
-	connection, err := routing.NewBedrockConnection(region, "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1", "")
+	bedrockProvider, _ := routing.ParseProvider("bedrock", func(candidate string) bool { return candidate == "bedrock" })
+	connection, err := routing.NewBedrockConnection(bedrockProvider, region, "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	messagesProtocol, err := routing.ParseProtocol(
 		"messages",
-		routing.ProviderBedrock,
+		bedrockProvider,
 		func(routing.Provider, string) bool { return true },
 	)
 	if err != nil {

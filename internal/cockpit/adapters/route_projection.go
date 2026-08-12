@@ -45,20 +45,12 @@ func targetFromWorkspaceTarget(target workspaceapi.Target) (readmodel.TargetRead
 	}
 	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: string(connection.Provider()), Model: target.Model, ProviderProtocol: target.Protocol}
 	switch connection := connection.(type) {
-	case routing.APIKeyConnection:
+	case routing.StandardConnection:
+		locator, _ := connection.Locator()
+		out.BaseURL = locator.String()
 		out.CredentialRef = connection.Credential().String()
 	case routing.ZAIConnection:
 		out.ZAIAccess = string(connection.Access())
-		out.CredentialRef = connection.Credential().String()
-	case routing.OllamaConnection:
-		baseURL, _ := connection.BaseURL()
-		out.BaseURL = baseURL.String()
-	case routing.EndpointCredentialConnection:
-		baseURL, _ := connection.BaseURL()
-		out.BaseURL = baseURL.String()
-		out.CredentialRef = connection.Credential().String()
-	case routing.AzureConnection:
-		out.BaseURL = connection.ProjectEndpoint().String()
 		out.CredentialRef = connection.Credential().String()
 	case routing.BedrockConnection:
 		// The read model preserves the independently authored signing region and

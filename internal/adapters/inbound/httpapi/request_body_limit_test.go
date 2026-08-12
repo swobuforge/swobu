@@ -43,9 +43,7 @@ func TestOperatorJSONHandlersRejectOversizeBeforeApplicationBehavior(t *testing.
 
 	t.Run("target probe", func(t *testing.T) {
 		stub := &stubTargetProber{}
-		raw, err := json.Marshal(targetProbeRequest{Connection: workspaceapi.Connection{
-			OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"},
-		}, ProviderProtocol: "responses"})
+		raw, err := json.Marshal(targetProbeRequest{Connection: workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), ProviderProtocol: "responses"})
 		if err != nil {
 			t.Fatal(err)
 		}

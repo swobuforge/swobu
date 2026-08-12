@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -357,12 +358,13 @@ func zaiReasoningWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := routing.NewZAIConnection(routing.ZAIAccessGeneralAPI, "env:ZAI_API_KEY")
+	provider, _ := routing.ParseProvider("zai", profile.SupportsSpec)
+	connection, err := routing.NewZAIConnection(provider, routing.ZAIAccessGeneralAPI, "env:ZAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
-	protocol, err := routing.ParseProtocol(routing.ZAIProviderProtocol, routing.ProviderZAI, func(provider routing.Provider, candidate string) bool {
-		return provider == routing.ProviderZAI && candidate == routing.ZAIProviderProtocol
+	protocol, err := routing.ParseProtocol(routing.ZAIProviderProtocol, provider, func(candidateProvider routing.Provider, candidate string) bool {
+		return candidateProvider == provider && candidate == routing.ZAIProviderProtocol
 	})
 	if err != nil {
 		t.Fatal(err)

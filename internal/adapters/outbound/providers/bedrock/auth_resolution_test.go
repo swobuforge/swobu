@@ -21,7 +21,8 @@ func TestDeadSupportedCredentialReferencesNeverResolveAsReady(t *testing.T) {
 	}
 	for _, raw := range []string{"env:MISSING", "file:/missing/token", "secret:missing"} {
 		t.Run(raw, func(t *testing.T) {
-			connection, err := routing.NewBedrockConnection(region, "https://bedrock-mantle.eu-west-2.api.aws/v1", raw)
+			provider, _ := routing.ParseProvider("bedrock", func(candidate string) bool { return candidate == "bedrock" })
+			connection, err := routing.NewBedrockConnection(provider, region, "https://bedrock-mantle.eu-west-2.api.aws/v1", raw)
 			if err != nil {
 				t.Fatalf("real credential grammar rejected supported ref: %v", err)
 			}

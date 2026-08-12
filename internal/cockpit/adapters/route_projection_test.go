@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -17,7 +18,7 @@ func TestDeepSeekOperatorConnectionSurvivesMountedTargetEdit(t *testing.T) {
 	const credential = "file:/home/metrofun/.config/deepseek.key"
 	operatorTarget := workspaceapi.Target{
 		ID: "tgt_c5ca3ff9-222e-42c1-9c4f-74eb2d240f35", Model: "deepseek-v4-pro", Provider: "deepseek",
-		Connection: workspaceapi.Connection{DeepSeek: &workspaceapi.CredentialConnection{Credential: credential}},
+		Connection: workspaceapi.StandardConnection("deepseek", "", credential),
 	}
 	projected, err := targetFromWorkspaceTarget(operatorTarget)
 	if err != nil {
@@ -44,18 +45,18 @@ func TestOperatorConnectionFactsSurviveCockpitProjection(t *testing.T) {
 		connection workspaceapi.Connection
 		want       readmodel.TargetReadModel
 	}{
-		{name: "openai", connection: workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
-		{name: "anthropic", connection: workspaceapi.Connection{Anthropic: &workspaceapi.CredentialConnection{Credential: "env:ANTHROPIC_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
-		{name: "deepseek", connection: workspaceapi.Connection{DeepSeek: &workspaceapi.CredentialConnection{Credential: "file:/home/metrofun/.config/deepseek.key"}}, want: readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/metrofun/.config/deepseek.key"}},
-		{name: "openrouter", connection: workspaceapi.Connection{OpenRouter: &workspaceapi.CredentialConnection{Credential: "env:OPENROUTER_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
-		{name: "chatgpt", connection: workspaceapi.Connection{ChatGPT: &workspaceapi.CredentialConnection{Credential: "secret:chatgpt/session"}}, want: readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},
-		{name: "zai", connection: workspaceapi.Connection{ZAI: &workspaceapi.ZAIConnection{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "zai", ZAIAccess: "coding_plan", CredentialRef: "env:ZAI_API_KEY"}},
-		{name: "ollama", connection: workspaceapi.Connection{Ollama: &workspaceapi.OllamaConnection{BaseURL: "http://127.0.0.1:11434/v1"}}, want: readmodel.TargetReadModel{Provider: "ollama", BaseURL: "http://127.0.0.1:11434/v1"}},
-		{name: "lmstudio", connection: workspaceapi.Connection{LMStudio: &workspaceapi.EndpointCredentialConnection{BaseURL: "http://127.0.0.1:1234/v1", Credential: "env:LM_API_TOKEN"}}, want: readmodel.TargetReadModel{Provider: "lmstudio", BaseURL: "http://127.0.0.1:1234/v1", CredentialRef: "env:LM_API_TOKEN"}},
-		{name: "vllm", connection: workspaceapi.Connection{VLLM: &workspaceapi.EndpointCredentialConnection{BaseURL: "http://127.0.0.1:8000/v1", Credential: "env:VLLM_API_KEY"}}, want: readmodel.TargetReadModel{Provider: "vllm", BaseURL: "http://127.0.0.1:8000/v1", CredentialRef: "env:VLLM_API_KEY"}},
-		{name: "azure", connection: workspaceapi.Connection{Azure: &workspaceapi.AzureConnection{ProjectEndpoint: "https://example.services.ai.azure.com/api/projects/demo", Credential: "env:AZURE_KEY"}}, want: readmodel.TargetReadModel{Provider: "azure", BaseURL: "https://example.services.ai.azure.com/api/projects/demo", CredentialRef: "env:AZURE_KEY"}},
-		{name: "bedrock", connection: workspaceapi.Connection{Bedrock: &workspaceapi.BedrockConnection{Region: "eu-west-2", Endpoint: "https://bedrock-mantle.eu-west-2.api.aws/v1", Credential: "env:BEDROCK_KEY"}}, want: readmodel.TargetReadModel{Provider: "bedrock", BaseURL: "https://bedrock-mantle.eu-west-2.api.aws/v1", BedrockRegion: "eu-west-2", CredentialRef: "env:BEDROCK_KEY"}},
-		{name: "custom", connection: workspaceapi.Connection{Custom: &workspaceapi.CustomConnection{BaseURL: "https://example.test/v1", Header: &workspaceapi.CustomHeader{Name: "x-api-key", Credential: "env:CUSTOM_KEY"}}}, want: readmodel.TargetReadModel{Provider: "custom", BaseURL: "https://example.test/v1", AuthHeader: "x-api-key", CredentialRef: "env:CUSTOM_KEY"}},
+		{"openai", workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
+		{"anthropic", workspaceapi.StandardConnection("anthropic", "", "env:ANTHROPIC_API_KEY"), readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
+		{"deepseek", workspaceapi.StandardConnection("deepseek", "", "file:/home/metrofun/.config/deepseek.key"), readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/metrofun/.config/deepseek.key"}},
+		{"openrouter", workspaceapi.StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
+		{"chatgpt", workspaceapi.StandardConnection("chatgpt", "", "secret:chatgpt/session"), readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},
+		{"zai", workspaceapi.ZAIConnectionDocument("coding_plan", "env:ZAI_API_KEY"), readmodel.TargetReadModel{Provider: "zai", ZAIAccess: "coding_plan", CredentialRef: "env:ZAI_API_KEY"}},
+		{"ollama", workspaceapi.StandardConnection("ollama", "http://127.0.0.1:11434/v1", ""), readmodel.TargetReadModel{Provider: "ollama", BaseURL: "http://127.0.0.1:11434/v1"}},
+		{"lmstudio", workspaceapi.StandardConnection("lmstudio", "http://127.0.0.1:1234/v1", "env:LM_API_TOKEN"), readmodel.TargetReadModel{Provider: "lmstudio", BaseURL: "http://127.0.0.1:1234/v1", CredentialRef: "env:LM_API_TOKEN"}},
+		{"vllm", workspaceapi.StandardConnection("vllm", "http://127.0.0.1:8000/v1", "env:VLLM_API_KEY"), readmodel.TargetReadModel{Provider: "vllm", BaseURL: "http://127.0.0.1:8000/v1", CredentialRef: "env:VLLM_API_KEY"}},
+		{"azure", workspaceapi.StandardConnection("azure", "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_KEY"), readmodel.TargetReadModel{Provider: "azure", BaseURL: "https://example.services.ai.azure.com/api/projects/demo", CredentialRef: "env:AZURE_KEY"}},
+		{"bedrock", workspaceapi.BedrockConnectionDocument("eu-west-2", "https://bedrock-mantle.eu-west-2.api.aws/v1", "env:BEDROCK_KEY"), readmodel.TargetReadModel{Provider: "bedrock", BaseURL: "https://bedrock-mantle.eu-west-2.api.aws/v1", BedrockRegion: "eu-west-2", CredentialRef: "env:BEDROCK_KEY"}},
+		{"custom", workspaceapi.CustomConnectionDocument("https://example.test/v1", &workspaceapi.CustomHeader{Name: "x-api-key", Credential: "env:CUSTOM_KEY"}), readmodel.TargetReadModel{Provider: "custom", BaseURL: "https://example.test/v1", AuthHeader: "x-api-key", CredentialRef: "env:CUSTOM_KEY"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,7 +81,7 @@ func TestNewTargetIDUsesOpaqueTypedUUID(t *testing.T) {
 	}
 }
 
-func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
+func TestTargetFromSaveRequestPreservesProviderKeyAcrossAdapters(t *testing.T) {
 	bedrockRegion, err := routing.ParseBedrockRegion("eu-west-1")
 	if err != nil {
 		t.Fatal(err)
@@ -89,69 +90,56 @@ func TestTargetFromSaveRequestProjectsValidatedConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructors := []struct {
+	standard := func(spec, locator, credential string) func() (routing.Connection, error) {
+		return func() (routing.Connection, error) {
+			provider, err := routing.ParseProvider(spec, profile.SupportsSpec)
+			if err != nil {
+				return nil, err
+			}
+			return routing.NewStandardConnection(provider, locator, credential)
+		}
+	}
+	tests := []struct {
 		name string
 		make func() (routing.Connection, error)
-		arm  func(targetConnection) bool
+		want string
 	}{
-		{"openai", func() (routing.Connection, error) {
-			return routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:OPENAI_API_KEY")
-		}, func(c targetConnection) bool { return c.openAI }},
-		{"anthropic", func() (routing.Connection, error) {
-			return routing.NewAPIKeyConnection(routing.ProviderAnthropic, "env:ANTHROPIC_API_KEY")
-		}, func(c targetConnection) bool { return c.anthropic }},
-		{"openrouter", func() (routing.Connection, error) {
-			return routing.NewAPIKeyConnection(routing.ProviderOpenRouter, "env:OPENROUTER_API_KEY")
-		}, func(c targetConnection) bool { return c.openRouter }},
+		{"openai", standard("openai", "", "env:OPENAI_API_KEY"), "openai"},
+		{"anthropic", standard("anthropic", "", "env:ANTHROPIC_API_KEY"), "anthropic"},
+		{"openrouter", standard("openrouter", "", "env:OPENROUTER_API_KEY"), "openrouter"},
+		{"chatgpt", standard("chatgpt", "", "secret:chatgpt/session"), "chatgpt"},
+		{"ollama", standard("ollama", "http://127.0.0.1:11434", ""), "ollama"},
+		{"lmstudio", standard("lmstudio", "http://127.0.0.1:1234/v1", "env:LM_API_TOKEN"), "lmstudio"},
+		{"azure", standard("azure", "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY"), "azure"},
 		{"zai", func() (routing.Connection, error) {
-			return routing.NewZAIConnection(routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
-		}, func(c targetConnection) bool { return c.zai }},
-		{"chatgpt", func() (routing.Connection, error) {
-			return routing.NewAPIKeyConnection(routing.ProviderChatGPT, "secret:chatgpt/session")
-		}, func(c targetConnection) bool { return c.chatGPT }},
-		{"ollama", func() (routing.Connection, error) { return routing.NewOllamaConnection("http://127.0.0.1:11434") }, func(c targetConnection) bool { return c.ollama }},
-		{"lm studio", func() (routing.Connection, error) {
-			return routing.NewEndpointCredentialConnection(routing.ProviderLMStudio, "http://127.0.0.1:1234/v1", "env:LM_API_TOKEN")
-		}, func(c targetConnection) bool { return c.lmStudio }},
-		{"azure", func() (routing.Connection, error) {
-			return routing.NewAzureConnection("https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
-		}, func(c targetConnection) bool { return c.azure }},
+			provider, _ := routing.ParseProvider("zai", profile.SupportsSpec)
+			return routing.NewZAIConnection(provider, routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
+		}, "zai"},
 		{"bedrock", func() (routing.Connection, error) {
-			return routing.NewBedrockConnection(bedrockRegion, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
-		}, func(c targetConnection) bool { return c.bedrock }},
+			provider, _ := routing.ParseProvider("bedrock", profile.SupportsSpec)
+			return routing.NewBedrockConnection(provider, bedrockRegion, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
+		}, "bedrock"},
 		{"custom", func() (routing.Connection, error) {
-			return routing.NewCustomConnection("https://example.com/v1", customAuth)
-		}, func(c targetConnection) bool { return c.custom }},
+			provider, _ := routing.ParseProvider("custom", profile.SupportsSpec)
+			return routing.NewCustomConnection(provider, "https://example.com/v1", customAuth)
+		}, "custom"},
 	}
-	for _, test := range constructors {
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			connection, err := test.make()
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := targetFromSaveRequest(ports.SaveTargetRequest{
-				ModelID:    "model",
-				Protocol:   "responses",
-				Connection: connection,
-			}, "target")
+			target, err := targetFromSaveRequest(ports.SaveTargetRequest{ModelID: "model", Protocol: "responses", Connection: connection}, "target")
 			if err != nil {
 				t.Fatal(err)
 			}
-			arms := targetConnection{
-				openAI: target.Connection.OpenAI != nil, anthropic: target.Connection.Anthropic != nil,
-				openRouter: target.Connection.OpenRouter != nil, zai: target.Connection.ZAI != nil, chatGPT: target.Connection.ChatGPT != nil,
-				ollama: target.Connection.Ollama != nil, lmStudio: target.Connection.LMStudio != nil, azure: target.Connection.Azure != nil,
-				bedrock: target.Connection.Bedrock != nil, custom: target.Connection.Custom != nil,
-			}
-			if !test.arm(arms) {
-				t.Fatalf("projected connection arms = %#v", arms)
+			projected, err := target.Connection.RoutingConnection()
+			if err != nil || string(projected.Provider()) != test.want {
+				t.Fatalf("projected provider = %v, %v; want %q", projected, err, test.want)
 			}
 		})
 	}
-}
-
-type targetConnection struct {
-	openAI, anthropic, openRouter, zai, chatGPT, ollama, lmStudio, azure, bedrock, custom bool
 }
 
 func TestPlacementFromReadModelHasOnlyOptionalBalanceTarget(t *testing.T) {

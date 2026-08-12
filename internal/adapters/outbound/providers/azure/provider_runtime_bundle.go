@@ -28,7 +28,6 @@ const azureDeploymentListPath = "/deployments?api-version=v1&deploymentType=Mode
 type azureBackendAdapter struct {
 	openAI    openaifamily.BackendAdapter
 	anthropic anthropicprovider.BackendAdapter
-	policy    providerRoutePolicy
 }
 
 type azureProviderModelCatalogClient struct {
@@ -73,11 +72,10 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	if client == nil {
 		client = http.DefaultClient
 	}
-	policy := providerRoutePolicy{}
+	policy := openaifamily.APIKeyPolicy(profile.ProviderSpecAzure)
 	router := azureBackendAdapter{
 		openAI:    openaifamily.NewExecutor(client, credentials, policy),
 		anthropic: anthropicprovider.NewBackendAdapter(profile.ProviderSpecAzure, client, credentials),
-		policy:    policy,
 	}
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
@@ -207,7 +205,7 @@ func (c azureProviderModelCatalogClient) applyCredential(ctx context.Context, re
 	if strings.TrimSpace(token) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
-	auth := openaifamily.AuthStrategyForHeader(target.AuthHeader(), NewPolicy().AuthStrategy())
+	auth := openaifamily.AuthStrategyForHeader(target.AuthHeader(), openaifamily.APIKeyPolicy(profile.ProviderSpecAzure).AuthStrategy())
 	auth.Apply(req, token)
 	return nil
 }

@@ -6,10 +6,13 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+var providerSpecReference = regexp.MustCompile(`profile\.ProviderSpec[A-Za-z0-9_]+`)
 
 // TestFileGrammarDemolitionLedger is the anti-carry guardrail for the
 // target_config collapse (epic-08 task 000). It enforces file-grammar-canon.md:
@@ -288,6 +291,31 @@ func TestTargetConfigViewHasExplicitProviderHierarchy(t *testing.T) {
 	}
 	if strings.Contains(src, "@ProviderForm(w)") {
 		t.Fatal("view.gsx must not hide provider hierarchy behind ProviderForm")
+	}
+}
+
+// TestGenericProviderPathsNameOnlyRetainedSpecialWorkflows is the Cockpit N+1
+// guard. Ordinary providers must continue through HTTPProviderForm and
+// profile-driven readiness; only the five workflows with a distinct operator
+// interaction may name a provider in target-config production sources.
+func TestGenericProviderPathsNameOnlyRetainedSpecialWorkflows(t *testing.T) {
+	allowed := map[string]struct{}{
+		"profile.ProviderSpecAzure":   {},
+		"profile.ProviderSpecBedrock": {},
+		"profile.ProviderSpecChatGPT": {},
+		"profile.ProviderSpecCustom":  {},
+		"profile.ProviderSpecZAI":     {},
+	}
+	paths := append(mustGlob(t, "*.go"), mustGlob(t, "*.gsx")...)
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		for _, reference := range providerSpecReference.FindAllString(mustReadFile(t, path), -1) {
+			if _, ok := allowed[reference]; !ok {
+				t.Fatalf("%s names ordinary provider workflow %q; use the profile-driven HTTP path", path, reference)
+			}
+		}
 	}
 }
 

@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// TargetDraft is the raw, boundary-neutral input finalized into one Target.
-// Transport and persistence adapters populate it without interpreting provider
-// compatibility or connection modes.
+// TargetDraft is raw boundary input finalized into one Target. Transport and
+// persistence adapters populate it without interpreting provider compatibility
+// or connection semantics.
 type TargetDraft struct {
 	ID         string
 	Model      string
@@ -15,22 +15,22 @@ type TargetDraft struct {
 	Connection ConnectionDraft
 }
 
-// ConnectionDraft is a raw tagged union. Exactly one arm must be present.
+// ConnectionDraft is a shape-oriented raw union. Provider identity remains an
+// external provider key; profile construction facts select the one required
+// durable shape. The finalized Connection still excludes invalid combinations.
 type ConnectionDraft struct {
-	APIKey   *APIKeyConnectionDraft
+	Provider string
+	Standard *StandardConnectionDraft
 	ZAI      *ZAIConnectionDraft
-	Ollama   *OllamaConnectionDraft
-	LMStudio *EndpointCredentialConnectionDraft
-	VLLM     *EndpointCredentialConnectionDraft
-	Azure    *AzureConnectionDraft
 	Bedrock  *BedrockConnectionDraft
 	Custom   *CustomConnectionDraft
 }
 
-// APIKeyConnectionDraft carries one fixed provider identity and unresolved
-// credential locator from a provider-specific transport arm.
-type APIKeyConnectionDraft struct {
-	Provider   Provider
+// StandardConnectionDraft carries the ordinary locator and credential facts.
+// Locator is deliberately not named base URL: Azure's project locator proves
+// that authoring grammar and durable connection shape are separate concerns.
+type StandardConnectionDraft struct {
+	Locator    string
 	Credential string
 }
 
@@ -38,22 +38,6 @@ type APIKeyConnectionDraft struct {
 type ZAIConnectionDraft struct {
 	Access     string
 	Credential string
-}
-
-// OllamaConnectionDraft carries an optional local base URL.
-type OllamaConnectionDraft struct{ BaseURL string }
-
-// EndpointCredentialConnectionDraft carries the endpoint and credential
-// payload shared by distinct endpoint-credential provider arms.
-type EndpointCredentialConnectionDraft struct {
-	BaseURL    string
-	Credential string
-}
-
-// AzureConnectionDraft carries the project endpoint before catalog normalization.
-type AzureConnectionDraft struct {
-	ProjectEndpoint string
-	Credential      string
 }
 
 // BedrockConnectionDraft carries the durable Bedrock region and required
@@ -76,13 +60,16 @@ type CustomHeaderDraft struct {
 	Credential string
 }
 
-// TargetConstructionFacts supplies catalog facts at the construction edge without
-// importing provider catalogs into the routing domain.
+// TargetConstructionFacts supplies catalog facts at the construction edge
+// without importing the provider catalog into the routing domain.
 type TargetConstructionFacts struct {
-	ProtocolSupported             ProtocolSupport
-	DerivedProtocol               func(Provider) (string, bool)
-	NormalizeAzureProjectEndpoint func(string) (string, error)
-	BedrockRegionSupported        func(string) bool
+	ProviderSupported            ProviderSupport
+	ConnectionShape              func(Provider) (ConnectionShape, bool)
+	ValidateStandardConnection   func(Provider, StandardConnectionDraft) (StandardConnectionDraft, error)
+	ProtocolSupported            ProtocolSupport
+	DerivedProtocol              func(Provider) (string, bool)
+	NormalizeAzureProjectLocator func(string) (string, error)
+	BedrockRegionSupported       func(string) bool
 }
 
 // FinalizeTarget is the single interpretation path for raw target and
@@ -120,48 +107,56 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 	return NewTarget(id, model, protocol, connection)
 }
 
-// FinalizeConnection validates one raw transport connection union without
-// requiring unrelated target identity, model, or protocol fields.
+// FinalizeConnection validates one raw provider-keyed connection document
+// against catalog construction facts without encoding catalog membership in
+// routing. The only exhaustive switch is over the four durable shapes.
 func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (Connection, error) {
+	provider, err := ParseProvider(draft.Provider, facts.ProviderSupported)
+	if err != nil {
+		return nil, err
+	}
+	if facts.ConnectionShape == nil {
+		return nil, pathError("connection.provider", "provider connection requirements are unavailable")
+	}
+	shape, ok := facts.ConnectionShape(provider)
+	if !ok {
+		return nil, pathError("connection.provider", "provider connection requirements are unsupported")
+	}
 	count := 0
-	for _, present := range []bool{draft.APIKey != nil, draft.ZAI != nil, draft.Ollama != nil, draft.LMStudio != nil, draft.VLLM != nil, draft.Azure != nil, draft.Bedrock != nil, draft.Custom != nil} {
+	for _, present := range []bool{draft.Standard != nil, draft.ZAI != nil, draft.Bedrock != nil, draft.Custom != nil} {
 		if present {
 			count++
 		}
 	}
 	if count != 1 {
-		return nil, pathError("target.connection", "exactly one provider variant is required")
+		return nil, pathError("target.connection", "exactly one provider connection is required")
 	}
-	if draft.APIKey != nil {
-		return NewAPIKeyConnection(draft.APIKey.Provider, draft.APIKey.Credential)
-	}
-	if draft.ZAI != nil {
+	switch shape {
+	case ConnectionShapeStandard:
+		if draft.Standard == nil {
+			return nil, pathError("target.connection", "provider connection details are required")
+		}
+		if facts.ValidateStandardConnection == nil {
+			return nil, pathError("connection.provider", "provider connection validation is unavailable")
+		}
+		standard, err := facts.ValidateStandardConnection(provider, *draft.Standard)
+		if err != nil {
+			return nil, err
+		}
+		return NewStandardConnection(provider, standard.Locator, standard.Credential)
+	case ConnectionShapeZAI:
+		if draft.ZAI == nil {
+			return nil, pathError("target.connection", "provider access selection is required")
+		}
 		access, err := ParseZAIAccess(draft.ZAI.Access)
 		if err != nil {
 			return nil, err
 		}
-		return NewZAIConnection(access, draft.ZAI.Credential)
-	}
-	if draft.Ollama != nil {
-		return NewOllamaConnection(draft.Ollama.BaseURL)
-	}
-	if draft.LMStudio != nil {
-		return NewEndpointCredentialConnection(ProviderLMStudio, draft.LMStudio.BaseURL, draft.LMStudio.Credential)
-	}
-	if draft.VLLM != nil {
-		return NewEndpointCredentialConnection(ProviderVLLM, draft.VLLM.BaseURL, draft.VLLM.Credential)
-	}
-	if draft.Azure != nil {
-		if facts.NormalizeAzureProjectEndpoint == nil {
-			return nil, pathError("connection.azure.project_endpoint", "Azure endpoint normalization capability is required")
+		return NewZAIConnection(provider, access, draft.ZAI.Credential)
+	case ConnectionShapeBedrock:
+		if draft.Bedrock == nil {
+			return nil, pathError("target.connection", "provider region and endpoint are required")
 		}
-		endpoint, err := facts.NormalizeAzureProjectEndpoint(draft.Azure.ProjectEndpoint)
-		if err != nil {
-			return nil, err
-		}
-		return NewAzureConnection(endpoint, draft.Azure.Credential)
-	}
-	if draft.Bedrock != nil {
 		if facts.BedrockRegionSupported == nil || !facts.BedrockRegionSupported(draft.Bedrock.Region) {
 			return nil, pathError("connection.bedrock.region", fmt.Sprintf("unsupported region %q", draft.Bedrock.Region))
 		}
@@ -169,15 +164,21 @@ func FinalizeConnection(draft ConnectionDraft, facts TargetConstructionFacts) (C
 		if err != nil {
 			return nil, err
 		}
-		return NewBedrockConnection(region, draft.Bedrock.Endpoint, draft.Bedrock.Credential)
-	}
-	var auth CustomAuth
-	if draft.Custom.Header != nil {
-		header, err := NewCustomHeaderAuth(draft.Custom.Header.Name, draft.Custom.Header.Credential)
-		if err != nil {
-			return nil, err
+		return NewBedrockConnection(provider, region, draft.Bedrock.Endpoint, draft.Bedrock.Credential)
+	case ConnectionShapeCustom:
+		if draft.Custom == nil {
+			return nil, pathError("target.connection", "provider endpoint configuration is required")
 		}
-		auth = header
+		var auth CustomAuth
+		if draft.Custom.Header != nil {
+			header, err := NewCustomHeaderAuth(draft.Custom.Header.Name, draft.Custom.Header.Credential)
+			if err != nil {
+				return nil, err
+			}
+			auth = header
+		}
+		return NewCustomConnection(provider, draft.Custom.BaseURL, auth)
+	default:
+		return nil, pathError("connection.provider", "provider connection requirements are unsupported")
 	}
-	return NewCustomConnection(draft.Custom.BaseURL, auth)
 }

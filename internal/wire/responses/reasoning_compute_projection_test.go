@@ -80,6 +80,39 @@ func TestResponsesProjectsOrdinalReasoningCompute(t *testing.T) {
 	}
 }
 
+// TestCodex0146DisabledReasoningStillReachesResponsesTarget reproduces the
+// outgoing field reported in Codex #36735. This is intentionally a behavioral
+// witness, not an approval to omit the field: generic Responses lowering has
+// no exact-target capability authority from which to decide that omission.
+func TestCodex0146DisabledReasoningStillReachesResponsesTarget(t *testing.T) {
+	disabled := canonical.NewDisabledReasoningCompute()
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(disabled),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     canonical.Specify("gpt-4o-mini"),
+		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "just say 1")},
+		Reasoning: reasoning,
+	})
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(
+		wire.ProviderEncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), "codex-36735",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	reasoningPayload, ok := payload["reasoning"].(map[string]any)
+	if !ok || reasoningPayload["effort"] != "none" {
+		t.Fatalf("Responses reasoning = %#v, want disabled effort to remain observable", payload["reasoning"])
+	}
+}
+
 func responsesEffortPointer(value canonical.InferenceEffort) *canonical.InferenceEffort {
 	return &value
 }

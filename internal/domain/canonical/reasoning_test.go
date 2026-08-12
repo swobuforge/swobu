@@ -136,8 +136,9 @@ func TestResponsesReasoningReplayPreservesOptionalItemID(t *testing.T) {
 		t.Fatal("empty encrypted content was accepted")
 	}
 
-	// Only the Responses branch may carry a wire id; Messages and OpenRouter must
-	// never silently absorb one (validate is the construction invariant guard).
+	// Only the Responses branch may carry a wire id; Messages and provider Chat
+	// branches must never silently absorb one (validate is the construction
+	// invariant guard).
 	messages, err := NewMessagesOpaqueThinking([]byte(`{"x":"y"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -150,6 +151,51 @@ func TestResponsesReasoningReplayPreservesOptionalItemID(t *testing.T) {
 		if strings.Contains(formatted, "cipher") || strings.Contains(formatted, "rs_1") {
 			t.Fatalf("opaque thinking leaked through formatting: %q", formatted)
 		}
+	}
+}
+
+func TestProviderChatOpaqueThinkingIsScopedAndDefensivelyCopied(t *testing.T) {
+	const (
+		ownerScope ProviderChatReplayScope = "owner-chat-replay"
+		otherScope ProviderChatReplayScope = "other-chat-replay"
+	)
+
+	raw := []byte("opaque provider reasoning")
+	opaque, err := NewProviderChatOpaqueThinking(ownerScope, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] = 'x'
+
+	if _, ok := opaque.ProviderChat(otherScope); ok {
+		t.Fatal("foreign provider Chat scope exposed opaque replay bytes")
+	}
+	got, ok := opaque.ProviderChat(ownerScope)
+	if !ok || string(got) != "opaque provider reasoning" {
+		t.Fatalf("same-scope replay = %q, %t", got, ok)
+	}
+	got[0] = 'x'
+	cloned, ok := opaque.Clone().ProviderChat(ownerScope)
+	if !ok || string(cloned) != "opaque provider reasoning" {
+		t.Fatalf("clone replay = %q, %t", cloned, ok)
+	}
+
+	if _, err := NewProviderChatOpaqueThinking("", []byte("opaque")); err == nil {
+		t.Fatal("empty provider Chat scope was accepted")
+	}
+	if _, err := NewProviderChatOpaqueThinking(ownerScope, nil); err == nil {
+		t.Fatal("empty provider Chat replay bytes were accepted")
+	}
+	invalid := OpaqueThinking{kind: opaqueThinkingProviderChat, raw: []byte("opaque")}
+	if _, err := NewReasoningItem(nil, invalid); err == nil {
+		t.Fatal("provider Chat branch without a scope was accepted")
+	}
+	invalid = OpaqueThinking{providerChatScope: ownerScope}
+	if invalid.IsZero() {
+		t.Fatal("partially populated provider Chat state was treated as zero")
+	}
+	if _, err := NewReasoningItem(nil, invalid); err == nil {
+		t.Fatal("scope-only opaque thinking was accepted")
 	}
 }
 

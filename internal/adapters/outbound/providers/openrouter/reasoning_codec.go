@@ -24,6 +24,9 @@ import (
 // provider fields.
 type reasoningCodec struct{ standard protocolcodec.Codec }
 
+// ChatReplayScope owns the exact OpenRouter Chat opaque reasoning replay dialect.
+const ChatReplayScope canonical.ProviderChatReplayScope = "openrouter-chat"
+
 func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
 		return carrier.Document{}, nil, err
@@ -162,7 +165,7 @@ func decorateOpenRouterThinking(document *chatcompletions.ProviderRequestDocumen
 			if !ok {
 				continue
 			}
-			if opaque, ok := reasoning.Opaque().OpenRouter(); ok {
+			if opaque, ok := reasoning.Opaque().ProviderChat(ChatReplayScope); ok {
 				if !json.Valid(opaque) {
 					return canonical.InternalError("checkpoint contains invalid OpenRouter opaque thinking")
 				}
@@ -231,7 +234,7 @@ func newOpenRouterReasoningItem(details json.RawMessage, hasDetails bool, flat s
 		if !json.Valid(details) {
 			return canonical.CanonicalItem{}, canonical.InternalError("OpenRouter reasoning_details are invalid")
 		}
-		value, err := canonical.NewOpenRouterOpaqueThinking(details)
+		value, err := canonical.NewProviderChatOpaqueThinking(ChatReplayScope, details)
 		if err != nil {
 			return canonical.CanonicalItem{}, err
 		}

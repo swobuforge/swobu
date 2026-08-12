@@ -21,11 +21,12 @@ func testTarget(t *testing.T, id string) Target {
 	t.Helper()
 	targetID, _ := ParseTargetID(id)
 	model, _ := ParseUpstreamModel("upstream-" + id)
-	connection, err := NewAPIKeyConnection(ProviderOpenAI, "env:OPENAI_API_KEY")
+	provider := supportedProvider("openai")
+	connection, err := NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := NewTarget(targetID, model, testProtocol(t, ProviderOpenAI, "responses"), connection)
+	target, err := NewTarget(targetID, model, testProtocol(t, provider, "responses"), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +149,41 @@ func TestWorkspaceResolveRouteUsesExactNameThenConfiguredDefault(t *testing.T) {
 	}
 }
 
+// TestWorkspaceResolveRouteLetsCodexMemoryNamesSelectOperatorTargets proves
+// the configuration workaround for Codex #37009. The client-visible hardcoded
+// values are exact route names; each route still owns its independent upstream
+// target model.
+func TestWorkspaceResolveRouteLetsCodexMemoryNamesSelectOperatorTargets(t *testing.T) {
+	defaultName, _ := ParseRouteName("chat")
+	lunaName, _ := ParseRouteName("gpt-5.6-luna")
+	terraName, _ := ParseRouteName("gpt-5.6-terra")
+	defaultTier, _ := NewTier([]Target{testTarget(t, "default-target")})
+	lunaTier, _ := NewTier([]Target{testTarget(t, "memory-extraction")})
+	terraTier, _ := NewTier([]Target{testTarget(t, "memory-consolidation")})
+	defaultRoute, _ := NewRoute(defaultName, []Tier{defaultTier})
+	lunaRoute, _ := NewRoute(lunaName, []Tier{lunaTier})
+	terraRoute, _ := NewRoute(terraName, []Tier{terraTier})
+	slug, _ := ParseWorkspaceSlug("dev")
+	workspace, err := NewWorkspace(slug, defaultName, []Route{defaultRoute, lunaRoute, terraRoute})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for requested, wantUpstream := range map[string]string{
+		"gpt-5.6-luna":  "upstream-memory-extraction",
+		"gpt-5.6-terra": "upstream-memory-consolidation",
+	} {
+		route, err := workspace.ResolveRoute(requested)
+		if err != nil {
+			t.Fatalf("ResolveRoute(%q): %v", requested, err)
+		}
+		target := route.Tiers()[0].Targets()[0]
+		if got := target.Model().String(); got != wantUpstream {
+			t.Fatalf("route %q target model = %q, want %q", requested, got, wantUpstream)
+		}
+	}
+}
+
 func TestCollectionsAreCloned(t *testing.T) {
 	config := testConfig(t, testTarget(t, "a"))
 	workspaces := config.Workspaces()
@@ -188,7 +224,7 @@ func TestConfigCloneOwnsNestedTargetStorage(t *testing.T) {
 
 func TestParseProtocolRequiresConcreteCatalogSupportedToken(t *testing.T) {
 	for _, raw := range []string{"", "auto", "unsupported"} {
-		_, err := ParseProtocol(raw, ProviderOpenAI, func(_ Provider, protocol string) bool { return protocol != "unsupported" })
+		_, err := ParseProtocol(raw, Provider("openai"), func(_ Provider, protocol string) bool { return protocol != "unsupported" })
 		if err == nil {
 			t.Fatalf("ParseProtocol(%q) unexpectedly succeeded", raw)
 		}

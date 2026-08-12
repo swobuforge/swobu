@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -259,7 +260,61 @@ func (s Service) SetCredential(ctx context.Context, cmd SetCredential) (Workspac
 	if e != nil {
 		return Workspace{}, commandError(e)
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.SetCredential(slug, name, id, cmd.Credential) })
+	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) {
+		return revalidateCredentialUpdate(c, slug, name, id, cmd.Credential)
+	})
+}
+
+// revalidateCredentialUpdate preserves the typed routing edit while taking the
+// replacement connection back through profile construction facts. Routing
+// intentionally has no profile dependency, so the public application command
+// owns this return to the catalog-validation boundary.
+func revalidateCredentialUpdate(config routing.Config, slug routing.WorkspaceSlug, routeName routing.RouteName, id routing.TargetID, credential string) (routing.Config, error) {
+	workspace, ok := config.Workspace(slug)
+	if !ok {
+		return routing.Config{}, fmt.Errorf("%w: workspace %q", routing.ErrNotFound, slug.String())
+	}
+	route, ok := workspace.Route(routeName)
+	if !ok {
+		return routing.Config{}, fmt.Errorf("%w: route %q", routing.ErrNotFound, routeName.String())
+	}
+	for _, tier := range route.Tiers() {
+		for _, target := range tier.Targets() {
+			if target.ID() != id {
+				continue
+			}
+			connection, err := connectionWithCredential(target.Connection(), credential)
+			if err != nil {
+				return routing.Config{}, err
+			}
+			return config.UpdateTargetSettings(slug, routeName, id, routing.TargetSettings{
+				Model: target.Model(), Protocol: target.Protocol(), Connection: connection,
+			})
+		}
+	}
+	return routing.Config{}, fmt.Errorf("%w: target %q", routing.ErrNotFound, id.String())
+}
+
+func connectionWithCredential(connection routing.Connection, credential string) (routing.Connection, error) {
+	draft, err := connectionDraftFromRouting(connection)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case draft.Standard != nil:
+		draft.Standard.Credential = credential
+	case draft.ZAI != nil:
+		draft.ZAI.Credential = credential
+	case draft.Bedrock != nil:
+		draft.Bedrock.Credential = credential
+	case draft.Custom != nil && draft.Custom.Header != nil:
+		draft.Custom.Header.Credential = credential
+	case draft.Custom != nil:
+		return nil, fmt.Errorf("connection.%s.credential: custom connection has no header auth", connection.Provider())
+	default:
+		return nil, fmt.Errorf("connection.%s.credential: connection does not carry a credential", connection.Provider())
+	}
+	return routing.FinalizeConnection(draft, profile.RoutingConstructionFacts())
 }
 
 func (s Service) update(ctx context.Context, slug routing.WorkspaceSlug, edit func(routing.Config) (routing.Config, error)) (Workspace, error) {

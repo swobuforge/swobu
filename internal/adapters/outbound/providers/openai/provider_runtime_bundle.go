@@ -10,12 +10,13 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.NewOpenAIPolicy())
+	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecOpenAI))
 	bundle.BackendResolver = chatCompletionsBackendResolver{standard: bundle.BackendResolver}
 	return bundle
 }

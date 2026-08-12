@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
@@ -20,7 +21,7 @@ import (
 // NewRuntime composes Z.AI Bearer transport, manual model entry, and the exact
 // hosted-search request rewrite for both access products.
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.NewZAIPolicy())
+	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecZAI))
 	bundle.BackendResolver = backendResolver{standard: bundle.BackendResolver}
 	bundle.Discovery = unsupportedDiscovery{}
 	return bundle

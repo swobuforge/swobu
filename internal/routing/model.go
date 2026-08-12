@@ -83,24 +83,25 @@ func ParseUpstreamModel(raw string) (UpstreamModel, error) {
 
 func (m UpstreamModel) String() string { return m.value }
 
-// Provider identifies one provider catalog entry. The closed connection sum
-// type is the construction boundary; callers cannot manufacture Provider IDs.
+// Provider identifies one catalog-supported provider. Construction boundaries
+// validate it through ProviderSupport so routing does not mirror catalog
+// membership with its own provider constants.
 type Provider string
 
-const (
-	ProviderOpenAI     Provider = "openai"
-	ProviderAnthropic  Provider = "anthropic"
-	ProviderDeepSeek   Provider = "deepseek"
-	ProviderOpenRouter Provider = "openrouter"
-	ProviderZAI        Provider = "zai"
-	ProviderChatGPT    Provider = "chatgpt"
-	ProviderOllama     Provider = "ollama"
-	ProviderLMStudio   Provider = "lmstudio"
-	ProviderVLLM       Provider = "vllm"
-	ProviderAzure      Provider = "azure"
-	ProviderBedrock    Provider = "bedrock"
-	ProviderCustom     Provider = "custom"
-)
+// ProviderSupport is supplied by the profile catalog at a construction edge.
+// It prevents routing from accepting unknown provider IDs without importing the
+// catalog into this domain package.
+type ProviderSupport func(string) bool
+
+// ParseProvider validates one external provider identifier through the
+// construction edge's catalog predicate.
+func ParseProvider(raw string, supports ProviderSupport) (Provider, error) {
+	raw = strings.TrimSpace(raw) // swobu:io-string source=boundary
+	if raw == "" || supports == nil || !supports(raw) {
+		return "", pathError("connection.provider", "provider is unsupported")
+	}
+	return Provider(raw), nil
+}
 
 // Protocol is a finalized, concrete provider protocol. ParseProtocol requires
 // the provider catalog's support predicate at the construction edge, avoiding a
