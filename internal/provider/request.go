@@ -14,6 +14,9 @@ import (
 type EncodeContext struct {
 	Context      context.Context
 	ResolveImage func(context.Context, canonical.URLImage) (InspectedImage, error)
+	// HasNextRouteCandidate is transient exchange execution context. It is not
+	// canonical intent, target capability, or persisted routing configuration.
+	HasNextRouteCandidate bool
 }
 
 // ResponsesPrevious authorizes one exact OpenAI Responses lowering to replace

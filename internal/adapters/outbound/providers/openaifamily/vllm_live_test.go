@@ -38,7 +38,7 @@ func TestLiveVLLMStandardServing(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	exec := NewExecutor(http.DefaultClient, credentialsadapter.NewResolver(), NewVLLMPolicy())
+	exec := NewExecutor(http.DefaultClient, credentialsadapter.NewResolver(), StandardBearerPolicy(profile.ProviderSpecVLLM))
 	discoveryTarget := liveVLLMTarget(baseURL, credentialRef, model, protocolkind.Responses, "responses")
 	deployments, err := exec.ListDeployments(ctx, discoveryTarget)
 	if err != nil {

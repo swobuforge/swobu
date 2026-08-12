@@ -6,17 +6,23 @@ type opaqueThinkingKind uint8
 
 const (
 	opaqueThinkingMessages opaqueThinkingKind = iota + 1
-	opaqueThinkingOpenRouter
+	opaqueThinkingProviderChat
 	opaqueThinkingResponses
 )
 
 // OpaqueThinking is one complete, reasoning-only replay unit. The private tag
 // prevents protocol and exact-provider bytes from being cross-converted.
 type OpaqueThinking struct {
-	kind            opaqueThinkingKind
-	raw             []byte
-	responsesItemID string
+	kind              opaqueThinkingKind
+	raw               []byte
+	providerChatScope ProviderChatReplayScope
+	responsesItemID   string
 }
+
+// ProviderChatReplayScope identifies one adapter-owned Chat replay dialect.
+// Canonical preserves this opaque exact token but does not assign provider
+// identity or meaning to it.
+type ProviderChatReplayScope string
 
 // ResponsesReasoningReplay is consumed by stateless Responses request
 // encoding to restore provider-hidden reasoning state on a later invocation.
@@ -50,9 +56,21 @@ func NewMessagesOpaqueThinking(raw []byte) (OpaqueThinking, error) {
 	return newOpaqueThinking(opaqueThinkingMessages, raw, "messages opaque thinking is empty")
 }
 
-// NewOpenRouterOpaqueThinking admits one non-empty complete reasoning_details unit.
-func NewOpenRouterOpaqueThinking(raw []byte) (OpaqueThinking, error) {
-	return newOpaqueThinking(opaqueThinkingOpenRouter, raw, "openrouter opaque thinking is empty")
+// NewProviderChatOpaqueThinking admits one complete non-empty provider-owned
+// Chat replay unit. The opaque scope is the replay boundary: only an adapter
+// presenting the exact same scope can retrieve its raw bytes.
+func NewProviderChatOpaqueThinking(scope ProviderChatReplayScope, raw []byte) (OpaqueThinking, error) {
+	if scope == "" {
+		return OpaqueThinking{}, BadRequest("provider Chat opaque thinking scope is empty")
+	}
+	if len(raw) == 0 {
+		return OpaqueThinking{}, BadRequest("provider Chat opaque thinking is empty")
+	}
+	return OpaqueThinking{
+		kind:              opaqueThinkingProviderChat,
+		raw:               append([]byte(nil), raw...),
+		providerChatScope: scope,
+	}, nil
 }
 
 func newOpaqueThinking(kind opaqueThinkingKind, raw []byte, emptyMessage string) (OpaqueThinking, error) {
@@ -70,20 +88,28 @@ func (o OpaqueThinking) Messages() ([]byte, bool) {
 	return append([]byte(nil), o.raw...), true
 }
 
-// OpenRouter returns independent bytes only for the OpenRouter branch.
-func (o OpaqueThinking) OpenRouter() ([]byte, bool) {
-	if o.kind != opaqueThinkingOpenRouter || len(o.raw) == 0 {
+// ProviderChat returns independent bytes only when scope exactly matches the
+// provider-owned Chat replay unit's construction scope.
+func (o OpaqueThinking) ProviderChat(scope ProviderChatReplayScope) ([]byte, bool) {
+	if o.kind != opaqueThinkingProviderChat || scope == "" || scope != o.providerChatScope || len(o.raw) == 0 {
 		return nil, false
 	}
 	return append([]byte(nil), o.raw...), true
 }
 
-// IsZero reports whether no valid branch is populated.
-func (o OpaqueThinking) IsZero() bool { return o.kind == 0 && len(o.raw) == 0 }
+// IsZero reports whether no replay state is populated.
+func (o OpaqueThinking) IsZero() bool {
+	return o.kind == 0 && len(o.raw) == 0 && o.providerChatScope == "" && o.responsesItemID == ""
+}
 
 // Clone returns an independent replay value.
 func (o OpaqueThinking) Clone() OpaqueThinking {
-	return OpaqueThinking{kind: o.kind, raw: append([]byte(nil), o.raw...), responsesItemID: o.responsesItemID}
+	return OpaqueThinking{
+		kind:              o.kind,
+		raw:               append([]byte(nil), o.raw...),
+		providerChatScope: o.providerChatScope,
+		responsesItemID:   o.responsesItemID,
+	}
 }
 
 func (OpaqueThinking) String() string   { return "<opaque>" }
@@ -93,11 +119,16 @@ func (o OpaqueThinking) validate() error {
 	if o.IsZero() {
 		return nil
 	}
-	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingOpenRouter && o.kind != opaqueThinkingResponses) || len(o.raw) == 0 {
+	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingProviderChat && o.kind != opaqueThinkingResponses) || len(o.raw) == 0 {
 		return fmt.Errorf("opaque thinking is invalid")
 	}
+	// Scope equality is the provider Chat replay boundary. Protocol branches
+	// must not carry an adapter-owned scope.
+	if (o.kind == opaqueThinkingProviderChat) != (o.providerChatScope != "") {
+		return fmt.Errorf("provider Chat opaque thinking scope is invalid")
+	}
 	// A Responses wire id is replay-affecting only for the Responses branch.
-	// Messages and OpenRouter branches must never carry one.
+	// Messages and provider Chat branches must never carry one.
 	if o.responsesItemID != "" && o.kind != opaqueThinkingResponses {
 		return fmt.Errorf("responses reasoning id on a non-responses opaque thinking")
 	}

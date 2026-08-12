@@ -17,6 +17,7 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -34,8 +35,8 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 	if client == nil {
 		client = http.DefaultClient
 	}
-	if profile == nil {
-		panic("openaifamily: route profile is required")
+	if profile.ProviderID() == "" {
+		panic("openaifamily: route policy provider id is required")
 	}
 	return BackendAdapter{
 		client:      client,
@@ -116,7 +117,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader()); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader(), target.ProtocolKind); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
@@ -185,7 +186,7 @@ func requestsStreamingResponse(raw []byte) bool {
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and
 // app orchestration never need to know provider token mechanics.
-func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string, authHeader string) error {
+func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string, authHeader string, kind protocolkind.ProtocolKind) error {
 	auth := AuthStrategyForHeader(authHeader, e.profile.AuthStrategy())
 	if auth.Style == AuthStyleNone {
 		return nil
@@ -204,6 +205,7 @@ func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, 
 		return canonical.BadEndpoint("credential reference resolved to an empty token")
 	}
 	auth.Apply(req, token)
+	e.profile.ApplyProtocolHeaders(kind, token, req.Header)
 	return nil
 }
 

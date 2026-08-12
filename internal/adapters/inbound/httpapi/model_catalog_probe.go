@@ -55,9 +55,10 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	var connection routing.Connection
 	providerSpec := ""
 	credentialRef := ""
-	if input.Connection.Bedrock != nil && strings.TrimSpace(input.Connection.Bedrock.Endpoint) == "" {
+	bedrock, isBedrock := input.Connection.BedrockDraft()
+	if isBedrock && strings.TrimSpace(bedrock.Endpoint) == "" {
 		providerSpec = string(profile.ProviderSpecBedrock)
-		credentialRef = strings.TrimSpace(input.Connection.Bedrock.Credential)
+		credentialRef = strings.TrimSpace(bedrock.Credential)
 	} else {
 		var err error
 		connection, err = input.Connection.RoutingConnection()
@@ -72,9 +73,9 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	var probe provider.TargetProbeResult
 	var resolvedVariant string
 	var probeErr error
-	if input.Connection.Bedrock != nil && strings.TrimSpace(input.Connection.Bedrock.Endpoint) == "" {
+	if isBedrock && strings.TrimSpace(bedrock.Endpoint) == "" {
 		probe, resolvedVariant, probeErr = probeBedrockCatalog(
-			req.Context(), h.providers, *input.Connection.Bedrock, input.ProviderProtocol,
+			req.Context(), h.providers, bedrock, input.ProviderProtocol,
 		)
 	} else {
 		probe, resolvedVariant, probeErr = probeDeployments(req.Context(), h.providers, connection, input.ProviderProtocol)
@@ -182,15 +183,11 @@ func probeDeployments(
 
 func connectionCredentialRef(connection routing.Connection) string {
 	switch c := connection.(type) {
-	case routing.APIKeyConnection:
+	case routing.StandardConnection:
 		return c.Credential().String()
 	case routing.ZAIConnection:
 		return c.Credential().String()
-	case routing.AzureConnection:
-		return c.Credential().String()
 	case routing.BedrockConnection:
-		return c.Credential().String()
-	case routing.EndpointCredentialConnection:
 		return c.Credential().String()
 	case routing.CustomConnection:
 		if auth, ok := c.Auth().(routing.CustomHeaderAuth); ok {

@@ -29,7 +29,7 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 	}))
 	defer srv.Close()
 
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenRouter))
 	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openrouter",
@@ -54,7 +54,7 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenAIPolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI))
 	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openai",
@@ -86,7 +86,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewOpenRouterPolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenRouter))
 	_, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"openrouter",
@@ -129,7 +129,7 @@ func TestListModels_LMStudioUsesNativeCatalogAndOptionalBearerAuth(t *testing.T)
 				_, _ = w.Write([]byte(`{"models":[{"type":"llm","key":"local-model","display_name":"Local Model","publisher":"Acme","architecture":"qwen"}]}`))
 			}))
 			defer srv.Close()
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 				"draft", "lmstudio", srv.URL+"/v1", tc.credentialRef,
 				protocolkind.Responses, "", "responses"))
@@ -164,7 +164,7 @@ func TestListModels_VLLMUsesSparseOpenAICatalogAndOptionalBearerAuth(t *testing.
 			}))
 			defer srv.Close()
 
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewVLLMPolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecVLLM))
 			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 				"draft", "vllm", srv.URL+"/serve", tc.credentialRef,
 				protocolkind.Responses, "", "responses"))
@@ -177,6 +177,59 @@ func TestListModels_VLLMUsesSparseOpenAICatalogAndOptionalBearerAuth(t *testing.
 			want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
 			if got := profile.ResolveProviderDeployment("vllm", models[0]).ProtocolOptions(); !slices.Equal(got, want) {
 				t.Fatalf("resolved protocols = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestListModels_NebiusUsesSparseOpenAICatalogAndBearerAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" || r.URL.RawQuery != "" {
+			t.Fatalf("request = %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token_test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"meta-llama/Llama-3.3-70B-Instruct"}]}`))
+	}))
+	defer srv.Close()
+
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
+	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
+		"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Name != "meta-llama/Llama-3.3-70B-Instruct" || models[0].ModelName != "meta-llama/Llama-3.3-70B-Instruct" || models[0].ModelPublisher != "nebius" || models[0].Family != "nebius" {
+		t.Fatalf("models = %#v", models)
+	}
+}
+
+func TestListModels_OpenCatalogAbsenceIsEmptyOnlyForEnumerableProvider(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
+			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
+				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses"))
+			if err != nil || len(models) != 0 {
+				t.Fatalf("models/error = %#v / %v, want empty / nil", models, err)
+			}
+		})
+	}
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
+			if _, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
+				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses")); err == nil {
+				t.Fatalf("status %d returned nil error", status)
 			}
 		})
 	}
@@ -211,7 +264,7 @@ func TestListModels_CustomUsesSelectedAuthHeader(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewCustomPolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecCustom))
 			// Auth header is a custom-endpoint fact fixed at construction via
 			// NewCustomTargetSnapshot (never post-construction mutation).
 			target := provider.NewCustomTargetSnapshot(

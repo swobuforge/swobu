@@ -29,7 +29,7 @@ func TestCommitEditReplacesStateFromCommittedResponseAndPreservesItOnFailure(t *
 	}
 	config := NewEditTargetConfig("dev", originalRoute, originalTarget, save, nil)
 	config.CommitEdit(context.Background())
-	connection, ok := savedConnection.(routing.APIKeyConnection)
+	connection, ok := savedConnection.(routing.StandardConnection)
 	if !ok || connection.Credential().String() != "env:OLD" {
 		t.Fatalf("save connection = %#v; want typed OpenAI connection", savedConnection)
 	}

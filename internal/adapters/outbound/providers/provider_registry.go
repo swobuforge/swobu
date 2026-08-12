@@ -9,11 +9,20 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepinfra"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/fireworks"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/friendli"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/gmi"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/groq"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/kimi"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/sambanova"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/scaleway"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/together"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -38,15 +47,26 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		openai.NewRuntime(client, credentials),
 		anthropic.NewRuntime(client, credentials),
 		deepseek.NewRuntime(client, credentials),
+		kimi.NewRuntime(client, credentials),
+		friendli.NewRuntime(client, credentials),
+		gmi.NewRuntime(client, credentials),
+		groq.NewRuntime(client, credentials),
+		fireworks.NewRuntime(client, credentials),
+		together.NewRuntime(client, credentials),
+		deepinfra.NewRuntime(client, credentials),
+		scaleway.NewRuntime(client, credentials),
+		sambanova.NewRuntime(client, credentials),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecStepFun)),
 		chatgpt.NewRuntime(profile.ProviderSpecChatGPT, client, credentials),
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
 		azure.NewRuntime(client, credentials),
 		openrouter.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
-		openaifamily.NewRuntime(client, credentials, openaifamily.NewOllamaPolicy()),
-		openaifamily.NewRuntime(client, credentials, openaifamily.NewLMStudioPolicy()),
-		openaifamily.NewRuntime(client, credentials, openaifamily.NewVLLMPolicy()),
-		openaifamily.NewRuntime(client, credentials, openaifamily.NewCustomPolicy()),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardNoAuthPolicy(profile.ProviderSpecOllama)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.LMStudioPolicy()),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecVLLM)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecCustom)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNebius)),
 	})
 }
 

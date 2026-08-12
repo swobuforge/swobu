@@ -61,7 +61,8 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 	after := workspaceView("server-normalized-model", "env:COMMITTED")
 	stub := &workspaceClientStub{getResponses: []workspaceapi.Workspace{before}, updateResponse: after}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	connection, err := routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:CLIENT")
+	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
+	connection, err := routing.NewStandardConnection(provider, "", "env:CLIENT")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,8 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 		createResponse: committed,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	connection, err := routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:OPENAI_API_KEY")
+	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
+	connection, err := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +169,7 @@ func workspaceView(model, credential string) workspaceapi.Workspace {
 			Name: "chat",
 			Tiers: []workspaceapi.Tier{{Targets: []workspaceapi.Target{{
 				ID: "a", Model: model, Protocol: "responses", Provider: "openai",
-				Connection: workspaceapi.Connection{OpenAI: &workspaceapi.CredentialConnection{Credential: credential}},
+				Connection: workspaceapi.StandardConnection("openai", "", credential),
 			}}}},
 		}},
 	}

@@ -1,14 +1,43 @@
 package openaifamily
 
-import "github.com/swobuforge/swobu/internal/profile"
+import (
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
+)
 
-// ProviderRoutePolicy owns provider route semantics while openaifamily owns shared
-// transport/protocol execution mechanics.
-type ProviderRoutePolicy interface {
-	ProviderID() profile.ProviderID
-	AuthStrategy() AuthStrategy
-	ModelCatalogDialect() ModelCatalogDialect
+// ProviderRoutePolicy is the complete route-level contract for one
+// OpenAI-family provider binding. It owns only the few facts that alter shared
+// HTTP transport or model-catalog realization. Provider codecs own request and
+// response grammar; profile owns product and setup facts.
+//
+// Use the standard constructors for ordinary providers. The two special
+// constructors exist because their catalog or Messages header behavior differs
+// independently, not because a provider needs a named policy class.
+type ProviderRoutePolicy struct {
+	providerID           profile.ProviderID
+	auth                 AuthStrategy
+	modelCatalogDialect  ModelCatalogDialect
+	applyProtocolHeaders func(protocolkind.ProtocolKind, string, HeaderSetter)
 }
+
+// ProviderID returns the explicit provider composed into this adapter runtime.
+func (p ProviderRoutePolicy) ProviderID() profile.ProviderID { return p.providerID }
+
+// AuthStrategy returns the provider's default credential header behavior.
+func (p ProviderRoutePolicy) AuthStrategy() AuthStrategy { return p.auth }
+
+// ModelCatalogDialect returns the provider's operator-side model-list grammar.
+func (p ProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect { return p.modelCatalogDialect }
+
+// ApplyProtocolHeaders applies documented protocol-specific request headers.
+func (p ProviderRoutePolicy) ApplyProtocolHeaders(kind protocolkind.ProtocolKind, token string, headers HeaderSetter) {
+	if p.applyProtocolHeaders != nil {
+		p.applyProtocolHeaders(kind, token, headers)
+	}
+}
+
+// HeaderSetter is the narrow HTTP-header seam for an exact provider policy.
+type HeaderSetter interface{ Set(string, string) }
 
 // ModelCatalogDialect selects the provider-owned model-list wire contract.
 // Inference protocol selection remains independent of this operator-side fact.
@@ -19,88 +48,55 @@ const (
 	ModelCatalogLMStudioV1
 )
 
-type openAIProviderRoutePolicy struct{}
-type ollamaProviderRoutePolicy struct{}
-type lmStudioProviderRoutePolicy struct{}
-type vllmProviderRoutePolicy struct{}
-type customProviderRoutePolicy struct{}
-type openRouterProviderRoutePolicy struct{}
-type zaiProviderRoutePolicy struct{}
-
-func (openAIProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecOpenAI
-}
-func (openAIProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
-func (openAIProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
+// StandardBearerPolicy constructs the common OpenAI-family route: Bearer
+// authentication, the OpenAI model catalog, and no protocol-specific headers.
+func StandardBearerPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
+	return ProviderRoutePolicy{
+		providerID:          providerID,
+		auth:                BearerAuthStrategy(),
+		modelCatalogDialect: ModelCatalogOpenAI,
+	}
 }
 
-func (ollamaProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecOllama
-}
-func (ollamaProviderRoutePolicy) AuthStrategy() AuthStrategy { return NoAuthStrategy() }
-func (ollamaProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
-}
-
-func (lmStudioProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecLMStudio
-}
-func (lmStudioProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
-func (lmStudioProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogLMStudioV1
+// StandardNoAuthPolicy constructs the common unauthenticated OpenAI-family
+// route used by local servers such as Ollama.
+func StandardNoAuthPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
+	return ProviderRoutePolicy{
+		providerID:          providerID,
+		auth:                NoAuthStrategy(),
+		modelCatalogDialect: ModelCatalogOpenAI,
+	}
 }
 
-func (vllmProviderRoutePolicy) ProviderID() profile.ProviderID { return profile.ProviderSpecVLLM }
-func (vllmProviderRoutePolicy) AuthStrategy() AuthStrategy     { return BearerAuthStrategy() }
-func (vllmProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
+// APIKeyPolicy constructs an OpenAI-family route that sends an unprefixed
+// token in the Azure-style `api-key` header while retaining the OpenAI model
+// catalog grammar.
+func APIKeyPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
+	return ProviderRoutePolicy{
+		providerID:          providerID,
+		auth:                APIKeyAuthStrategy(),
+		modelCatalogDialect: ModelCatalogOpenAI,
+	}
 }
 
-func (customProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecCustom
-}
-func (customProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
-func (customProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
-}
-
-func (openRouterProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecOpenRouter
-}
-func (openRouterProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
-func (openRouterProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
+// LMStudioPolicy retains LM Studio's native `/api/v1/models` catalog with its
+// documented fallback to the standard OpenAI catalog endpoint.
+func LMStudioPolicy() ProviderRoutePolicy {
+	policy := StandardBearerPolicy(profile.ProviderSpecLMStudio)
+	policy.modelCatalogDialect = ModelCatalogLMStudioV1
+	return policy
 }
 
-func (zaiProviderRoutePolicy) ProviderID() profile.ProviderID {
-	return profile.ProviderSpecZAI
+// GMIPolicy retains GMI's documented Messages authentication headers. Its
+// other route behavior is the common Bearer OpenAI-family policy.
+func GMIPolicy() ProviderRoutePolicy {
+	policy := StandardBearerPolicy(profile.ProviderSpecGMI)
+	policy.applyProtocolHeaders = func(kind protocolkind.ProtocolKind, token string, headers HeaderSetter) {
+		if kind != protocolkind.Messages || headers == nil {
+			return
+		}
+		headers.Set("X-API-Key", token)
+		headers.Set("anthropic-version", "2023-06-01")
+	}
+	return policy
 }
-func (zaiProviderRoutePolicy) AuthStrategy() AuthStrategy { return BearerAuthStrategy() }
-func (zaiProviderRoutePolicy) ModelCatalogDialect() ModelCatalogDialect {
-	return ModelCatalogOpenAI
-}
-
-// NewOpenAIPolicy returns the OpenAI route policy.
-func NewOpenAIPolicy() ProviderRoutePolicy { return openAIProviderRoutePolicy{} }
-
-// NewOllamaPolicy returns the Ollama route policy.
-func NewOllamaPolicy() ProviderRoutePolicy { return ollamaProviderRoutePolicy{} }
-
-// NewLMStudioPolicy returns the LM Studio route policy.
-func NewLMStudioPolicy() ProviderRoutePolicy { return lmStudioProviderRoutePolicy{} }
-
-// NewVLLMPolicy returns the vLLM standard-serving route policy.
-func NewVLLMPolicy() ProviderRoutePolicy { return vllmProviderRoutePolicy{} }
-
-// NewCustomPolicy returns the custom-endpoint route policy.
-func NewCustomPolicy() ProviderRoutePolicy {
-	return customProviderRoutePolicy{}
-}
-
-// NewOpenRouterPolicy returns the OpenRouter route policy.
-func NewOpenRouterPolicy() ProviderRoutePolicy { return openRouterProviderRoutePolicy{} }
-
-// NewZAIPolicy returns the shared Z.AI route policy. Access-specific endpoints
-// are derived from routing intent before provider execution reaches this layer.
-func NewZAIPolicy() ProviderRoutePolicy { return zaiProviderRoutePolicy{} }

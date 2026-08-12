@@ -150,11 +150,12 @@ func liveBedrockRoutingTarget(t *testing.T, region, endpoint, model string) rout
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := routing.NewBedrockConnection(regionValue, endpoint, "")
+	provider, _ := routing.ParseProvider("bedrock", func(candidate string) bool { return candidate == "bedrock" })
+	connection, err := routing.NewBedrockConnection(provider, regionValue, endpoint, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	protocol, err := routing.ParseProtocol("responses", routing.ProviderBedrock, func(routing.Provider, string) bool { return true })
+	protocol, err := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}

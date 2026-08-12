@@ -98,12 +98,7 @@ func (w *TargetConfig) endpointValueFor(provider profile.Profile) string {
 }
 
 func providerProfileForSpec(spec string) (profile.Profile, bool) {
-	for _, candidate := range profile.All() {
-		if string(candidate.ProviderID) == spec {
-			return candidate, true
-		}
-	}
-	return profile.Profile{}, false
+	return profile.ProfileForSpec(spec)
 }
 
 // RequiresInteractiveAuth reports the one provider-specific login exception.

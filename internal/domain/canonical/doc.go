@@ -8,8 +8,10 @@
 // Namespaces retain their tree, while discovery results add loaded declarations
 // only after their ordered position. Reasoning owns ordered portable
 // summary/trace parts plus one
-// optional closed opaque-thinking branch. Opaque fields clone defensively,
-// format as redacted values, and remain attached to their exact artifact. User
+// optional closed opaque-thinking branch. Provider-owned Chat replay uses an
+// opaque exact scope, so only the owning adapter can retrieve its bytes.
+// Opaque fields clone defensively, format as redacted values, and remain
+// attached to their exact artifact. User
 // messages may carry portable images; assistant, system, and developer
 // directives remain text-only. Messages and tool results preserve their
 // distinct, ordered part grammars. Tool calls

@@ -82,24 +82,14 @@ func ProviderTargetFromConnection(targetID string, connection routing.Connection
 		return provider.TargetSnapshot{}, canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
 	switch connection := connection.(type) {
-	case routing.APIKeyConnection:
-		return provider.NewTargetSnapshot(targetID, providerSpec, profile.DefaultExecuteBaseURL(providerSpec), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
-	case routing.ZAIConnection:
-		return provider.NewTargetSnapshot(targetID, providerSpec, connection.BaseURL(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
-	case routing.OllamaConnection:
+	case routing.StandardConnection:
 		baseURL := profile.DefaultExecuteBaseURL(providerSpec)
-		if configured, ok := connection.BaseURL(); ok {
-			baseURL = configured.String()
-		}
-		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, "", protocolKind, frame, providerProtocol), nil
-	case routing.EndpointCredentialConnection:
-		baseURL := profile.DefaultExecuteBaseURL(providerSpec)
-		if configured, ok := connection.BaseURL(); ok {
+		if configured, ok := connection.Locator(); ok {
 			baseURL = configured.String()
 		}
 		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, connection.Credential().String(), protocolKind, frame, providerProtocol), nil
-	case routing.AzureConnection:
-		return provider.NewTargetSnapshot(targetID, providerSpec, connection.ProjectEndpoint().String(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
+	case routing.ZAIConnection:
+		return provider.NewTargetSnapshot(targetID, providerSpec, connection.BaseURL(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
 	case routing.BedrockConnection:
 		region := connection.Region().String()
 		resolution, err := profile.ResolveBedrockEndpoint(connection.Endpoint(), region, protocolKind)

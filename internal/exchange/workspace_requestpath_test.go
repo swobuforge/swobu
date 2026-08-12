@@ -26,8 +26,9 @@ func requestpathTarget(t *testing.T, id string) routing.Target {
 	t.Helper()
 	targetID, _ := routing.ParseTargetID(id)
 	model, _ := routing.ParseUpstreamModel("upstream-" + id)
-	connection, _ := routing.NewCustomConnection("https://example.test/v1", nil)
-	protocol, _ := routing.ParseProtocol("responses", routing.ProviderCustom, func(routing.Provider, string) bool { return true })
+	provider, _ := routing.ParseProvider("custom", func(candidate string) bool { return candidate == "custom" })
+	connection, _ := routing.NewCustomConnection(provider, "https://example.test/v1", nil)
+	protocol, _ := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
 	target, err := routing.NewTarget(targetID, model, protocol, connection)
 	if err != nil {
 		t.Fatal(err)

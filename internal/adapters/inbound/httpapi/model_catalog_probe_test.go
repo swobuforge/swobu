@@ -67,9 +67,7 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 		Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}},
 		Diagnostics: diagnostics,
 	}}
-	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
-		Bedrock: &workspaceapi.BedrockConnection{Region: "eu-west-2", Credential: "env:AWS_BEARER_TOKEN_BEDROCK"},
-	}, "responses")
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.BedrockConnectionDocument("eu-west-2", "", "env:AWS_BEARER_TOKEN_BEDROCK"), "responses")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -91,9 +89,7 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 
 func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.T) {
 	stub := &stubTargetProber{result: provider.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}}
-	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
-		Custom: &workspaceapi.CustomConnection{BaseURL: "https://example.test/v1", Header: &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}},
-	}, "responses")
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.CustomConnectionDocument("https://example.test/v1", &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}), "responses")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -109,9 +105,7 @@ func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T)
 		}
 		return provider.TargetProbeResult{}, errors.New("try next protocol")
 	}}
-	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
-		OpenAI: &workspaceapi.CredentialConnection{Credential: "env:OPENAI_API_KEY"},
-	}, "")
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -125,17 +119,17 @@ func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T)
 }
 
 func TestModelCatalogProbeHandlerRejectsInvalidConnectionUnion(t *testing.T) {
-	rec := postTargetProbe(t, NewTargetProbeHandler(&stubTargetProber{}), workspaceapi.Connection{}, "responses")
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "exactly one provider variant") {
+	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", strings.NewReader(`{"connection":{},"provider_protocol":"responses"}`))
+	rec := httptest.NewRecorder()
+	NewTargetProbeHandler(&stubTargetProber{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "target probe request is invalid") {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
 func TestModelCatalogProbeHandlerNormalizesFileCredentialResolutionError(t *testing.T) {
 	stub := &stubTargetProber{err: errors.New("BAD_ENDPOINT: credential reference could not be resolved")}
-	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.Connection{
-		OpenAI: &workspaceapi.CredentialConnection{Credential: "file:/missing/key"},
-	}, "responses")
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("openai", "", "file:/missing/key"), "responses")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "credential file could not be resolved") {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}

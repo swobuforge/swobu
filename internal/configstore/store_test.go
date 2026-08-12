@@ -63,8 +63,9 @@ func storeTarget(t *testing.T, id string) routing.Target {
 	t.Helper()
 	targetID, _ := routing.ParseTargetID(id)
 	model, _ := routing.ParseUpstreamModel("model-" + id)
-	connection, _ := routing.NewAPIKeyConnection(routing.ProviderOpenAI, "env:OPENAI_API_KEY")
-	protocol, _ := routing.ParseProtocol("responses", routing.ProviderOpenAI, func(routing.Provider, string) bool { return true })
+	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
+	connection, _ := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
+	protocol, _ := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
 	target, err := routing.NewTarget(targetID, model, protocol, connection)
 	if err != nil {
 		t.Fatal(err)

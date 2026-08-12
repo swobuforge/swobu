@@ -36,29 +36,19 @@ type targetDTO struct {
 	Connection connectionDTO `yaml:"connection"`
 }
 
+// connectionDTO preserves the provider-keyed YAML contract while keeping its
+// Go representation free of catalog-sized provider fields. The profile chooses
+// the stable child grammar from the provider's durable connection shape.
 type connectionDTO struct {
-	OpenAI     *credentialConnectionDTO         `yaml:"openai,omitempty"`
-	Anthropic  *credentialConnectionDTO         `yaml:"anthropic,omitempty"`
-	DeepSeek   *credentialConnectionDTO         `yaml:"deepseek,omitempty"`
-	OpenRouter *credentialConnectionDTO         `yaml:"openrouter,omitempty"`
-	ZAI        *zaiConnectionDTO                `yaml:"zai,omitempty"`
-	ChatGPT    *credentialConnectionDTO         `yaml:"chatgpt,omitempty"`
-	Ollama     *ollamaConnectionDTO             `yaml:"ollama,omitempty"`
-	LMStudio   *endpointCredentialConnectionDTO `yaml:"lmstudio,omitempty"`
-	VLLM       *endpointCredentialConnectionDTO `yaml:"vllm,omitempty"`
-	Azure      *azureConnectionDTO              `yaml:"azure,omitempty"`
-	Bedrock    *bedrockConnectionDTO            `yaml:"bedrock,omitempty"`
-	Custom     *customConnectionDTO             `yaml:"custom,omitempty"`
+	Draft routing.ConnectionDraft
 }
+
 type credentialConnectionDTO struct {
 	Credential string `yaml:"credential"`
 }
 type zaiConnectionDTO struct {
 	Access     string `yaml:"access"`
 	Credential string `yaml:"credential"`
-}
-type ollamaConnectionDTO struct {
-	BaseURL string `yaml:"base_url,omitempty"`
 }
 type endpointCredentialConnectionDTO struct {
 	BaseURL    string `yaml:"base_url,omitempty"`
@@ -83,6 +73,203 @@ type customAuthDTO struct {
 type customHeaderDTO struct {
 	Name       string `yaml:"name"`
 	Credential string `yaml:"credential"`
+}
+
+func (dto *connectionDTO) UnmarshalYAML(value *yaml.Node) error {
+	provider, child, err := singleProviderYAMLNode(value)
+	if err != nil {
+		return err
+	}
+	shape, ok := profile.ConnectionShapeForSpec(provider)
+	if !ok {
+		return fmt.Errorf("connection.%s: provider is unsupported", provider)
+	}
+	draft := routing.ConnectionDraft{Provider: provider}
+	switch shape {
+	case routing.ConnectionShapeStandard:
+		locator, _ := profile.LocatorSpecForProvider(provider)
+		entry, _ := profile.ProfileForSpec(provider)
+		if locator.Kind == profile.LocatorAzureProject {
+			var encoded azureConnectionDTO
+			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.ProjectEndpoint, Credential: encoded.Credential}
+		} else if locator.Kind == profile.LocatorFixed {
+			var encoded credentialConnectionDTO
+			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			draft.Standard = &routing.StandardConnectionDraft{Credential: encoded.Credential}
+		} else {
+			var encoded endpointCredentialConnectionDTO
+			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.BaseURL, Credential: encoded.Credential}
+		}
+	case routing.ConnectionShapeZAI:
+		var encoded zaiConnectionDTO
+		if err := decodeStrictYAMLNode(child, &encoded, "access", "credential"); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: encoded.Access, Credential: encoded.Credential}
+	case routing.ConnectionShapeBedrock:
+		var encoded bedrockConnectionDTO
+		if err := decodeStrictYAMLNode(child, &encoded, "region", "endpoint", "credential"); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: encoded.Region, Endpoint: encoded.Endpoint, Credential: encoded.Credential}
+	case routing.ConnectionShapeCustom:
+		var encoded customConnectionDTO
+		if err := decodeStrictYAMLNode(child, &encoded, "base_url", "auth"); err != nil {
+			return fmt.Errorf("connection.%s: %w", provider, err)
+		}
+		if encoded.Auth != nil && encoded.Auth.Header == nil {
+			return fmt.Errorf("connection.%s.auth: exactly one auth variant is required", provider)
+		}
+		draft.Custom = &routing.CustomConnectionDraft{BaseURL: encoded.BaseURL}
+		if encoded.Auth != nil {
+			if err := validateCustomHeaderYAML(child); err != nil {
+				return fmt.Errorf("connection.%s: %w", provider, err)
+			}
+			draft.Custom.Header = &routing.CustomHeaderDraft{Name: encoded.Auth.Header.Name, Credential: encoded.Auth.Header.Credential}
+		}
+	default:
+		return fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
+	}
+	dto.Draft = draft
+	return nil
+}
+
+func standardConnectionYAMLFields(locator profile.LocatorSpec, credential profile.CredentialSpec) []string {
+	fields := make([]string, 0, 2)
+	switch locator.Kind {
+	case profile.LocatorAzureProject:
+		fields = append(fields, "project_endpoint")
+	case profile.LocatorBaseURL:
+		fields = append(fields, "base_url")
+	}
+	if credential.Requirement != profile.CredentialUnsupported {
+		fields = append(fields, "credential")
+	}
+	return fields
+}
+
+func (dto connectionDTO) MarshalYAML() (any, error) {
+	connection, err := routing.FinalizeConnection(dto.Draft, profile.RoutingConstructionFacts())
+	if err != nil {
+		return nil, err
+	}
+	provider := string(connection.Provider())
+	switch connection := connection.(type) {
+	case routing.StandardConnection:
+		locator, _ := profile.LocatorSpecForProvider(provider)
+		if locator.Kind == profile.LocatorAzureProject {
+			value, _ := connection.Locator()
+			return map[string]any{provider: azureConnectionDTO{ProjectEndpoint: value.String(), Credential: connection.Credential().String()}}, nil
+		}
+		if locator.Kind == profile.LocatorFixed {
+			return map[string]any{provider: credentialConnectionDTO{Credential: connection.Credential().String()}}, nil
+		}
+		value, _ := connection.Locator()
+		return map[string]any{provider: endpointCredentialConnectionDTO{BaseURL: value.String(), Credential: connection.Credential().String()}}, nil
+	case routing.ZAIConnection:
+		return map[string]any{provider: zaiConnectionDTO{Access: string(connection.Access()), Credential: connection.Credential().String()}}, nil
+	case routing.BedrockConnection:
+		return map[string]any{provider: bedrockConnectionDTO{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}}, nil
+	case routing.CustomConnection:
+		encoded := customConnectionDTO{BaseURL: connection.BaseURL().String()}
+		if auth := connection.Auth(); auth != nil {
+			header, ok := auth.(routing.CustomHeaderAuth)
+			if !ok {
+				return nil, fmt.Errorf("unsupported custom auth %T", auth)
+			}
+			encoded.Auth = &customAuthDTO{Header: &customHeaderDTO{Name: header.Name(), Credential: header.Credential().String()}}
+		}
+		return map[string]any{provider: encoded}, nil
+	default:
+		return nil, fmt.Errorf("unsupported routing connection %T", connection)
+	}
+}
+
+func singleProviderYAMLNode(value *yaml.Node) (string, *yaml.Node, error) {
+	if value.Kind != yaml.MappingNode || len(value.Content) != 2 || value.Content[0].Kind != yaml.ScalarNode {
+		return "", nil, fmt.Errorf("connection must contain exactly one provider key")
+	}
+	provider := strings.TrimSpace(value.Content[0].Value)
+	if !profile.SupportsSpec(provider) {
+		return "", nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
+	}
+	return provider, value.Content[1], nil
+}
+
+func decodeStrictYAMLNode(value *yaml.Node, target any, allowed ...string) error {
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("connection payload must be a mapping")
+	}
+	known := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		known[field] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(allowed))
+	for index := 0; index < len(value.Content); index += 2 {
+		key := value.Content[index]
+		if key.Kind != yaml.ScalarNode {
+			return fmt.Errorf("connection field name must be a string")
+		}
+		if _, exists := known[key.Value]; !exists {
+			return fmt.Errorf("field %q is not recognized", key.Value)
+		}
+		if _, duplicate := seen[key.Value]; duplicate {
+			return fmt.Errorf("field %q is duplicated", key.Value)
+		}
+		seen[key.Value] = struct{}{}
+	}
+	return value.Decode(target)
+}
+
+func validateCustomHeaderYAML(value *yaml.Node) error {
+	for index := 0; index < len(value.Content); index += 2 {
+		if value.Content[index].Value != "auth" {
+			continue
+		}
+		auth := value.Content[index+1]
+		if err := validateMappingFields(auth, "header"); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		if len(auth.Content) == 2 && auth.Content[0].Value == "header" {
+			if err := validateMappingFields(auth.Content[1], "name", "credential"); err != nil {
+				return fmt.Errorf("auth.header: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateMappingFields(value *yaml.Node, allowed ...string) error {
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("connection payload must be a mapping")
+	}
+	known := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		known[field] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(allowed))
+	for index := 0; index < len(value.Content); index += 2 {
+		key := value.Content[index]
+		if key.Kind != yaml.ScalarNode {
+			return fmt.Errorf("connection field name must be a string")
+		}
+		if _, exists := known[key.Value]; !exists {
+			return fmt.Errorf("field %q is not recognized", key.Value)
+		}
+		if _, duplicate := seen[key.Value]; duplicate {
+			return fmt.Errorf("field %q is duplicated", key.Value)
+		}
+		seen[key.Value] = struct{}{}
+	}
+	return nil
 }
 
 func decode(raw []byte) (routing.Config, error) {
@@ -164,62 +351,7 @@ func decodeTarget(dto targetDTO) (routing.Target, error) {
 }
 
 func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
-	draft := routing.ConnectionDraft{}
-	if dto.OpenAI != nil {
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenAI, Credential: dto.OpenAI.Credential}
-	}
-	if dto.Anthropic != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderAnthropic, Credential: dto.Anthropic.Credential}
-	}
-	if dto.DeepSeek != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderDeepSeek, Credential: dto.DeepSeek.Credential}
-	}
-	if dto.OpenRouter != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderOpenRouter, Credential: dto.OpenRouter.Credential}
-	}
-	if dto.ZAI != nil {
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: dto.ZAI.Access, Credential: dto.ZAI.Credential}
-	}
-	if dto.ChatGPT != nil {
-		if draft.APIKey != nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection: exactly one provider variant is required")
-		}
-		draft.APIKey = &routing.APIKeyConnectionDraft{Provider: routing.ProviderChatGPT, Credential: dto.ChatGPT.Credential}
-	}
-	if dto.Ollama != nil {
-		draft.Ollama = &routing.OllamaConnectionDraft{BaseURL: dto.Ollama.BaseURL}
-	}
-	if dto.LMStudio != nil {
-		draft.LMStudio = &routing.EndpointCredentialConnectionDraft{BaseURL: dto.LMStudio.BaseURL, Credential: dto.LMStudio.Credential}
-	}
-	if dto.VLLM != nil {
-		draft.VLLM = &routing.EndpointCredentialConnectionDraft{BaseURL: dto.VLLM.BaseURL, Credential: dto.VLLM.Credential}
-	}
-	if dto.Azure != nil {
-		draft.Azure = &routing.AzureConnectionDraft{ProjectEndpoint: dto.Azure.ProjectEndpoint, Credential: dto.Azure.Credential}
-	}
-	if dto.Bedrock != nil {
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: dto.Bedrock.Region, Endpoint: dto.Bedrock.Endpoint, Credential: dto.Bedrock.Credential}
-	}
-	if dto.Custom != nil {
-		if dto.Custom.Auth != nil && dto.Custom.Auth.Header == nil {
-			return routing.ConnectionDraft{}, fmt.Errorf("connection.custom.auth: exactly one auth variant is required")
-		}
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: dto.Custom.BaseURL}
-		if dto.Custom.Auth != nil && dto.Custom.Auth.Header != nil {
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: dto.Custom.Auth.Header.Name, Credential: dto.Custom.Auth.Header.Credential}
-		}
-	}
-	return draft, nil
+	return dto.Draft, nil
 }
 
 func encode(config routing.Config) ([]byte, error) {
@@ -262,56 +394,37 @@ func encodeTarget(target routing.Target) (targetDTO, error) {
 	if _, derived := profile.DerivedProtocolForSpec(string(target.Provider())); derived {
 		dto.Protocol = ""
 	}
-	switch c := target.Connection().(type) {
-	case routing.APIKeyConnection:
-		credential := &credentialConnectionDTO{Credential: c.Credential().String()}
-		switch c.Provider() {
-		case routing.ProviderOpenAI:
-			dto.Connection.OpenAI = credential
-		case routing.ProviderAnthropic:
-			dto.Connection.Anthropic = credential
-		case routing.ProviderDeepSeek:
-			dto.Connection.DeepSeek = credential
-		case routing.ProviderOpenRouter:
-			dto.Connection.OpenRouter = credential
-		case routing.ProviderChatGPT:
-			dto.Connection.ChatGPT = credential
-		default:
-			return targetDTO{}, fmt.Errorf("encode target %s: unsupported API-key provider %q", target.ID().String(), c.Provider())
-		}
-	case routing.ZAIConnection:
-		dto.Connection.ZAI = &zaiConnectionDTO{Access: string(c.Access()), Credential: c.Credential().String()}
-	case routing.OllamaConnection:
-		u, _ := c.BaseURL()
-		dto.Connection.Ollama = &ollamaConnectionDTO{BaseURL: u.String()}
-	case routing.EndpointCredentialConnection:
-		u, _ := c.BaseURL()
-		switch c.Provider() {
-		case routing.ProviderLMStudio:
-			dto.Connection.LMStudio = &endpointCredentialConnectionDTO{BaseURL: u.String(), Credential: c.Credential().String()}
-		case routing.ProviderVLLM:
-			dto.Connection.VLLM = &endpointCredentialConnectionDTO{BaseURL: u.String(), Credential: c.Credential().String()}
-		default:
-			return targetDTO{}, fmt.Errorf("encode target %s: unsupported endpoint-credential provider %q", target.ID().String(), c.Provider())
-		}
-	case routing.AzureConnection:
-		dto.Connection.Azure = &azureConnectionDTO{ProjectEndpoint: c.ProjectEndpoint().String(), Credential: c.Credential().String()}
-	case routing.BedrockConnection:
-		dto.Connection.Bedrock = &bedrockConnectionDTO{Region: c.Region().String(), Endpoint: c.Endpoint(), Credential: c.Credential().String()}
-	case routing.CustomConnection:
-		encoded := &customConnectionDTO{BaseURL: c.BaseURL().String()}
-		if c.Auth() != nil {
-			header, ok := c.Auth().(routing.CustomHeaderAuth)
-			if !ok {
-				return targetDTO{}, fmt.Errorf("encode target %s: unsupported custom auth", target.ID().String())
-			}
-			encoded.Auth = &customAuthDTO{Header: &customHeaderDTO{Name: header.Name(), Credential: header.Credential().String()}}
-		}
-		dto.Connection.Custom = encoded
-	default:
-		return targetDTO{}, fmt.Errorf("encode target %s: unsupported connection %T", target.ID().String(), target.Connection())
+	draft, err := connectionDraftFromRouting(target.Connection())
+	if err != nil {
+		return targetDTO{}, fmt.Errorf("encode target %s: %w", target.ID().String(), err)
 	}
+	dto.Connection = connectionDTO{Draft: draft}
 	return dto, nil
+}
+
+func connectionDraftFromRouting(connection routing.Connection) (routing.ConnectionDraft, error) {
+	draft := routing.ConnectionDraft{Provider: string(connection.Provider())}
+	switch connection := connection.(type) {
+	case routing.StandardConnection:
+		locator, _ := connection.Locator()
+		draft.Standard = &routing.StandardConnectionDraft{Locator: locator.String(), Credential: connection.Credential().String()}
+	case routing.ZAIConnection:
+		draft.ZAI = &routing.ZAIConnectionDraft{Access: string(connection.Access()), Credential: connection.Credential().String()}
+	case routing.BedrockConnection:
+		draft.Bedrock = &routing.BedrockConnectionDraft{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}
+	case routing.CustomConnection:
+		draft.Custom = &routing.CustomConnectionDraft{BaseURL: connection.BaseURL().String()}
+		if auth := connection.Auth(); auth != nil {
+			header, ok := auth.(routing.CustomHeaderAuth)
+			if !ok {
+				return routing.ConnectionDraft{}, fmt.Errorf("unsupported custom auth %T", auth)
+			}
+			draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name(), Credential: header.Credential().String()}
+		}
+	default:
+		return routing.ConnectionDraft{}, fmt.Errorf("unsupported routing connection %T", connection)
+	}
+	return draft, nil
 }
 
 // unknownFieldTypeSuffix strips yaml.v3's internal Go type name (e.g.

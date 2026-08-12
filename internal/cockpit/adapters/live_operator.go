@@ -290,15 +290,12 @@ func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req por
 	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
 }
 func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-	connection := workspaceapi.Connection{}
+	var connection workspaceapi.Connection
 	bedrockProbe := false
 	switch probe := req.Probe.(type) {
 	case ports.BedrockCatalogProbe:
 		bedrockProbe = true
-		connection.Bedrock = &workspaceapi.BedrockConnection{
-			Region:     strings.TrimSpace(probe.Region),
-			Credential: strings.TrimSpace(probe.CredentialRef),
-		}
+		connection = workspaceapi.BedrockConnectionDocument(strings.TrimSpace(probe.Region), "", strings.TrimSpace(probe.CredentialRef))
 	case ports.ConnectionCatalogProbe:
 		if probe.Connection == nil {
 			return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")

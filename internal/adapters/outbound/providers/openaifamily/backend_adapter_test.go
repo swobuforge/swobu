@@ -43,12 +43,12 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 		providerID profile.ProviderID
 		policy     ProviderRoutePolicy
 	}{
-		{name: "official_openai_kernel", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy()},
-		{name: "openrouter", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy()},
-		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
-		{name: "lmstudio", providerID: profile.ProviderSpecLMStudio, policy: NewLMStudioPolicy()},
-		{name: "vllm", providerID: profile.ProviderSpecVLLM, policy: NewVLLMPolicy()},
-		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
+		{name: "official_openai_kernel", providerID: profile.ProviderSpecOpenAI, policy: StandardBearerPolicy(profile.ProviderSpecOpenAI)},
+		{name: "openrouter", providerID: profile.ProviderSpecOpenRouter, policy: StandardBearerPolicy(profile.ProviderSpecOpenRouter)},
+		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: StandardNoAuthPolicy(profile.ProviderSpecOllama)},
+		{name: "lmstudio", providerID: profile.ProviderSpecLMStudio, policy: LMStudioPolicy()},
+		{name: "vllm", providerID: profile.ProviderSpecVLLM, policy: StandardBearerPolicy(profile.ProviderSpecVLLM)},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions")
@@ -92,8 +92,8 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 		providerID profile.ProviderID
 		policy     ProviderRoutePolicy
 	}{
-		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy()},
-		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: NewOllamaPolicy()},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom)},
+		{name: "ollama", providerID: profile.ProviderSpecOllama, policy: StandardNoAuthPolicy(profile.ProviderSpecOllama)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "", protocolkind.ChatCompletions, "chat_completions")
@@ -132,12 +132,12 @@ func TestCommodityResponsesTargetsUseFlatNamespaceGrammar(t *testing.T) {
 		policy   ProviderRoutePolicy
 		baseURL  string
 	}{
-		{name: "ollama", provider: profile.ProviderSpecOllama, policy: NewOllamaPolicy(), baseURL: "http://127.0.0.1:11434/v1"},
-		{name: "lmstudio", provider: profile.ProviderSpecLMStudio, policy: NewLMStudioPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
-		{name: "vllm", provider: profile.ProviderSpecVLLM, policy: NewVLLMPolicy(), baseURL: "http://127.0.0.1:8000/v1"},
-		{name: "custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8080/v1"},
-		{name: "lmstudio_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
-		{name: "llama_cpp_custom", provider: profile.ProviderSpecCustom, policy: NewCustomPolicy(), baseURL: "http://127.0.0.1:8081/v1"},
+		{name: "ollama", provider: profile.ProviderSpecOllama, policy: StandardNoAuthPolicy(profile.ProviderSpecOllama), baseURL: "http://127.0.0.1:11434/v1"},
+		{name: "lmstudio", provider: profile.ProviderSpecLMStudio, policy: LMStudioPolicy(), baseURL: "http://127.0.0.1:1234/v1"},
+		{name: "vllm", provider: profile.ProviderSpecVLLM, policy: StandardBearerPolicy(profile.ProviderSpecVLLM), baseURL: "http://127.0.0.1:8000/v1"},
+		{name: "custom", provider: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom), baseURL: "http://127.0.0.1:8080/v1"},
+		{name: "lmstudio_custom", provider: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom), baseURL: "http://127.0.0.1:1234/v1"},
+		{name: "llama_cpp_custom", provider: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom), baseURL: "http://127.0.0.1:8081/v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			target := newPolicyTarget(test.provider, test.baseURL, "", protocolkind.Responses, "responses")
@@ -175,9 +175,9 @@ func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 		policy     ProviderRoutePolicy
 		wantField  string
 	}{
-		{name: "openrouter_transport_kernel", providerID: profile.ProviderSpecOpenRouter, policy: NewOpenRouterPolicy(), wantField: "reasoning_effort"},
-		{name: "openai_standard_effort", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), wantField: "reasoning_effort"},
-		{name: "custom_standard_protocol", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), wantField: "reasoning_effort"},
+		{name: "openrouter_transport_kernel", providerID: profile.ProviderSpecOpenRouter, policy: StandardBearerPolicy(profile.ProviderSpecOpenRouter), wantField: "reasoning_effort"},
+		{name: "openai_standard_effort", providerID: profile.ProviderSpecOpenAI, policy: StandardBearerPolicy(profile.ProviderSpecOpenAI), wantField: "reasoning_effort"},
+		{name: "custom_standard_protocol", providerID: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom), wantField: "reasoning_effort"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions")
@@ -219,7 +219,7 @@ func TestClineReasoningExcludeIsOmittedFromCustomOpenAICompatibleProviderRequest
 	request := decoded.Request.Request
 	target := newPolicyTarget(profile.ProviderSpecCustom, "https://api.friendli.ai/serverless/v1", "env:FRIENDLI_TOKEN", protocolkind.ChatCompletions, "chat_completions")
 	target.Model = request.Model()
-	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecCustom)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestOpenRouterTransportKernelProjectsStandardReasoningBudget(t *testing.T) 
 	})
 	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenRouter), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
 	target.Model = request.Model()
-	backend, err := NewExecutor(nil, nil, NewOpenRouterPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecOpenRouter)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestCustomMessagesReplaysProtocolOpaqueThinking(t *testing.T) {
 	})
 	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "", "messages", "")
 	target.Model = request.Model()
-	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecCustom)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestCustomMessagesReplaysOpaqueThinking(t *testing.T) {
 		Model: canonical.Specify(target.Model),
 		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
 	})
-	backend, err := NewExecutor(nil, nil, NewCustomPolicy()).ResolveBackend(target)
+	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecCustom)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,8 +361,8 @@ func TestResponsesEncryptedCaptureIsComposedByStandardResponsesCodec(t *testing.
 		policy     ProviderRoutePolicy
 		want       bool
 	}{
-		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: NewOpenAIPolicy(), want: true},
-		{name: "custom", providerID: profile.ProviderSpecCustom, policy: NewCustomPolicy(), want: true},
+		{name: "official_openai", providerID: profile.ProviderSpecOpenAI, policy: StandardBearerPolicy(profile.ProviderSpecOpenAI), want: true},
+		{name: "custom", providerID: profile.ProviderSpecCustom, policy: StandardBearerPolicy(profile.ProviderSpecCustom), want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := newPolicyTarget(tc.providerID, "https://example.test/v1", "", protocolkind.Responses, "responses")
@@ -435,7 +435,7 @@ func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
 	t.Parallel()
 
 	transportErr := errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
-	exec := NewExecutor(&http.Client{Transport: failingRoundTripper{err: transportErr}}, nil, NewOllamaPolicy())
+	exec := NewExecutor(&http.Client{Transport: failingRoundTripper{err: transportErr}}, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
 	doc := carrier.NewDocument(
 		protocolkind.Responses,
 		"application/json",
@@ -483,7 +483,7 @@ func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
 	exec := NewExecutor(
 		&http.Client{Transport: failingRoundTripper{err: context.Canceled}},
 		nil,
-		NewOllamaPolicy(),
+		StandardNoAuthPolicy(profile.ProviderSpecOllama),
 	)
 	doc := carrier.NewDocument(
 		protocolkind.Responses,
@@ -519,7 +519,7 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
-	exec := NewExecutor(client, nil, NewOllamaPolicy())
+	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
 	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","tool_choice":"required"}`), carrier.Meta{})
@@ -545,7 +545,7 @@ func TestSendProviderRequest_Unclassified4xxDefaultsToRejectedAndMayHaveExecuted
 	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
-	exec := NewExecutor(client, nil, NewOllamaPolicy())
+	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
 	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini"}`), carrier.Meta{})
@@ -562,7 +562,7 @@ func TestSendProviderRequest_Unclassified4xxDefaultsToRejectedAndMayHaveExecuted
 }
 
 func TestSendProviderRequest_MarksPreDispatchValidation(t *testing.T) {
-	exec := NewExecutor(nil, nil, NewOllamaPolicy())
+	exec := NewExecutor(nil, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
 	target := provider.NewTargetSnapshot(
 		"backend-a",
 		string(profile.ProviderSpecOllama),
@@ -593,7 +593,7 @@ func TestSendProviderRequest_BoundsNonSSEStreamingEvidenceAndClosesBody(t *testi
 	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
-	exec := NewExecutor(client, nil, NewOllamaPolicy())
+	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
 	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","input":"hello","stream":true}`), carrier.Meta{})

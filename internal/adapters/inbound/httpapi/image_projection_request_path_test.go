@@ -154,8 +154,9 @@ func imageIncidentWorkspace(t *testing.T) routing.Workspace {
 	}
 	targetID, _ := routing.ParseTargetID("chat-image")
 	model, _ := routing.ParseUpstreamModel("chat-model")
-	connection, _ := routing.NewCustomConnection("https://example.test/v1", nil)
-	protocol, err := routing.ParseProtocol("chat_completions", routing.ProviderCustom, func(routing.Provider, string) bool { return true })
+	provider, _ := routing.ParseProvider("custom", func(raw string) bool { return raw == "custom" })
+	connection, _ := routing.NewCustomConnection(provider, "https://example.test/v1", nil)
+	protocol, err := routing.ParseProtocol("chat_completions", provider, func(routing.Provider, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}

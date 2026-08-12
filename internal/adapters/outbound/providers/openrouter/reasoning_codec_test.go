@@ -146,7 +146,7 @@ func TestOpenRouterCodecOwnsReasoningRequestAndOpaqueReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opaque, err := canonical.NewOpenRouterOpaqueThinking([]byte(`[{"type":"reasoning.summary","summary":"prior"}]`))
+	opaque, err := canonical.NewProviderChatOpaqueThinking(ChatReplayScope, []byte(`[{"type":"reasoning.summary","summary":"prior"}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,34 @@ func TestOpenRouterCodecOwnsReasoningRequestAndOpaqueReplay(t *testing.T) {
 	first, _ := messages[0].(map[string]any)
 	if _, ok := first["reasoning_details"].([]any); !ok {
 		t.Fatalf("opaque reasoning_details were not replayed: %s", document.RawBytes())
+	}
+}
+
+func TestOpenRouterDoesNotSerializeForeignProviderChatOpaqueThinking(t *testing.T) {
+	opaque, err := canonical.NewProviderChatOpaqueThinking("foreign-chat-replay", []byte(`[{"type":"reasoning.summary","summary":"foreign"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "foreign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{
+			reasoning, messageItem(t, canonical.MessageRoleAssistant, "answer"),
+		},
+	})
+	backend := openRouterBackend(t, request.Model())
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("reasoning_details")) {
+		t.Fatalf("foreign opaque state leaked to OpenRouter: %s", document.RawBytes())
 	}
 }
 
@@ -261,7 +289,7 @@ func TestOpenRouterBufferedReasoningCompletesAtomicallyBeforeAnswer(t *testing.T
 		if completed, ok := itemEvent.Payload.(canonical.ItemCompletedPayload); ok && completed.Item.Kind() == canonical.ItemKindReasoning {
 			reasoningIndex = index
 			reasoning, _ := completed.Item.Reasoning()
-			if _, ok := reasoning.Opaque().OpenRouter(); !ok {
+			if _, ok := reasoning.Opaque().ProviderChat(ChatReplayScope); !ok {
 				t.Fatal("reasoning item lost OpenRouter opaque replay unit")
 			}
 		}
@@ -354,7 +382,7 @@ func openRouterReasoningItem(t *testing.T, summary string) canonical.CanonicalIt
 	if err != nil {
 		t.Fatal(err)
 	}
-	opaque, err := canonical.NewOpenRouterOpaqueThinking(raw)
+	opaque, err := canonical.NewProviderChatOpaqueThinking(ChatReplayScope, raw)
 	if err != nil {
 		t.Fatal(err)
 	}

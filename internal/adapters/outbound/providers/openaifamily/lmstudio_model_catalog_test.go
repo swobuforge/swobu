@@ -61,7 +61,7 @@ func TestListDeploymentsLMStudioMapsOnlyGenerativeNativeModels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 	got, err := exec.ListDeployments(context.Background(), lmStudioTarget(srv.URL+"/proxy/v1"))
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestListDeploymentsLMStudioFallsBackOnlyForUnavailableNativeRoute(t *testin
 			}))
 			defer srv.Close()
 
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 			got, err := exec.ListDeployments(context.Background(), lmStudioTarget(srv.URL+"/v1"))
 			if err != nil {
 				t.Fatal(err)
@@ -137,7 +137,7 @@ func TestListDeploymentsLMStudioDoesNotHideNativeFailures(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 			if _, err := exec.ListDeployments(context.Background(), lmStudioTarget(srv.URL+"/v1")); err == nil {
 				t.Fatal("expected native catalog failure")
 			}
@@ -154,7 +154,7 @@ func TestListDeploymentsRejectsProviderPolicyIdentityDrift(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer srv.Close()
 
-	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, NewLMStudioPolicy())
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 	target := provider.NewCustomTargetSnapshot("draft", srv.URL+"/v1", "", protocolkind.Responses, "", "responses", "Authorization")
 	if _, err := exec.ListDeployments(context.Background(), target); err == nil {
 		t.Fatal("expected exact provider policy mismatch")

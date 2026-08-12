@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"testing"
 
+	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -102,10 +103,10 @@ func TestNewRuntime_UsesAzureProviderIDAndSharedKernel(t *testing.T) {
 	}
 }
 
-func TestNewPolicy_UsesAzureProviderIDAndApiKeyAuth(t *testing.T) {
+func TestAPIKeyPolicy_UsesAzureProviderIDAndApiKeyAuth(t *testing.T) {
 	t.Parallel()
 
-	policy := NewPolicy()
+	policy := openaifamily.APIKeyPolicy(profile.ProviderSpecAzure)
 	if got := policy.ProviderID(); got != profile.ProviderSpecAzure {
 		t.Fatalf("provider id=%q want %q", got, profile.ProviderSpecAzure)
 	}

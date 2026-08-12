@@ -222,21 +222,6 @@ func (c Config) DeleteTarget(slug WorkspaceSlug, routeName RouteName, id TargetI
 	})
 }
 
-func (c Config) SetCredential(slug WorkspaceSlug, routeName RouteName, id TargetID, raw string) (Config, error) {
-	return c.editRoute(slug, routeName, func(route Route) (Route, error) {
-		tierIndex, targetIndex, ok := route.target(id)
-		if !ok {
-			return Route{}, fmt.Errorf("%w: target %q", ErrNotFound, id.String())
-		}
-		target := route.tiers[tierIndex].targets[targetIndex]
-		connection, err := setConnectionCredential(target.connection, raw)
-		if err != nil {
-			return Route{}, err
-		}
-		return replaceTargetSettings(route, id, TargetSettings{Model: target.model, Protocol: target.protocol, Connection: connection})
-	})
-}
-
 func (r Route) target(id TargetID) (int, int, bool) {
 	for tierIndex := range r.tiers {
 		for targetIndex := range r.tiers[tierIndex].targets {

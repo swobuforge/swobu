@@ -1,9 +1,12 @@
 package configstore
 
 import (
+	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -18,6 +21,17 @@ workspaces:
               - {id: openai, model: gpt-5, protocol: responses, connection: {openai: {credential: env:OPENAI_API_KEY}}}
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
               - {id: deepseek, model: deepseek-v4-pro, connection: {deepseek: {credential: env:DEEPSEEK_API_KEY}}}
+              - {id: kimi, model: kimi-k3, connection: {kimi: {credential: env:MOONSHOT_API_KEY}}}
+              - {id: together, model: zai-org/GLM-5.1, connection: {together: {credential: env:TOGETHER_API_KEY}}}
+              - {id: deepinfra, model: deploy_id:private, connection: {deepinfra: {credential: env:DEEPINFRA_TOKEN}}}
+              - {id: scaleway, model: served-model, protocol: responses_stream, connection: {scaleway: {base_url: https://dedicated.example/v1}}}
+              - {id: sambanova, model: served-model, protocol: messages_stream, connection: {sambanova: {base_url: https://stack.example/v1, credential: env:SAMBANOVA_API_KEY}}}
+              - {id: stepfun, model: step-router-v1, protocol: messages_stream, connection: {stepfun: {base_url: https://api.stepfun.com/step_plan/v1, credential: env:STEP_API_KEY}}}
+              - {id: friendli, model: ENDPOINT_ID:OPTIONAL_ADAPTER_ROUTE, protocol: messages_stream, connection: {friendli: {base_url: https://friendli-gateway.example/v1}}}
+              - {id: nebius, model: dedicated-routing-key, protocol: responses_stream, connection: {nebius: {base_url: https://api.tokenfactory.us-central1.nebius.com/v1, credential: env:NEBIUS_API_KEY}}}
+              - {id: gmi, model: exact-model, protocol: messages_stream, connection: {gmi: {base_url: https://gmi.example/v1, credential: env:GMI_API_KEY}}}
+              - {id: groq, model: served-model, protocol: responses_stream, connection: {groq: {credential: env:GROQ_API_KEY}}}
+              - {id: fireworks, model: accounts/acme/deployments/deploy-1, protocol: responses_stream, connection: {fireworks: {base_url: https://direct.example/v1, credential: env:FIREWORKS_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
               - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
               - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
@@ -34,6 +48,7 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertConfigCoversEveryProfile(t, config)
 	raw, err := encode(config)
 	if err != nil {
 		t.Fatal(err)
@@ -54,14 +69,136 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if strings.Contains(string(raw), "protocol: chat_completions_stream") {
 		t.Fatalf("derived Z.AI protocol was persisted:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "deepseek:") || strings.Count(string(raw), "protocol: messages_stream") != 1 {
+	if !strings.Contains(string(raw), "deepseek:") || strings.Count(string(raw), "protocol: messages_stream") != 5 {
 		t.Fatalf("DeepSeek connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "kimi:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
+		t.Fatalf("Kimi connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "together:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
+		t.Fatalf("Together AI connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "deepinfra:") || !strings.Contains(string(raw), "credential: env:DEEPINFRA_TOKEN") || strings.Contains(string(raw), "fail_fast") {
+		t.Fatalf("DeepInfra connection or transient fail-fast boundary is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "scaleway:") || !strings.Contains(string(raw), "base_url: https://dedicated.example/v1") || strings.Contains(string(raw), "credential: env:SCW_SECRET_KEY") {
+		t.Fatalf("Scaleway endpoint/optional credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "sambanova:") || !strings.Contains(string(raw), "base_url: https://stack.example/v1") || !strings.Contains(string(raw), "credential: env:SAMBANOVA_API_KEY") {
+		t.Fatalf("SambaNova endpoint/credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "stepfun:") || !strings.Contains(string(raw), "base_url: https://api.stepfun.com/step_plan/v1") || !strings.Contains(string(raw), "credential: env:STEP_API_KEY") {
+		t.Fatalf("StepFun endpoint/credential changed during round trip:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "lmstudio:") || !strings.Contains(string(raw), "credential: env:LM_API_TOKEN") {
 		t.Fatalf("LM Studio connection changed during round trip:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "vllm:") || !strings.Contains(string(raw), "credential: env:VLLM_API_KEY") {
 		t.Fatalf("vLLM connection changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "friendli:") || !strings.Contains(string(raw), "base_url: https://friendli-gateway.example/v1") || strings.Contains(string(raw), "credential: env:FRIENDLI_TOKEN") {
+		t.Fatalf("Friendli endpoint/optional credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "nebius:") || !strings.Contains(string(raw), "base_url: https://api.tokenfactory.us-central1.nebius.com/v1") || !strings.Contains(string(raw), "credential: env:NEBIUS_API_KEY") {
+		t.Fatalf("Nebius endpoint/credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "gmi:") || !strings.Contains(string(raw), "base_url: https://gmi.example/v1") || !strings.Contains(string(raw), "credential: env:GMI_API_KEY") {
+		t.Fatalf("GMI endpoint/credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "groq:") || !strings.Contains(string(raw), "credential: env:GROQ_API_KEY") || strings.Contains(string(raw), "service_tier") {
+		t.Fatalf("Groq endpoint/credential or transient capacity boundary is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "fireworks:") || !strings.Contains(string(raw), "base_url: https://direct.example/v1") || !strings.Contains(string(raw), "credential: env:FIREWORKS_API_KEY") {
+		t.Fatalf("Fireworks exact endpoint/credential changed during round trip:\n%s", raw)
+	}
+}
+
+// TestConnectionDTOCarriesOnlyShapeDraft guards the YAML N+1 boundary. Adding
+// an ordinary provider must add neither a provider-keyed Go DTO field nor a
+// codec arm: the one dynamic provider key resolves through profile metadata
+// into routing's closed shape draft.
+func TestConnectionDTOCarriesOnlyShapeDraft(t *testing.T) {
+	typeOfDTO := reflect.TypeOf(connectionDTO{})
+	if typeOfDTO.NumField() != 1 {
+		t.Fatalf("connectionDTO field count = %d, want one shape draft", typeOfDTO.NumField())
+	}
+	field := typeOfDTO.Field(0)
+	if field.Name != "Draft" || field.Type != reflect.TypeOf(routing.ConnectionDraft{}) {
+		t.Fatalf("connectionDTO field = %s %s, want Draft %s", field.Name, field.Type, reflect.TypeOf(routing.ConnectionDraft{}))
+	}
+}
+
+func assertConfigCoversEveryProfile(t *testing.T, config routing.Config) {
+	t.Helper()
+	seen := make(map[string]struct{})
+	for _, workspace := range config.Workspaces() {
+		for _, route := range workspace.Routes() {
+			for _, tier := range route.Tiers() {
+				for _, target := range tier.Targets() {
+					seen[string(target.Provider())] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, provider := range profile.All() {
+		if _, ok := seen[string(provider.ProviderID)]; !ok {
+			t.Fatalf("all-provider YAML fixture omits %q", provider.ProviderID)
+		}
+	}
+	if len(seen) != len(profile.All()) {
+		t.Fatalf("all-provider YAML fixture has %d provider keys, want %d", len(seen), len(profile.All()))
+	}
+}
+
+func TestCodecNebiusUsesPublicEndpointWhenOmitted(t *testing.T) {
+	config, err := decode([]byte(`schema_version: 1
+workspaces:
+  personal:
+    default_route: coding
+    routes:
+      coding:
+        tiers:
+          - targets:
+              - id: nebius-public
+                model: meta-llama/Llama-3.3-70B-Instruct
+                protocol: responses_stream
+                connection: {nebius: {credential: env:NEBIUS_API_KEY}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encode(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("nebius:\n")) || bytes.Contains(raw, []byte("base_url:")) {
+		t.Fatalf("Nebius default persistence =\n%s", raw)
+	}
+}
+
+func TestCodecFriendliUsesDefaultEndpointWhenOmitted(t *testing.T) {
+	config, err := decode([]byte(`schema_version: 1
+workspaces:
+  personal:
+    default_route: chat
+    routes:
+      chat:
+        tiers:
+          - targets:
+              - id: friendli
+                model: zai-org/GLM-5.2
+                protocol: chat_completions_stream
+                connection: {friendli: {credential: env:FRIENDLI_TOKEN}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encode(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("friendli:\n")) || bytes.Contains(raw, []byte("base_url:")) {
+		t.Fatalf("Friendli default persistence =\n%s", raw)
 	}
 }
 
@@ -74,6 +211,31 @@ func TestCodecRejectsAuthoredDeepSeekProtocol(t *testing.T) {
 	)
 	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "provider protocol is derived and must be omitted") {
 		t.Fatalf("decode error = %v, want authored DeepSeek protocol rejection", err)
+	}
+}
+
+func TestCodecPersistsKimiConnectionWithDerivedProtocol(t *testing.T) {
+	config, err := decode([]byte(`schema_version: 1
+workspaces:
+  personal:
+    default_route: coding
+    routes:
+      coding:
+        tiers:
+          - targets:
+              - id: kimi-k3
+                model: kimi-k3
+                connection: {kimi: {credential: env:MOONSHOT_API_KEY}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encode(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("kimi:\n")) || bytes.Contains(raw, []byte("protocol:")) {
+		t.Fatalf("Kimi persistence =\n%s", raw)
 	}
 }
 
@@ -95,7 +257,7 @@ func TestCodecRejectsMultipleAPIKeyProviderVariants(t *testing.T) {
 		"connection: {openai: {credential: env:OPENAI_API_KEY}, deepseek: {credential: env:DEEPSEEK_API_KEY}}",
 		1,
 	)
-	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "exactly one provider variant") {
+	if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "exactly one provider key") {
 		t.Fatalf("decode error = %v, want multiple provider variant rejection", err)
 	}
 }
@@ -140,6 +302,46 @@ func TestCodecRejectsUnknownDuplicateAndLegacyFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decode([]byte(raw)); err == nil {
 				t.Fatal("decode unexpectedly succeeded")
+			}
+		})
+	}
+}
+
+func TestFixedStandardProvidersRejectBaseURLKeyEvenWhenEmpty(t *testing.T) {
+	for _, provider := range profile.All() {
+		if provider.ConnectionShape != routing.ConnectionShapeStandard || provider.Locator.Kind != profile.LocatorFixed {
+			continue
+		}
+		for _, baseURL := range []string{"", "https://override.example/v1"} {
+			t.Run(string(provider.ProviderID)+"/base_url="+baseURL, func(t *testing.T) {
+				raw := strings.Replace(
+					allVariantsYAML,
+					"connection: {"+string(provider.ProviderID)+": {credential:",
+					"connection: {"+string(provider.ProviderID)+": {base_url: "+baseURL+", credential:",
+					1,
+				)
+				if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "base_url") {
+					t.Fatalf("fixed-provider base_url error = %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCredentialUnsupportedStandardProvidersRejectCredentialKey(t *testing.T) {
+	for _, provider := range profile.All() {
+		if provider.ConnectionShape != routing.ConnectionShapeStandard || provider.Credential.Requirement != profile.CredentialUnsupported {
+			continue
+		}
+		t.Run(string(provider.ProviderID), func(t *testing.T) {
+			raw := strings.Replace(
+				allVariantsYAML,
+				"connection: {"+string(provider.ProviderID)+": {}}",
+				"connection: {"+string(provider.ProviderID)+": {credential: env:UNSUPPORTED_TOKEN}}",
+				1,
+			)
+			if _, err := decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), "credential") {
+				t.Fatalf("unsupported credential key error = %v", err)
 			}
 		})
 	}

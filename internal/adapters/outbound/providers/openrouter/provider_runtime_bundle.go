@@ -8,11 +8,12 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.NewOpenRouterPolicy())
+	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecOpenRouter))
 	bundle.BackendResolver = reasoningBackendResolver{standard: bundle.BackendResolver}
 	return bundle
 }
