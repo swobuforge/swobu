@@ -130,6 +130,52 @@ func TestCockpit_DraftWorkspaceNameEnterContinuesLocalOnboarding(t *testing.T) {
 	}
 }
 
+func TestCockpit_NamedDraftProviderSelectionKeepsInlineTargetConfig(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "kimi-k3", ModelName: "kimi-k3", Enabled: true}
+	model := readmodel.CockpitReadModel{
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "+", Slug: "kimi-wedge", Kind: readmodel.WorkspaceTabDraft, Selected: true},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+		SelectedWorkspaceID: "+",
+		SelectedWorkspace: readmodel.WorkspaceReadModel{
+			ID: "+", Slug: "kimi-wedge", State: readmodel.WorkspaceDraft,
+			Routes:          []readmodel.RouteReadModel{route},
+			ProviderOptions: []readmodel.ProviderOptionReadModel{{ProviderSpec: "kimi", DisplayName: "Kimi"}},
+		},
+		ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	root := NewCockpitWithContext(model, context.Background(), &workspaceCreateQueries{}, &workspaceCreateCommands{})
+	page := root.currentWorkspacePage()
+	page.RoutesSection.State.ExpandedRoute.Set(route.ID)
+	page.RoutesSection.AddTarget(route)
+	h, err := testkit.NewHarness(root)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	for range 24 {
+		if frame := h.FrameTrimmed(); strings.Contains(frame, "> Kimi") {
+			break
+		}
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "> Kimi") {
+		t.Fatalf("named-draft provider picker did not select Kimi:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "new target · Kimi") || !strings.Contains(frame, "credential") {
+		t.Fatalf("named-draft provider selection closed the inline target config:\n%s", frame)
+	}
+	if got := page.RoutesSection.State.AddTargetRoute.Get(); got != route.ID {
+		t.Fatalf("add target route = %q, want %q", got, route.ID)
+	}
+}
+
 func TestCockpit_DiscardStartsFreshDraftInteractionLifetime(t *testing.T) {
 	model := readmodel.CockpitReadModel{
 		Tabs: []readmodel.WorkspaceTabReadModel{
