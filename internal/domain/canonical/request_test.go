@@ -31,3 +31,25 @@ func TestCanonicalRequestOwnsOrderedContextAndDeepClones(t *testing.T) {
 		t.Fatal("request items aliased clone")
 	}
 }
+
+func TestCanonicalRequestStorePreservesPortablePersistenceIntent(t *testing.T) {
+	for name, store := range map[string]Specified[bool]{
+		"omitted": Unspecified[bool](),
+		"false":   Specify(false),
+		"true":    Specify(true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := NewCanonicalRequest(RequestParams{Model: Specify("model"), Store: store})
+			wantValue, wantSpecified := store.Get()
+			for _, derived := range []CanonicalRequest{request, request.Clone(), request.WithItems(nil)} {
+				gotValue, gotSpecified := derived.Store()
+				if gotValue != wantValue || gotSpecified != wantSpecified {
+					t.Fatalf("store = (%t,%t), want (%t,%t)", gotValue, gotSpecified, wantValue, wantSpecified)
+				}
+				if gotEligible := derived.PersistenceEligible(); gotEligible != (!wantSpecified || wantValue) {
+					t.Fatalf("persistence eligible = %t", gotEligible)
+				}
+			}
+		})
+	}
+}

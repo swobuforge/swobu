@@ -69,7 +69,7 @@ type ClientRequestResult struct {
 	Request  canonical.CanonicalRequest
 	Delivery delivery.Delivery
 	// MCPAccess is request-private ingress state consumed by the local MCP
-	// runtime or an exact native provider projection.
+	// runtime. It never enters provider projection.
 	MCPAccess mcp.Access
 	// RequestFingerprint identifies the current protocol-native contribution
 	// relative to the predecessor selected by decode semantics.
@@ -235,13 +235,11 @@ func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 // ProviderEncodeInput is the declarative canonical input for provider encoders.
 type ProviderEncodeInput struct {
 	Request canonical.CanonicalRequest
-	// ResponsesPrevious is concrete OpenAI Responses lowering data. Request
-	// remains complete when this field is present.
-	ResponsesPrevious *provider.ResponsesPrevious
+	// PreviousHistory is exact-target history-lowering data. Request remains
+	// complete when this field is present; each codec selects its typed handle.
+	PreviousHistory *provider.PreviousHistory
 	// ToolNames is transient representation state for this provider attempt.
 	ToolNames ToolNames
-	// MCPAccess is transient request state for native MCP projection.
-	MCPAccess mcp.Access
 }
 
 // ProviderEncodeResult is the concrete provider-request lowering result.

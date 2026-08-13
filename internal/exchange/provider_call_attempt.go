@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -24,55 +23,6 @@ type providerCallFailure struct {
 	Attempt provider.AttemptFailure
 }
 
-type providerReplaySafety uint8
-
-const (
-	providerReplaySafe providerReplaySafety = iota + 1
-	providerReplayUnsafe
-)
-
-// providerReplaySafetyFor classifies the final semantic provider attempt.
-// Ordinary inference and caller-executed tools are safe to repeat. A remaining
-// native MCP source can execute outside Swobu, so uncertain delivery fails
-// closed without a parallel effect registry.
-func providerReplaySafetyFor(request canonical.CanonicalRequest) (providerReplaySafety, error) {
-	environment, err := canonical.EffectiveTools(request)
-	if err != nil {
-		return 0, err
-	}
-	var inspect func(canonical.ToolDeclaration) (providerReplaySafety, error)
-	inspect = func(declaration canonical.ToolDeclaration) (providerReplaySafety, error) {
-		switch declaration.Kind() {
-		case canonical.ToolKindFunction, canonical.ToolKindCustom,
-			canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
-			return providerReplaySafe, nil
-		case canonical.ToolKindMCP:
-			return providerReplayUnsafe, nil
-		case canonical.ToolKindNamespace:
-			namespace, ok := declaration.Namespace()
-			if !ok {
-				return 0, fmt.Errorf("canonical tool namespace branch is invalid")
-			}
-			for _, child := range namespace.Tools() {
-				safety, err := inspect(child)
-				if err != nil || safety == providerReplayUnsafe {
-					return safety, err
-				}
-			}
-			return providerReplaySafe, nil
-		default:
-			return 0, fmt.Errorf("canonical tool declaration has unknown execution kind %q", declaration.Kind())
-		}
-	}
-	for _, declaration := range environment.Declarations() {
-		safety, err := inspect(declaration)
-		if err != nil || safety == providerReplayUnsafe {
-			return safety, err
-		}
-	}
-	return providerReplaySafe, nil
-}
-
 // providerCallAttempt is compact reducer history for one issued command. Its
 // candidate index addresses the immutable route plan; the active phase alone
 // retains executable machinery and command correlation identity.
@@ -82,7 +32,6 @@ type providerCallAttempt struct {
 	requestChoice          providerRequestChoice
 	providerRound          int
 	retry                  bool
-	replaySafety           providerReplaySafety
 	nativePreviousResponse bool
 	requestChanges         []compat.Change
 	status                 providerCallAttemptStatus
@@ -160,7 +109,7 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 	attempt := providerCallAttempt{
 		candidateIndex: selection.candidateIndex, target: call.backend.Target,
 		requestChoice: selection.requestChoice, providerRound: call.providerRound,
-		retry: selection.retry, replaySafety: call.replaySafety,
+		retry:                  selection.retry,
 		nativePreviousResponse: nativePreviousResponseSent(call.request),
 		requestChanges:         compat.CloneChanges(requestChanges),
 		status:                 providerCallAttemptCalling,

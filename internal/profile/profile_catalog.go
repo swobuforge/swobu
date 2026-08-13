@@ -38,6 +38,10 @@ type CredentialSpec struct {
 	Requirement     CredentialRequirement
 	Authoring       CredentialAuthoring
 	SuggestedEnvVar string
+	// AmbientLabel and ReferenceLabel are operator-facing authoring nouns for
+	// AmbientOrReference. They never enter routing or provider requests.
+	AmbientLabel   string
+	ReferenceLabel string
 }
 
 // ModelCatalogMode states whether target authoring can enumerate model
@@ -57,6 +61,7 @@ const (
 	ProviderSpecVLLM       ProviderID = "vllm"
 	ProviderSpecOpenAI     ProviderID = "openai"
 	ProviderSpecChatGPT    ProviderID = "chatgpt"
+	ProviderSpecGemini     ProviderID = "gemini"
 	ProviderSpecAnthropic  ProviderID = "anthropic"
 	ProviderSpecDeepSeek   ProviderID = "deepseek"
 	ProviderSpecKimi       ProviderID = "kimi"
@@ -185,15 +190,21 @@ func ValidateCatalogProfile(provider Profile) error {
 }
 
 func validCredentialSpec(spec CredentialSpec) bool {
+	ambientLabel := strings.TrimSpace(spec.AmbientLabel)
+	referenceLabel := strings.TrimSpace(spec.ReferenceLabel)
+	labelsAbsent := ambientLabel == "" && referenceLabel == ""
 	switch spec.Requirement {
 	case CredentialUnsupported:
-		return spec.Authoring == CredentialAuthoringNone
+		return spec.Authoring == CredentialAuthoringNone && labelsAbsent
 	case CredentialRequired:
-		return spec.Authoring == CredentialAuthoringReference || spec.Authoring == CredentialAuthoringInteractive
+		return (spec.Authoring == CredentialAuthoringReference || spec.Authoring == CredentialAuthoringInteractive) && labelsAbsent
 	case CredentialOptional:
-		return spec.Authoring == CredentialAuthoringReference || spec.Authoring == CredentialAuthoringAmbientOrReference
+		if spec.Authoring == CredentialAuthoringReference {
+			return labelsAbsent
+		}
+		return spec.Authoring == CredentialAuthoringAmbientOrReference && ambientLabel != "" && referenceLabel != ""
 	case CredentialRequiredOutsideLoopback:
-		return spec.Authoring == CredentialAuthoringReference
+		return spec.Authoring == CredentialAuthoringReference && labelsAbsent
 	default:
 		return false
 	}

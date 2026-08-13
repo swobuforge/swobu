@@ -25,10 +25,10 @@
 //
 // Known MCP declarations retain typed URL, connector, tunnel, selection,
 // approval, loading, and caller semantics. Authorization and headers remain
-// transient. Approval-free native declarations lower exactly; approval-bearing
-// attempts reject as target-incompatible until the canonical approval
-// request/response lifecycle exists. Malformed MCP syntax and unsolicited
-// provider-owned MCP effects still fail.
+// transient and flow only to Exchange's local MCP runtime. Provider lowering
+// rejects every residual MCP declaration; unsupported local forms fail before
+// dispatch. Malformed MCP syntax and unsolicited provider-owned MCP effects
+// still fail.
 //
 // Shared lowering implements official Responses with compatibility-oriented
 // representation choices: full materialized history, flat scope-qualified

@@ -264,7 +264,7 @@ func TestAttemptToolNamesDoNotFlattenSpecificChildUnderResidualMCP(t *testing.T)
 		t.Fatal(err)
 	}
 	if _, err := names.WireName(childKey); err == nil {
-		t.Fatal("residual native MCP child received a flat callable alias")
+		t.Fatal("unmaterialized MCP child received a flat callable alias")
 	}
 }
 

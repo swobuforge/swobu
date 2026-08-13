@@ -136,7 +136,7 @@ func TestExplicitCheckpointRejectsStaleHeadAndWrongCodecScheme(t *testing.T) {
 	}
 }
 
-func TestProviderCallCarriesCompleteRequestPlusExactResponsesData(t *testing.T) {
+func TestProviderCallCarriesCompleteRequestPlusExactPreviousHistory(t *testing.T) {
 	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.test", "cred", "responses", "", "responses")
 	target.TargetVersion = 3
 	target.Model = "a"
@@ -156,12 +156,12 @@ func TestProviderCallCarriesCompleteRequestPlusExactResponsesData(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, start, end, ok := resolved.ResponsesPrevious(target.TargetID, target.TargetVersion)
+	previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion)
 	if !ok {
-		t.Fatal("matching target did not expose Responses data")
+		t.Fatal("matching target did not expose previous history")
 	}
-	request := provider.Request{Canonical: resolved.Request(), ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}}
-	if len(request.Canonical.Items()) != 3 || request.ResponsesPrevious.OmitStart != 0 || request.ResponsesPrevious.OmitEnd != 2 {
+	request := provider.Request{Canonical: resolved.Request(), PreviousHistory: &previous}
+	if len(request.Canonical.Items()) != 3 || request.PreviousHistory.OmitStart != 0 || request.PreviousHistory.OmitEnd != 2 || request.PreviousHistory.Response.Responses == nil {
 		t.Fatalf("provider request = %#v", request)
 	}
 }

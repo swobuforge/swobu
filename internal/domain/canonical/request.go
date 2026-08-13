@@ -15,7 +15,7 @@ type CanonicalRequest struct {
 	controls         GenerationControls
 	reasoning        ReasoningControls
 	outputFormat     Specified[OutputFormat]
-	responses        ResponsesRequestRefinement
+	store            Specified[bool]
 }
 
 // RequestParams carries already-decoded request bands into canonical
@@ -29,7 +29,7 @@ type RequestParams struct {
 	Controls         GenerationControls
 	Reasoning        ReasoningControls
 	OutputFormat     Specified[OutputFormat]
-	Responses        ResponsesRequestRefinement
+	Store            Specified[bool]
 }
 
 func NewCanonicalRequest(params RequestParams) CanonicalRequest {
@@ -42,7 +42,7 @@ func NewCanonicalRequest(params RequestParams) CanonicalRequest {
 		controls:         params.Controls.Clone(),
 		reasoning:        params.Reasoning.Clone(),
 		outputFormat:     cloneSpecified(params.OutputFormat, OutputFormat.Clone),
-		responses:        params.Responses.Clone(),
+		store:            cloneSpecified(params.Store, func(value bool) bool { return value }),
 	}
 }
 
@@ -103,7 +103,23 @@ func (r CanonicalRequest) OutputFormatSpecified() bool  { return r.outputFormat.
 func (r CanonicalRequest) OutputFormatField() Specified[OutputFormat] {
 	return cloneSpecified(r.outputFormat, OutputFormat.Clone)
 }
-func (r CanonicalRequest) Responses() ResponsesRequestRefinement { return r.responses.Clone() }
+
+// Store returns the explicit provider-persistence intent and whether it was
+// supplied. The intent is portable canonical request state because more than
+// one provider wire family reads it.
+func (r CanonicalRequest) Store() (bool, bool) { return r.store.Get() }
+
+// StoreField preserves omission independently from an explicit false value.
+func (r CanonicalRequest) StoreField() Specified[bool] {
+	return cloneSpecified(r.store, func(value bool) bool { return value })
+}
+
+// PersistenceEligible reports whether request policy permits provider-side
+// state capture or native previous-history use. Omission does not prohibit it.
+func (r CanonicalRequest) PersistenceEligible() bool {
+	store, specified := r.Store()
+	return !specified || store
+}
 
 func (r CanonicalRequest) PreviousResponse() (ResponseRef, bool) {
 	if r.previousResponse == nil {
@@ -122,7 +138,7 @@ func (r CanonicalRequest) Clone() CanonicalRequest {
 		Controls:         r.controls,
 		Reasoning:        r.reasoning,
 		OutputFormat:     cloneSpecified(r.outputFormat, OutputFormat.Clone),
-		Responses:        r.responses,
+		Store:            r.StoreField(),
 	})
 }
 
@@ -133,7 +149,7 @@ func (r CanonicalRequest) WithItems(items []CanonicalItem) CanonicalRequest {
 		Model: r.ModelField(), Items: items, ToolPolicy: r.ToolPolicyField(),
 		ToolCallBatch: r.ToolCallBatchField(), Controls: r.Controls(),
 		Reasoning: r.Reasoning(), OutputFormat: r.OutputFormatField(),
-		Responses: r.Responses(),
+		Store: r.StoreField(),
 	}
 	if previous, ok := r.PreviousResponse(); ok {
 		params.PreviousResponse = &previous

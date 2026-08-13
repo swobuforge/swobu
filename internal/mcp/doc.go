@@ -18,6 +18,7 @@
 // become the same canonical selection.
 //
 // Managed connectors, tunnels, approval workflows, and caller restrictions
-// remain canonical for native target projection; this package never erases or
-// weakens them into local ordinary-tool success.
+// remain canonical so the local MCP boundary can reject unsupported execution
+// honestly. They never cross into provider lowering, and this package never
+// erases or weakens them into local ordinary-tool success.
 package mcp

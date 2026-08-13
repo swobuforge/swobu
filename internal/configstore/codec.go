@@ -44,7 +44,7 @@ type connectionDTO struct {
 }
 
 type credentialConnectionDTO struct {
-	Credential string `yaml:"credential"`
+	Credential string `yaml:"credential,omitempty"`
 }
 type zaiConnectionDTO struct {
 	Access     string `yaml:"access"`

@@ -47,7 +47,7 @@ func TestCredentialLocatorsMatchResolverSyntax(t *testing.T) {
 func TestStandardConnectionPreservesProviderAndDurableFacts(t *testing.T) {
 	t.Parallel()
 
-	providers := []string{"lmstudio", "vllm", "nebius", "gmi", "scaleway", "sambanova", "stepfun", "groq", "fireworks", "ollama", "azure"}
+	providers := []string{"lmstudio", "vllm", "nebius", "gmi", "gemini", "scaleway", "sambanova", "stepfun", "groq", "fireworks", "ollama", "azure"}
 	connections := make([]StandardConnection, 0, len(providers))
 	for _, raw := range providers {
 		connection, err := NewStandardConnection(supportedProvider(raw), "https://models.example/v1", "env:PROVIDER_TOKEN")

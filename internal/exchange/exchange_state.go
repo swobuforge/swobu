@@ -104,12 +104,12 @@ type callingProviderPhase struct {
 }
 
 type callingMCPPhase struct {
-	selection     providerCallSelection
-	target        provider.TargetSnapshot
-	calls         []canonical.ToolCallItem
-	responseItems []canonical.CanonicalItem
-	results       []canonical.CanonicalItem
-	next          int
+	selection providerCallSelection
+	target    provider.TargetSnapshot
+	response  canonical.CanonicalResponse
+	calls     []canonical.ToolCallItem
+	results   []canonical.CanonicalItem
+	next      int
 }
 
 func (callingMCPPhase) isPhase() {}
@@ -243,7 +243,6 @@ type providerCall struct {
 	expectedHead       canonical.SwobuResponseID
 	delayClientHandoff bool
 	providerRound      int
-	replaySafety       providerReplaySafety
 }
 
 type reducerOutcome struct {
@@ -403,10 +402,10 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			}
 			if len(calls) > 0 {
 				s.providerUsage = rounds
-				selection := providerCallSelection{candidateIndex: attempt.candidateIndex, requestChoice: providerRequestFullHistory}
+				selection := providerCallSelection{candidateIndex: attempt.candidateIndex, requestChoice: providerRequestPreferred}
 				mcpPhase := callingMCPPhase{
 					selection: selection, target: attempt.target, calls: calls,
-					responseItems: canonicalResponse.Items(),
+					response: canonicalResponse.Clone(),
 				}
 				outcome, beginErr := beginMCPBatch(s, mcpPhase)
 				return outcome, beginErr
@@ -533,13 +532,6 @@ func terminateProviderExecution(s exchangeState) reducerOutcome {
 	}
 	last := s.providerCallAttempts[len(s.providerCallAttempts)-1]
 	problem := last.failure.Attempt.Cause()
-	if last.failure.Attempt.Execution() == provider.ExecutionMayHaveOccurred &&
-		last.replaySafety == providerReplayUnsafe {
-		problem = fmt.Errorf(
-			"provider execution may have occurred; automatic replay stopped to avoid duplicating an external effect: %w",
-			problem,
-		)
-	}
 	var incompatible provider.IncompatibleTargetError
 	if errors.As(problem, &incompatible) {
 		problem = noCompatibleTarget(problem)
@@ -557,7 +549,7 @@ func noCompatibleTarget(lastRejection error) canonical.Error {
 }
 
 func nativePreviousResponseSent(request provider.Request) bool {
-	return request.ResponsesPrevious != nil
+	return request.PreviousHistory != nil
 }
 
 // selectSameTargetAlternative maps the issued call facts to one concrete
@@ -603,7 +595,7 @@ func providerRecoveryPermitted(attempt providerCallAttempt) bool {
 	case provider.ExecutionNotDispatched, provider.ExecutionRejectedBeforeExecution:
 		return true
 	case provider.ExecutionMayHaveOccurred:
-		return attempt.replaySafety == providerReplaySafe
+		return true
 	default:
 		return false
 	}
@@ -625,7 +617,7 @@ func providerFailureAdvancesCandidate(err error) bool {
 // previousResponseHandoffEvidence describes only the winning representation.
 // Failed and preparation paths do not call this function.
 func previousResponseHandoffEvidence(prepared session.ResolvedRequest, winner providerCallAttempt) []compat.Change {
-	if !prepared.HasResponsesPrevious() || winner.nativePreviousResponse {
+	if !prepared.HasPreviousHistory() || winner.nativePreviousResponse {
 		return nil
 	}
 	return []compat.Change{compat.NewApproximation(

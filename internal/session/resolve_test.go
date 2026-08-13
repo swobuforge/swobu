@@ -57,8 +57,20 @@ func checkpoint(id canonical.SwobuResponseID, request canonical.CanonicalRequest
 	return Checkpoint{Request: request, Response: bound}
 }
 
+func interactionsCheckpoint(id canonical.SwobuResponseID, request canonical.CanonicalRequest, response canonical.CanonicalResponse, interactions *canonical.InteractionsContinuation) Checkpoint {
+	bound, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id, Interactions: interactions}, response.Model(), response.Items(), response.Completion(), response.Usage())
+	if err != nil {
+		panic(err)
+	}
+	return Checkpoint{Request: request, Response: bound}
+}
+
 func nativeResponses(target provider.TargetSnapshot, providerResponseID string) *canonical.ResponsesContinuation {
 	return &canonical.ResponsesContinuation{ProviderResponseID: canonical.NewResponsesResponseID(providerResponseID), TargetID: target.TargetID, TargetVersion: target.TargetVersion}
+}
+
+func nativeInteractions(target provider.TargetSnapshot, providerInteractionID string) *canonical.InteractionsContinuation {
+	return &canonical.InteractionsContinuation{ProviderInteractionID: canonical.NewInteractionID(providerInteractionID), TargetID: target.TargetID, TargetVersion: target.TargetVersion}
 }
 
 func mustTestToolSet(t *testing.T, declarations ...canonical.ToolDeclaration) canonical.ToolSet {
@@ -278,8 +290,8 @@ func TestResumeRepeatsRequestContextOnlyForMatchingUnfinishedTurn(t *testing.T) 
 	if len(prelude.Items()) != 2 || len(rest) != 3 || rest[2].Kind() != canonical.ItemKindToolResult {
 		t.Fatalf("unfinished-turn complete request = %#v", resolved.Request().Items())
 	}
-	if _, start, end, ok := resolved.ResponsesPrevious(target.TargetID, target.TargetVersion); !ok || start != 2 || end != 4 {
-		t.Fatalf("unfinished-turn Responses data = (%d, %d, %t)", start, end, ok)
+	if previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion); !ok || previous.OmitStart != 2 || previous.OmitEnd != 4 || previous.Response.Responses == nil {
+		t.Fatalf("unfinished-turn previous history = (%#v, %t)", previous, ok)
 	}
 
 	completedRecord := checkpoint("resp_previous", previousRequest, makeResponse(

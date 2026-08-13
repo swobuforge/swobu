@@ -93,6 +93,25 @@ func TestReasoningPartsAndOpaqueThinkingRemainDistinct(t *testing.T) {
 	}
 }
 
+func TestInteractionsOpaqueThinkingIsClosedAndDefensivelyCopied(t *testing.T) {
+	raw := []byte(`{"type":"thought","signature":"secret"}`)
+	opaque, err := NewInteractionsOpaqueThinking(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] = 'x'
+	got, ok := opaque.Clone().Interactions()
+	if !ok || string(got) != `{"type":"thought","signature":"secret"}` {
+		t.Fatalf("Interactions replay = %q/%t", got, ok)
+	}
+	if _, foreign := opaque.Messages(); foreign {
+		t.Fatal("Interactions replay escaped through Messages branch")
+	}
+	if _, err := NewInteractionsOpaqueThinking(nil); err == nil {
+		t.Fatal("empty Interactions replay was accepted")
+	}
+}
+
 func TestReasoningIsAssistantOwnedAndAtomicInSynthesizedStream(t *testing.T) {
 	part, _ := NewReasoningPart(ReasoningPartSummary, "summary")
 	item, _ := NewReasoningItem([]ReasoningPart{part}, OpaqueThinking{})

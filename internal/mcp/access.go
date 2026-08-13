@@ -18,8 +18,9 @@ type accessSecrets struct {
 	bySource map[canonical.ToolKey]SourceAccess
 }
 
-// Access is request-private MCP authorization and header state. It may cross
-// ingress and provider projection but never enters canonical history.
+// Access is request-private MCP authorization and header state. It crosses
+// ingress into Exchange's local MCP runtime but never enters provider
+// projection or canonical history.
 type Access struct {
 	secrets *accessSecrets
 }

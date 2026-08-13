@@ -452,6 +452,54 @@ func TestLocalRuntimeClaimsOnlyAuthorityItCanHonor(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsUnsupportedMCPFormsBeforeResolution(t *testing.T) {
+	connector, _ := canonical.NewMCPConnectorSource(
+		"connector_gmail", canonical.Unspecified[[]string](),
+		canonical.NewMCPApprovalNever(), canonical.MCPLoadingEager,
+		canonical.Unspecified[[]string](),
+	)
+	approvalURL, _ := canonical.NewMCPURLSource(
+		"https://approval.example.test/rpc", canonical.Unspecified[[]string](),
+		canonical.NewMCPApprovalAlways(), canonical.MCPLoadingEager,
+		canonical.Unspecified[[]string](),
+	)
+	restrictedURL, _ := canonical.NewMCPURLSource(
+		"https://restricted.example.test/rpc", canonical.Unspecified[[]string](),
+		canonical.NewMCPApprovalNever(), canonical.MCPLoadingEager,
+		canonical.Specify([]string{"direct"}),
+	)
+
+	for name, source := range map[string]canonical.MCPSource{
+		"connector":         connector,
+		"approval-bearing":  approvalURL,
+		"caller-restricted": restrictedURL,
+	} {
+		t.Run(name, func(t *testing.T) {
+			key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, name)
+			declaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
+			set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
+			item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+			request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}})
+
+			resolverCalled := false
+			_, run, changes, err := openWith(
+				context.Background(), request, Access{},
+				func(context.Context, canonical.MCPToolSource, SourceAccess) (sourceResolution, error) {
+					resolverCalled = true
+					return sourceResolution{}, nil
+				},
+			)
+			var canonicalError canonical.Error
+			if !errors.As(err, &canonicalError) || canonicalError.Code != canonical.ErrorCodeNotImplemented {
+				t.Fatalf("unsupported source error = %T %v", err, err)
+			}
+			if resolverCalled || run != nil || len(changes) != 0 {
+				t.Fatalf("unsupported source reached execution: called=%v run=%#v changes=%#v", resolverCalled, run, changes)
+			}
+		})
+	}
+}
+
 func TestRunDerivesOrdinaryAttemptFunctionsFromFrozenCatalog(t *testing.T) {
 	full, remoteKey, _ := runtimeTestRequest(t)
 	environment, err := canonical.EffectiveTools(full)

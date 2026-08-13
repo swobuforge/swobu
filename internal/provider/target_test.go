@@ -35,6 +35,16 @@ func TestTargetSnapshotConstructorDerivesOneCoherentFrame(t *testing.T) {
 	}
 }
 
+func TestTargetSnapshotAcceptsProviderOnlyInteractionsStream(t *testing.T) {
+	target := NewTargetSnapshot("target", "gemini", "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Interactions, "", "interactions_stream")
+	if target.SelectedFrame != executionFrameSSEEvent {
+		t.Fatalf("selected frame = %q, want %q", target.SelectedFrame, executionFrameSSEEvent)
+	}
+	if err := target.ValidateExecutionProtocol(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTargetSnapshotConstructorsExposeExactlyOneProviderOptionsArm(t *testing.T) {
 	custom := NewCustomTargetSnapshot("custom", "https://example.test", "cred", protocolkind.Responses, "", "responses", "X-API-Key")
 	if custom.AuthHeader() != "X-API-Key" {

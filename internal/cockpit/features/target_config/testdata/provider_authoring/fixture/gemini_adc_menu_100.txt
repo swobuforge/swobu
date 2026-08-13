@@ -1,0 +1,23 @@
+  authentication    Google identity (ADC)                                             close ↵
+     use Gemini API key                                                               select ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

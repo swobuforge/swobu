@@ -170,7 +170,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 		Reasoning:        reasoning,
 		PreviousResponse: previousResponse,
 	}
-	params.Responses = canonical.NewResponsesRequestRefinement(store)
+	params.Store = store
 	if supplied.Model {
 		params.Model = canonical.Specify(strings.TrimSpace(dto.Model)) // swobu:io-string source=boundary
 	} // swobu:io-string source=boundary

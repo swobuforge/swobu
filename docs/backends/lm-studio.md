@@ -20,5 +20,6 @@ decode failures do not trigger that fallback.
 
 Inference continues to use `/v1/responses`, `/v1/chat/completions`, and
 `/v1/messages`. Swobu does not use native chat or LM Studio model
-load/unload/download operations. Remote MCP remains on Swobu's portable
-tool-discovery path, and model metadata never selects request-path behavior.
+load/unload/download operations. Remote MCP is resolved and executed by
+Exchange, and LM Studio receives ordinary callable functions. Model metadata
+never selects request-path behavior.

@@ -25,6 +25,39 @@ func TestWebSearchCallPreservesOrderedDuplicateQueries(t *testing.T) {
 	}
 }
 
+func TestInteractionsWebSearchReplayIsOccurrenceOwnedAndDefensivelyCopied(t *testing.T) {
+	callRaw := []byte(`{"type":"google_search_call","signature":"call-secret"}`)
+	call, err := NewInteractionsWebSearchCall(WebSearchCall{Action: WebSearchActionSearch}, callRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callRaw[0] = 'x'
+	if got, ok := call.Clone().InteractionsReplay(); !ok || string(got) != `{"type":"google_search_call","signature":"call-secret"}` {
+		t.Fatalf("call replay = %q/%t", got, ok)
+	}
+	result, _ := NewWebSearchResult(nil)
+	resultRaw := []byte(`{"type":"google_search_result","signature":"result-secret"}`)
+	result, err = result.WithInteractionsReplay(resultRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultRaw[0] = 'x'
+	if got, ok := result.Clone().InteractionsReplay(); !ok || string(got) != `{"type":"google_search_result","signature":"result-secret"}` {
+		t.Fatalf("result replay = %q/%t", got, ok)
+	}
+	if _, err := NewInteractionsWebSearchCall(WebSearchCall{Action: WebSearchActionSearch}, nil); err == nil {
+		t.Fatal("empty call replay accepted")
+	}
+	if _, err := result.WithInteractionsReplay(nil); err == nil {
+		t.Fatal("empty result replay accepted")
+	}
+	// Canonical owns the portable occurrence and opaque byte lifetime. The
+	// Gemini adapter owns the private Interactions grammar and correlation.
+	if _, err := NewInteractionsWebSearchCall(WebSearchCall{Action: WebSearchActionSearch}, []byte(`{"provider_private":true}`)); err != nil {
+		t.Fatalf("canonical interpreted provider-private replay grammar: %v", err)
+	}
+}
+
 func TestWebSearchCallRejectsIncompleteObservedActions(t *testing.T) {
 	webURL, err := NewWebURL("https://example.com/source")
 	if err != nil {

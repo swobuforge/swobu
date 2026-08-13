@@ -441,7 +441,7 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	// Hydration stores one complete request. The preferred attempt must keep
 	// complete history because ChatGPT responses never mint native continuation.
 	selected := prepared.Request()
-	if _, _, _, ok := prepared.ResponsesPrevious(target.TargetID, target.TargetVersion); ok {
+	if _, ok := prepared.PreviousHistory(target.TargetID, target.TargetVersion); ok {
 		t.Fatal("ChatGPT identity-only handle exposed Responses continuation")
 	}
 

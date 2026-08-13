@@ -34,6 +34,18 @@ func (id ResponsesResponseID) isBlank() bool {
 	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
 }
 
+// InteractionID is an opaque Gemini Interactions conversation-state handle.
+// It is neither a Swobu checkpoint key nor a portable tool correlation ID.
+type InteractionID string
+
+// NewInteractionID preserves one provider-issued interaction identity exactly.
+func NewInteractionID(raw string) InteractionID { return InteractionID(raw) }
+
+func (id InteractionID) String() string { return string(id) }
+func (id InteractionID) isBlank() bool {
+	return strings.TrimSpace(string(id)) == "" // swobu:io-string source=domain
+}
+
 // ResponsesItemID is one provider/dialect-owned item identity carried by a
 // Responses output item (for example a web_search_call id beginning with "ws").
 // It is not canonical call correlation: a ToolCallID pairs a call with its
@@ -60,8 +72,9 @@ func (id ResponsesItemID) IsZero() bool {
 // ResponseRef is the shared identity of a completed response and a later
 // request that selects it. Provider-native handles remain optional typed children.
 type ResponseRef struct {
-	SwobuID   SwobuResponseID
-	Responses *ResponsesContinuation
+	SwobuID      SwobuResponseID
+	Responses    *ResponsesContinuation
+	Interactions *InteractionsContinuation
 }
 
 // ResponsesContinuation records the provider response and exact target
@@ -72,6 +85,15 @@ type ResponsesContinuation struct {
 	ProviderResponseID ResponsesResponseID
 	TargetID           string
 	TargetVersion      uint64
+}
+
+// InteractionsContinuation records the exact Gemini interaction and target
+// generation that produced it. Its typed child prevents opaque provider-handle
+// maps from becoming canonical continuation authority.
+type InteractionsContinuation struct {
+	ProviderInteractionID InteractionID
+	TargetID              string
+	TargetVersion         uint64
 }
 
 // ValidatePreviousResponseSelector requires the public Swobu identity used for
@@ -90,7 +112,17 @@ func (r ResponseRef) ValidateCommittedResponse() error {
 		return errors.New("committed response requires a Swobu response ID")
 	}
 	if r.Responses != nil {
-		return r.Responses.ValidateBound()
+		if err := r.Responses.ValidateBound(); err != nil {
+			return err
+		}
+	}
+	if r.Interactions != nil {
+		if err := r.Interactions.ValidateBound(); err != nil {
+			return err
+		}
+	}
+	if r.Responses != nil && r.Interactions != nil {
+		return errors.New("committed response cannot carry multiple native continuations")
 	}
 	return nil
 }
@@ -110,11 +142,30 @@ func (r ResponsesContinuation) ValidateBound() error {
 	return nil
 }
 
+// ValidateBound requires every fact needed to safely reuse a native Gemini
+// interaction for one exact routing-owned target generation.
+func (r InteractionsContinuation) ValidateBound() error {
+	if r.ProviderInteractionID.isBlank() {
+		return errors.New("Interactions native reference requires a provider interaction ID")
+	}
+	if strings.TrimSpace(r.TargetID) == "" { // swobu:io-string source=domain
+		return errors.New("Interactions native reference requires a target ID")
+	}
+	if r.TargetVersion == 0 {
+		return errors.New("Interactions native reference requires a target version")
+	}
+	return nil
+}
+
 func (r ResponseRef) Clone() ResponseRef {
 	cloned := ResponseRef{SwobuID: r.SwobuID}
 	if r.Responses != nil {
 		responses := *r.Responses
 		cloned.Responses = &responses
+	}
+	if r.Interactions != nil {
+		interactions := *r.Interactions
+		cloned.Interactions = &interactions
 	}
 	return cloned
 }
@@ -122,5 +173,11 @@ func (r ResponseRef) Clone() ResponseRef {
 // AppliesTo reports whether the Responses-native handle is valid for one
 // exact routing-owned target generation.
 func (r ResponsesContinuation) AppliesTo(targetID string, targetVersion uint64) bool {
+	return r.ValidateBound() == nil && r.TargetID == targetID && r.TargetVersion == targetVersion
+}
+
+// AppliesTo reports whether the Interactions-native handle is valid for one
+// exact routing-owned target generation.
+func (r InteractionsContinuation) AppliesTo(targetID string, targetVersion uint64) bool {
 	return r.ValidateBound() == nil && r.TargetID == targetID && r.TargetVersion == targetVersion
 }

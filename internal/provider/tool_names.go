@@ -23,8 +23,9 @@ type wireToolRef struct {
 }
 
 // BuildAttemptToolNames allocates labels from the complete post-MCP semantic
-// context. Ordinary namespace children and historical calls participate;
-// residual native MCP catalogs and fixed built-ins do not.
+// context. Ordinary namespace children and historical calls participate; MCP
+// catalog children participate only after Exchange materializes them as
+// ordinary functions, while fixed built-ins do not.
 func BuildAttemptToolNames(semantic canonical.CanonicalRequest) (AttemptToolNames, []compat.Change, error) {
 	return buildAttemptToolNames(semantic, toolname.Generated)
 }

@@ -109,11 +109,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 			return ProviderRequestDocument{}, err
 		}
 	}
-	if flatTools.OmittedMCP > 0 {
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	tools = flatTools.Declarations
 	conversation, err := lowerMessagesContextPrefix(items, changeLog, exchangeID)
 	if err != nil {
@@ -170,11 +165,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
 		return ProviderRequestDocument{}, err
-	}
-	if flatTools.OmittedMCP > 0 {
-		if err := wire.ValidateFlatToolPolicy(policy, tools); err != nil {
-			return ProviderRequestDocument{}, err
-		}
 	}
 	choice, err := encodeMessagesToolChoice(policy, tools, names, changeLog, exchangeID)
 	if err != nil {

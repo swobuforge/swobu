@@ -12,6 +12,14 @@
 // opaque exact scope, so only the owning adapter can retrieve its bytes.
 // Opaque fields clone defensively, format as redacted values, and remain
 // attached to their exact artifact. User
+//
+// Stateless completeness is mandatory: every supported committed semantic
+// retains the portable meaning and narrowly owned native refinement needed for
+// inference-equivalent stateless continuation. A provider continuation handle
+// may compress an already-reconstructible prefix, but may never compensate for
+// state discarded during canonicalization.
+//
+// User
 // messages may carry portable images; assistant, system, and developer
 // directives remain text-only. Messages and tool results preserve their
 // distinct, ordered part grammars. Tool calls

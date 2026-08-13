@@ -20,10 +20,32 @@ const (
 // WebSearchCall records the provider action and only its portable observed
 // arguments. Providers may omit undisclosed queries.
 type WebSearchCall struct {
-	Action  WebSearchAction
-	Queries []string
-	URL     Specified[WebURL]
-	Match   Specified[string]
+	Action             WebSearchAction
+	Queries            []string
+	URL                Specified[WebURL]
+	Match              Specified[string]
+	interactionsReplay []byte
+}
+
+// NewInteractionsWebSearchCall attaches one opaque Interactions replay
+// candidate to its portable semantic occurrence. The owning Interactions
+// adapter validates private grammar and correlation before use.
+func NewInteractionsWebSearchCall(call WebSearchCall, replay []byte) (WebSearchCall, error) {
+	if err := call.Validate(); err != nil {
+		return WebSearchCall{}, err
+	}
+	if len(replay) == 0 {
+		return WebSearchCall{}, BadRequest("interactions web-search call replay is empty")
+	}
+	call.interactionsReplay = append([]byte(nil), replay...)
+	return call.Clone(), nil
+}
+
+func (c WebSearchCall) InteractionsReplay() ([]byte, bool) {
+	if len(c.interactionsReplay) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), c.interactionsReplay...), true
 }
 
 func (c WebSearchCall) Validate() error {
@@ -61,10 +83,11 @@ func (c WebSearchCall) Validate() error {
 
 func (c WebSearchCall) Clone() WebSearchCall {
 	return WebSearchCall{
-		Action:  c.Action,
-		Queries: append([]string(nil), c.Queries...),
-		URL:     cloneSpecified(c.URL, func(value WebURL) WebURL { return value }),
-		Match:   cloneSpecified(c.Match, func(value string) string { return value }),
+		Action:             c.Action,
+		Queries:            append([]string(nil), c.Queries...),
+		URL:                cloneSpecified(c.URL, func(value WebURL) WebURL { return value }),
+		Match:              cloneSpecified(c.Match, func(value string) string { return value }),
+		interactionsReplay: append([]byte(nil), c.interactionsReplay...),
 	}
 }
 
@@ -142,8 +165,31 @@ func (s WebSource) Clone() WebSource {
 // WebSearchResult is either a successful ordered source list or a typed
 // failure. Success with zero sources is valid.
 type WebSearchResult struct {
-	sources []WebSource
-	failure *string
+	sources            []WebSource
+	failure            *string
+	interactionsReplay []byte
+}
+
+// WithInteractionsReplay attaches one opaque Interactions replay candidate
+// without changing its portable success/failure meaning. The owning
+// Interactions adapter validates private grammar and correlation before use.
+func (r WebSearchResult) WithInteractionsReplay(replay []byte) (WebSearchResult, error) {
+	if !r.valid() {
+		return WebSearchResult{}, BadRequest("canonical web-search result is invalid")
+	}
+	if len(replay) == 0 {
+		return WebSearchResult{}, BadRequest("interactions web-search result replay is empty")
+	}
+	r = r.Clone()
+	r.interactionsReplay = append([]byte(nil), replay...)
+	return r, nil
+}
+
+func (r WebSearchResult) InteractionsReplay() ([]byte, bool) {
+	if len(r.interactionsReplay) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), r.interactionsReplay...), true
 }
 
 func NewWebSearchResult(sources []WebSource) (WebSearchResult, error) {
@@ -198,9 +244,11 @@ func (r WebSearchResult) valid() bool {
 func (r WebSearchResult) Clone() WebSearchResult {
 	if failure, ok := r.Failure(); ok {
 		cloned, _ := NewWebSearchFailureResult(failure)
+		cloned.interactionsReplay = append([]byte(nil), r.interactionsReplay...)
 		return cloned
 	}
 	cloned, _ := NewWebSearchResult(r.sources)
+	cloned.interactionsReplay = append([]byte(nil), r.interactionsReplay...)
 	return cloned
 }
 

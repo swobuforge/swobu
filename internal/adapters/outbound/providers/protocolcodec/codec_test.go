@@ -12,11 +12,9 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -41,7 +39,7 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 
 	responses, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
 		Canonical: full, Delivery: delivery.BufferedDelivery(),
-		ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: "provider_previous", OmitStart: 0, OmitEnd: 2},
+		PreviousHistory: &provider.PreviousHistory{Response: canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: "provider_previous", TargetID: "target", TargetVersion: 1}}, OmitStart: 0, OmitEnd: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +94,7 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 	}
 }
 
-func TestFlatProtocolCodecsOmitResidualMCPForOptionalPolicy(t *testing.T) {
+func TestProviderCodecsRejectResidualMCPInsteadOfChangingExecutionOwner(t *testing.T) {
 	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
 	source, _ := canonical.NewMCPConnectorSource(
 		"connector_gmail", canonical.Specify([]string{"search", "send"}),
@@ -112,36 +110,17 @@ func TestFlatProtocolCodecsOmitResidualMCPForOptionalPolicy(t *testing.T) {
 			item, canonicaltest.Message(t, canonical.MessageRoleUser, "search mail"),
 		},
 	})
-	access, err := (mcp.Access{}).WithBearer(key, "oauth-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	access, err = access.WithHeaders(key, map[string]string{"X-Tenant": "tenant-a"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	providerRequest := provider.Request{
-		Canonical: request, Delivery: delivery.BufferedDelivery(), MCPAccess: access,
+		Canonical: request, Delivery: delivery.BufferedDelivery(),
 	}
 
 	for _, protocol := range []protocolkind.ProtocolKind{
 		protocolkind.Responses, protocolkind.ChatCompletions, protocolkind.Messages,
 	} {
-		document, changes, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
-		if encodeErr != nil {
-			t.Fatalf("%s encode: %v", protocol, encodeErr)
-		}
-		if strings.Contains(string(document.RawBytes()), `"type":"mcp"`) {
-			t.Fatalf("%s leaked residual MCP: %s", protocol, document.RawBytes())
-		}
-		found := false
-		for _, change := range changes {
-			if change.Capability == canonical.RequestToolsKind && change.Kind == compat.Omission {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("%s changes = %#v, want residual MCP omission", protocol, changes)
+		_, _, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
+		var incompatible provider.IncompatibleTargetError
+		if !errors.As(encodeErr, &incompatible) {
+			t.Fatalf("%s encode error = %T %v, want target incompatibility", protocol, encodeErr, encodeErr)
 		}
 	}
 }
@@ -283,8 +262,8 @@ func TestResponsesContinuationCaptureRequiresPersistenceEligibleRequest(t *testi
 			request := provider.Request{
 				ExchangeID: "exchange-store-policy",
 				Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
-					Model:     canonical.Specify("model"),
-					Responses: canonical.NewResponsesRequestRefinement(test.requestStore),
+					Model: canonical.Specify("model"),
+					Store: test.requestStore,
 				}),
 			}
 			codec := Codec{Protocol: protocolkind.Responses, CaptureResponsesContinuation: true}

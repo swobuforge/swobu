@@ -38,7 +38,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical, ResponsesPrevious: req.ResponsesPrevious, ToolNames: req.ToolNames, MCPAccess: req.MCPAccess}
+	input := wire.ProviderEncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames}
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
@@ -121,7 +121,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
 	case protocolkind.Responses:
-		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.Responses().PersistenceEligible()
+		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
 		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocumentWithCapture(ctx, request.Canonical, request.ToolNames, doc, exchangeID, continuationEligible)
 	case protocolkind.Messages:
 		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
@@ -136,7 +136,7 @@ func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request)
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, request.ToolNames, stream, exchangeID)
 	case protocolkind.Responses:
-		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.Responses().PersistenceEligible()
+		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
 		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithCapture(request.Canonical, request.ToolNames, stream, exchangeID, continuationEligible)
 	case protocolkind.Messages:
 		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, stream, exchangeID)

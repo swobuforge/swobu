@@ -28,7 +28,12 @@
 // Bedrock has one authentication field: an absent credential reference
 // selects AWS identity, while a present reference selects a bearer API key and
 // embeds the shared credential chooser. ChatGPT retains its genuine
-// login-session workflow. Browser login is the default and device code is an
+// login-session workflow. Ordinary HTTP providers whose profile declares
+// AmbientOrReference use one provider-neutral authentication component: profile
+// labels describe ambient and reference choices, the existing credential
+// chooser authors references, and selecting ambient clears only the reference.
+// The component receives no provider identity or TargetConfig authority.
+// Browser login is the default and device code is an
 // explicit form-owned choice. Pending authentication remains selectable;
 // changing mode cancels the active session before starting its replacement. A
 // pending session always renders its complete login URL as wrapped terminal

@@ -5,7 +5,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/mcp"
 )
 
 // EncodeContext carries request-scoped capabilities that an exact provider
@@ -19,17 +18,19 @@ type EncodeContext struct {
 	HasNextRouteCandidate bool
 }
 
-// ResponsesPrevious authorizes one exact OpenAI Responses lowering to replace
-// a contiguous complete-request history range with previous_response_id.
-type ResponsesPrevious struct {
-	ProviderResponseID canonical.ResponsesResponseID
-	OmitStart          uint32
-	OmitEnd            uint32
+// PreviousHistory authorizes one exact provider codec to replace a contiguous
+// complete-request history range with its typed native continuation handle.
+// The closed ResponseRef remains the handle authority; no provider-generic ID
+// or metadata map can be introduced at this seam.
+type PreviousHistory struct {
+	Response  canonical.ResponseRef
+	OmitStart uint32
+	OmitEnd   uint32
 }
 
 // Request contains only the provider-facing input for one provider call.
 // Canonical is always the complete effective canonical request and is the only
-// request-history authority. ResponsesPrevious is optional concrete lowering
+// request-history authority. PreviousHistory is optional exact-target lowering
 // data; it never changes Canonical's meaning.
 type Request struct {
 	// ExchangeID correlates progressive response events for this invocation. It
@@ -38,13 +39,10 @@ type Request struct {
 	Canonical  canonical.CanonicalRequest
 	// TargetSupport is the immutable knowledge snapshot resolved for this exact
 	// attempt. Feature owners decide how Unknown affects their own behavior.
-	TargetSupport     TargetSupport
-	ResponsesPrevious *ResponsesPrevious
-	EncodeContext     EncodeContext
-	Delivery          delivery.Delivery
+	TargetSupport   TargetSupport
+	PreviousHistory *PreviousHistory
+	EncodeContext   EncodeContext
+	Delivery        delivery.Delivery
 	// ToolNames is transient provider-attempt representation state.
 	ToolNames AttemptToolNames
-	// MCPAccess is request-private and may be consumed only by an exact native
-	// MCP request projection. It never enters canonical history.
-	MCPAccess mcp.Access
 }

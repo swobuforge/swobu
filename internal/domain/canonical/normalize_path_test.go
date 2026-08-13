@@ -35,7 +35,7 @@ func TestNormalizePath_MapsSupportedAliasesToCanonicalPaths(t *testing.T) {
 }
 
 func TestNormalizePath_RejectsUnsupportedPaths(t *testing.T) {
-	for _, raw := range []string{"/v1/embeddings", "/completions", "/v1/completions"} {
+	for _, raw := range []string{"/interactions", "/v1/interactions", "/v1/embeddings", "/completions", "/v1/completions"} {
 		_, err := NormalizePath(raw)
 		if err == nil {
 			t.Fatalf("expected error for %q, got nil", raw)

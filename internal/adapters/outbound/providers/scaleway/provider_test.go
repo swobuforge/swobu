@@ -97,11 +97,11 @@ func TestTransportAndDiscoveryUseEffectiveEndpointWithOptionalBearer(t *testing.
 }
 
 func TestResponsesRehomesInstructionsAndOmitsOnlyStoreFalse(t *testing.T) {
-	storeFalse := canonical.NewResponsesRequestRefinement(canonical.Specify(false))
+	storeFalse := canonical.Specify(false)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model:     canonical.Specify("glm-5.2"),
-		Items:     []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "be precise"), canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
-		Responses: storeFalse,
+		Model: canonical.Specify("glm-5.2"),
+		Items: []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "be precise"), canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
+		Store: storeFalse,
 	})
 	document, _, err := (responsesCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
@@ -134,8 +134,8 @@ func TestResponsesRehomesInstructionsAndOmitsOnlyStoreFalse(t *testing.T) {
 		t.Fatalf("user text = %#v", got)
 	}
 
-	storeTrue := canonical.NewResponsesRequestRefinement(canonical.Specify(true))
-	trueRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("glm-5.2"), Items: request.Items(), Responses: storeTrue})
+	storeTrue := canonical.Specify(true)
+	trueRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("glm-5.2"), Items: request.Items(), Store: storeTrue})
 	document, _, err = (responsesCodec{}).Encode(provider.Request{Canonical: trueRequest, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)

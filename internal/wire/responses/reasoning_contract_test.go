@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -365,7 +364,7 @@ func TestResponsesContinuationUsesProviderHandle(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt"),
 	})
-	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: "provider_resp", OmitStart: 0, OmitEnd: 0}, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, PreviousHistory: responsesPrevious("provider_resp"), ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

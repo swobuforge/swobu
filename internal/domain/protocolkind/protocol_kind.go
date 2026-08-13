@@ -10,6 +10,9 @@ const (
 	ChatCompletions ProtocolKind = "chat_completions"
 	Responses       ProtocolKind = "responses"
 	Messages        ProtocolKind = "messages"
+	// Interactions names the native Gemini provider wire grammar. It is an
+	// outbound execution identity, not a client ingress protocol.
+	Interactions ProtocolKind = "interactions"
 )
 
 func (k ProtocolKind) String() string {
@@ -18,7 +21,7 @@ func (k ProtocolKind) String() string {
 
 func ParseProtocolKind(raw string) (ProtocolKind, error) {
 	switch ProtocolKind(raw) {
-	case ChatCompletions, Responses, Messages:
+	case ChatCompletions, Responses, Messages, Interactions:
 		return ProtocolKind(raw), nil
 	default:
 		return "", fmt.Errorf("unsupported protocol kind %q", raw)

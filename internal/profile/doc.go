@@ -2,10 +2,10 @@
 // domain validation and operator-facing setup surfaces.
 //
 // It owns stable locator, durable connection-shape, credential requirement and
-// authoring, catalog-noun, and protocol facts. Credential storage sources,
+// authoring, ambient/reference display labels, catalog-noun, and protocol facts. Credential storage sources,
 // provider probe diagnostics, and ChatGPT login mechanics are deliberately
-// outside this catalog; Bedrock runtime authentication strategy belongs to the
-// Bedrock adapter.
+// outside this catalog; provider runtime authentication strategies belong to
+// their outbound adapters.
 // Bedrock endpoint resolution is the exception to static catalog-only data:
 // ResolveBedrockEndpoint normalizes the required operator-authored inference
 // endpoint and appends one protocol operation. BedrockCatalogURL independently
@@ -19,5 +19,8 @@
 // Static manifest truth lives here.
 //
 // Runtime adapter dispatch is owned by outbound provider composition, not by
-// this catalog.
+// this catalog. AmbientOrReference is shared authoring semantics only: provider
+// adapters separately own identity discovery, lifecycle, signing or token
+// acquisition, and request authentication. It is not authority for a generic
+// cloud authenticator.
 package profile

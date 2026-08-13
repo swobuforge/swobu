@@ -14,13 +14,12 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
-// NewRuntime composes Fireworks' documented Responses-only native MCP and
-// stored-continuation authority with shared protocol codecs and transport.
+// NewRuntime composes Fireworks' stored-continuation authority with shared
+// protocol codecs and transport. MCP remains Exchange-owned for every target.
 // Model identities and configured base URLs remain opaque operator facts.
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	bundle := openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecFireworks))
 	bundle.BackendResolver = responsesBackendResolver{standard: bundle.BackendResolver}
-	bundle.TargetSupport = provider.TargetSupportFunc(targetSupport)
 	bundle.Discovery = unsupportedDiscovery{}
 	return bundle
 }
@@ -49,15 +48,6 @@ func (r responsesBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 	codec.CaptureResponsesContinuation = true
 	backend.Codec = codec
 	return backend, backend.Validate()
-}
-
-func targetSupport(target provider.TargetSnapshot) provider.TargetSupport {
-	if target.ProtocolKind != protocolkind.Responses {
-		return provider.TargetSupport{}
-	}
-	return provider.NewTargetSupport(map[canonical.CapabilityPath]provider.Support{
-		canonical.RequestToolsDiscovery: provider.SupportSupported,
-	})
 }
 
 var _ provider.Discovery = unsupportedDiscovery{}

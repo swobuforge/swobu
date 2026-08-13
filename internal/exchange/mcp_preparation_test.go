@@ -51,7 +51,7 @@ func (nativeMessagesDiscoveryRuntime) ResolveTargetSupport(provider.TargetSnapsh
 	return provider.NewTargetSupport(map[canonical.CapabilityPath]provider.Support{canonical.RequestToolsDiscovery: provider.SupportSupported})
 }
 
-func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
+func TestMCPPreparationRetainsIngressAccessForLocalOpen(t *testing.T) {
 	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	access, err := (mcp.Access{}).WithBearer(source, "incident-secret-bearer")
 	if err != nil {
@@ -70,7 +70,7 @@ func TestMCPPreparationRetainsIngressAccessForNativeAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(outcome.nextState.input.mcpAccess, access) {
-		t.Fatal("exchange discarded ingress MCP access before native target projection")
+		t.Fatal("exchange discarded ingress MCP access before local MCP open")
 	}
 }
 
@@ -147,6 +147,45 @@ func TestProviderPreparationProjectsClaudeDiscoveryHistoryBeforeResponsesEncodin
 	}
 	if len(changes) == 0 {
 		t.Fatal("discovery projection did not record compatibility evidence")
+	}
+}
+
+func TestStructuralProjectionSuppressesApplicableNativePrefix(t *testing.T) {
+	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	declarations := canonicaltest.ToolDeclarations(t, discovery, loaded)
+	callID, _ := canonical.NewToolCallID("discover_weather")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider)
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
+	result, _ := canonical.NewToolDiscoveryResultItem(callID, set, canonical.DiscoveryExecutorProvider)
+	previous := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations, call, result}})
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}})
+	target := requestpathTarget(t, "structural-prefix")
+	prepared := mustResumeSession(t, previous, nil, current, target)
+	path, err := resolveProviderPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := prepared.PreviousHistory(path.target.TargetID, path.target.TargetVersion); !ok {
+		t.Fatal("test setup has no applicable native prefix before projection")
+	}
+	state := reducerTestState(t)
+	state.input.request = current
+	state.prepared = &prepared
+	state.route = routePlan{targets: []routing.Target{target}}
+	runner := withRuntime(bufferedProviderTransport(nil))
+	runner.Runtime = toolDiscoveryResponsesRuntime{transport: bufferedProviderTransport(nil)}
+
+	providerCall, _, _, _, err := prepareProviderCall(context.Background(), state, providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCall.request.PreviousHistory != nil || bytes.Contains(providerCall.document.RawBytes(), []byte("previous_response_id")) {
+		t.Fatal("structurally rewritten history retained native prefix authority")
 	}
 }
 

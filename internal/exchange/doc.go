@@ -15,10 +15,10 @@
 //     accumulation, and compatibility evidence.
 //
 // Provider requests always carry one complete canonical request. Optional
-// ResponsesPrevious metadata authorizes a Responses codec to omit one exact
-// prior-history range while emitting previous_response_id. A target change,
-// target-version change, invalid provider reference, or unsupported provider
-// receives the same complete request without that metadata.
+// PreviousHistory metadata authorizes an exact provider codec to omit one
+// prior-history range while emitting its typed native continuation handle. A
+// target change, target-version change, invalid provider reference, or
+// unsupported provider receives the same complete request without metadata.
 // Routing connections become complete provider TargetSnapshots at this edge.
 // Bedrock endpoint resolution and signing region are supplied atomically during
 // that projection; exchange never patches provider facts after construction.
