@@ -1,0 +1,23 @@
+  new target · Gemini API                                                             cancel ↵
+     provider          Gemini API                                                     change ↵
+     authentication    Google identity (ADC)                                          manage ↵
+   > model             Gemini Google identity (ADC) is unavailable                    retry ↵
+     routing           fallback after step 1                                          change ↵
+     create                                                                           complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

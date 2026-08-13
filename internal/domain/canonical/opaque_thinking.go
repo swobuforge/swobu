@@ -8,6 +8,7 @@ const (
 	opaqueThinkingMessages opaqueThinkingKind = iota + 1
 	opaqueThinkingProviderChat
 	opaqueThinkingResponses
+	opaqueThinkingInteractions
 )
 
 // OpaqueThinking is one complete, reasoning-only replay unit. The private tag
@@ -56,6 +57,12 @@ func NewMessagesOpaqueThinking(raw []byte) (OpaqueThinking, error) {
 	return newOpaqueThinking(opaqueThinkingMessages, raw, "messages opaque thinking is empty")
 }
 
+// NewInteractionsOpaqueThinking admits one exact Interactions thought replay
+// unit. Its provider-private grammar remains owned by the Interactions adapter.
+func NewInteractionsOpaqueThinking(raw []byte) (OpaqueThinking, error) {
+	return newOpaqueThinking(opaqueThinkingInteractions, raw, "interactions opaque thinking is empty")
+}
+
 // NewProviderChatOpaqueThinking admits one complete non-empty provider-owned
 // Chat replay unit. The opaque scope is the replay boundary: only an adapter
 // presenting the exact same scope can retrieve its raw bytes.
@@ -83,6 +90,14 @@ func newOpaqueThinking(kind opaqueThinkingKind, raw []byte, emptyMessage string)
 // Messages returns independent bytes only for the Messages branch.
 func (o OpaqueThinking) Messages() ([]byte, bool) {
 	if o.kind != opaqueThinkingMessages || len(o.raw) == 0 {
+		return nil, false
+	}
+	return append([]byte(nil), o.raw...), true
+}
+
+// Interactions returns independent bytes only for the Interactions branch.
+func (o OpaqueThinking) Interactions() ([]byte, bool) {
+	if o.kind != opaqueThinkingInteractions || len(o.raw) == 0 {
 		return nil, false
 	}
 	return append([]byte(nil), o.raw...), true
@@ -119,7 +134,7 @@ func (o OpaqueThinking) validate() error {
 	if o.IsZero() {
 		return nil
 	}
-	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingProviderChat && o.kind != opaqueThinkingResponses) || len(o.raw) == 0 {
+	if (o.kind != opaqueThinkingMessages && o.kind != opaqueThinkingProviderChat && o.kind != opaqueThinkingResponses && o.kind != opaqueThinkingInteractions) || len(o.raw) == 0 {
 		return fmt.Errorf("opaque thinking is invalid")
 	}
 	// Scope equality is the provider Chat replay boundary. Protocol branches

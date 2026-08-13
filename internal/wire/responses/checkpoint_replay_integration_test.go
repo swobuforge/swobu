@@ -53,7 +53,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 			)
 			differentTarget.TargetVersion = 2
 			stateless := resolved.Request()
-			if _, _, _, ok := resolved.ResponsesPrevious(differentTarget.TargetID, differentTarget.TargetVersion); ok {
+			if _, ok := resolved.PreviousHistory(differentTarget.TargetID, differentTarget.TargetVersion); ok {
 				t.Fatal("different target exposed previous_response_id data")
 			}
 			document, err := EncodeCarrierWithChanges(

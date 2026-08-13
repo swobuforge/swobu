@@ -42,8 +42,10 @@ func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 }
 
 func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
-	value := "catalog failed"
-	switch strings.ToLower(strings.TrimSpace(w.Catalog.Get().Err)) {
+	errText := strings.TrimSpace(w.Catalog.Get().Err)
+	value := errText
+	if value == "" { value = "catalog failed" }
+	switch strings.ToLower(errText) {
 	case "project not found":
 		value = "project not found"
 	case "unauthorized":
@@ -241,6 +243,8 @@ templ (t *targetTail) Render() {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")
 		} else if setupAllowsModelChoice(t.root) && t.root.usesManualModelInput() {
 			@ManualModelInput(t.root)
+		} else if targetCatalogFailed(t.root) && targetCatalogRetryable(t.root) {
+			@ModelCatalogRetry(t.root)
 		} else if setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)
 		} else {

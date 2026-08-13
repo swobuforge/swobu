@@ -102,7 +102,7 @@ func (c chatCodec) Decode(ctx context.Context, req provider.Request, ingress pro
 type responsesCodec struct{ standard protocolcodec.Codec }
 
 func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	req.ResponsesPrevious = nil
+	req.PreviousHistory = nil
 	return c.standard.Encode(req)
 }
 

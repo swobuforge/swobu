@@ -72,6 +72,9 @@ func openWith(
 	if err != nil {
 		return canonical.CanonicalRequest{}, nil, nil, err
 	}
+	if err := validateLocallyExecutableSources(environment); err != nil {
+		return canonical.CanonicalRequest{}, nil, nil, err
+	}
 	sources := localMCPSources(environment)
 	if len(sources) == 0 {
 		return request.Clone(), nil, nil, nil
@@ -191,6 +194,30 @@ func openWith(
 		return canonical.CanonicalRequest{}, nil, changes, err
 	}
 	return prepared, run, changes, nil
+}
+
+// validateLocallyExecutableSources enforces the single MCP execution owner at
+// the earliest boundary with the source semantics needed to decide. Provider
+// selection cannot turn a locally unsupported source into provider authority.
+func validateLocallyExecutableSources(environment canonical.ToolEnvironment) error {
+	for _, declaration := range environment.Declarations() {
+		sourceDeclaration, ok := declaration.MCP()
+		if !ok {
+			continue
+		}
+		source := sourceDeclaration.Source()
+		switch {
+		case source.Kind() != canonical.MCPSourceURL:
+			return canonical.NotImplemented("Swobu MCP execution supports URL sources only")
+		case source.Approval().Kind() != canonical.MCPApprovalNever:
+			return canonical.NotImplemented("Swobu MCP execution does not yet support approval-bearing sources")
+		default:
+			if _, restricted := source.AllowedCallers().Get(); restricted {
+				return canonical.NotImplemented("Swobu MCP execution does not yet support caller-restricted sources")
+			}
+		}
+	}
+	return nil
 }
 
 func resolveRemoteSource(
@@ -334,7 +361,7 @@ func (r *Run) Calls(response canonical.CanonicalResponse) ([]canonical.ToolCallI
 		}
 	}
 	if len(remote) > 0 && callerOwned > 0 {
-		return nil, canonical.NotImplemented("Swobu does not implement provider turns that mix remote MCP and caller-owned tool calls")
+		return nil, canonical.NotImplemented("Swobu does not implement assistant rounds that mix remote MCP and caller-owned tool calls")
 	}
 	return remote, nil
 }

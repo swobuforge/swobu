@@ -49,15 +49,12 @@ func TestRuntimeLeavesFireworksModelDiscoveryManual(t *testing.T) {
 	}
 }
 
-func TestResponsesSupportOnlyClaimsNativeMCP(t *testing.T) {
+func TestRuntimeDoesNotClaimProviderNativeMCPAuthority(t *testing.T) {
 	bundle := NewRuntime(nil, credentialResolver{})
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
 		target := fireworksTarget(kind)
 		got := bundle.TargetSupport.ResolveTargetSupport(target).Get(canonical.RequestToolsDiscovery)
 		want := provider.SupportUnknown
-		if kind == protocolkind.Responses {
-			want = provider.SupportSupported
-		}
 		if got != want {
 			t.Errorf("%s tools discovery support = %v, want %v", kind, got, want)
 		}
@@ -109,11 +106,11 @@ func TestResponsesContinuationUsesMatchingTargetAndStoreFalseFallsBackToHistory(
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, start, end, ok := prepared.ResponsesPrevious(backend.Target.TargetID, backend.Target.TargetVersion)
+	previous, ok := prepared.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion)
 	if !ok {
 		t.Fatal("matching Fireworks target did not expose Responses continuation")
 	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: prepared.Request(), Delivery: delivery.BufferedDelivery(), ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: prepared.Request(), Delivery: delivery.BufferedDelivery(), PreviousHistory: &previous})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,13 +120,13 @@ func TestResponsesContinuationUsesMatchingTargetAndStoreFalseFallsBackToHistory(
 	}
 
 	storeFalse := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("accounts/acme/deployments/deploy-1"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "previous"}, Responses: canonical.NewResponsesRequestRefinement(canonical.Specify(false)),
+		Model: canonical.Specify("accounts/acme/deployments/deploy-1"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "previous"}, Store: canonical.Specify(false),
 	})
 	fallback, err := session.Resume(storeFalse, session.Checkpoint{Request: turnOne, Response: canonicaltest.Response(t, "previous", "model", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one")}, canonical.Completed("completed"))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, ok := fallback.ResponsesPrevious(backend.Target.TargetID, backend.Target.TargetVersion); ok {
+	if _, ok := fallback.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion); ok {
 		t.Fatal("store:false exposed native Fireworks continuation")
 	}
 	document, _, err = backend.Codec.Encode(provider.Request{Canonical: fallback.Request(), Delivery: delivery.BufferedDelivery()})

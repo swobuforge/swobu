@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/mcp"
 )
 
 func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T) {
@@ -289,7 +288,7 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatal("custom output did not participate in the Responses history fingerprint")
 	}
 
-	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, testAttemptToolNames(decoded.Request.Request), mcp.Access{}, nil, "")
+	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, testAttemptToolNames(decoded.Request.Request), nil, "")
 	if err != nil {
 		t.Fatalf("encode result-only segment: %v", err)
 	}
@@ -472,7 +471,7 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 	items := []canonical.CanonicalItem{functionCall, functionResult, customCall, customResult}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: items})
 
-	encoded, err := encodeConversation(request, items, nil, testAttemptToolNames(request), mcp.Access{}, nil, "")
+	encoded, err := encodeConversation(request, items, nil, testAttemptToolNames(request), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

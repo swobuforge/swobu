@@ -67,17 +67,12 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	if err != nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
-	replaySafety, err := providerReplaySafetyFor(attemptRequest)
-	if err != nil {
-		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("provider attempt replay safety: %w", err)
-	}
 	providerRequest := provider.Request{
 		ExchangeID:    s.input.exchangeID,
 		Canonical:     bindRequestToTarget(attemptRequest, path.target.Model),
 		TargetSupport: targetSupport,
 		Delivery:      path.delivery,
 		ToolNames:     toolNames,
-		MCPAccess:     s.input.mcpAccess,
 	}
 	preparationCtx := ctx
 	cancel := func() {}
@@ -91,8 +86,8 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
 	}
 	if selection.requestChoice == providerRequestPreferred && !structuralProjection {
-		if id, start, end, ok := resolved.ResponsesPrevious(path.target.TargetID, path.target.TargetVersion); ok {
-			providerRequest.ResponsesPrevious = &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}
+		if previous, ok := resolved.PreviousHistory(path.target.TargetID, path.target.TargetVersion); ok {
+			providerRequest.PreviousHistory = &previous
 		}
 	}
 	requestChanges := compat.CloneChanges(projectionChanges)
@@ -117,16 +112,11 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 				if namingErr != nil {
 					return providerCall{}, path.target, nil, s.mediaFetchCache, namingErr
 				}
-				projectedReplaySafety, replayErr := providerReplaySafetyFor(attemptRequest)
-				if replayErr != nil {
-					return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("provider attempt replay safety: %w", replayErr)
-				}
 				toolNames = projectedToolNames
 				namingChanges = projectedNamingChanges
-				replaySafety = projectedReplaySafety
 				providerRequest.Canonical = bindRequestToTarget(attemptRequest, path.target.Model)
 				providerRequest.ToolNames = toolNames
-				providerRequest.ResponsesPrevious = nil
+				providerRequest.PreviousHistory = nil
 				requestChanges = append(compat.CloneChanges(projection.Changes), namingChanges...)
 				doc, changes, err = backend.Codec.Encode(providerRequest)
 				requestChanges = append(requestChanges, changes...)
@@ -147,7 +137,6 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		expectedHead:       s.expectedHead,
 		delayClientHandoff: delayClientHandoffFor(s.mcp),
 		providerRound:      len(s.providerUsage),
-		replaySafety:       replaySafety,
 	}, path.target, requestChanges, fetchCache, nil
 }
 

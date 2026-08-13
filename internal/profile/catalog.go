@@ -74,6 +74,9 @@ var (
 	providerProtocolsChatGPT = []ProviderProtocolSpec{
 		{Name: "responses_stream", Kind: protocolkind.Responses, Frame: FrameSSEEvent},
 	}
+	providerProtocolsGemini = []ProviderProtocolSpec{
+		{Name: "interactions_stream", Kind: protocolkind.Interactions, Frame: FrameSSEEvent},
+	}
 	providerProtocolsAnthropic = []ProviderProtocolSpec{
 		{Name: "messages", Kind: protocolkind.Messages, Frame: FrameHTTPJSONBody},
 		{Name: "messages_stream", Kind: protocolkind.Messages, Frame: FrameSSEEvent},
@@ -178,6 +181,25 @@ func catalog() []Profile {
 			VisibleInOperatorUI: true,
 			ProtocolAuthoring:   ProtocolDerived,
 			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
+		},
+		{
+			ProviderID:          ProviderSpecGemini,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelCatalog:        ModelCatalogModeEnumerable,
+			ProviderDisplayName: "Gemini API",
+			SetupHint:           "Google AI Studio API key",
+			SetupKeywords:       []string{"Gemini", "Google AI Studio", "Google", "Interactions", "Google Search", "MCP"},
+			Locator: LocatorSpec{
+				Kind:    LocatorFixed,
+				Default: "https://generativelanguage.googleapis.com/v1",
+			},
+			Credential: CredentialSpec{
+				Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference,
+				SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key",
+			},
+			VisibleInOperatorUI: true,
+			ProtocolAuthoring:   ProtocolDerived,
+			ProviderProtocols:   slices.Clone(providerProtocolsGemini),
 		},
 		{
 			ProviderID:          ProviderSpecAnthropic,
@@ -300,7 +322,7 @@ func catalog() []Profile {
 			ModelCatalog:        ModelCatalogModeManual,
 			ProviderDisplayName: "Fireworks AI",
 			SetupHint:           "API key / endpoint",
-			SetupKeywords:       []string{"Fireworks", "credential", "serverless", "deployment", "router", "base URL", "Responses", "Messages", "MCP"},
+			SetupKeywords:       []string{"Fireworks", "credential", "serverless", "deployment", "router", "base URL", "Responses", "Messages"},
 			Locator:             LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.fireworks.ai/inference/v1"},
 			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "FIREWORKS_API_KEY"},
 			DefaultAuthHeader:   "Authorization",
@@ -399,7 +421,10 @@ func catalog() []Profile {
 				Kind:  LocatorAWSRegion,
 				Label: "region",
 			},
-			Credential:          CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK"},
+			Credential: CredentialSpec{
+				Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference,
+				SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK", AmbientLabel: "AWS identity", ReferenceLabel: "Bedrock API key",
+			},
 			ConnectionShape:     routing.ConnectionShapeBedrock,
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsBedrock),

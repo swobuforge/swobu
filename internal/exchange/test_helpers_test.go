@@ -117,8 +117,8 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
 	request := provider.Request{Canonical: in.Prepared.Request(), Delivery: in.ProviderDelivery}
-	if id, start, end, ok := in.Prepared.ResponsesPrevious(backend.Target.TargetID, backend.Target.TargetVersion); ok {
-		request.ResponsesPrevious = &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end}
+	if previous, ok := in.Prepared.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion); ok {
+		request.PreviousHistory = &previous
 	}
 	call := providerCall{
 		backend: backend, request: request, clientCodec: clientCodec,
@@ -174,7 +174,7 @@ func mustResumeSession(
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_resp_123"},
 		ToolPolicy:       current.ToolPolicyField(), ToolCallBatch: current.ToolCallBatchField(),
 		Controls: current.Controls(), Reasoning: current.Reasoning(), OutputFormat: current.OutputFormatField(),
-		Responses: current.Responses(),
+		Store: current.StoreField(),
 	})
 	prepared, err := session.Resume(current, session.Checkpoint{Request: previousRequest, Response: response})
 	if err != nil {

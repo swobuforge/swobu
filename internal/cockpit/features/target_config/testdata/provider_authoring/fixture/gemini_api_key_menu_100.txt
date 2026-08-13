@@ -1,0 +1,23 @@
+  authentication    Gemini API key · environment                                      close ↵
+   GEMINI_API_KEY
+     change credential                                                                enter ↵
+     use Google identity (ADC)                                                        select ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

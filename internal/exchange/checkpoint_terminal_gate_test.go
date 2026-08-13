@@ -66,3 +66,32 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 		t.Fatalf("optional history fingerprint = %#v, want absent", record.History)
 	}
 }
+
+func TestCheckpointCaptureRejectsNativeHandleForAnotherTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ref  canonical.ResponseRef
+	}{
+		{
+			name: "Responses",
+			ref: canonical.ResponseRef{SwobuID: "resp_capture", Responses: &canonical.ResponsesContinuation{
+				ProviderResponseID: "provider_response", TargetID: "other-target", TargetVersion: 1,
+			}},
+		},
+		{
+			name: "Gemini Interactions",
+			ref: canonical.ResponseRef{SwobuID: "resp_capture", Interactions: &canonical.InteractionsContinuation{
+				ProviderInteractionID: "interaction_provider", TargetID: "other-target", TargetVersion: 1,
+			}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capture := newCheckpointCaptureResponseStream(canonical.NewSliceEventReader([]canonical.Event{{
+				Kind: canonical.EventResponseIdentity, Payload: canonical.ResponseIdentityPayload{Response: tc.ref},
+			}}), canonical.ResponseBinding{SwobuID: "resp_capture", TargetID: "attempted-target", TargetVersion: 1})
+			if _, err := capture.Next(context.Background()); err == nil {
+				t.Fatal("checkpoint capture accepted a native handle for another target")
+			}
+		})
+	}
+}

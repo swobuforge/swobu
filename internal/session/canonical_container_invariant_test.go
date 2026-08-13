@@ -24,8 +24,8 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 	}
 
 	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"ID", "SessionID", "HistoryScheme", "History", "Request", "Response", "CreatedAt", "ExpiresAt"})
-	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "responsesPrevious"})
-	assertFields("responsesPrevious", reflect.TypeOf(responsesPrevious{}), []string{"response", "omitItems"})
+	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "previousHistory"})
+	assertFields("previousHistory", reflect.TypeOf(previousHistory{}), []string{"response", "omitItems"})
 	assertFields("requestItemRange", reflect.TypeOf(requestItemRange{}), []string{"start", "end"})
 
 	store := reflect.TypeOf((*Store)(nil)).Elem()

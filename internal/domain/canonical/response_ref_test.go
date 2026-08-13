@@ -1,6 +1,7 @@
 package canonical
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -8,6 +9,9 @@ import (
 func TestResponseIdentityDomainsHaveDistinctNominalTypes(t *testing.T) {
 	if reflect.TypeOf(SwobuResponseID("")) == reflect.TypeOf(ResponsesResponseID("")) {
 		t.Fatal("Swobu and provider response identities share a nominal type")
+	}
+	if reflect.TypeOf(InteractionID("")) == reflect.TypeOf(ResponsesResponseID("")) {
+		t.Fatal("Interactions and Responses provider identities share a nominal type")
 	}
 }
 
@@ -56,6 +60,61 @@ func TestResponsesContinuationValidateBound(t *testing.T) {
 				t.Fatalf("invalid native ref accepted: %#v", candidate)
 			}
 		})
+	}
+}
+
+func TestInteractionsContinuationIsBoundTypedAndCloned(t *testing.T) {
+	continuation := InteractionsContinuation{ProviderInteractionID: NewInteractionID("interaction_789"), TargetID: "target-a", TargetVersion: 7}
+	if err := continuation.ValidateBound(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*InteractionsContinuation){
+		"provider ID":    func(ref *InteractionsContinuation) { ref.ProviderInteractionID = "" },
+		"target ID":      func(ref *InteractionsContinuation) { ref.TargetID = "" },
+		"target version": func(ref *InteractionsContinuation) { ref.TargetVersion = 0 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := continuation
+			mutate(&candidate)
+			if err := candidate.ValidateBound(); err == nil {
+				t.Fatalf("invalid native ref accepted: %#v", candidate)
+			}
+		})
+	}
+
+	ref := ResponseRef{SwobuID: NewSwobuResponseID("resp_1"), Interactions: &continuation}
+	clone := ref.Clone()
+	clone.Interactions.TargetID = "target-b"
+	if ref.Interactions.TargetID != "target-a" {
+		t.Fatal("response reference clone aliases Interactions continuation")
+	}
+	ref.Responses = &ResponsesContinuation{ProviderResponseID: NewResponsesResponseID("response_1"), TargetID: "target-a", TargetVersion: 7}
+	if err := ref.ValidateCommittedResponse(); err == nil {
+		t.Fatal("committed response accepted two native continuation families")
+	}
+}
+
+func TestBoundResponseIdentityStreamBindsInteractionsContinuation(t *testing.T) {
+	bound := NewBoundResponseIdentityStream(NewSliceEventReader([]Event{{
+		Kind: EventResponseIdentity,
+		Payload: ResponseIdentityPayload{Response: ResponseRef{
+			Interactions: &InteractionsContinuation{ProviderInteractionID: NewInteractionID("interaction_789")},
+		}},
+		Meta: EventMetadataFields{NativeID: "interaction_789"},
+	}}), ResponseBinding{SwobuID: NewSwobuResponseID("resp_1"), TargetID: "target-a", TargetVersion: 7})
+	event, err := bound.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := event.Payload.(ResponseIdentityPayload)
+	if !ok || payload.Response.SwobuID != "resp_1" || payload.Response.Interactions == nil {
+		t.Fatalf("bound identity = %#v", event)
+	}
+	if got := payload.Response.Interactions; got.TargetID != "target-a" || got.TargetVersion != 7 || got.ProviderInteractionID != "interaction_789" {
+		t.Fatalf("bound Interactions continuation = %#v", got)
+	}
+	if event.Meta.NativeID != "" {
+		t.Fatalf("bound event leaked native metadata: %#v", event.Meta)
 	}
 }
 

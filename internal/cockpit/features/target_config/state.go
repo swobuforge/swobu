@@ -156,6 +156,20 @@ func genericCredentialRowVisible(w *TargetConfig) bool {
 	return setup.CredentialRequired || ok && provider.Credential.Requirement == profile.CredentialOptional
 }
 
+// ambientOrReferenceCredential projects only profile-owned authoring metadata.
+// Provider identity remains irrelevant to the generic HTTP form.
+func ambientOrReferenceCredential(w *TargetConfig) (profile.CredentialSpec, bool) {
+	setup := w.setupState()
+	if setup.RequiresLocator() {
+		return profile.CredentialSpec{}, false
+	}
+	provider, ok := providerProfileForSpec(setup.ProviderSpec)
+	if !ok || provider.Credential.Authoring != profile.CredentialAuthoringAmbientOrReference {
+		return profile.CredentialSpec{}, false
+	}
+	return provider.Credential, true
+}
+
 func providerAllowsNoCredential(w *TargetConfig) bool {
 	spec := strings.TrimSpace(w.Draft.Get().ProviderSpec)
 	if spec == "" {
@@ -242,11 +256,14 @@ func setupRequiresCredential(w *TargetConfig) bool   { return w.setupState().Req
 func targetUsesInteractiveAuth(w *TargetConfig) bool { return w.RequiresInteractiveAuth() }
 func targetCatalogLoading(w *TargetConfig) bool      { return w.catalogLoading() }
 func targetCatalogFailed(w *TargetConfig) bool       { return w.catalogFailed() }
-func targetCreateFailed(w *TargetConfig) bool        { return w.createFailed() }
-func targetReadyToCreate(w *TargetConfig) bool       { return w.readyToCreate() }
-func targetSaveVerb(w *TargetConfig) string          { return w.saveVerb() }
-func targetAuthPending(w *TargetConfig) bool         { return w.authSessionPending() }
-func targetAuthFailed(w *TargetConfig) bool          { return w.authSessionFailed() }
+func targetCatalogRetryable(w *TargetConfig) bool {
+	return strings.TrimSpace(w.Catalog.Get().Err) != "model catalog endpoint is unsupported"
+}
+func targetCreateFailed(w *TargetConfig) bool  { return w.createFailed() }
+func targetReadyToCreate(w *TargetConfig) bool { return w.readyToCreate() }
+func targetSaveVerb(w *TargetConfig) string    { return w.saveVerb() }
+func targetAuthPending(w *TargetConfig) bool   { return w.authSessionPending() }
+func targetAuthFailed(w *TargetConfig) bool    { return w.authSessionFailed() }
 
 // Lifecycle is the target form's independent open/closed/completed lifecycle.
 // Catalog, save, and ChatGPT login operations have their own state below.

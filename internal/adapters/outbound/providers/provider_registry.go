@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/fireworks"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/friendli"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/gemini"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/gmi"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/groq"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/kimi"
@@ -49,6 +50,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		deepseek.NewRuntime(client, credentials),
 		kimi.NewRuntime(client, credentials),
 		friendli.NewRuntime(client, credentials),
+		gemini.NewRuntime(client, credentials),
 		gmi.NewRuntime(client, credentials),
 		groq.NewRuntime(client, credentials),
 		fireworks.NewRuntime(client, credentials),

@@ -23,6 +23,7 @@ const chatGPTVisualLoginURL = "https://auth.openai.com/oauth/authorize?client_id
 
 var requiredProviderAuthoringVisualNames = []string{
 	"api_key_missing", "api_key_environment_ready",
+	"gemini_adc_default", "gemini_adc_menu", "gemini_api_key_environment", "gemini_api_key_menu", "gemini_credential_chooser", "gemini_adc_catalog_failed",
 	"credential_source_menu", "credential_environment_input", "credential_file_browser", "credential_paste_input", "credential_optional_remove",
 	"custom_loopback_anonymous", "custom_remote_credential_required", "custom_credential_header_picker", "custom_credential_header_open_value", "custom_ready",
 	"custom_manual_model",
@@ -121,6 +122,32 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "api_key_environment_ready", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
 			selectReadyModel(w, "gpt-4.1", "responses_stream")
+			return w
+		}},
+		{name: "gemini_adc_default", build: func(t *testing.T) tui.Component {
+			return ambientOrReferenceVisual("")
+		}},
+		{name: "gemini_adc_menu", build: func(t *testing.T) tui.Component {
+			a := ambientOrReferenceVisual("")
+			a.stage.Set(ambientOrReferenceMenu)
+			return a
+		}},
+		{name: "gemini_api_key_environment", build: func(t *testing.T) tui.Component {
+			return ambientOrReferenceVisual("env:GEMINI_API_KEY")
+		}},
+		{name: "gemini_api_key_menu", build: func(t *testing.T) tui.Component {
+			a := ambientOrReferenceVisual("env:GEMINI_API_KEY")
+			a.stage.Set(ambientOrReferenceMenu)
+			return a
+		}},
+		{name: "gemini_credential_chooser", build: func(t *testing.T) tui.Component {
+			a := ambientOrReferenceVisual("")
+			a.stage.Set(ambientOrReferenceChooser)
+			return a
+		}},
+		{name: "gemini_adc_catalog_failed", build: func(t *testing.T) tui.Component {
+			w := authoringConfig(t, profile.ProviderSpecGemini, "", "")
+			w.Catalog.Set(catalogOperationState{Err: "Gemini Google identity (ADC) is unavailable"})
 			return w
 		}},
 		{name: "credential_source_menu", render: func(t *testing.T, width int) string {
@@ -252,6 +279,13 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			return w
 		}},
 	}
+}
+
+func ambientOrReferenceVisual(ref string) *ambientOrReferenceAuthentication {
+	return AmbientOrReferenceAuthentication(AmbientOrReferenceAuthenticationProps{
+		ID: "gemini-auth", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key",
+		SuggestedEnvVar: "GEMINI_API_KEY", Ref: ref,
+	}).(*ambientOrReferenceAuthentication)
 }
 
 func renderModelPicker(t *testing.T, width int) string {

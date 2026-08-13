@@ -60,7 +60,7 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 	if phase.next < len(phase.calls) {
 		return beginMCPCall(s, phase)
 	}
-	next, replaceErr := s.prepared.AppendLocalRound(phase.responseItems, phase.results)
+	next, replaceErr := s.prepared.ContinueAfterLocalResult(phase.response, phase.results)
 	if replaceErr != nil {
 		s.phase = failedPhase{problem: canonical.InternalError("MCP tool loop produced invalid complete history: " + replaceErr.Error()), target: phase.target}
 		return reducerOutcome{nextState: s}, nil

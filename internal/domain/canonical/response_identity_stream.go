@@ -39,6 +39,12 @@ func (s *BoundResponseIdentityStream) Next(ctx context.Context) (Event, error) {
 			responses.TargetVersion = s.binding.TargetVersion
 			payload.Response.Responses = &responses
 		}
+		if payload.Response.Interactions != nil {
+			interactions := *payload.Response.Interactions
+			interactions.TargetID = s.binding.TargetID
+			interactions.TargetVersion = s.binding.TargetVersion
+			payload.Response.Interactions = &interactions
+		}
 		event.Payload = payload
 		event.Meta.NativeID = ""
 	}

@@ -381,75 +381,6 @@ func TestRejectedBeforeExecutionAdvancesNextCandidateWithoutRetry(t *testing.T) 
 	}
 }
 
-func TestReducerDoesNotReplayNativeEffectAfterAmbiguousDelivery(t *testing.T) {
-	key, err := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err := canonical.NewMCPConnectorSource(
-		"connector_mail",
-		canonical.Unspecified[[]string](),
-		canonical.NewMCPApprovalNever(),
-		canonical.MCPLoadingEager,
-		canonical.Unspecified[[]string](),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	namespace, err := canonical.NewMCPToolSource(key, "Mail", source, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
-	if err != nil {
-		t.Fatal(err)
-	}
-	declarations, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s := reducerTestState(t)
-	s.input.request = canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{
-			declarations,
-			testMessage(canonical.MessageRoleUser, "send the message"),
-		},
-	})
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "effect-a"),
-		requestpathTarget(t, "effect-b"),
-	}}
-	prepared := mustBeginSession(t, s.input.request)
-	s.prepared = &prepared
-
-	started := beginPreparedProviderCall(t, s)
-	active := activeProviderAttempt(t, started.nextState)
-	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
-		attemptID: active.id,
-		failure: mayHaveExecuted(provider.Unavailable(
-			canonical.NewBackendError("effect-a", http.StatusServiceUnavailable, "response unavailable", ""),
-		)),
-	}, reducerRuntime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if failed.command != nil {
-		t.Fatalf("ambiguous native effect failure issued %T", failed.command)
-	}
-	terminal, ok := failed.nextState.phase.(failedPhase)
-	if !ok {
-		t.Fatalf("phase = %T, want failedPhase", failed.nextState.phase)
-	}
-	if !strings.Contains(terminal.problem.Error(), "automatic replay stopped") {
-		t.Fatalf("terminal problem = %v", terminal.problem)
-	}
-	if len(failed.nextState.providerCallAttempts) != 1 {
-		t.Fatalf("provider calls = %d, want one", len(failed.nextState.providerCallAttempts))
-	}
-}
-
 func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
@@ -467,7 +398,6 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	s.providerCallAttempts = []providerCallAttempt{{
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
-		replaySafety:   providerReplaySafe,
 		retry:          true,
 		status:         providerCallAttemptFailed,
 		failure: &providerCallFailure{
@@ -481,59 +411,25 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	}
 }
 
-func TestProviderReplaySafetyUsesFinalCanonicalToolOwnership(t *testing.T) {
-	webTools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
-	webRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{
-			canonicaltest.ToolDeclarations(t, webTools.Declarations()...),
-			testMessage(canonical.MessageRoleUser, "search"),
-		},
-	})
-	if safety, err := providerReplaySafetyFor(webRequest); err != nil || safety != providerReplaySafe {
-		t.Fatalf("web-search safety = %d, %v", safety, err)
-	}
-
-	key, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "mail")
-	source, _ := canonical.NewMCPConnectorSource(
-		"connector_mail",
-		canonical.Unspecified[[]string](),
-		canonical.NewMCPApprovalNever(),
-		canonical.MCPLoadingEager,
-		canonical.Unspecified[[]string](),
-	)
-	namespace, _ := canonical.NewMCPToolSource(key, "Mail", source, nil)
-	nativeTools, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace})
-	nativeRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{
-			canonicaltest.ToolDeclarations(t, nativeTools.Declarations()...),
-			testMessage(canonical.MessageRoleUser, "send"),
-		},
-	})
-	if safety, err := providerReplaySafetyFor(nativeRequest); err != nil || safety != providerReplayUnsafe {
-		t.Fatalf("native MCP safety = %d, %v", safety, err)
-	}
-}
-
 func TestProviderRecoveryStopsAfterLocalEffectRound(t *testing.T) {
-	s := reducerTestState(t)
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "effect-a"),
-		requestpathTarget(t, "effect-b"),
-	}}
-	s.providerCallAttempts = []providerCallAttempt{{
-		candidateIndex: 0,
-		requestChoice:  providerRequestFullHistory,
-		providerRound:  1,
-		replaySafety:   providerReplaySafe,
-		status:         providerCallAttemptFailed,
-		failure: &providerCallFailure{
-			Attempt: mayHaveExecuted(provider.Unavailable(errors.New("post-MCP provider failure"))),
-		},
-	}}
-	if selection, ok := selectNextProviderCall(s); ok {
-		t.Fatalf("post-MCP recovery selected %#v", selection)
+	for _, choice := range []providerRequestChoice{providerRequestFullHistory, providerRequestPreferred} {
+		s := reducerTestState(t)
+		s.route = routePlan{targets: []routing.Target{
+			requestpathTarget(t, "effect-a"),
+			requestpathTarget(t, "effect-b"),
+		}}
+		s.providerCallAttempts = []providerCallAttempt{{
+			candidateIndex: 0,
+			requestChoice:  choice,
+			providerRound:  1,
+			status:         providerCallAttemptFailed,
+			failure: &providerCallFailure{
+				Attempt: mayHaveExecuted(provider.Unavailable(errors.New("post-MCP provider failure"))),
+			},
+		}}
+		if selection, ok := selectNextProviderCall(s); ok {
+			t.Fatalf("post-MCP choice %d recovery selected %#v", choice, selection)
+		}
 	}
 }
 
@@ -546,7 +442,6 @@ func TestProviderCancellationNeverSelectsRecovery(t *testing.T) {
 	s.providerCallAttempts = []providerCallAttempt{{
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
-		replaySafety:   providerReplaySafe,
 		status:         providerCallAttemptFailed,
 		failure: &providerCallFailure{
 			Attempt: mayHaveExecuted(provider.Cancelled(context.Canceled)),
@@ -569,10 +464,10 @@ func genericBackendRejection(target string) provider.AttemptFailure {
 	)))
 }
 
-// A replay-safe backend rejection advances directly to the next route
+// A first-round backend rejection advances directly to the next route
 // candidate, without the same-target retry reserved for unavailability. This is
 // the ordered-route fallback the candidate count already expresses.
-func TestReplaySafeBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t *testing.T) {
+func TestFirstRoundBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "reject-a"),
@@ -582,7 +477,6 @@ func TestReplaySafeBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
 		providerRound:  0,
-		replaySafety:   providerReplaySafe,
 		retry:          false,
 		status:         providerCallAttemptFailed,
 		failure:        &providerCallFailure{Attempt: genericBackendRejection("reject-a")},
@@ -590,34 +484,10 @@ func TestReplaySafeBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t
 
 	selection, ok := selectNextProviderCall(s)
 	if !ok {
-		t.Fatalf("replay-safe rejection selected nothing")
+		t.Fatalf("first-round rejection selected nothing")
 	}
 	if selection.candidateIndex != 1 || selection.retry {
-		t.Fatalf("replay-safe rejection selection = %#v, want next candidate without retry", selection)
-	}
-}
-
-// The identical rejection must not advance when execution may have occurred and
-// replay is unsafe (native MCP). Recovery stays gated by execution possibility;
-// widening the advancing cause never grants replay.
-func TestReplayUnsafeBackendRejectionDoesNotAdvance(t *testing.T) {
-	s := reducerTestState(t)
-	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "reject-a"),
-		requestpathTarget(t, "reject-b"),
-	}}
-	s.providerCallAttempts = []providerCallAttempt{{
-		candidateIndex: 0,
-		requestChoice:  providerRequestPreferred,
-		providerRound:  0,
-		replaySafety:   providerReplayUnsafe,
-		retry:          false,
-		status:         providerCallAttemptFailed,
-		failure:        &providerCallFailure{Attempt: genericBackendRejection("reject-a")},
-	}}
-
-	if selection, ok := selectNextProviderCall(s); ok {
-		t.Fatalf("replay-unsafe rejection selected %#v", selection)
+		t.Fatalf("first-round rejection selection = %#v, want next candidate without retry", selection)
 	}
 }
 
@@ -1014,7 +884,6 @@ func TestProviderCallAttemptRejectsConsumedAttemptKey(t *testing.T) {
 	call := providerCall{
 		backend:       provider.Backend{Target: provider.TargetSnapshot{TargetID: "target-a"}},
 		providerRound: 0,
-		replaySafety:  providerReplaySafe,
 	}
 	if _, err := beginProviderCallAttempt(
 		s,

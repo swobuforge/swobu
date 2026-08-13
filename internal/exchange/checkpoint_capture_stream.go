@@ -64,6 +64,11 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 			s.fail(err)
 			return canonical.Event{}, err
 		}
+		if payload.Response.Interactions != nil && (payload.Response.Interactions.TargetID != s.binding.TargetID || payload.Response.Interactions.TargetVersion != s.binding.TargetVersion) {
+			err := errors.New("response native handle does not match attempted target")
+			s.fail(err)
+			return canonical.Event{}, err
+		}
 	}
 	// Fold the event into projection state; the event itself is not retained.
 	if foldErr := s.projector.Apply(event); foldErr != nil && s.result.state == checkpointCapturePending {

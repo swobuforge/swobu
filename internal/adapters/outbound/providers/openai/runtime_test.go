@@ -169,13 +169,13 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, start, end, ok := prepared.ResponsesPrevious(backend.Target.TargetID, backend.Target.TargetVersion)
+	previous, ok := prepared.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion)
 	if !ok {
 		t.Fatal("captured official continuation was not available on resume")
 	}
 	secondDocument, _, err := backend.Codec.Encode(provider.Request{
 		Canonical: prepared.Request(), Delivery: delivery.BufferedDelivery(),
-		ResponsesPrevious: &provider.ResponsesPrevious{ProviderResponseID: id, OmitStart: start, OmitEnd: end},
+		PreviousHistory: &previous,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -50,10 +49,9 @@ type customToolCallItem struct {
 // EncodeInput is the local equivalent of wire.ProviderEncodeInput so this
 // package does not import wire.
 type EncodeInput struct {
-	Request           canonical.CanonicalRequest
-	ResponsesPrevious *provider.ResponsesPrevious
-	ToolNames         wire.ToolNames
-	Access            mcp.Access
+	Request         canonical.CanonicalRequest
+	PreviousHistory *provider.PreviousHistory
+	ToolNames       wire.ToolNames
 }
 
 // ProviderRequestDocument is the typed official Responses request before an
@@ -103,18 +101,19 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		return ProviderRequestDocument{}, err
 	}
 	requestTools := requestEnvironment.Declarations()
-	responsesRefined := input.ResponsesPrevious != nil
+	responsesRefined := false
 	inputRequest := req
-	if previous := input.ResponsesPrevious; previous != nil {
-		if previous.ProviderResponseID.String() == "" || previous.OmitStart > previous.OmitEnd || uint64(previous.OmitEnd) > uint64(len(items)) {
+	if previous := input.PreviousHistory; previous != nil && previous.Response.Responses != nil {
+		if previous.Response.Responses.ProviderResponseID.String() == "" || previous.OmitStart > previous.OmitEnd || uint64(previous.OmitEnd) > uint64(len(items)) {
 			return ProviderRequestDocument{}, fmt.Errorf("responses provider encoding received invalid previous-response data")
 		}
 		projected := make([]canonical.CanonicalItem, 0, len(items)-int(previous.OmitEnd-previous.OmitStart))
 		projected = append(projected, items[:previous.OmitStart]...)
 		projected = append(projected, items[previous.OmitEnd:]...)
 		inputRequest = req.WithItems(projected)
+		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(inputRequest, input.ToolNames, input.Access, changeLog, exchangeID)
+	payloadInput, err := encodeInput(inputRequest, input.ToolNames, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -129,11 +128,6 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		return ProviderRequestDocument{}, err
 	}
 	choiceTools := flatTools.Declarations
-	if flatTools.OmittedMCP > 0 {
-		if err := wire.ValidateFlatToolPolicy(policy, choiceTools); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	choice, err := encodeToolChoice(policy, choiceTools, input.ToolNames, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -150,14 +144,14 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		payload["instructions"] = instructions
 	}
 	var store *bool
-	if storeValue, specified := req.Responses().Store(); specified {
+	if storeValue, specified := req.Store(); specified {
 		store = &storeValue
 	}
 	requestVisibility, err := responsesToolVisibilityAt(preludeItems)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, err := encodeResponsesTools(requestTools, requestVisibility, input.ToolNames, input.Access, changeLog, exchangeID)
+	wireTools, err := encodeResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -194,7 +188,7 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		payload["text"] = &responsesTextDTO{Format: responsesTextFormatDTO{Type: string(canonical.OutputFormatText)}}
 	}
 	if responsesRefined {
-		payload["previous_response_id"] = input.ResponsesPrevious.ProviderResponseID
+		payload["previous_response_id"] = input.PreviousHistory.Response.Responses.ProviderResponseID
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -351,7 +345,7 @@ func responsesWireToolChoiceShape(choice any) string {
 	return "other"
 }
 
-func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	items := req.Items()
 	_, history, err := canonical.SplitRequestPrelude(items)
 	if err != nil {
@@ -368,7 +362,7 @@ func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, access mc
 		if err != nil {
 			return nil, err
 		}
-		return encodeConversation(req, items, environment.Declarations(), names, access, changeLog, exchangeID)
+		return encodeConversation(req, items, environment.Declarations(), names, changeLog, exchangeID)
 	}
 }
 
@@ -415,7 +409,7 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, access mcp.Access, changeLog *[]compat.Change, exchangeID string) ([]any, error) {
+func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
 	pendingContentCalls := make(map[canonical.ToolCallID]canonical.ToolKind)
@@ -448,7 +442,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if declarations.Scope() == canonical.ContextScopeRequest {
 				continue
 			}
-			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), declarations.Visibility(), names, access, changeLog, exchangeID)
+			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), declarations.Visibility(), names, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -596,7 +590,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if _, failed := result.Failure(); failed {
 				return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.CallOccurrence(result.CallID()), "Responses cannot represent a typed failed discovery result")
 			}
-			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), names, access, changeLog, exchangeID)
+			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), names, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}

@@ -7,19 +7,25 @@ import (
 	"reflect"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ResolvedRequest contains one complete canonical request and the optional
-// exact Responses history projection inherited from a checkpoint.
+// exact native previous-history relation inherited from a checkpoint.
 type ResolvedRequest struct {
-	request           canonical.CanonicalRequest
-	responsesPrevious *responsesPrevious
+	request         canonical.CanonicalRequest
+	previousHistory *previousHistory
 }
 
-type responsesPrevious struct {
+type previousHistory struct {
 	response  canonical.ResponseRef
 	omitItems requestItemRange
 }
+
+// previousHistory proves that response's typed native continuation represents
+// exactly omitItems. Items outside that provider-known prefix remain explicit
+// provider input. A newly completed provider response replaces any inherited
+// relation; local results appended afterward never enter its omit range.
 
 type requestItemRange struct {
 	start uint32
@@ -39,27 +45,50 @@ type Draft struct {
 }
 
 func (r ResolvedRequest) Request() canonical.CanonicalRequest { return r.request.Clone() }
-func (r ResolvedRequest) HasResponsesPrevious() bool          { return r.responsesPrevious != nil }
+func (r ResolvedRequest) HasPreviousHistory() bool            { return r.previousHistory != nil }
 
-// AppendLocalRound returns a new complete request after one Swobu-executed MCP
-// round. The local round is not represented by any prior provider response, so
-// reusable Responses continuation state is intentionally cleared.
-func (r ResolvedRequest) AppendLocalRound(responseItems, resultItems []canonical.CanonicalItem) (ResolvedRequest, error) {
+// ContinueAfterLocalResult makes an in-process local-effect continuation
+// equivalent to checkpointing the just-completed provider response and
+// immediately resuming with the local results. Canonical history retains the
+// provider response and results. The fresh response may replace inherited
+// continuation authority only for the prefix through its own items; results
+// remain outside that prefix and therefore stay explicit provider input.
+func (r ResolvedRequest) ContinueAfterLocalResult(response canonical.CanonicalResponse, results []canonical.CanonicalItem) (ResolvedRequest, error) {
+	responseRef := response.Response()
+	if err := responseRef.ValidateCommittedResponse(); err != nil {
+		return ResolvedRequest{}, fmt.Errorf("local tool round response is invalid: %w", err)
+	}
 	items := r.request.Items()
-	items = append(items, cloneCanonicalItems(responseItems)...)
-	items = append(items, cloneCanonicalItems(resultItems)...)
-	return newResolvedRequest(r.request.WithItems(items), nil)
+	items = append(items, cloneCanonicalItems(response.Items())...)
+	omitEnd, err := checkedRequestItemIndex(len(items))
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
+	items = append(items, cloneCanonicalItems(results)...)
+	request := r.request.WithItems(items)
+	prelude, _, err := canonical.SplitRequestPrelude(request.Items())
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
+	omitStart, err := checkedRequestItemIndex(len(prelude.Items()))
+	if err != nil {
+		return ResolvedRequest{}, err
+	}
+	return newResolvedRequest(request, newPreviousHistory(responseRef, requestItemRange{start: omitStart, end: omitEnd}))
 }
 
-// ResponsesPrevious returns exact provider lowering data only for the target
-// generation that produced the reusable OpenAI Responses state.
-func (r ResolvedRequest) ResponsesPrevious(targetID string, targetVersion uint64) (canonical.ResponsesResponseID, uint32, uint32, bool) {
-	previous := r.responsesPrevious
-	if previous == nil || previous.response.Responses == nil ||
-		!previous.response.Responses.AppliesTo(targetID, targetVersion) {
-		return "", 0, 0, false
+// PreviousHistory returns one closed exact-target history relation. The
+// provider codec selects its own typed continuation child from Response.
+func (r ResolvedRequest) PreviousHistory(targetID string, targetVersion uint64) (provider.PreviousHistory, bool) {
+	previous := r.previousHistory
+	if previous == nil || !r.request.PersistenceEligible() || !previous.responseAppliesTo(targetID, targetVersion) {
+		return provider.PreviousHistory{}, false
 	}
-	return previous.response.Responses.ProviderResponseID, previous.omitItems.start, previous.omitItems.end, true
+	return provider.PreviousHistory{
+		Response:  previous.response.Clone(),
+		OmitStart: previous.omitItems.start,
+		OmitEnd:   previous.omitItems.end,
+	}, true
 }
 
 // PreviousSwobuResponseID returns the explicit workspace-local checkpoint key
@@ -125,7 +154,7 @@ func materializeBeginRequest(request canonical.CanonicalRequest) (canonical.Cano
 		Controls:      request.Controls(),
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  canonical.Specify(request.OutputFormat()),
-		Responses:     request.Responses(),
+		Store:         request.StoreField(),
 	}), nil
 }
 
@@ -185,10 +214,10 @@ func (d Draft) Finalize(prepared canonical.CanonicalRequest) (ResolvedRequest, e
 	if err != nil {
 		return ResolvedRequest{}, err
 	}
-	return newResolvedRequest(materialized.request, newResponsesPrevious(d.checkpoint.Response.Response(), materialized.previousHistory))
+	return newResolvedRequest(materialized.request, newPreviousHistory(d.checkpoint.Response.Response(), materialized.previousHistory))
 }
 
-func newResolvedRequest(request canonical.CanonicalRequest, previous *responsesPrevious) (ResolvedRequest, error) {
+func newResolvedRequest(request canonical.CanonicalRequest, previous *previousHistory) (ResolvedRequest, error) {
 	if _, ok := request.PreviousResponse(); ok {
 		return ResolvedRequest{}, errors.New("resolved complete request contains previous response")
 	}
@@ -200,7 +229,7 @@ func newResolvedRequest(request canonical.CanonicalRequest, previous *responsesP
 			return ResolvedRequest{}, err
 		}
 	}
-	return ResolvedRequest{request: request.Clone(), responsesPrevious: cloneResponsesPrevious(previous)}, nil
+	return ResolvedRequest{request: request.Clone(), previousHistory: clonePreviousHistory(previous)}, nil
 }
 
 // resolveTurnContinuation validates tool-result correlation and writes the
@@ -323,7 +352,7 @@ func replaceRequestItems(request canonical.CanonicalRequest, items []canonical.C
 		Model: request.ModelField(), Items: items, PreviousResponse: previousPointer,
 		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
 		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
-		Responses: request.Responses(),
+		Store: request.StoreField(),
 	})
 }
 
@@ -346,7 +375,7 @@ func replaceComputeControls(request canonical.CanonicalRequest, controls canonic
 		Model: request.ModelField(), Items: request.Items(),
 		PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
 		ToolCallBatch: request.ToolCallBatchField(), Controls: controls, Reasoning: reasoning,
-		OutputFormat: request.OutputFormatField(), Responses: request.Responses(),
+		OutputFormat: request.OutputFormatField(), Store: request.StoreField(),
 	})
 }
 
@@ -359,7 +388,7 @@ func withoutPreviousResponse(request canonical.CanonicalRequest) (canonical.Cano
 		Controls:      request.Controls(),
 		Reasoning:     request.Reasoning(),
 		OutputFormat:  request.OutputFormatField(),
-		Responses:     request.Responses(),
+		Store:         request.StoreField(),
 	}), nil
 }
 
@@ -389,7 +418,7 @@ func materialize(previous Checkpoint, current canonical.CanonicalRequest) (mater
 		Controls:      current.Controls(),
 		Reasoning:     current.Reasoning(),
 		OutputFormat:  current.OutputFormatField(),
-		Responses:     current.Responses(),
+		Store:         current.StoreField(),
 	})
 	return materializedRequest{request: request, previousHistory: requestItemRange{start: start, end: end}}, nil
 }
@@ -401,36 +430,41 @@ func checkedRequestItemIndex(value int) (uint32, error) {
 	return uint32(value), nil
 }
 
-func newResponsesPrevious(response canonical.ResponseRef, replacedHistory requestItemRange) *responsesPrevious {
-	if response.Responses == nil {
+func newPreviousHistory(response canonical.ResponseRef, replacedHistory requestItemRange) *previousHistory {
+	if response.Responses == nil && response.Interactions == nil {
 		return nil
 	}
-	return &responsesPrevious{response: response.Clone(), omitItems: replacedHistory}
+	return &previousHistory{response: response.Clone(), omitItems: replacedHistory}
 }
 
-func cloneResponsesPrevious(previous *responsesPrevious) *responsesPrevious {
+func clonePreviousHistory(previous *previousHistory) *previousHistory {
 	if previous == nil {
 		return nil
 	}
-	return &responsesPrevious{response: previous.response.Clone(), omitItems: previous.omitItems}
+	return &previousHistory{response: previous.response.Clone(), omitItems: previous.omitItems}
 }
 
-func (p responsesPrevious) validateFor(request canonical.CanonicalRequest) error {
-	if p.response.Responses == nil {
-		return errors.New("responses previous relation is missing provider continuation")
+func (p previousHistory) validateFor(request canonical.CanonicalRequest) error {
+	if p.response.Responses == nil && p.response.Interactions == nil {
+		return errors.New("previous history relation is missing provider continuation")
 	}
 	items := request.Items()
 	if p.omitItems.start > p.omitItems.end || uint64(p.omitItems.end) > uint64(len(items)) {
-		return errors.New("responses previous history range is invalid")
+		return errors.New("previous history range is invalid")
 	}
 	prelude, _, err := canonical.SplitRequestPrelude(items)
 	if err != nil {
 		return fmt.Errorf("resolved request prelude is invalid: %w", err)
 	}
 	if uint32(len(prelude.Items())) != p.omitItems.start {
-		return errors.New("responses previous history range does not follow request prelude")
+		return errors.New("previous history range does not follow request prelude")
 	}
 	return nil
+}
+
+func (p previousHistory) responseAppliesTo(targetID string, targetVersion uint64) bool {
+	return (p.response.Responses != nil && p.response.Responses.AppliesTo(targetID, targetVersion)) ||
+		(p.response.Interactions != nil && p.response.Interactions.AppliesTo(targetID, targetVersion))
 }
 
 func cloneCanonicalItems(items []canonical.CanonicalItem) []canonical.CanonicalItem {

@@ -14,13 +14,13 @@ import (
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
 	var changes []compat.Change
-	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, ResponsesPrevious: input.ResponsesPrevious, ToolNames: input.ToolNames, Access: input.MCPAccess}, d, &changes, exchangeID, EncodeOptions{})
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, PreviousHistory: input.PreviousHistory, ToolNames: input.ToolNames}, d, &changes, exchangeID, EncodeOptions{})
 	return wire.ProviderEncodeResult{Document: document, Changes: changes}, err
 }
 
 func (ProviderRequestDocumentEncoder) EncodeProviderRequestWithOptions(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string, options EncodeOptions) (wire.ProviderEncodeResult, error) {
 	var changes []compat.Change
-	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, ResponsesPrevious: input.ResponsesPrevious, ToolNames: input.ToolNames, Access: input.MCPAccess}, d, &changes, exchangeID, options)
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: input.Request, PreviousHistory: input.PreviousHistory, ToolNames: input.ToolNames}, d, &changes, exchangeID, options)
 	return wire.ProviderEncodeResult{Document: document, Changes: changes}, err
 }
 

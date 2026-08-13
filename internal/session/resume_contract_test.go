@@ -1,16 +1,17 @@
 package session
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestResumeStoresCompleteRequestAndReturnsTargetGatedResponsesData(t *testing.T) {
+func TestResumeStoresCompleteRequestAndReturnsTargetGatedPreviousHistory(t *testing.T) {
 	target := testBackendTarget(t, "m")
-	previous := makeRequest("m", makeItems("turn one"), nil)
-	record := checkpoint("resp_previous", previous, makeResponse(
+	previousRequest := makeRequest("m", makeItems("turn one"), nil)
+	record := checkpoint("resp_previous", previousRequest, makeResponse(
 		mustMessageItem(canonical.MessageRoleAssistant, "answer one"),
 	), nativeResponses(target, "provider_previous"))
 	resolved, err := Resume(makeRequest("m", makeItems("turn two"), &canonical.ResponseRef{SwobuID: "resp_previous"}), record)
@@ -20,15 +21,167 @@ func TestResumeStoresCompleteRequestAndReturnsTargetGatedResponsesData(t *testin
 	if got := len(resolved.Request().Items()); got != 3 {
 		t.Fatalf("complete request items = %d, want 3", got)
 	}
-	id, start, end, ok := resolved.ResponsesPrevious(target.TargetID, target.TargetVersion)
-	if !ok || id.String() != "provider_previous" || start != 0 || end != 2 {
-		t.Fatalf("ResponsesPrevious = (%q, %d, %d, %t)", id, start, end, ok)
+	previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion)
+	if !ok || previous.Response.Responses == nil || previous.Response.Responses.ProviderResponseID.String() != "provider_previous" || previous.OmitStart != 0 || previous.OmitEnd != 2 {
+		t.Fatalf("PreviousHistory = (%#v, %t)", previous, ok)
 	}
-	if _, _, _, ok := resolved.ResponsesPrevious(target.TargetID+"-other", target.TargetVersion); ok {
+	if _, ok := resolved.PreviousHistory(target.TargetID+"-other", target.TargetVersion); ok {
 		t.Fatal("target ID mismatch reused Responses continuation")
 	}
-	if _, _, _, ok := resolved.ResponsesPrevious(target.TargetID, target.TargetVersion+1); ok {
+	if _, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion+1); ok {
 		t.Fatal("target version mismatch reused Responses continuation")
+	}
+}
+
+func TestContinueAfterLocalResultMatchesCheckpointResumeSemantics(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	base := makeRequest("m", makeItems("turn one"), nil)
+	resolved, err := Begin(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	callID, _ := canonical.NewToolCallID("call_equivalent")
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	ref := canonical.ResponseRef{SwobuID: "resp_equivalent", Interactions: nativeInteractions(target, "interaction_equivalent")}
+	response, err := canonical.NewCanonicalResponse(ref, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	local, err := resolved.ContinueAfterLocalResult(response, []canonical.CanonicalItem{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := resolved.Request()
+	external, err := Resume(canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}, PreviousResponse: &canonical.ResponseRef{SwobuID: ref.SwobuID},
+		ToolPolicy: scope.ToolPolicyField(), ToolCallBatch: scope.ToolCallBatchField(), Controls: scope.Controls(),
+		Reasoning: scope.Reasoning(), OutputFormat: scope.OutputFormatField(), Store: scope.StoreField(),
+	}), Checkpoint{Request: base, Response: response})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(local.Request(), external.Request()) {
+		t.Fatalf("local request = %#v, checkpoint/resume = %#v", local.Request(), external.Request())
+	}
+	localPrevious, localOK := local.PreviousHistory(target.TargetID, target.TargetVersion)
+	externalPrevious, externalOK := external.PreviousHistory(target.TargetID, target.TargetVersion)
+	if localOK != externalOK || !reflect.DeepEqual(localPrevious, externalPrevious) {
+		t.Fatalf("local previous = (%#v,%t), checkpoint/resume = (%#v,%t)", localPrevious, localOK, externalPrevious, externalOK)
+	}
+}
+
+func TestContinueAfterLocalResultValidatesFreshAuthorityAndFallbacks(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	callID, _ := canonical.NewToolCallID("call_fallback")
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+
+	for _, tc := range []struct {
+		name      string
+		store     canonical.Specified[bool]
+		ref       canonical.ResponseRef
+		targetID  string
+		version   uint64
+		wantFresh bool
+	}{
+		{name: "matching", ref: canonical.ResponseRef{SwobuID: "resp_matching", Interactions: nativeInteractions(target, "interaction_matching")}, targetID: target.TargetID, version: target.TargetVersion, wantFresh: true},
+		{name: "no native handle", ref: canonical.ResponseRef{SwobuID: "resp_portable"}, targetID: target.TargetID, version: target.TargetVersion},
+		{name: "store false", store: canonical.Specify(false), ref: canonical.ResponseRef{SwobuID: "resp_stateless", Interactions: nativeInteractions(target, "interaction_stateless")}, targetID: target.TargetID, version: target.TargetVersion},
+		{name: "target changed", ref: canonical.ResponseRef{SwobuID: "resp_target", Interactions: nativeInteractions(target, "interaction_target")}, targetID: target.TargetID + "-other", version: target.TargetVersion},
+		{name: "version changed", ref: canonical.ResponseRef{SwobuID: "resp_version", Interactions: nativeInteractions(target, "interaction_version")}, targetID: target.TargetID, version: target.TargetVersion + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, err := Begin(canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: makeItems("turn"), Store: tc.store}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := canonical.NewCanonicalResponse(tc.ref, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
+			if err != nil {
+				t.Fatal(err)
+			}
+			continued, err := resolved.ContinueAfterLocalResult(response, []canonical.CanonicalItem{result})
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous, ok := continued.PreviousHistory(tc.targetID, tc.version)
+			if ok != tc.wantFresh {
+				t.Fatalf("PreviousHistory = (%#v,%t), want present=%t", previous, ok, tc.wantFresh)
+			}
+			if len(continued.Request().Items()) != len(resolved.Request().Items())+2 {
+				t.Fatal("fallback changed complete canonical history")
+			}
+		})
+	}
+
+	resolved, _ := Begin(makeRequest("m", makeItems("turn"), nil))
+	invalid, _ := canonical.NewCanonicalResponse(canonical.ResponseRef{}, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
+	if _, err := resolved.ContinueAfterLocalResult(invalid, []canonical.CanonicalItem{result}); err == nil {
+		t.Fatal("local continuation accepted an uncommitted provider response")
+	}
+}
+
+func TestContinueAfterLocalResultRotatesOnlyNewestAuthority(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	resolved, _ := Begin(makeRequest("m", makeItems("turn"), nil))
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	for round := 1; round <= 2; round++ {
+		callID, _ := canonical.NewToolCallID("call_" + string(rune('0'+round)))
+		call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+		result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+		interaction := "interaction_" + string(rune('0'+round))
+		ref := canonical.ResponseRef{SwobuID: canonical.SwobuResponseID("resp_" + string(rune('0'+round))), Interactions: nativeInteractions(target, interaction)}
+		response, _ := canonical.NewCanonicalResponse(ref, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
+		var err error
+		resolved, err = resolved.ContinueAfterLocalResult(response, []canonical.CanonicalItem{result})
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion)
+		if !ok || previous.Response.Interactions.ProviderInteractionID.String() != interaction {
+			t.Fatalf("round %d previous history = (%#v,%t)", round, previous, ok)
+		}
+		if previous.OmitEnd != uint32(len(resolved.Request().Items())-1) {
+			t.Fatalf("round %d omit end = %d, want explicit newest result", round, previous.OmitEnd)
+		}
+	}
+}
+
+func TestResumeReturnsInteractionsHistoryOnlyForMatchingPersistentTarget(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	previousRequest := makeRequest("m", makeItems("turn one"), nil)
+	record := interactionsCheckpoint("resp_previous", previousRequest, makeResponse(
+		mustMessageItem(canonical.MessageRoleAssistant, "answer one"),
+	), nativeInteractions(target, "interaction_previous"))
+	current := makeRequest("m", makeItems("turn two"), &canonical.ResponseRef{SwobuID: "resp_previous"})
+	resolved, err := Resume(current, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion)
+	if !ok || previous.Response.Responses != nil || previous.Response.Interactions == nil || previous.Response.Interactions.ProviderInteractionID.String() != "interaction_previous" {
+		t.Fatalf("Interactions PreviousHistory = (%#v, %t)", previous, ok)
+	}
+	if _, ok := resolved.PreviousHistory(target.TargetID+"-other", target.TargetVersion); ok {
+		t.Fatal("target ID mismatch reused Interactions continuation")
+	}
+	if _, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion+1); ok {
+		t.Fatal("target version mismatch reused Interactions continuation")
+	}
+
+	storeFalse := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: makeItems("turn two"),
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"}, Store: canonical.Specify(false),
+	})
+	stateless, err := Resume(storeFalse, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stateless.PreviousHistory(target.TargetID, target.TargetVersion); ok {
+		t.Fatal("store:false exposed Interactions native continuation")
 	}
 }
 
@@ -59,12 +212,12 @@ func TestDraftFinalizeAllowsPreludePreparationAndRejectsHistoryRewrite(t *testin
 		{name: "reorder items", mutated: prepared.WithItems([]canonical.CanonicalItem{history[0], history[2], history[1], history[3]})},
 		{name: "change model", mutated: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("other"), Items: history, ToolPolicy: prepared.ToolPolicyField(), ToolCallBatch: prepared.ToolCallBatchField(),
-			Controls: prepared.Controls(), Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Responses: prepared.Responses(),
+			Controls: prepared.Controls(), Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Store: prepared.StoreField(),
 		})},
 		{name: "change controls", mutated: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: prepared.ModelField(), Items: history, ToolPolicy: prepared.ToolPolicyField(), ToolCallBatch: prepared.ToolCallBatchField(),
 			Controls:  canonical.GenerationControls{Limits: canonical.GenerationLimits{MaxOutputTokens: canonical.NewOptionalInt(101)}},
-			Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Responses: prepared.Responses(),
+			Reasoning: prepared.Reasoning(), OutputFormat: prepared.OutputFormatField(), Store: prepared.StoreField(),
 		})},
 	}
 	for _, test := range cases {
@@ -76,7 +229,7 @@ func TestDraftFinalizeAllowsPreludePreparationAndRejectsHistoryRewrite(t *testin
 	}
 }
 
-func TestAppendLocalRoundValidatesToolCorrelationAndClearsResponsesContinuation(t *testing.T) {
+func TestContinueAfterLocalResultPreservesHistoryAndRotatesAuthority(t *testing.T) {
 	target := testBackendTarget(t, "m")
 	previous := makeRequest("m", makeItems("turn one"), nil)
 	resolved, err := Resume(
@@ -96,15 +249,21 @@ func TestAppendLocalRoundValidatesToolCorrelationAndClearsResponsesContinuation(
 	if err != nil {
 		t.Fatal(err)
 	}
-	local, err := resolved.AppendLocalRound(
-		[]canonical.CanonicalItem{call},
-		[]canonical.CanonicalItem{result},
-	)
+	fresh := canonical.ResponseRef{SwobuID: "resp_fresh", Responses: nativeResponses(target, "provider_fresh")}
+	providerResponse, err := canonical.NewCanonicalResponse(fresh, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if local.HasResponsesPrevious() {
-		t.Fatal("local MCP round retained provider continuation")
+	local, err := resolved.ContinueAfterLocalResult(providerResponse, []canonical.CanonicalItem{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, ok := local.PreviousHistory(target.TargetID, target.TargetVersion)
+	if !ok || rotated.Response.Responses == nil || rotated.Response.Responses.ProviderResponseID.String() != "provider_fresh" {
+		t.Fatalf("local MCP round previous history = (%#v, %t), want fresh provider response", rotated, ok)
+	}
+	if rotated.OmitStart != 0 || rotated.OmitEnd != uint32(len(resolved.Request().Items())+1) {
+		t.Fatalf("local MCP round omit range = %d:%d, want prefix through provider call", rotated.OmitStart, rotated.OmitEnd)
 	}
 	if len(local.Request().Items()) != len(resolved.Request().Items())+2 {
 		t.Fatal("local MCP round did not append complete history")
@@ -118,10 +277,48 @@ func TestAppendLocalRoundValidatesToolCorrelationAndClearsResponsesContinuation(
 	}
 	foreignID, _ := canonical.NewToolCallID("call_other")
 	foreign, _ := canonical.NewToolResultItem(foreignID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
-	if _, err := resolved.AppendLocalRound([]canonical.CanonicalItem{call}, []canonical.CanonicalItem{foreign}); err == nil {
+	if _, err := resolved.ContinueAfterLocalResult(providerResponse, []canonical.CanonicalItem{foreign}); err == nil {
 		t.Fatal("local MCP round accepted a foreign result")
 	}
-	if _, err := resolved.AppendLocalRound([]canonical.CanonicalItem{call}, []canonical.CanonicalItem{result, result}); err == nil {
+	if _, err := resolved.ContinueAfterLocalResult(providerResponse, []canonical.CanonicalItem{result, result}); err == nil {
 		t.Fatal("local MCP round accepted a duplicate result")
+	}
+}
+
+func TestContinueAfterLocalResultReplacesInheritedInteractionsAuthority(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	previous := makeRequest("m", makeItems("turn one"), nil)
+	resolved, err := Resume(
+		makeRequest("m", makeItems("turn two"), &canonical.ResponseRef{SwobuID: "resp_previous"}),
+		interactionsCheckpoint("resp_previous", previous, makeResponse(mustMessageItem(canonical.MessageRoleAssistant, "answer")), nativeInteractions(target, "interaction_previous")),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion); !ok {
+		t.Fatal("matching Interactions continuation was not available before local MCP round")
+	}
+	callID, err := canonical.NewToolCallID("call_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"q":"one"}`)))
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := canonical.ResponseRef{SwobuID: "resp_current", Interactions: nativeInteractions(target, "interaction_current")}
+	providerResponse, err := canonical.NewCanonicalResponse(fresh, "m", []canonical.CanonicalItem{call}, canonical.Completed("requires_action"), canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := resolved.ContinueAfterLocalResult(providerResponse, []canonical.CanonicalItem{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, ok := local.PreviousHistory(target.TargetID, target.TargetVersion)
+	if !ok || rotated.Response.Interactions == nil || rotated.Response.Interactions.ProviderInteractionID.String() != "interaction_current" {
+		t.Fatalf("local MCP round previous history = (%#v, %t), want fresh Interactions continuation", rotated, ok)
 	}
 }

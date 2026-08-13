@@ -12,6 +12,9 @@ func beginMCPPreparation(s exchangeState, runner runtimeBundle) (reducerOutcome,
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: MCP preparation requires a session draft")
 	}
 	s.phase = preparingMCPPhase{}
+	// MCP preparation is deliberately exchange-scoped and precedes provider
+	// selection. One Run freezes the catalog and owns every MCP effect across
+	// route candidates; providers receive only AttemptRequest's callable view.
 	return reducerOutcome{
 		nextState: s,
 		command: prepareMCPCommand{

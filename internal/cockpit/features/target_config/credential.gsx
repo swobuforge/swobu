@@ -72,6 +72,7 @@ type CredentialFieldProps struct {
 	AutoFocus    bool
 	Apply        func(string)
 	Store        func(string) (string, error)
+	ChoiceAction string
 }
 
 func newCredentialField(props CredentialFieldProps) *credentialRow {
@@ -249,11 +250,13 @@ func CredentialRemoveOption(r *credentialRow) *ui.SelectableRow {
 }
 
 func CredentialEnvOption(r *credentialRow) *ui.SelectableRow {
+	action := strings.TrimSpace(r.props.ChoiceAction)
+	if action == "" { action = "enter ↵" }
 	row := ui.NewSelectableRow(
 		r.key("env-action"),
 		"",
 		"environment variable",
-		"enter ↵",
+		action,
 		r.openEnv,
 	)
 	row.AutoFocus = true
@@ -261,22 +264,26 @@ func CredentialEnvOption(r *credentialRow) *ui.SelectableRow {
 }
 
 func CredentialFileOption(r *credentialRow) *ui.SelectableRow {
+	action := strings.TrimSpace(r.props.ChoiceAction)
+	if action == "" { action = "enter ↵" }
 	row := ui.NewSelectableRow(
 		r.key("file-action"),
 		"",
 		"file",
-		"enter ↵",
+		action,
 		r.openFile,
 	)
 	return row
 }
 
 func CredentialPasteSecretOption(r *credentialRow) *ui.SelectableRow {
+	action := strings.TrimSpace(r.props.ChoiceAction)
+	if action == "" { action = "enter ↵" }
 	row := ui.NewSelectableRow(
 		r.key("paste-secret-action"),
 		"",
 		"paste credential",
-		"enter ↵",
+		action,
 		r.openPaste,
 	)
 	return row

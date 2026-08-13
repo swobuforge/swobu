@@ -13,17 +13,6 @@ import (
 type FlatToolSet struct {
 	Declarations      []canonical.ToolDeclaration
 	RemovedNamespaces int
-	OmittedMCP        int
-}
-
-// ValidateFlatToolPolicy proves that declaration erasure left the caller's
-// selection constraint executable. A dependency on an erased declaration is
-// target incompatibility, not malformed client intent.
-func ValidateFlatToolPolicy(policy canonical.ToolPolicy, declarations []canonical.ToolDeclaration) error {
-	if err := policy.ValidateForTools(declarations); err != nil {
-		return provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "flat tool projection cannot preserve the canonical tool-selection constraint")
-	}
-	return nil
 }
 
 // HasDeferredTools reports whether any declaration contribution or loaded
@@ -52,15 +41,13 @@ func PrepareFlatToolSet(
 ) (FlatToolSet, error) {
 	var flattened []canonical.ToolDeclaration
 	flattenedNamespaces := 0
-	omittedMCP := 0
 	var appendDeclaration func(canonical.ToolDeclaration) error
 	appendDeclaration = func(declaration canonical.ToolDeclaration) error {
 		if declaration.Kind() == canonical.ToolKindMCP {
-			// Residual provider-native MCP is not user-healable on flat targets.
-			// Drop only its declaration; the caller validates selection policy
-			// against the surviving surface before dispatch.
-			omittedMCP++
-			return nil
+			// Exchange owns MCP source resolution and execution. Reaching a
+			// provider codec with a residual source would otherwise create a
+			// second execution owner or silently erase an available tool surface.
+			return provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()), "provider lowering received an MCP source before Exchange projection")
 		}
 		namespace, ok := declaration.Namespace()
 		if !ok {
@@ -92,5 +79,5 @@ func PrepareFlatToolSet(
 		}
 		seen[wireIdentity] = struct{}{}
 	}
-	return FlatToolSet{Declarations: flattened, RemovedNamespaces: flattenedNamespaces, OmittedMCP: omittedMCP}, nil
+	return FlatToolSet{Declarations: flattened, RemovedNamespaces: flattenedNamespaces}, nil
 }

@@ -319,6 +319,37 @@ func TestGenericProviderPathsNameOnlyRetainedSpecialWorkflows(t *testing.T) {
 	}
 }
 
+// TestHTTPProviderAuthenticationAuthoringStaysProfileDriven fixes the generic
+// HTTP form topology: profile metadata selects exactly one credential surface,
+// and the reusable ambient/reference component has no provider identity or
+// TargetConfig authority.
+func TestHTTPProviderAuthenticationAuthoringStaysProfileDriven(t *testing.T) {
+	httpForm := mustReadFile(t, "provider_http.gsx")
+	for _, required := range []string{
+		"ambientOrReferenceCredential",
+		"@AmbientOrReferenceAuthentication",
+		"@CredentialControlRegion",
+		"if credential, ok := ambientOrReferenceCredential",
+		"} else if genericCredentialRowVisible",
+	} {
+		if !strings.Contains(httpForm, required) {
+			t.Fatalf("provider_http.gsx must select one profile-authored credential surface; missing %q", required)
+		}
+	}
+
+	component := mustReadFile(t, "ambient_or_reference_authentication.gsx")
+	for _, forbidden := range []string{"TargetConfig", "ProviderSpec", "Gemini", "Bedrock", "changeCredentialRef"} {
+		if strings.Contains(component, forbidden) {
+			t.Fatalf("ambient/reference component contains forbidden feature or provider authority %q", forbidden)
+		}
+	}
+	for _, required := range []string{"AmbientLabel", "ReferenceLabel", "SuggestedEnvVar", "Apply", "Store", "CredentialChooser"} {
+		if !strings.Contains(component, required) {
+			t.Fatalf("ambient/reference component is missing props-down/events-up fact %q", required)
+		}
+	}
+}
+
 func TestTargetConfigMountsUIRowsWithoutForwardingWrappers(t *testing.T) {
 	for _, path := range mustGlob(t, "*.gsx") {
 		src := mustReadFile(t, path)

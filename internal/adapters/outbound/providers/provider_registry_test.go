@@ -116,9 +116,6 @@ func TestAdvertisedProviderProtocolsLeaveDiscoverySupportUnknownWithoutExactTarg
 			target := advertisedProtocolTarget(manifest.ProviderID, protocol)
 			got := registry.ResolveTargetSupport(target).Get(canonical.RequestToolsDiscovery)
 			want := provider.SupportUnknown
-			if manifest.ProviderID == profile.ProviderSpecFireworks && protocol.Kind == protocolkind.Responses {
-				want = provider.SupportSupported
-			}
 			if got != want {
 				t.Fatalf("%s tool discovery support = %v, want %v", key, got, want)
 			}

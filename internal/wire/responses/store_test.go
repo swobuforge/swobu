@@ -39,7 +39,7 @@ func TestResponsesStorePreservesOccurrenceThroughDecodeAndEncode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode store %s: %v", test.name, err)
 			}
-			gotValue, gotSpecified := decoded.Request.Request.Responses().Store()
+			gotValue, gotSpecified := decoded.Request.Request.Store()
 			if gotValue != test.wantValue || gotSpecified != test.wantSpecified {
 				t.Fatalf("decoded store = (%t,%t), want (%t,%t)", gotValue, gotSpecified, test.wantValue, test.wantSpecified)
 			}

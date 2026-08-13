@@ -51,6 +51,22 @@ func newCredentialRow(target *TargetConfig, autoFocus bool) *credentialRow {
 	return row
 }
 
+func ambientOrReferenceAuthenticationProps(target *TargetConfig, credential profile.CredentialSpec) AmbientOrReferenceAuthenticationProps {
+	return AmbientOrReferenceAuthenticationProps{
+		ID:              credentialRegionKey(target),
+		AmbientLabel:    credential.AmbientLabel,
+		ReferenceLabel:  credential.ReferenceLabel,
+		SuggestedEnvVar: credential.SuggestedEnvVar,
+		Ref:             target.Draft.Get().CredentialRef,
+		Apply: func(ref string) {
+			target.changeCredentialRef(strings.TrimSpace(ref))
+		},
+		Store: func(secret string) (string, error) {
+			return target.storePastedCredential(target.actionContext(), secret)
+		},
+	}
+}
+
 func (w *TargetConfig) changeCredentialRef(ref string) {
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.CredentialRef = strings.TrimSpace(ref)

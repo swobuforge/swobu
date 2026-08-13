@@ -103,11 +103,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 			return ProviderRequestDocument{}, err
 		}
 	}
-	if flatTools.OmittedMCP > 0 {
-		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsKind, compat.Omission); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	}
 	tools = flatTools.Declarations
 	conversation := make([]canonical.CanonicalItem, 0, len(items))
 	historyStarted := false
@@ -139,11 +134,6 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
 		return ProviderRequestDocument{}, err
-	}
-	if flatTools.OmittedMCP > 0 {
-		if err := wire.ValidateFlatToolPolicy(policy, tools); err != nil {
-			return ProviderRequestDocument{}, err
-		}
 	}
 	choice, err := encodeChatCompletionsToolChoice(policy, tools, names, changeLog, exchangeID)
 	if err != nil {

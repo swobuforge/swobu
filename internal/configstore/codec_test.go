@@ -30,6 +30,7 @@ workspaces:
               - {id: friendli, model: ENDPOINT_ID:OPTIONAL_ADAPTER_ROUTE, protocol: messages_stream, connection: {friendli: {base_url: https://friendli-gateway.example/v1}}}
               - {id: nebius, model: dedicated-routing-key, protocol: responses_stream, connection: {nebius: {base_url: https://api.tokenfactory.us-central1.nebius.com/v1, credential: env:NEBIUS_API_KEY}}}
               - {id: gmi, model: exact-model, protocol: messages_stream, connection: {gmi: {base_url: https://gmi.example/v1, credential: env:GMI_API_KEY}}}
+              - {id: gemini, model: operator-selected-model, connection: {gemini: {credential: env:GEMINI_API_KEY}}}
               - {id: groq, model: served-model, protocol: responses_stream, connection: {groq: {credential: env:GROQ_API_KEY}}}
               - {id: fireworks, model: accounts/acme/deployments/deploy-1, protocol: responses_stream, connection: {fireworks: {base_url: https://direct.example/v1, credential: env:FIREWORKS_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
@@ -75,6 +76,9 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if !strings.Contains(string(raw), "kimi:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
 		t.Fatalf("Kimi connection or derived protocol persistence is wrong:\n%s", raw)
 	}
+	if !strings.Contains(string(raw), "gemini:") || !strings.Contains(string(raw), "credential: env:GEMINI_API_KEY") || strings.Contains(string(raw), "protocol: interactions_stream") {
+		t.Fatalf("Gemini connection or derived protocol persistence is wrong:\n%s", raw)
+	}
 	if !strings.Contains(string(raw), "together:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
 		t.Fatalf("Together AI connection or derived protocol persistence is wrong:\n%s", raw)
 	}
@@ -110,6 +114,40 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "fireworks:") || !strings.Contains(string(raw), "base_url: https://direct.example/v1") || !strings.Contains(string(raw), "credential: env:FIREWORKS_API_KEY") {
 		t.Fatalf("Fireworks exact endpoint/credential changed during round trip:\n%s", raw)
+	}
+}
+
+func TestGeminiAmbientAndExplicitCredentialRoundTripWithoutAuthResidue(t *testing.T) {
+	for name, connection := range map[string]string{
+		"ambient ADC":      "connection: {gemini: {}}",
+		"explicit API key": "connection: {gemini: {credential: env:GEMINI_API_KEY}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := []byte("schema_version: 1\nworkspaces:\n  dev:\n    default_route: chat\n    routes:\n      chat:\n        tiers:\n          - targets:\n              - {id: gemini, model: gemini-model, " + connection + "}\n")
+			config, err := decode(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := encode(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := decode(encoded); err != nil {
+				t.Fatalf("decode round trip: %v\n%s", err, encoded)
+			}
+			text := string(encoded)
+			for _, forbidden := range []string{"auth_mode", "quota_project", "access_token", "project_id", "interactions_stream"} {
+				if strings.Contains(text, forbidden) {
+					t.Fatalf("Gemini round trip persisted %q:\n%s", forbidden, text)
+				}
+			}
+			if name == "ambient ADC" && !strings.Contains(text, "gemini: {}") {
+				t.Fatalf("ambient Gemini connection changed shape:\n%s", text)
+			}
+			if name == "explicit API key" && !strings.Contains(text, "credential: env:GEMINI_API_KEY") {
+				t.Fatalf("explicit Gemini credential missing:\n%s", text)
+			}
+		})
 	}
 }
 

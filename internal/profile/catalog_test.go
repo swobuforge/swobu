@@ -17,6 +17,9 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("chatgpt") {
 		t.Fatal("chatgpt provider missing from catalog")
 	}
+	if !SupportsSpec("gemini") {
+		t.Fatal("gemini provider missing from catalog")
+	}
 	if !SupportsSpec("anthropic") {
 		t.Fatal("anthropic provider spec should be supported")
 	}
@@ -80,8 +83,8 @@ func TestCatalog_SpecSupport(t *testing.T) {
 // durable shape reasons, never recreate this inventory.
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 23 {
-		t.Fatalf("provider profile count = %d, want 23", len(profiles))
+	if len(profiles) != 24 {
+		t.Fatalf("provider profile count = %d, want 24", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -98,7 +101,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 	for _, providerID := range []ProviderID{
 		ProviderSpecOllama, ProviderSpecLMStudio, ProviderSpecVLLM,
-		ProviderSpecOpenAI, ProviderSpecChatGPT, ProviderSpecAnthropic,
+		ProviderSpecOpenAI, ProviderSpecChatGPT, ProviderSpecGemini, ProviderSpecAnthropic,
 		ProviderSpecDeepSeek, ProviderSpecKimi, ProviderSpecFriendli,
 		ProviderSpecTogether, ProviderSpecDeepInfra, ProviderSpecScaleway,
 		ProviderSpecSambaNova, ProviderSpecStepFun, ProviderSpecNebius,
@@ -112,7 +115,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 20,
+		routing.ConnectionShapeStandard: 21,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -164,6 +167,22 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if got, ok := DerivedProtocolForSpec("zai"); !ok || got != "chat_completions_stream" {
 		t.Fatalf("Z.AI derived protocol = %q, %v", got, ok)
+	}
+	if got := DefaultExecuteBaseURL("gemini"); got != "https://generativelanguage.googleapis.com/v1" {
+		t.Fatalf("Gemini API default base URL = %q", got)
+	}
+	if RequiresCredential("gemini", DefaultExecuteBaseURL("gemini")) || DefaultEnvKeyForSpec("gemini") != "GEMINI_API_KEY" {
+		t.Fatal("Gemini API credential policy is wrong")
+	}
+	gemini, _ := profileFor("gemini")
+	if gemini.Credential.Authoring != CredentialAuthoringAmbientOrReference || gemini.Credential.AmbientLabel != "Google identity (ADC)" || gemini.Credential.ReferenceLabel != "Gemini API key" {
+		t.Fatalf("Gemini credential authoring = %#v", gemini.Credential)
+	}
+	if got, ok := DerivedProtocolForSpec("gemini"); !ok || got != "interactions_stream" {
+		t.Fatalf("Gemini derived protocol = %q, %v", got, ok)
+	}
+	if got := ConcreteProviderProtocolsForSpec("gemini"); !slices.Equal(got, []string{"interactions_stream"}) {
+		t.Fatalf("Gemini protocols = %#v", got)
 	}
 	if got, ok := DerivedProtocolForSpec("together"); !ok || got != "chat_completions_stream" {
 		t.Fatalf("Together AI derived protocol = %q, %v", got, ok)
@@ -435,9 +454,10 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		"together":   {LocatorSpec{Kind: LocatorFixed, Default: "https://api.together.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "TOGETHER_API_KEY"}, "model"},
 		"openai":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
 		"chatgpt":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive}, "model"},
+		"gemini":     {LocatorSpec{Kind: LocatorFixed, Default: "https://generativelanguage.googleapis.com/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key"}, "model"},
 		"anthropic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
 		"openrouter": {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
-		"bedrock":    {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK"}, "model"},
+		"bedrock":    {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK", AmbientLabel: "AWS identity", ReferenceLabel: "Bedrock API key"}, "model"},
 		"azure":      {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
 		"custom":     {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback, Authoring: CredentialAuthoringReference}, "model"},
 	}

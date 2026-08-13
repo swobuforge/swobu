@@ -1,9 +1,11 @@
 package wire
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -58,7 +60,7 @@ func TestPrepareFlatToolSetRejectsTargetIdentityCollision(t *testing.T) {
 	}
 }
 
-func TestPrepareFlatToolSetOmitsResidualMCPAndRetainsSibling(t *testing.T) {
+func TestPrepareFlatToolSetRejectsResidualMCP(t *testing.T) {
 	function := canonicaltest.MustFunctionTool(
 		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"),
 		"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
@@ -67,13 +69,11 @@ func TestPrepareFlatToolSetOmitsResidualMCPAndRetainsSibling(t *testing.T) {
 	source, _ := canonical.NewMCPConnectorSource("connector_mail", canonical.Unspecified[[]string](), canonical.NewMCPApprovalNever(), canonical.MCPLoadingEager, canonical.Unspecified[[]string]())
 	mcpDeclaration, _ := canonical.NewMCPToolSource(key, "", source, nil)
 
-	got, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) (string, error) {
+	_, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) (string, error) {
 		return tool.Key().Name(), nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.OmittedMCP != 1 || len(got.Declarations) != 1 || got.Declarations[0].Key() != function.Key() {
-		t.Fatalf("flat projection = %#v", got)
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T %v, want target incompatibility", err, err)
 	}
 }
