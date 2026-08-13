@@ -131,3 +131,26 @@ func TestMissingCredentialOwnsFirstVisibleSelection(t *testing.T) {
 		t.Fatalf("credential selection did not open its source menu:\n%s", frame)
 	}
 }
+
+func TestKimiMissingCredentialRendersCredentialControlAfterSetupTransition(t *testing.T) {
+	config := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+	config.Open()
+	config.SelectProvider(string(profile.ProviderSpecKimi))
+	config.ContinueSetup()
+	harness, err := testkit.NewHarness(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+
+	frame := harness.Frame()
+	if !strings.Contains(frame, "> credential") {
+		t.Fatalf("Kimi setup must render the required credential control:\n%s", frame)
+	}
+
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if frame = harness.Frame(); !strings.Contains(frame, "environment variable") {
+		t.Fatalf("Kimi credential control did not open its source menu:\n%s", frame)
+	}
+}

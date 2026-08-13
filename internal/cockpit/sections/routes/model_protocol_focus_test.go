@@ -50,3 +50,40 @@ func TestAddTargetModelSelectionStaysLocalOnDefaultedProtocol(t *testing.T) {
 		t.Fatalf("create handoff must continue to the next section action:\n%s", frame)
 	}
 }
+
+func TestAddTargetProviderSelectionKeepsInlineConfigMounted(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Enabled: true}
+	section := Section(readmodel.WorkspaceReadModel{
+		ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting,
+		Routes:          []readmodel.RouteReadModel{route},
+		ProviderOptions: []readmodel.ProviderOptionReadModel{{ProviderSpec: "kimi", DisplayName: "Kimi"}},
+	}, nil)
+	section.State.ExpandedRoute.Set(route.ID)
+	section.AddTarget(route)
+
+	h, err := testkit.NewHarness(section)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	for range 16 {
+		if frame := h.Frame(); strings.Contains(frame, "> Kimi") {
+			break
+		}
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	if frame := h.Frame(); !strings.Contains(frame, "> Kimi") {
+		t.Fatalf("provider picker did not select Kimi through mounted traversal:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	frame := h.Frame()
+	if !strings.Contains(frame, "new target · Kimi") || !strings.Contains(frame, "credential") {
+		t.Fatalf("provider selection closed the inline target config:\n%s", frame)
+	}
+	if got := section.State.AddTargetRoute.Get(); got != route.ID {
+		t.Fatalf("add target route = %q, want %q", got, route.ID)
+	}
+}

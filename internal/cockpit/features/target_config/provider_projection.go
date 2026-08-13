@@ -111,11 +111,18 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 }
 
 // currentTargetDraft applies the shared transient authoring spine to the
-// durable draft. Bedrock owns region and explicit endpoint directly on the
-// draft, so the generic locator buffer is ignored for that provider.
+// durable draft. The generic locator buffer also carries an operational base
+// URL for fixed profiles so catalog probes have an endpoint, but that runtime
+// default is not an operator-authored durable locator. Bedrock owns region and
+// explicit endpoint directly on the draft.
 func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol string, routeID readmodel.RouteID) readmodel.TargetDraft {
-	if profile.ProviderID(draft.ProviderSpec) != profile.ProviderSpecBedrock {
+	if profile.ProviderID(draft.ProviderSpec) == profile.ProviderSpecBedrock {
+		// Bedrock's region is already an authored draft fact; BaseURL is its
+		// operational inference endpoint and must never replace that region.
+	} else if locatorIsAuthorable(draft.ProviderSpec) {
 		draft.Locator = strings.TrimSpace(locator) // swobu:io-string source=boundary
+	} else {
+		draft.Locator = ""
 	}
 	if _, derived := profile.DerivedProtocolForSpec(draft.ProviderSpec); derived {
 		draft.ProviderProtocol = ""
@@ -125,6 +132,15 @@ func currentTargetDraft(draft readmodel.TargetDraft, locator, modelID, protocol 
 	draft.ModelID = strings.TrimSpace(modelID)              // swobu:io-string source=boundary
 	draft.RouteModelID = strings.TrimSpace(string(routeID)) // swobu:io-string source=boundary
 	return draft
+}
+
+// locatorIsAuthorable asks the profile-owned durable shape whether the shared
+// operational locator buffer belongs in a connection draft. Unknown profiles
+// preserve the conservative empty durable value; routing owns rejection of an
+// unsupported provider later at its construction boundary.
+func locatorIsAuthorable(providerSpec string) bool {
+	locator, ok := profile.LocatorSpecForProvider(providerSpec)
+	return ok && locator.Kind != profile.LocatorFixed
 }
 
 func providerPickerLabel(providerSpec, displayName string) string {
