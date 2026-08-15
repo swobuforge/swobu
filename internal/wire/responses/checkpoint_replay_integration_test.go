@@ -49,7 +49,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 			}
 			differentTarget := provider.NewTargetSnapshot(
 				"responses-b", "openai", "https://example.test", "cred",
-				protocolkind.Responses, "m", "responses",
+				protocolkind.Responses, "responses", delivery.BufferedDelivery(),
 			)
 			differentTarget.TargetVersion = 2
 			stateless := resolved.Request()

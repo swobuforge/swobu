@@ -52,7 +52,7 @@ func TestZAICreateFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.changeCredentialRef(ref)
-	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: "manual-model", ModelName: "manual-model"})
+	w.SelectModel(readmodel.ModelAuthoringOptionReadModel{ID: "manual-model", ModelName: "manual-model"})
 
 	if draft := w.Draft.Get(); draft.ProviderProtocol != "" || draft.ZAIAccess != string(routing.ZAIAccessCodingPlan) || draft.CredentialRef != ref {
 		t.Fatalf("Z.AI create draft = %#v", draft)

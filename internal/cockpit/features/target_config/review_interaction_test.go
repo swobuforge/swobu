@@ -23,7 +23,7 @@ func TestBedrockRegionSelectionLaunchesFirstProbe(t *testing.T) {
 	probes := 0
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
 		probes++
-		return readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model", ModelName: "model"}}}, nil
+		return readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model", ModelName: "model"}}}, nil
 	})
 	w.SelectBedrockRegion("eu-west-2")
 	if !w.catalogLoading() {
@@ -58,7 +58,7 @@ func TestBedrockEditRequiresPersistedEndpoint(t *testing.T) {
 		ID:               "bedrock-primary",
 		Model:            "xai.grok-4.3",
 		Provider:         string(profile.ProviderSpecBedrock),
-		ProviderProtocol: "responses_stream",
+		ProviderProtocol: "responses",
 		BedrockRegion:    "us-east-1",
 	}
 	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
@@ -78,7 +78,7 @@ func TestBedrockEndpointPersistsNormalizedAuthoredURL(t *testing.T) {
 		ID:               "bedrock-primary",
 		Model:            "xai.grok-4.3",
 		Provider:         string(profile.ProviderSpecBedrock),
-		ProviderProtocol: "responses_stream",
+		ProviderProtocol: "responses",
 		BedrockRegion:    "eu-west-2",
 		BaseURL:          "https://bedrock-mantle.eu-west-2.api.aws/openai/v1",
 	}
@@ -110,7 +110,7 @@ func TestBedrockRegionSelectionRejectsCanonicalEndpointRegionMismatchBeforeSave(
 		ID:               "bedrock-primary",
 		Model:            "xai.grok-4.3",
 		Provider:         string(profile.ProviderSpecBedrock),
-		ProviderProtocol: "responses_stream",
+		ProviderProtocol: "responses",
 		BedrockRegion:    "us-east-1",
 		BaseURL:          "https://bedrock-mantle.us-east-1.api.aws/v1",
 	}
@@ -179,7 +179,7 @@ func TestInitialBedrockSetupNormalizedOpenAIBaseRejectsLaterMessagesSelection(t 
 	})
 	row := BedrockEndpointRow(w)
 	row.OnSubmit("https://proxy.example/openai/v1/responses")
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{
+	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{
 		ID: "model", Name: "model", ModelName: "model",
 		SupportedProviderProtocols: []string{"responses", "messages"},
 	})
@@ -211,7 +211,7 @@ func TestBedrockEndpointCancelRestoresDurableEffectiveValueAfterInvalidSubmit(t 
 				ID:               "bedrock-primary",
 				Model:            "xai.grok-4.3",
 				Provider:         string(profile.ProviderSpecBedrock),
-				ProviderProtocol: "responses_stream",
+				ProviderProtocol: "responses",
 				BedrockRegion:    "eu-west-2",
 				BaseURL:          tc.endpoint,
 			}
@@ -266,7 +266,7 @@ func TestCustomManualModelEditStillSchedulesBestEffortCatalogProbe(t *testing.T)
 		ID:               "custom",
 		Model:            "manual-model",
 		Provider:         string(profile.ProviderSpecCustom),
-		ProviderProtocol: "chat_completions_stream",
+		ProviderProtocol: "chat_completions",
 		BaseURL:          "http://127.0.0.1:11434/v1",
 	}
 	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
@@ -448,8 +448,8 @@ func readyBedrockConfig(t *testing.T) *TargetConfig {
 		d.CredentialRef = "secret:target"
 		return d
 	})
-	w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model-1", Name: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationExplicitAPIKey}}})
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{ID: "model-1", Name: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}})
+	w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model-1", Name: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationExplicitAPIKey}}})
+	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{ID: "model-1", Name: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}})
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ModelID = "model-1"
 		d.ProviderProtocol = "responses"
@@ -465,7 +465,7 @@ func TestRemovingBedrockCredentialReprobesWithoutTargetOverride(t *testing.T) {
 	var probed ports.BedrockCatalogProbe
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(_ context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
 		probed, _ = req.Probe.(ports.BedrockCatalogProbe)
-		return readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity}}, nil
+		return readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity}}, nil
 	})
 	row := newCredentialRow(w, false)
 	row.props.Apply("")
@@ -480,9 +480,9 @@ func TestRemovingBedrockCredentialReprobesWithoutTargetOverride(t *testing.T) {
 
 func TestBedrockRefreshPreservesSelectionWhenStillAvailable(t *testing.T) {
 	w := readyBedrockConfig(t)
-	deployments := []readmodel.ModelDeploymentReadModel{{ID: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}}}
+	deployments := []readmodel.ModelAuthoringOptionReadModel{{ID: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}}}
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-		return readmodel.ModelCatalogReadModel{Deployments: deployments}, nil
+		return readmodel.ModelCatalogReadModel{Options: deployments}, nil
 	})
 	w.RefreshBedrockIdentity()
 	w.ProbeCatalog()
@@ -502,11 +502,11 @@ func TestMountedBedrockRefreshStartsExactlyOneProbeAndReconcilesSelection(t *tes
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.CredentialRef = ""; return d })
 	probes := 0
 	probed := make(chan struct{}, 2)
-	deployments := []readmodel.ModelDeploymentReadModel{{ID: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}}}
+	deployments := []readmodel.ModelAuthoringOptionReadModel{{ID: "model-1", ModelName: "model-1", SupportedProviderProtocols: []string{"responses"}}}
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(context.Context, ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
 		probes++
 		probed <- struct{}{}
-		return readmodel.ModelCatalogReadModel{Deployments: deployments}, nil
+		return readmodel.ModelCatalogReadModel{Options: deployments}, nil
 	})
 	menu := newBedrockAuthenticationMenu(w, func() {})
 	h, err := testkit.NewHarnessAt(menu, 100, 8)
@@ -603,7 +603,7 @@ func TestCustomEndpointWithoutModelCatalogAcceptsTypedModel(t *testing.T) {
 	}
 }
 
-func TestDeepSeekSuccessfulEmptyCatalogAcceptsTypedModelAndHidesProtocol(t *testing.T) {
+func TestDeepSeekSuccessfulEmptyCatalogAcceptsTypedModelAndShowsFixedProtocol(t *testing.T) {
 	w := authoringConfig(t, profile.ProviderSpecDeepSeek, "", "env:DEEPSEEK_API_KEY")
 	if !setupAllowsModelChoice(w) {
 		t.Fatal("DeepSeek model input was blocked before optional discovery")
@@ -624,8 +624,8 @@ func TestDeepSeekSuccessfulEmptyCatalogAcceptsTypedModelAndHidesProtocol(t *test
 		t.Fatalf("DeepSeek draft protocol = %q, want omitted", got)
 	}
 	frame := testkit.RenderMountedTrimmed(t, w, 100, 20)
-	if strings.Contains(frame, "protocol") {
-		t.Fatalf("DeepSeek authoring exposed protocol row:\n%s", frame)
+	if !strings.Contains(frame, "protocol          Anthropic · Messages · streaming") {
+		t.Fatalf("DeepSeek authoring did not show its fixed concrete protocol:\n%s", frame)
 	}
 }
 
@@ -633,7 +633,7 @@ func TestDeepSeekRefreshPreservesUnlistedSelection(t *testing.T) {
 	w := authoringConfig(t, profile.ProviderSpecDeepSeek, "", "env:DEEPSEEK_API_KEY")
 	w.SetCatalogResult(readmodel.ModelCatalogReadModel{}, nil)
 	w.selectModelByID("future-deepseek-model")
-	w.SetCatalogResult(readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "deepseek-v4-pro", Name: "deepseek-v4-pro", ModelName: "deepseek-v4-pro"}}}, nil)
+	w.SetCatalogResult(readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "deepseek-v4-pro", Name: "deepseek-v4-pro", ModelName: "deepseek-v4-pro"}}}, nil)
 	if got := w.SelectedModel.Get().ModelName; got != "future-deepseek-model" {
 		t.Fatalf("refresh replaced unlisted DeepSeek selection with %q", got)
 	}

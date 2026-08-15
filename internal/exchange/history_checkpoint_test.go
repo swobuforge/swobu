@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -137,7 +139,7 @@ func TestExplicitCheckpointRejectsStaleHeadAndWrongCodecScheme(t *testing.T) {
 }
 
 func TestProviderCallCarriesCompleteRequestPlusExactPreviousHistory(t *testing.T) {
-	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.test", "cred", "responses", "", "responses")
+	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.test", "cred", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.TargetVersion = 3
 	target.Model = "a"
 	previousRequest := testCanonicalRequest("a")

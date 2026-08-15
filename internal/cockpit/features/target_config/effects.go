@@ -138,10 +138,10 @@ func (w *TargetConfig) SetCatalogResult(result readmodel.ModelCatalogReadModel, 
 		return
 	}
 	w.Catalog.Set(state)
-	if w.reconcileSelectedModel(result.Deployments) {
+	if w.reconcileSelectedModel(result.Options) {
 		return
 	}
-	if w.IsAzureFlow() && len(result.Deployments) == 0 {
+	if w.IsAzureFlow() && len(result.Options) == 0 {
 		state.Err = "none found"
 		w.Catalog.Set(state)
 		return
@@ -150,36 +150,36 @@ func (w *TargetConfig) SetCatalogResult(result readmodel.ModelCatalogReadModel, 
 
 // reconcileSelectedModel enriches a typed selection when discovery returns a
 // matching row. A missing row never invalidates the operator-authored model.
-func (w *TargetConfig) reconcileSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
+func (w *TargetConfig) reconcileSelectedModel(options []readmodel.ModelAuthoringOptionReadModel) bool {
 	selected := w.SelectedModel.Get()
 	if strings.TrimSpace(selected.ModelName) == "" {
 		return false
 	}
-	if w.hydrateSelectedModel(deployments) {
+	if w.hydrateSelectedModel(options) {
 		return true
 	}
 	return true
 }
 
-func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploymentReadModel) bool {
+func (w *TargetConfig) hydrateSelectedModel(options []readmodel.ModelAuthoringOptionReadModel) bool {
 	selected := w.SelectedModel.Get()
 	if strings.TrimSpace(selected.ModelName) == "" {
 		return false
 	}
-	for _, deployment := range deployments {
-		if deployment.ID != selected.ID && deployment.ModelName != selected.ModelName {
+	for _, option := range options {
+		if option.ID != selected.ID && option.ModelName != selected.ModelName {
 			continue
 		}
-		w.SelectedModel.Set(deployment)
-		options := resolveProtocolOptions(w.Draft.Get().ProviderSpec, deployment)
-		for _, option := range options {
-			if option.ID == w.Draft.Get().ProviderProtocol {
+		w.SelectedModel.Set(option)
+		protocolOptions := resolveProtocolOptions(w.Draft.Get().ProviderSpec, option)
+		for _, protocolOption := range protocolOptions {
+			if protocolOption.ID == w.Draft.Get().ProviderProtocol {
 				return true
 			}
 		}
 		defaultProtocol := ""
-		if !w.derivesProviderProtocol() && len(options) > 0 {
-			defaultProtocol = options[0].ID
+		if !w.derivesProviderProtocol() && len(protocolOptions) > 0 {
+			defaultProtocol = protocolOptions[0].ID
 		}
 		w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 			d.ProviderProtocol = defaultProtocol
@@ -192,7 +192,7 @@ func (w *TargetConfig) hydrateSelectedModel(deployments []readmodel.ModelDeploym
 
 // SelectModel commits a model choice with the provider's first resolved
 // protocol as its editable default.
-func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
+func (w *TargetConfig) SelectModel(model readmodel.ModelAuthoringOptionReadModel) {
 	w.SelectedModel.Set(model)
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft { d.ProviderProtocol = ""; return d })
 	w.Error.Set("")
@@ -213,13 +213,13 @@ func (w *TargetConfig) SelectModel(model readmodel.ModelDeploymentReadModel) {
 }
 
 func (w *TargetConfig) selectModelByID(id string) {
-	for _, deployment := range w.catalogResult().Deployments {
-		if deployment.ID == id {
-			w.SelectModel(deployment)
+	for _, option := range w.catalogResult().Options {
+		if option.ID == id {
+			w.SelectModel(option)
 			return
 		}
 	}
-	w.SelectModel(readmodel.ModelDeploymentReadModel{ID: id, Name: id, ModelName: id})
+	w.SelectModel(readmodel.ModelAuthoringOptionReadModel{ID: id, Name: id, ModelName: id})
 }
 
 func (w *TargetConfig) selectProtocol(protocol string) {
@@ -474,7 +474,7 @@ func (w *TargetConfig) advanceFromSetup() {
 // invalidateCatalogEvidence so exact operator input survives discovery drift.
 func (w *TargetConfig) invalidateCatalogSelection() {
 	w.Catalog.Set(catalogOperationState{})
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
+	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{})
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ModelID = ""
 		d.ProviderProtocol = ""
@@ -497,7 +497,11 @@ func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries,
 	if queries != nil {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		providerProtocol, _ := profile.ResolveConcreteProtocolForAutoAtBoundary(provider)
+		providerProtocol := ""
+		protocols := profile.ConcreteProviderProtocolsForSpec(provider)
+		if len(protocols) > 0 {
+			providerProtocol = protocols[0]
+		}
 		request := ports.ProbeProviderModelsRequest{ProviderProtocol: providerProtocol}
 		if profile.ProviderID(provider) == profile.ProviderSpecBedrock {
 			request.Probe = ports.BedrockCatalogProbe{

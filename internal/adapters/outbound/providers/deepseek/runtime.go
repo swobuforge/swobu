@@ -39,7 +39,7 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	}
 }
 
-func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	if target.ProviderID() != string(profile.ProviderSpecDeepSeek) {
 		return nil, canonical.BadEndpoint("selected provider does not match DeepSeek discovery")
 	}
@@ -80,9 +80,9 @@ func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSn
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
 	protocols := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecDeepSeek))
-	deployments := make([]profile.ProviderDeploymentRecord, 0, len(models))
+	deployments := make([]profile.ModelAuthoringOption, 0, len(models))
 	for _, modelID := range models {
-		deployments = append(deployments, profile.NewProviderDeployment(
+		deployments = append(deployments, profile.NewModelAuthoringOption(
 			modelID,
 			modelID,
 			string(profile.ProviderSpecDeepSeek),
@@ -97,7 +97,7 @@ func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSn
 
 func (d Discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := d.ListDeployments(ctx, target)
-	return provider.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Options: deployments}, err
 }
 
 var _ provider.Discovery = Discovery{}

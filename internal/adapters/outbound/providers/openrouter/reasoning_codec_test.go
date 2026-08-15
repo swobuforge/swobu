@@ -215,6 +215,19 @@ func TestOpenRouterDoesNotSerializeForeignProviderChatOpaqueThinking(t *testing.
 	}
 }
 
+func TestOpenRouterRejectsDuplicateProviderChatOpaqueThinking(t *testing.T) {
+	first := openRouterReasoningItem(t, "first")
+	second := openRouterReasoningItem(t, "second")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{first, second, messageItem(t, canonical.MessageRoleAssistant, "answer")},
+	})
+	backend := openRouterBackend(t, request.Model())
+	if _, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()}); err == nil || !strings.Contains(err.Error(), "duplicate provider Chat opaque thinking") {
+		t.Fatalf("duplicate OpenRouter replay error = %v", err)
+	}
+}
+
 func TestOpenRouterOpaqueReplayFollowsMixedAssistantTextAndToolTurns(t *testing.T) {
 	reasoningOne := openRouterReasoningItem(t, "first")
 	reasoningTwo := openRouterReasoningItem(t, "second")
@@ -403,7 +416,7 @@ func openRouterBackend(t *testing.T, model string) provider.Backend {
 
 func openRouterBackendForProtocol(t *testing.T, model string, protocol protocolkind.ProtocolKind) provider.Backend {
 	t.Helper()
-	target := provider.NewTargetSnapshot("openrouter", string(profile.ProviderSpecOpenRouter), "https://openrouter.test/api/v1", "env:OPENROUTER_API_KEY", protocol, "", string(protocol))
+	target := provider.NewTargetSnapshot("openrouter", string(profile.ProviderSpecOpenRouter), "https://openrouter.test/api/v1", "env:OPENROUTER_API_KEY", protocol, string(protocol), delivery.BufferedDelivery())
 	target.Model = model
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {

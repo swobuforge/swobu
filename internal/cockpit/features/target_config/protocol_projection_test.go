@@ -11,54 +11,49 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider string
-		model    readmodel.ModelDeploymentReadModel
+		model    readmodel.ModelAuthoringOptionReadModel
 		want     []string
 	}{
 		{
 			name:     "openai",
 			provider: "openai",
-			model:    readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
-			want: []string{
-				"responses",
-				"responses_stream",
-				"chat_completions",
-				"chat_completions_stream",
-			},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
+			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"},
 		},
 		{
 			name:     "anthropic",
 			provider: "anthropic",
-			model:    readmodel.ModelDeploymentReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
 			want:     []string{"messages", "messages_stream"},
 		},
 		{
 			name:     "chatgpt",
 			provider: "chatgpt",
-			model:    readmodel.ModelDeploymentReadModel{ID: "chatgpt-4o-latest", ModelName: "chatgpt-4o-latest"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "chatgpt-4o-latest", ModelName: "chatgpt-4o-latest"},
 			want:     []string{"responses_stream"},
 		},
 		{
 			name:     "ollama",
 			provider: "ollama",
-			model:    readmodel.ModelDeploymentReadModel{ID: "llama3.2", ModelName: "llama3.2"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "llama3.2", ModelName: "llama3.2"},
 			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 		{
 			name:     "lm studio",
 			provider: "lmstudio",
-			model:    readmodel.ModelDeploymentReadModel{ID: "local-model", ModelName: "local-model"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "local-model", ModelName: "local-model"},
 			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 		{
 			name:     "vllm",
 			provider: "vllm",
-			model:    readmodel.ModelDeploymentReadModel{ID: "served-model", ModelName: "served-model"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "served-model", ModelName: "served-model"},
 			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 		{
 			name:     "azure sparse catalog uses provider manifest",
 			provider: "azure",
-			model:    readmodel.ModelDeploymentReadModel{ID: "prod-claude-sonnet", ModelName: "prod-claude-sonnet"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "prod-claude-sonnet", ModelName: "prod-claude-sonnet"},
 			want: []string{
 				"responses",
 				"responses_stream",
@@ -71,7 +66,7 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 		{
 			name:     "bedrock sparse catalog uses provider manifest",
 			provider: "bedrock",
-			model:    readmodel.ModelDeploymentReadModel{ID: "anthropic.claude-3-5-sonnet", ModelName: "anthropic.claude-3-5-sonnet"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "anthropic.claude-3-5-sonnet", ModelName: "anthropic.claude-3-5-sonnet"},
 			want:     []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"},
 		},
 	}
@@ -86,22 +81,22 @@ func TestResolveProtocolOptions_ProviderManifestProductOrder(t *testing.T) {
 }
 
 func TestResolveProtocolOptions_DeploymentMetadataNarrows(t *testing.T) {
-	got := protocolOptionIDs(resolveProtocolOptions("azure", readmodel.ModelDeploymentReadModel{
+	got := protocolOptionIDs(resolveProtocolOptions("azure", readmodel.ModelAuthoringOptionReadModel{
 		ID:                         "Kimi-K2.6",
 		ModelName:                  "Kimi-K2.6",
 		ModelPublisher:             "MoonshotAI",
 		Family:                     "openai",
-		SupportedProviderProtocols: []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"},
+		SupportedProviderProtocols: []string{"responses", "chat_completions"},
 		DefaultProviderProtocol:    "responses",
 	}))
-	want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}
+	want := []string{"responses", "chat_completions"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("protocol options = %v, want %v", got, want)
 	}
 }
 
 func TestResolveProtocolOptions_DefaultProtocolDoesNotNarrowSparseReadModel(t *testing.T) {
-	got := protocolOptionIDs(resolveProtocolOptions("openai", readmodel.ModelDeploymentReadModel{
+	got := protocolOptionIDs(resolveProtocolOptions("openai", readmodel.ModelAuthoringOptionReadModel{
 		ID:                      "gpt-4.1",
 		ModelName:               "gpt-4.1",
 		DefaultProviderProtocol: "chat_completions",
@@ -116,36 +111,36 @@ func TestResolveProtocolOptions_DeploymentMetadataCannotWidenProviderRules(t *te
 	tests := []struct {
 		name     string
 		provider string
-		model    readmodel.ModelDeploymentReadModel
+		model    readmodel.ModelAuthoringOptionReadModel
 		want     []string
 	}{
 		{
 			name:     "chatgpt rejects catalog chat completions",
 			provider: "chatgpt",
-			model: readmodel.ModelDeploymentReadModel{
+			model: readmodel.ModelAuthoringOptionReadModel{
 				ID:                         "chatgpt-4o-latest",
 				ModelName:                  "chatgpt-4o-latest",
-				SupportedProviderProtocols: []string{"chat_completions", "responses_stream"},
+				SupportedProviderProtocols: []string{"chat_completions", "responses"},
 			},
 			want: []string{"responses_stream"},
 		},
 		{
 			name:     "ollama intersects catalog protocols",
 			provider: "ollama",
-			model: readmodel.ModelDeploymentReadModel{
+			model: readmodel.ModelAuthoringOptionReadModel{
 				ID:                         "llama3.2",
 				ModelName:                  "llama3.2",
-				SupportedProviderProtocols: []string{"responses_stream", "responses", "chat_completions"},
+				SupportedProviderProtocols: []string{"responses", "chat_completions"},
 			},
-			want: []string{"responses", "responses_stream", "chat_completions"},
+			want: []string{"responses", "chat_completions"},
 		},
 		{
 			name:     "anthropic rejects catalog openai protocols",
 			provider: "anthropic",
-			model: readmodel.ModelDeploymentReadModel{
+			model: readmodel.ModelAuthoringOptionReadModel{
 				ID:                         "claude-sonnet-4-5",
 				ModelName:                  "claude-sonnet-4-5",
-				SupportedProviderProtocols: []string{"responses_stream", "messages"},
+				SupportedProviderProtocols: []string{"responses", "messages"},
 			},
 			want: []string{"messages"},
 		},
@@ -164,25 +159,25 @@ func TestResolveProtocolOptions_LabelsIncludeProtocolHints(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider string
-		model    readmodel.ModelDeploymentReadModel
+		model    readmodel.ModelAuthoringOptionReadModel
 		want     []string
 	}{
 		{
 			name:     "openai uses provider first display labels",
 			provider: "openai",
-			model:    readmodel.ModelDeploymentReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "gpt-4.1", ModelName: "gpt-4.1"},
 			want: []string{
-				"OpenAI · Responses",
-				"OpenAI · Responses · stream",
-				"OpenAI · Chat Completions",
-				"OpenAI · Chat Completions · stream",
+				"OpenAI · Responses · buffered",
+				"OpenAI · Responses · streaming",
+				"OpenAI · Chat Completions · buffered",
+				"OpenAI · Chat Completions · streaming",
 			},
 		},
 		{
 			name:     "anthropic keeps its provider first display labels",
 			provider: "anthropic",
-			model:    readmodel.ModelDeploymentReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
-			want:     []string{"Anthropic · Messages", "Anthropic · Messages · stream"},
+			model:    readmodel.ModelAuthoringOptionReadModel{ID: "claude-sonnet-4-5", ModelName: "claude-sonnet-4-5"},
+			want:     []string{"Anthropic · Messages · buffered", "Anthropic · Messages · streaming"},
 		},
 	}
 	for _, tt := range tests {

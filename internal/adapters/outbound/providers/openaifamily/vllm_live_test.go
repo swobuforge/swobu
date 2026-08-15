@@ -14,6 +14,7 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -65,7 +66,7 @@ func TestLiveVLLMStandardServing(t *testing.T) {
 		{name: "responses", kind: protocolkind.Responses, protocol: "responses", body: `{"model":"` + model + `","input":"Reply briefly.","max_output_tokens":8,"store":false}`},
 		{name: "chat_completions", kind: protocolkind.ChatCompletions, protocol: "chat_completions", body: `{"model":"` + model + `","messages":[{"role":"user","content":"Reply briefly."}],"max_tokens":8}`},
 		{name: "messages", kind: protocolkind.Messages, protocol: "messages", body: `{"model":"` + model + `","messages":[{"role":"user","content":"Reply briefly."}],"max_tokens":8}`},
-		{name: "responses_stream", kind: protocolkind.Responses, protocol: "responses_stream", body: `{"model":"` + model + `","input":"Reply briefly.","max_output_tokens":8,"stream":true,"store":false}`, stream: true},
+		{name: "responses", kind: protocolkind.Responses, protocol: "responses", body: `{"model":"` + model + `","input":"Reply briefly.","max_output_tokens":8,"stream":true,"store":false}`, stream: true},
 	}
 	for _, request := range requests {
 		t.Run(request.name, func(t *testing.T) {
@@ -106,7 +107,7 @@ func TestLiveVLLMStandardServing(t *testing.T) {
 }
 
 func liveVLLMTarget(baseURL, credentialRef, model string, kind protocolkind.ProtocolKind, protocol string) provider.TargetSnapshot {
-	target := provider.NewTargetSnapshot("live-vllm", "vllm", baseURL, credentialRef, kind, "", protocol)
+	target := provider.NewTargetSnapshot("live-vllm", "vllm", baseURL, credentialRef, kind, protocol)
 	target.Model = model
 	return target
 }

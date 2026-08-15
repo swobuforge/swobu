@@ -223,8 +223,8 @@ func TestConfigCloneOwnsNestedTargetStorage(t *testing.T) {
 }
 
 func TestParseProtocolRequiresConcreteCatalogSupportedToken(t *testing.T) {
-	for _, raw := range []string{"", "auto", "unsupported"} {
-		_, err := ParseProtocol(raw, Provider("openai"), func(_ Provider, protocol string) bool { return protocol != "unsupported" })
+	for _, raw := range []string{"", "not_a_protocol"} {
+		_, err := ParseProtocol(raw, Provider("openai"), func(_ Provider, protocol string) bool { return protocol == "responses" })
 		if err == nil {
 			t.Fatalf("ParseProtocol(%q) unexpectedly succeeded", raw)
 		}

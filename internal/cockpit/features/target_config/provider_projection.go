@@ -70,7 +70,7 @@ func validateTargetDraftEndpoint(draft readmodel.TargetDraft) error {
 	if profile.ProviderID(strings.TrimSpace(draft.ProviderSpec)) != profile.ProviderSpecBedrock {
 		return nil
 	}
-	kind, _, ok := profile.ProviderProtocolKindAndFrame(draft.ProviderSpec, draft.ProviderProtocol)
+	kind, ok := profile.ProviderProtocolKind(draft.ProviderSpec, draft.ProviderProtocol)
 	if !ok {
 		return fmt.Errorf("selected provider protocol is unsupported")
 	}
@@ -81,8 +81,12 @@ func validateTargetDraftEndpoint(draft readmodel.TargetDraft) error {
 // TargetDraftFromReadModel projects the persisted read shape into the typed
 // draft used by both create and edit authoring.
 func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.TargetReadModel) readmodel.TargetDraft {
-	spec := strings.TrimSpace(target.Provider)   // swobu:io-string source=boundary
-	locator := strings.TrimSpace(target.BaseURL) // swobu:io-string source=boundary
+	spec := strings.TrimSpace(target.Provider)             // swobu:io-string source=boundary
+	locator := strings.TrimSpace(target.BaseURL)           // swobu:io-string source=boundary
+	protocol := strings.TrimSpace(target.ProviderProtocol) // swobu:io-string source=boundary
+	if normalized, err := profile.DecodeProviderProtocolFromPersistence(spec, protocol); err == nil {
+		protocol = normalized
+	}
 	endpoint := ""
 	if profile.ProviderID(spec) == profile.ProviderSpecBedrock {
 		// Region is an authored first-class fact surfaced on the readmodel; the
@@ -96,10 +100,10 @@ func TargetDraftFromReadModel(routeID readmodel.RouteID, target readmodel.Target
 		ZAIAccess:        strings.TrimSpace(target.ZAIAccess),
 		Locator:          locator,
 		Endpoint:         endpoint,
-		CredentialRef:    strings.TrimSpace(target.CredentialRef),    // swobu:io-string source=boundary
-		ProviderProtocol: strings.TrimSpace(target.ProviderProtocol), // swobu:io-string source=boundary
-		ModelID:          strings.TrimSpace(target.Model),            // swobu:io-string source=boundary
-		RouteModelID:     strings.TrimSpace(string(routeID)),         // swobu:io-string source=boundary
+		CredentialRef:    strings.TrimSpace(target.CredentialRef), // swobu:io-string source=boundary
+		ProviderProtocol: protocol,
+		ModelID:          strings.TrimSpace(target.Model),    // swobu:io-string source=boundary
+		RouteModelID:     strings.TrimSpace(string(routeID)), // swobu:io-string source=boundary
 	}
 	if _, derived := profile.DerivedProtocolForSpec(spec); derived {
 		draft.ProviderProtocol = ""

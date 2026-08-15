@@ -103,7 +103,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery()),
 	)
 	if _, err := executeProviderRequest(composition, context.Background(), openAIReq); err != nil {
 		t.Fatalf("openai execution failed: %v", err)
@@ -115,7 +115,7 @@ func TestServices_ExecutionDispatchesByProviderID(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-b", "anthropic", upstream.URL+"/v1", "cred-1", protocolkind.Messages, "messages", delivery.BufferedDelivery()),
 	)
 	if _, err := executeProviderRequest(composition, context.Background(), anthropicReq); err != nil {
 		t.Fatalf("anthropic execution failed: %v", err)
@@ -138,16 +138,16 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 
 	openAIProbe, err := composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
-		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", ""))
+		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("openai model catalog failed: %v", err)
 	}
-	if len(openAIProbe.Deployments) != 2 {
-		t.Fatalf("openai model catalog len=%d want 2", len(openAIProbe.Deployments))
+	if len(openAIProbe.Options) != 2 {
+		t.Fatalf("openai model catalog len=%d want 2", len(openAIProbe.Options))
 	}
 
 	_, err = composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
-		"backend-b", "chatgpt", upstream.URL+"/v1", "secret:chatgpt/default", protocolkind.ChatCompletions, "", ""))
+		"backend-b", "chatgpt", upstream.URL+"/v1", "secret:chatgpt/default", protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
 		t.Fatalf("chatgpt catalog dispatch must use chatgpt adapter tier validation, got err=%v", err)
 	}
@@ -163,7 +163,7 @@ func TestServices_UnknownProviderIDFailsFast(t *testing.T) {
 			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "", ""),
+		provider.NewTargetSnapshot("backend-a", "unknown-provider", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "", delivery.BufferedDelivery()),
 	))
 	if err == nil || !strings.Contains(err.Error(), "provider id is unsupported") {
 		t.Fatalf("unknown provider must fail fast, got err=%v", err)
@@ -185,7 +185,7 @@ func TestServices_ProbeTargetDispatchesByProviderID(t *testing.T) {
 
 	composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 	_, err := composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
-		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", ""))
+		"backend-a", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("openai target probe failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheCompatibilityDecisions(t *testing.
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery()),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-cache-intent-openai"
@@ -265,7 +265,7 @@ func TestServices_OpenAIFamilyDoesNotEmitCacheFieldsOnOllama(t *testing.T) {
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-ollama", "ollama", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery()),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-cache-intent-ollama"
@@ -326,7 +326,7 @@ func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery()),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-structured-output"
@@ -366,7 +366,7 @@ func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *tes
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewBedrockTargetSnapshot("backend-bedrock", upstream.URL+"/anthropic/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "", "messages", "us-east-1"),
+		provider.NewBedrockTargetSnapshot("backend-bedrock", upstream.URL+"/anthropic/v1", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages, "messages", "us-east-1", delivery.BufferedDelivery()),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-bedrock-strict-drop"
@@ -404,7 +404,7 @@ func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *t
 	req := mustProviderRequestWithDocument(t,
 		request,
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-anthropic", "anthropic", upstream.URL+"/v1", "credential-ref", protocolkind.Messages, "", "messages"),
+		provider.NewTargetSnapshot("backend-anthropic", "anthropic", upstream.URL+"/v1", "credential-ref", protocolkind.Messages, "messages", delivery.BufferedDelivery()),
 	)
 	req.Changes = sink
 	req.ExchangeID = "ex-anthropic-strict-drop"
@@ -437,7 +437,7 @@ func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t 
 			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		}),
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "", "chat_completions"),
+		provider.NewTargetSnapshot("backend-openai", "openai", upstream.URL+"/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery()),
 	)
 	_, err := executeProviderRequest(composition, context.Background(), req)
 	if err == nil {
@@ -476,9 +476,9 @@ func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 			composition := mustProviderRegistry(t, upstream.Client(), testCredentialResolver{})
 			var target provider.TargetSnapshot
 			if providerSpec == "custom" {
-				target = provider.NewCustomTargetSnapshot("backend-b", upstream.URL, "cred-1", protocolkind.Messages, "", "messages", "Authorization")
+				target = provider.NewCustomTargetSnapshot("backend-b", upstream.URL, "cred-1", protocolkind.Messages, "messages", "Authorization", delivery.BufferedDelivery())
 			} else {
-				target = provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "", "messages")
+				target = provider.NewTargetSnapshot("backend-b", providerSpec, upstream.URL, "cred-1", protocolkind.Messages, "messages", delivery.BufferedDelivery())
 			}
 			req := newTestProviderRequest(
 				"test-ex", protocolkind.Responses, request,

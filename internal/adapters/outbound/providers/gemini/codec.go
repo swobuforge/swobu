@@ -44,7 +44,7 @@ func (codec) Decode(_ context.Context, request provider.Request, ingress provide
 	}
 	if err := core.ValidateResponseSSEByteStream(stream.Stream); err != nil {
 		carrierErr := canonical.InternalError("Gemini Interactions stream wire carrier is invalid")
-		carrierErr.Details = map[string]string{"wire_stream_invariant": err.Error()}
+		carrierErr.Details = map[string]string{"wire_invariant": err.Error()}
 		return provider.DecodedResponse{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
 	reader := newInteractionsStream(request.Canonical, request.ToolNames, stream.Stream, request.ExchangeID)

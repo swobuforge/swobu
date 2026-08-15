@@ -48,19 +48,19 @@ func TestClientProbeTargetEncodesTypedConnectionBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProbeTarget returned error: %v", err)
 	}
-	if len(result.Deployments) != 2 {
-		t.Fatalf("deployments = %d, want 2", len(result.Deployments))
+	if len(result.Options) != 2 {
+		t.Fatalf("model-authoring options = %d, want 2", len(result.Options))
 	}
-	d0 := result.Deployments[0]
+	d0 := result.Options[0]
 	if d0.Name != "gpt-4.1" || d0.ModelName != "gpt-4.1" || d0.ModelPublisher != "openai" || d0.ModelVersion != "2024-01" || d0.Family != "gpt" || d0.DefaultProviderProtocol != "responses" {
-		t.Fatalf("first deployment = %#v", d0)
+		t.Fatalf("first model-authoring option = %#v", d0)
 	}
 	if len(d0.SupportedProviderProtocols) != 2 || d0.SupportedProviderProtocols[0] != "responses" || d0.SupportedProviderProtocols[1] != "chat_completions" {
-		t.Fatalf("first deployment protocols = %v", d0.SupportedProviderProtocols)
+		t.Fatalf("first model-authoring option protocols = %v", d0.SupportedProviderProtocols)
 	}
-	d1 := result.Deployments[1]
+	d1 := result.Options[1]
 	if d1.Name != "gpt-4o" || d1.ModelName != "gpt-4o" {
-		t.Fatalf("second deployment = %#v", d1)
+		t.Fatalf("second model-authoring option = %#v", d1)
 	}
 	if result.ResolvedProviderProtocol != "responses" {
 		t.Fatalf("resolved_provider_protocol = %q, want responses", result.ResolvedProviderProtocol)

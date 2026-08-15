@@ -7,6 +7,7 @@ import (
 
 	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -97,7 +98,7 @@ func TestProviderRegistry_RejectsUnknownProviderID(t *testing.T) {
 
 func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
-	target := provider.NewTargetSnapshot("backend-a", "openai", "https://api.openai.com/v1", "credential-a", protocolkind.Responses, "", "responses")
+	target := provider.NewTargetSnapshot("backend-a", "openai", "https://api.openai.com/v1", "credential-a", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "gpt-4.1-mini"
 	backend, err := registry.ResolveBackend(target)
 	if err != nil {
@@ -128,13 +129,13 @@ func advertisedProtocolTarget(providerID profile.ProviderID, protocol profile.Pr
 	var target provider.TargetSnapshot
 	switch providerID {
 	case profile.ProviderSpecBedrock:
-		target = provider.NewBedrockTargetSnapshot("target", "https://bedrock-mantle.eu-west-2.api.aws", credentialRef, protocol.Kind, protocol.Frame, protocol.Name, "eu-west-2")
+		target = provider.NewBedrockTargetSnapshot("target", "https://bedrock-mantle.eu-west-2.api.aws", credentialRef, protocol.Kind, protocol.Name, "eu-west-2", protocol.Delivery)
 	case profile.ProviderSpecCustom:
-		target = provider.NewCustomTargetSnapshot("target", "https://example.test/v1", credentialRef, protocol.Kind, protocol.Frame, protocol.Name, "Authorization")
+		target = provider.NewCustomTargetSnapshot("target", "https://example.test/v1", credentialRef, protocol.Kind, protocol.Name, "Authorization", protocol.Delivery)
 	case profile.ProviderSpecAzure:
-		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.openai.azure.com", credentialRef, protocol.Kind, protocol.Frame, protocol.Name)
+		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.openai.azure.com", credentialRef, protocol.Kind, protocol.Name, protocol.Delivery)
 	default:
-		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.test/v1", credentialRef, protocol.Kind, protocol.Frame, protocol.Name)
+		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.test/v1", credentialRef, protocol.Kind, protocol.Name, protocol.Delivery)
 	}
 	target.Model = "model"
 	return target

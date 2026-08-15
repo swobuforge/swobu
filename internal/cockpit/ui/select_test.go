@@ -15,7 +15,6 @@ func TestSelectNotEnteredHidesBodyAndEnteredShowsIt(t *testing.T) {
 		Value: "",
 		Body: func(backout func()) tui.Component {
 			return NewSearchPicker("proto-picker", "protocol", []SearchOption{
-				{ID: "responses_stream", Label: "responses_stream"},
 				{ID: "responses", Label: "responses"},
 			}, func(Selection) {}, backout)
 		},
@@ -28,7 +27,7 @@ func TestSelectNotEnteredHidesBodyAndEnteredShowsIt(t *testing.T) {
 	if !strings.Contains(notEntered, "protocol") || !strings.Contains(notEntered, "choose") {
 		t.Fatalf("not entered row should show label + choose action:\n%s", notEntered)
 	}
-	if strings.Contains(notEntered, "responses_stream") {
+	if strings.Contains(notEntered, "responses") {
 		t.Fatalf("not entered render must not include body options:\n%s", notEntered)
 	}
 
@@ -37,7 +36,7 @@ func TestSelectNotEnteredHidesBodyAndEnteredShowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entered render: %v", err)
 	}
-	if !strings.Contains(entered, "responses_stream") {
+	if !strings.Contains(entered, "responses") {
 		t.Fatalf("entered render should include body options:\n%s", entered)
 	}
 
@@ -46,7 +45,7 @@ func TestSelectNotEnteredHidesBodyAndEnteredShowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("backout render: %v", err)
 	}
-	if strings.Contains(again, "responses_stream") {
+	if strings.Contains(again, "responses") {
 		t.Fatalf("backout render must not include body options:\n%s", again)
 	}
 }

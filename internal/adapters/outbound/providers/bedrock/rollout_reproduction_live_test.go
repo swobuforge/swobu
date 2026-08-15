@@ -19,7 +19,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -38,7 +37,7 @@ func TestLiveBedrockMantleGrokProductionCodecToolImageContinuation(t *testing.T)
 	}
 	exec := NewExecutor(http.DefaultClient)
 	exec.credentials = credentials.NewEnvResolver()
-	target := provider.NewBedrockTargetSnapshot("live-bedrock-production-continuation", endpoint, credentialRef, protocolkind.Responses, profile.FrameSSEEvent, "responses_stream", region)
+	target := provider.NewBedrockTargetSnapshot("live-bedrock-production-continuation", endpoint, credentialRef, protocolkind.Responses, "responses", region, delivery.BufferedDelivery())
 	target.Model = model
 	backend, err := exec.ResolveBackend(target)
 	if err != nil {
@@ -169,7 +168,7 @@ func TestLiveBedrockMantleGrokReasoningStreamReplayShape(t *testing.T) {
 	}
 	exec := NewExecutor(http.DefaultClient)
 	exec.credentials = credentials.NewEnvResolver()
-	target := provider.NewBedrockTargetSnapshot("live-bedrock-reasoning-stream", endpoint, credentialRef, protocolkind.Responses, profile.FrameHTTPJSONBody, "responses", region)
+	target := provider.NewBedrockTargetSnapshot("live-bedrock-reasoning-stream", endpoint, credentialRef, protocolkind.Responses, "responses", region, delivery.BufferedDelivery())
 	target.Model = model
 	raw := []byte(`{"model":"` + model + `","stream":true,"store":false,"include":["reasoning.encrypted_content"],"reasoning":{"effort":"low","summary":"auto"},"input":"Think briefly, then say pong."}`)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -241,7 +240,7 @@ func TestLiveBedrockMantleGrokEncryptedReasoningTraceReplay(t *testing.T) {
 	}
 	exec := NewExecutor(http.DefaultClient)
 	exec.credentials = credentials.NewEnvResolver()
-	target := provider.NewBedrockTargetSnapshot("live-bedrock-reasoning-trace", endpoint, credentialRef, protocolkind.Responses, profile.FrameHTTPJSONBody, "responses", region)
+	target := provider.NewBedrockTargetSnapshot("live-bedrock-reasoning-trace", endpoint, credentialRef, protocolkind.Responses, "responses", region, delivery.BufferedDelivery())
 	target.Model = model
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -305,7 +304,7 @@ func TestLiveBedrockMantleGrokCodexRolloutReproduction(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")) != "" {
 		credentialRef = "env:AWS_BEARER_TOKEN_BEDROCK"
 	}
-	target := provider.NewBedrockTargetSnapshot("live-bedrock-rollout", endpoint, credentialRef, protocolkind.Responses, profile.FrameHTTPJSONBody, "responses", region)
+	target := provider.NewBedrockTargetSnapshot("live-bedrock-rollout", endpoint, credentialRef, protocolkind.Responses, "responses", region, delivery.BufferedDelivery())
 	target.Model = model
 	raw, err := json.Marshal(map[string]any{"model": model, "store": false, "instructions": instructions, "input": input})
 	if err != nil {
@@ -336,7 +335,7 @@ func TestLiveBedrockMantleGrokToolImageAndBareReasoningReproduction(t *testing.T
 	if strings.TrimSpace(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")) != "" {
 		credentialRef = "env:AWS_BEARER_TOKEN_BEDROCK"
 	}
-	target := provider.NewBedrockTargetSnapshot("live-bedrock-tool-image", endpoint, credentialRef, protocolkind.Responses, profile.FrameHTTPJSONBody, "responses", region)
+	target := provider.NewBedrockTargetSnapshot("live-bedrock-tool-image", endpoint, credentialRef, protocolkind.Responses, "responses", region, delivery.BufferedDelivery())
 	target.Model = model
 
 	const imageURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -448,11 +447,4 @@ func loadCodexRolloutForBedrockProbe(t *testing.T, path string) (string, []any) 
 			if err := json.Unmarshal(item.Output, &output); err != nil {
 				t.Fatal(err)
 			}
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": item.CallID, "output": output})
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return instructions.String(), input
-}
+			input = append(input, map[string]any{"type": "function_call_output", "call_

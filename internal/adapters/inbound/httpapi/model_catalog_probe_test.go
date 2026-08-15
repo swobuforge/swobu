@@ -64,7 +64,7 @@ func TestModelCatalogProbeHandlerRejectsTrailingJSON(t *testing.T) {
 func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testing.T) {
 	diagnostics := json.RawMessage(`{"authentication":"aws_identity"}`)
 	stub := &stubTargetProber{result: provider.TargetProbeResult{
-		Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}},
+		Options:     []profile.ModelAuthoringOption{{Name: "model-1"}},
 		Diagnostics: diagnostics,
 	}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.BedrockConnectionDocument("eu-west-2", "", "env:AWS_BEARER_TOKEN_BEDROCK"), "responses")
@@ -82,13 +82,23 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if string(out.Diagnostics) != string(diagnostics) || len(out.Deployments) != 1 {
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wire["deployments"]; !ok {
+		t.Fatalf("wire result omitted compatibility key deployments: %s", rec.Body.String())
+	}
+	if _, ok := wire["options"]; ok {
+		t.Fatalf("wire result exposed internal options field: %s", rec.Body.String())
+	}
+	if string(out.Diagnostics) != string(diagnostics) || len(out.Options) != 1 {
 		t.Fatalf("result = %#v", out)
 	}
 }
 
 func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.T) {
-	stub := &stubTargetProber{result: provider.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}}
+	stub := &stubTargetProber{result: provider.TargetProbeResult{Options: []profile.ModelAuthoringOption{{Name: "model-1"}}}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.CustomConnectionDocument("https://example.test/v1", &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}), "responses")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -98,12 +108,27 @@ func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.
 	}
 }
 
-func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T) {
+func TestModelCatalogProbeHandlerUsesNormalizedRunPodEndpoint(t *testing.T) {
+	stub := &stubTargetProber{result: provider.TargetProbeResult{Options: []profile.ModelAuthoringOption{{Name: "served-model"}}}}
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), "responses")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(stub.attempts) != 1 {
+		t.Fatalf("attempts = %#v, want one probe", stub.attempts)
+	}
+	attempt := stub.attempts[0]
+	if attempt.ProviderSpec != "runpod" || attempt.BaseURL != "https://api.runpod.ai/v2/abc123/openai/v1" || attempt.CredentialRef != "env:RUNPOD_API_KEY" {
+		t.Fatalf("Runpod probe attempt = %#v", attempt)
+	}
+}
+
+func TestModelCatalogProbeHandlerUsesFirstManifestProtocolWhenUnspecified(t *testing.T) {
 	stub := &stubTargetProber{probeFn: func(target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
-		if target.ProviderProtocol == "responses_stream" {
-			return provider.TargetProbeResult{Deployments: []profile.ProviderDeploymentRecord{{Name: "model-1"}}}, nil
+		if target.ProviderProtocol != "responses" {
+			t.Fatalf("selected protocol = %q, want static preferred responses", target.ProviderProtocol)
 		}
-		return provider.TargetProbeResult{}, errors.New("try next protocol")
+		return provider.TargetProbeResult{}, errors.New("selected protocol rejected")
 	}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), "")
 	if rec.Code != http.StatusOK {
@@ -113,7 +138,7 @@ func TestModelCatalogProbeHandlerAutoProbeUsesProtocolCapabilities(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.ResolvedProviderProtocol != "responses_stream" || len(stub.attempts) < 2 {
+	if out.ResolvedProviderProtocol != "" || len(stub.attempts) != 1 {
 		t.Fatalf("result=%#v attempts=%d", out, len(stub.attempts))
 	}
 }

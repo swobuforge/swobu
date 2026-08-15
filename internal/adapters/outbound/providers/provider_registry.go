@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/anthropic"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/azure"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/cerebras"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepinfra"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
@@ -17,13 +18,19 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/gmi"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/groq"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/kimi"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/llm7"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/mistral"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/novita"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/runpod"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/sambanova"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/scaleway"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/siliconflow"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/together"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/workersai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -47,14 +54,19 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 	return newProviderRegistry(profile.All(), []providersruntime.ProviderRuntimeBundle{
 		openai.NewRuntime(client, credentials),
 		anthropic.NewRuntime(client, credentials),
+		cerebras.NewRuntime(client, credentials),
 		deepseek.NewRuntime(client, credentials),
 		kimi.NewRuntime(client, credentials),
+		llm7.NewRuntime(client, credentials),
+		mistral.NewRuntime(client, credentials),
+		novita.NewRuntime(client, credentials),
 		friendli.NewRuntime(client, credentials),
 		gemini.NewRuntime(client, credentials),
 		gmi.NewRuntime(client, credentials),
 		groq.NewRuntime(client, credentials),
 		fireworks.NewRuntime(client, credentials),
 		together.NewRuntime(client, credentials),
+		workersai.NewRuntime(client, credentials),
 		deepinfra.NewRuntime(client, credentials),
 		scaleway.NewRuntime(client, credentials),
 		sambanova.NewRuntime(client, credentials),
@@ -63,12 +75,21 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
 		azure.NewRuntime(client, credentials),
 		openrouter.NewRuntime(client, credentials),
+		runpod.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardNoAuthPolicy(profile.ProviderSpecOllama)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.LMStudioPolicy()),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecVLLM)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecCustom)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNebius)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNVIDIA)),
+		// Baseten intentionally composes the shared standard runtime in P0; its
+		// managed and exact deployment bases do not require a provider codec.
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecBaseten)),
+		// Hyperbolic's manual model authoring is derived from its profile while
+		// the inference runtime remains the shared Chat transport.
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecHyperbolic)),
+		siliconflow.NewRuntime(client, credentials),
 	})
 }
 

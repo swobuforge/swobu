@@ -17,10 +17,10 @@ import (
 )
 
 type TargetProbeResult struct {
-	Deployments              []profile.ProviderDeploymentRecord `json:"deployments,omitempty"`
-	Error                    string                             `json:"error,omitempty"`
-	ResolvedProviderProtocol string                             `json:"resolved_provider_protocol,omitempty"`
-	Diagnostics              json.RawMessage                    `json:"diagnostics,omitempty"`
+	Options                  []profile.ModelAuthoringOption `json:"deployments,omitempty"`
+	Error                    string                         `json:"error,omitempty"`
+	ResolvedProviderProtocol string                         `json:"resolved_provider_protocol,omitempty"`
+	Diagnostics              json.RawMessage                `json:"diagnostics,omitempty"`
 }
 
 type targetProbeRequest struct {
@@ -28,7 +28,9 @@ type targetProbeRequest struct {
 	ProviderProtocol string                  `json:"provider_protocol,omitempty"`
 }
 
-// TargetProbeHandler probes provider-backed deployments for one draft route.
+// TargetProbeHandler probes provider-backed model-authoring options for one
+// draft route. The response keeps the established "deployments" JSON member
+// as a compatibility boundary.
 type TargetProbeHandler struct {
 	providers provider.Discovery
 }
@@ -92,9 +94,9 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		slog.Debug("model catalog probe succeeded",
 			"provider_spec", providerSpec,
 			"provider_protocol", resolvedVariant,
-			"deployment_count", len(probe.Deployments),
+			"model_option_count", len(probe.Options),
 		)
-		result.Deployments = probe.Deployments
+		result.Options = probe.Options
 		result.Diagnostics = json.RawMessage(probe.Diagnostics)
 		result.ResolvedProviderProtocol = resolvedVariant
 	}
@@ -112,29 +114,19 @@ func probeBedrockCatalog(
 	if err != nil {
 		return provider.TargetProbeResult{}, "", err
 	}
-	var lastErr error
-	var lastProbe provider.TargetProbeResult
-	for _, variant := range modelCatalogProbeVariants(string(profile.ProviderSpecBedrock), providerProtocol) {
-		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(string(profile.ProviderSpecBedrock), variant)
-		if !ok {
-			continue
-		}
-		target := provider.NewBedrockTargetSnapshot(
-			"draft", "", strings.TrimSpace(connection.Credential), protocol, frame,
-			variant, region.String(),
-		)
-		probe, probeErr := providers.ProbeTarget(ctx, target)
-		if probeErr == nil {
-			probe.Deployments = profile.CloneProviderDeployments(probe.Deployments)
-			return probe, variant, nil
-		}
-		lastErr = probeErr
-		lastProbe = probe
+	variant, protocol, err := selectModelCatalogProtocol(string(profile.ProviderSpecBedrock), providerProtocol)
+	if err != nil {
+		return provider.TargetProbeResult{}, "", err
 	}
-	if lastErr != nil {
-		return lastProbe, "", lastErr
+	target := provider.NewBedrockTargetSnapshot(
+		"draft", "", strings.TrimSpace(connection.Credential), protocol.Kind,
+		variant, region.String(), protocol.Delivery)
+	probe, probeErr := providers.ProbeTarget(ctx, target)
+	if probeErr != nil {
+		return probe, "", probeErr
 	}
-	return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
+	probe.Options = profile.CloneModelAuthoringOptions(probe.Options)
+	return probe, variant, nil
 }
 
 func credentialRefKindForProbe(credentialRef string) string {
@@ -151,34 +143,20 @@ func probeDeployments(
 	if !profile.SupportsSpec(providerSpec) {
 		return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
 	}
-	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	variants := modelCatalogProbeVariants(providerSpec, providerProtocol)
-	var lastErr error
-	var lastProbe provider.TargetProbeResult
-	for _, variant := range variants {
-		protocol, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, variant)
-		if !ok {
-			continue
-		}
-		_ = protocol
-		_ = frame
-		target, err := exchange.ProviderTargetFromConnection("draft", connection, variant)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		probe, err := providers.ProbeTarget(ctx, target)
-		if err == nil {
-			probe.Deployments = profile.CloneProviderDeployments(probe.Deployments)
-			return probe, variant, nil
-		}
-		lastErr = err
-		lastProbe = probe
+	variant, _, err := selectModelCatalogProtocol(providerSpec, providerProtocol)
+	if err != nil {
+		return provider.TargetProbeResult{}, "", err
 	}
-	if lastErr != nil {
-		return lastProbe, "", lastErr
+	target, err := exchange.ProviderTargetFromConnection("draft", connection, variant)
+	if err != nil {
+		return provider.TargetProbeResult{}, "", err
 	}
-	return provider.TargetProbeResult{}, "", canonical.BadEndpoint("selected provider route is unsupported")
+	probe, probeErr := providers.ProbeTarget(ctx, target)
+	if probeErr != nil {
+		return probe, "", probeErr
+	}
+	probe.Options = profile.CloneModelAuthoringOptions(probe.Options)
+	return probe, variant, nil
 }
 
 func connectionCredentialRef(connection routing.Connection) string {
@@ -197,26 +175,30 @@ func connectionCredentialRef(connection routing.Connection) string {
 	return ""
 }
 
-func modelCatalogProbeVariants(providerSpec string, providerProtocol string) []string {
-	supported := profile.ConcreteProviderProtocolsForSpec(providerSpec)
-	variants := make([]string, 0, len(supported))
-	seen := map[string]struct{}{}
-	appendVariant := func(variant string) {
-		variant = strings.TrimSpace(variant) // swobu:io-string source=boundary
-		if variant == "" {
-			return
+// selectModelCatalogProtocol chooses one static concrete contract for an
+// advisory authoring probe. An authored exact contract wins; otherwise the
+// first manifest entry supplies the static preference. Probe failure is
+// returned to the operator and never triggers a second protocol attempt.
+func selectModelCatalogProtocol(providerSpec string, authored string) (string, profile.ProviderProtocolSpec, error) {
+	selected := strings.TrimSpace(authored) // swobu:io-string source=boundary
+	if selected == "" {
+		protocols := profile.ConcreteProviderProtocolsForSpec(providerSpec)
+		if len(protocols) > 0 {
+			selected = protocols[0]
 		}
-		if _, exists := seen[variant]; exists {
-			return
+	}
+	normalized, err := profile.NormalizeProviderProtocolForSpec(providerSpec, selected)
+	if err != nil || normalized == "" {
+		if err != nil {
+			return "", profile.ProviderProtocolSpec{}, canonical.BadEndpoint(err.Error())
 		}
-		seen[variant] = struct{}{}
-		variants = append(variants, variant)
+		return "", profile.ProviderProtocolSpec{}, canonical.BadEndpoint("selected provider route is unsupported")
 	}
-	appendVariant(providerProtocol)
-	for _, variant := range supported {
-		appendVariant(variant)
+	spec, ok := profile.ProviderProtocolSpecForSpec(providerSpec, normalized)
+	if !ok {
+		return "", profile.ProviderProtocolSpec{}, canonical.BadEndpoint("selected provider route is unsupported")
 	}
-	return variants
+	return normalized, spec, nil
 }
 
 func normalizeModelCatalogProbeError(message string, credentialRef string) string {

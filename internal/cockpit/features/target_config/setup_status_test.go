@@ -47,7 +47,7 @@ func TestProviderMatrixProjectsSemanticSetupStatus(t *testing.T) {
 						d.Locator = test.locator
 						return d
 					})
-					config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model"}}}})
+					config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model"}}}})
 				} else {
 					config.BaseURL.Set(test.locator)
 				}
@@ -78,7 +78,7 @@ func TestBedrockReadinessUsesCatalogSuccessNotIdentityEnrichment(t *testing.T) {
 	if got := w.setupState().Status; got != setupReady {
 		t.Fatalf("region-present status = %v, want ready to probe", got)
 	}
-	w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{ID: "model"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity, AWSIdentity: &readmodel.AWSIdentityReadModel{State: "identity_probe_failed", Error: "STS unavailable"}}}})
+	w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity, AWSIdentity: &readmodel.AWSIdentityReadModel{State: "identity_probe_failed", Error: "STS unavailable"}}}})
 	if got := w.setupState().Status; got != setupReady {
 		t.Fatalf("catalog success with STS failure status = %v, want ready", got)
 	}

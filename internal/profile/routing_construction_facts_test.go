@@ -16,8 +16,7 @@ func TestRoutingConstructionFactsUsesDirectProviderIdentity(t *testing.T) {
 	}{
 		{name: "custom is the catalog identity", provider: routing.Provider("custom"), protocol: "messages", want: true},
 		{name: "native provider", provider: routing.Provider("openai"), protocol: "responses", want: true},
-		{name: "auto fails closed", provider: routing.Provider("openai"), protocol: ProviderProtocolAuto, want: false},
-		{name: "unknown fails closed", provider: routing.Provider("openai"), protocol: "unknown", want: false},
+		{name: "unknown fails closed", provider: routing.Provider("openai"), protocol: "not_a_protocol", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

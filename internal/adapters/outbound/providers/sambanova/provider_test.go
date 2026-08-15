@@ -12,7 +12,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -72,8 +71,8 @@ func TestTransportAndDiscoveryUseEffectiveEndpointAndBearer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Deployments) != 1 || result.Deployments[0].Name != "served-model" {
-		t.Fatalf("deployments = %#v", result.Deployments)
+	if len(result.Options) != 1 || result.Options[0].Name != "served-model" {
+		t.Fatalf("deployments = %#v", result.Options)
 	}
 }
 
@@ -162,16 +161,7 @@ func TestMessagesThinkingOnlyOmitsDocumentedUnsupportedForms(t *testing.T) {
 
 func sambaNovaTarget(baseURL string, kind protocolkind.ProtocolKind) provider.TargetSnapshot {
 	protocol := string(kind)
-	if kind == protocolkind.ChatCompletions {
-		protocol = "chat_completions_stream"
-	}
-	if kind == protocolkind.Responses {
-		protocol = "responses_stream"
-	}
-	if kind == protocolkind.Messages {
-		protocol = "messages_stream"
-	}
-	target := provider.NewTargetSnapshot("sambanova", "sambanova", baseURL, "env:SAMBANOVA_API_KEY", kind, profile.FrameSSEEvent, protocol)
+	target := provider.NewTargetSnapshot("sambanova", "sambanova", baseURL, "env:SAMBANOVA_API_KEY", kind, protocol, delivery.BufferedDelivery())
 	target.Model = "served-model"
 	return target
 }

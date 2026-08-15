@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -13,7 +15,7 @@ const testWorkspaceSlug = "test-ns"
 
 func testBackendTarget(t *testing.T, model string) provider.TargetSnapshot {
 	t.Helper()
-	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", "responses", "", "responses")
+	target := provider.NewTargetSnapshot("target-"+model, "openai", "https://api.openai.com", "test", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = model
 	return target
 }

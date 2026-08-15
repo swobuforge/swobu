@@ -19,6 +19,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -63,9 +64,12 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes one exact ChatGPT Codex backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	_, err := resolveChatGPTDelivery(target.ProviderProtocol)
+	providerDelivery, err := resolveChatGPTDelivery(target.ProviderProtocol)
 	if err != nil {
 		return provider.Backend{}, err
+	}
+	if target.ProviderDelivery != providerDelivery {
+		return provider.Backend{}, canonical.BadEndpoint("ChatGPT target delivery does not match its concrete provider protocol")
 	}
 	backend := provider.Backend{
 		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send),
@@ -78,8 +82,12 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 
 // Send performs ChatGPT Codex HTTP transport over a final Responses document.
 func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
-	if _, err := resolveChatGPTDelivery(target.ProviderProtocol); err != nil {
+	providerDelivery, err := resolveChatGPTDelivery(target.ProviderProtocol)
+	if err != nil {
 		return nil, provider.AttemptNotDispatched(err)
+	}
+	if target.ProviderDelivery != providerDelivery {
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("ChatGPT target delivery does not match its concrete provider protocol"))
 	}
 	if doc.IsEmpty() {
 		return nil, provider.AttemptNotDispatched(canonical.InternalError("chatgpt provider request document is required"))
@@ -271,7 +279,7 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 	return out, nil
 }
 
-func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	tier, ok := e.resolveChatGPTSubscriptionTier(ctx, target.ProviderID(), target.CredentialRef)
 	if !ok {
 		return nil, canonical.BadEndpoint("chatgpt subscription tier could not be resolved from credential")
@@ -286,9 +294,9 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 		"model_count", len(models),
 	)
 	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(target.ProviderID())
-	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
+	out := make([]profile.ModelAuthoringOption, 0, len(models))
 	for _, modelID := range models {
-		out = append(out, profile.NewProviderDeployment(
+		out = append(out, profile.NewModelAuthoringOption(
 			modelID,
 			modelID,
 			target.ProviderID(),
@@ -303,7 +311,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 
 func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := e.ListDeployments(ctx, target)
-	return provider.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Options: deployments}, err
 }
 
 func (e BackendAdapter) resolveChatGPTSubscriptionTier(_ context.Context, providerSpec string, credentialRef string) (string, bool) {
@@ -365,16 +373,15 @@ func resolveChatGPTExecuteBaseURL(raw string) string {
 
 func resolveChatGPTDelivery(providerProtocol string) (delivery.Delivery, error) {
 	providerProtocol = strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
-	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
+	if providerProtocol == "" {
 		return delivery.BufferedDelivery(), canonical.BadEndpoint("chatgpt provider protocol must be concrete")
 	}
 	if !profile.SupportsProviderProtocolForSpec(string(profile.ProviderSpecChatGPT), providerProtocol) {
 		return delivery.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt")
 	}
-	switch providerProtocol {
-	case "responses_stream":
-		return delivery.StreamingDelivery(delivery.FramingSSE), nil
-	default:
+	spec, ok := profile.ProviderProtocolSpecForSpec(string(profile.ProviderSpecChatGPT), providerProtocol)
+	if !ok || spec.Kind != protocolkind.Responses {
 		return delivery.BufferedDelivery(), canonical.BadEndpoint("selected provider protocol is unsupported for chatgpt; use responses_stream")
 	}
+	return spec.Delivery, nil
 }

@@ -68,9 +68,7 @@ func TestSendProviderRequest_UsesContractDeliveryForStreamingRequests(t *testing
 		server.URL,
 		"env:ANTHROPIC_API_KEY",
 		protocolkind.Messages,
-
-		"",
-		"messages")
+		"messages", delivery.BufferedDelivery())
 	target.Model = request.Model()
 
 	backend, err := adapter.ResolveBackend(target)
@@ -149,9 +147,7 @@ func TestSendProviderRequest_DoesNotEmitCacheBreakpoints(t *testing.T) {
 		server.URL,
 		"env:ANTHROPIC_API_KEY",
 		protocolkind.Messages,
-
-		"",
-		"messages")
+		"messages", delivery.BufferedDelivery())
 	target.Model = request.Model()
 
 	backend, err := adapter.ResolveBackend(target)
@@ -225,14 +221,13 @@ func TestMessagesAdapterRejectsNonMessagesProviderProtocols(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		protocol protocolkind.ProtocolKind
-		frame    string
 		token    string
 	}{
-		{name: "chat completions", protocol: protocolkind.ChatCompletions, frame: profile.FrameHTTPJSONBody, token: "chat_completions"},
-		{name: "responses", protocol: protocolkind.Responses, frame: profile.FrameHTTPJSONBody, token: "responses"},
+		{name: "chat completions", protocol: protocolkind.ChatCompletions, token: "chat_completions"},
+		{name: "responses", protocol: protocolkind.Responses, token: "responses"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("azure", "azure", "https://example.test", "env:AZURE_KEY", test.protocol, test.frame, test.token)
+			target := provider.NewTargetSnapshot("azure", "azure", "https://example.test", "env:AZURE_KEY", test.protocol, test.token, delivery.BufferedDelivery())
 			target.Model = "deployment"
 			if _, err := adapter.ResolveBackend(target); err == nil {
 				t.Fatalf("ResolveBackend accepted Azure %q through Messages adapter", test.token)
@@ -246,14 +241,17 @@ func TestMessagesAdapterAcceptsMessagesProviderProtocols(t *testing.T) {
 		name       string
 		providerID profile.ProviderID
 		token      string
-		frame      string
 	}{
-		{name: "Anthropic buffered Messages", providerID: profile.ProviderSpecAnthropic, token: "messages", frame: profile.FrameHTTPJSONBody},
-		{name: "DeepSeek streamed Messages", providerID: profile.ProviderSpecDeepSeek, token: "messages_stream", frame: profile.FrameSSEEvent},
+		{name: "Anthropic Messages", providerID: profile.ProviderSpecAnthropic, token: "messages"},
+		{name: "DeepSeek Messages", providerID: profile.ProviderSpecDeepSeek, token: "messages_stream"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			adapter := NewBackendAdapter(test.providerID, nil, staticCredentialProvider{token: "test-token"})
-			target := provider.NewTargetSnapshot("target", string(test.providerID), "https://example.test", "env:KEY", protocolkind.Messages, test.frame, test.token)
+			providerDelivery := delivery.BufferedDelivery()
+			if test.token == "messages_stream" {
+				providerDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
+			}
+			target := provider.NewTargetSnapshot("target", string(test.providerID), "https://example.test", "env:KEY", protocolkind.Messages, test.token, providerDelivery)
 			target.Model = "model"
 			if _, err := adapter.ResolveBackend(target); err != nil {
 				t.Fatalf("ResolveBackend rejected %q: %v", test.token, err)
@@ -267,16 +265,19 @@ func TestMessagesAdapterRejectsMismatchedMessagesProjection(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		protocol protocolkind.ProtocolKind
-		frame    string
 	}{
-		{name: "wrong kind", protocol: protocolkind.Responses, frame: profile.FrameSSEEvent},
-		{name: "wrong frame", protocol: protocolkind.Messages, frame: profile.FrameHTTPJSONBody},
+		{name: "wrong kind", protocol: protocolkind.Responses},
+		{name: "wrong protocol name", protocol: protocolkind.Messages},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			target := provider.NewTargetSnapshot("deepseek", "deepseek", "https://example.test", "env:DEEPSEEK_API_KEY", test.protocol, test.frame, "messages_stream")
+			protocolName := "messages"
+			if test.name == "wrong protocol name" {
+				protocolName = "responses"
+			}
+			target := provider.NewTargetSnapshot("deepseek", "deepseek", "https://example.test", "env:DEEPSEEK_API_KEY", test.protocol, protocolName, delivery.BufferedDelivery())
 			target.Model = "deepseek-v4-pro"
 			if _, err := adapter.ResolveBackend(target); err == nil {
-				t.Fatalf("ResolveBackend accepted mismatched kind/frame: %#v", target)
+				t.Fatalf("ResolveBackend accepted mismatched projection: %#v", target)
 			}
 		})
 	}

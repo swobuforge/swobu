@@ -12,13 +12,10 @@ const (
 var (
 	azureSupportedProviderProtocolsOpenAI = []string{
 		"responses",
-		"responses_stream",
 		"chat_completions",
-		"chat_completions_stream",
 	}
 	azureSupportedProviderProtocolsAnthropic = []string{
 		"messages",
-		"messages_stream",
 	}
 )
 

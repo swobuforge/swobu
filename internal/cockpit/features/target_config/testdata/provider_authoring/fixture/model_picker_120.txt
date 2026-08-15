@@ -11,7 +11,7 @@
         GPT-4o                                                                                            select ↵
 
         3 of 3 shown                                                                                      ↑↓ search
-     protocol          OpenAI · Responses · stream                                                        change ↵
+     protocol          OpenAI · Responses · buffered                                                      change ↵
      routing           fallback after step 1                                                              change ↵
      create                                                                                               create ↵
 

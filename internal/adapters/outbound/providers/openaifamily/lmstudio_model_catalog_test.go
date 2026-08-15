@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -76,7 +77,7 @@ func TestListDeploymentsLMStudioMapsOnlyGenerativeNativeModels(t *testing.T) {
 		t.Fatalf("native model metadata invented protocol support: %#v", got[0])
 	}
 	wantProtocols := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
-	resolved := profile.ResolveProviderDeployment("lmstudio", got[0])
+	resolved := profile.ResolveModelAuthoringOption("lmstudio", got[0])
 	if !reflect.DeepEqual(resolved.ProtocolOptions(), wantProtocols) {
 		t.Fatalf("resolved provider protocols = %#v, want %#v", resolved.ProtocolOptions(), wantProtocols)
 	}
@@ -155,7 +156,7 @@ func TestListDeploymentsRejectsProviderPolicyIdentityDrift(t *testing.T) {
 	defer srv.Close()
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
-	target := provider.NewCustomTargetSnapshot("draft", srv.URL+"/v1", "", protocolkind.Responses, "", "responses", "Authorization")
+	target := provider.NewCustomTargetSnapshot("draft", srv.URL+"/v1", "", protocolkind.Responses, "responses", "Authorization", delivery.BufferedDelivery())
 	if _, err := exec.ListDeployments(context.Background(), target); err == nil {
 		t.Fatal("expected exact provider policy mismatch")
 	}
@@ -165,5 +166,5 @@ func TestListDeploymentsRejectsProviderPolicyIdentityDrift(t *testing.T) {
 }
 
 func lmStudioTarget(baseURL string) provider.TargetSnapshot {
-	return provider.NewTargetSnapshot("draft", "lmstudio", baseURL, "", protocolkind.Responses, "", "responses")
+	return provider.NewTargetSnapshot("draft", "lmstudio", baseURL, "", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 }

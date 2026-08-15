@@ -84,8 +84,8 @@ func TestTransportAndDiscoveryUseResolvedBaseAndBearer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Deployments) != 1 || result.Deployments[0].Name != "future-model" {
-		t.Fatalf("deployments = %#v", result.Deployments)
+	if len(result.Options) != 1 || result.Options[0].Name != "future-model" {
+		t.Fatalf("deployments = %#v", result.Options)
 	}
 }
 
@@ -236,11 +236,11 @@ func TestCapacityExceededIsPreExecutionOnlyForMarkedFlexDocument(t *testing.T) {
 }
 
 func groqTarget(baseURL string, kind protocolkind.ProtocolKind) provider.TargetSnapshot {
-	protocol := "chat_completions_stream"
+	protocol := "chat_completions"
 	if kind == protocolkind.Responses {
-		protocol = "responses_stream"
+		protocol = "responses"
 	}
-	target := provider.NewTargetSnapshot("groq", string(profile.ProviderSpecGroq), baseURL, "env:GROQ_API_KEY", kind, profile.FrameSSEEvent, protocol)
+	target := provider.NewTargetSnapshot("groq", string(profile.ProviderSpecGroq), baseURL, "env:GROQ_API_KEY", kind, protocol, delivery.BufferedDelivery())
 	target.Model = "future-model"
 	return target
 }

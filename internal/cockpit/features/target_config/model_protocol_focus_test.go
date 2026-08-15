@@ -16,7 +16,7 @@ func TestModelSelectionDefaultsProtocolAndAdvancesSelectionToCreate(t *testing.T
 		ProviderSpec:  "openai",
 		CredentialRef: "env:OPENAI_API_KEY",
 	})
-	config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{{
+	config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{
 		ID:        "gpt-5.6",
 		Name:      "gpt-5.6",
 		ModelName: "gpt-5.6",
@@ -37,7 +37,7 @@ func TestModelSelectionDefaultsProtocolAndAdvancesSelectionToCreate(t *testing.T
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 
 	frame := h.Frame()
-	if !strings.Contains(frame, "protocol          OpenAI · Responses") {
+	if !strings.Contains(frame, "protocol          OpenAI · Responses · buffered") {
 		t.Fatalf("protocol row must show the provider default after model choice:\n%s", frame)
 	}
 	if !strings.Contains(frame, "> create") {
@@ -57,8 +57,8 @@ func TestModelSelectionDefaultsToFirstResolvedProtocolAndRemainsEditable(t *test
 	for _, provider := range providers {
 		t.Run(string(provider), func(t *testing.T) {
 			config := authoringConfig(t, provider, "", "")
-			model := readmodel.ModelDeploymentReadModel{ID: "served-model", Name: "served-model", ModelName: "served-model"}
-			config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{model}}})
+			model := readmodel.ModelAuthoringOptionReadModel{ID: "served-model", Name: "served-model", ModelName: "served-model"}
+			config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{model}}})
 
 			config.SelectModel(model)
 
@@ -78,7 +78,7 @@ func TestModelSelectionDefaultsToFirstResolvedProtocolAndRemainsEditable(t *test
 }
 
 func TestCatalogHydrationDefaultsOnlyAnAbsentOrInvalidProtocol(t *testing.T) {
-	model := readmodel.ModelDeploymentReadModel{ID: "served-model", Name: "served-model", ModelName: "served-model"}
+	model := readmodel.ModelAuthoringOptionReadModel{ID: "served-model", Name: "served-model", ModelName: "served-model"}
 	for _, test := range []struct {
 		name string
 		seed string
@@ -96,7 +96,7 @@ func TestCatalogHydrationDefaultsOnlyAnAbsentOrInvalidProtocol(t *testing.T) {
 				return d
 			})
 
-			if !config.hydrateSelectedModel([]readmodel.ModelDeploymentReadModel{model}) {
+			if !config.hydrateSelectedModel([]readmodel.ModelAuthoringOptionReadModel{model}) {
 				t.Fatal("selected model was not hydrated")
 			}
 			if got := config.Draft.Get().ProviderProtocol; got != test.want {
@@ -109,8 +109,8 @@ func TestCatalogHydrationDefaultsOnlyAnAbsentOrInvalidProtocol(t *testing.T) {
 func TestIncompleteCreateStatusDoesNotParticipateInSelection(t *testing.T) {
 	config := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 	config.Route = readmodel.RouteReadModel{ID: "openai"}
-	deployment := readmodel.ModelDeploymentReadModel{ID: "gpt-5.6-sol", Name: "gpt-5.6-sol", ModelName: "gpt-5.6-sol"}
-	config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{deployment}}})
+	deployment := readmodel.ModelAuthoringOptionReadModel{ID: "gpt-5.6-sol", Name: "gpt-5.6-sol", ModelName: "gpt-5.6-sol"}
+	config.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{deployment}}})
 	config.SelectModel(deployment)
 	config.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ProviderProtocol = ""

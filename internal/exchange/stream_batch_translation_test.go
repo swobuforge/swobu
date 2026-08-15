@@ -25,7 +25,7 @@ func TestRunnerRun_StreamToBatchResponseProjectsProviderEventsInternally(t *test
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 		Contract:         NewExecutionContractForDeliveries(delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -57,7 +57,7 @@ func TestRunnerRun_BatchToStreamResponseWithoutSourceIncrementality(t *testing.T
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingSSE), delivery.BufferedDelivery()),
 	})
 	if err != nil {

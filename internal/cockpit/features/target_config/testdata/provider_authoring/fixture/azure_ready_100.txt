@@ -3,7 +3,7 @@
      project           example/demo                                                   edit ↵
      credential        environment · AZURE_OPENAI_API_KEY                             change ↵
      deployment        claude-opus-4-8                                                change ↵
-     protocol          Anthropic · Messages · stream                                  change ↵
+     protocol          Anthropic · Messages · buffered                                change ↵
      routing           fallback after step 1                                          change ↵
    > create                                                                           create ↵
 

@@ -115,7 +115,7 @@ type ProtocolSupport func(provider Provider, protocol string) bool
 
 func ParseProtocol(raw string, provider Provider, supports ProtocolSupport) (Protocol, error) {
 	raw = strings.TrimSpace(raw) // swobu:io-string source=boundary
-	if raw == "" || raw == "auto" {
+	if raw == "" {
 		return Protocol{}, pathError("target.protocol", "a concrete protocol is required")
 	}
 	if supports == nil || !supports(provider, raw) {
@@ -374,7 +374,7 @@ func (t Target) validate() error {
 	if t.model.value == "" {
 		return pathError("target.model", "upstream model is required")
 	}
-	if t.protocol.value == "" || t.protocol.value == "auto" {
+	if t.protocol.value == "" {
 		return pathError("target.protocol", "concrete protocol is required")
 	}
 	if t.connection == nil || t.connection.Provider() == "" {

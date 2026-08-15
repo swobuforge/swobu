@@ -44,15 +44,15 @@ func TestGeminiNativeTextAndGoogleSearchLive(t *testing.T) {
 	target := provider.NewTargetSnapshot(
 		"gemini-live", string(profile.ProviderSpecGemini),
 		"https://generativelanguage.googleapis.com/v1", credentialRef,
-		protocolkind.Interactions, profile.FrameSSEEvent, "interactions_stream",
-	)
+		protocolkind.Interactions, "interactions_stream",
+		delivery.StreamingDelivery(delivery.FramingSSE))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	probe, err := runtime.Discovery.ProbeTarget(ctx, target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(probe.Deployments) == 0 {
+	if len(probe.Options) == 0 {
 		t.Fatal("Gemini live discovery returned no models")
 	}
 	model := strings.TrimSpace(os.Getenv("SWOBU_LIVE_GEMINI_MODEL"))
@@ -60,7 +60,7 @@ func TestGeminiNativeTextAndGoogleSearchLive(t *testing.T) {
 		t.Fatal("set SWOBU_LIVE_GEMINI_MODEL to one model ID returned by live discovery")
 	}
 	foundModel := false
-	for _, deployment := range probe.Deployments {
+	for _, deployment := range probe.Options {
 		if deployment.Name == model {
 			foundModel = true
 			break

@@ -56,7 +56,13 @@ func TestStandardProfilesEnforceOneProfileOwnedConstructionContract(t *testing.T
 				}
 			case LocatorBaseURL:
 				malformed := valid
-				malformed.Standard = &routing.StandardConnectionDraft{Locator: "not a URL", Credential: valid.Standard.Credential}
+				locator := "not a URL"
+				if entry.ProviderID == ProviderSpecRunPod {
+					// Runpod endpoint IDs are valid authoring syntax and are
+					// normalized before the standard URL parser runs.
+					locator = "https://"
+				}
+				malformed.Standard = &routing.StandardConnectionDraft{Locator: locator, Credential: valid.Standard.Credential}
 				if _, err := routing.FinalizeConnection(malformed, facts); err == nil || !strings.Contains(err.Error(), "connection."+provider+".base_url") || strings.Contains(err.Error(), ".locator") {
 					t.Fatalf("base URL error = %v", err)
 				}
@@ -158,6 +164,11 @@ func validStandardLocator(entry Profile) string {
 	switch entry.Locator.Kind {
 	case LocatorAzureProject:
 		return "https://futurecloud.services.ai.azure.com/api/projects/demo"
+	case LocatorBaseURL:
+		if strings.TrimSpace(entry.Locator.Default) == "" {
+			return "https://futurecloud.example/v1"
+		}
+		return ""
 	default:
 		return ""
 	}

@@ -24,7 +24,7 @@ func TestProviderTargetFromGeminiStandardConnectionPreservesInteractionsIdentity
 	if target.ProviderSpec != "gemini" || target.BaseURL != "https://generativelanguage.googleapis.com/v1" || target.CredentialRef != "env:GEMINI_API_KEY" {
 		t.Fatalf("Gemini target = %#v", target)
 	}
-	if target.ProtocolKind != protocolkind.Interactions || target.SelectedFrame != profile.FrameSSEEvent || target.ProviderProtocol != "interactions_stream" {
+	if target.ProtocolKind != protocolkind.Interactions || target.ProviderProtocol != "interactions_stream" {
 		t.Fatalf("Gemini execution identity = %#v", target)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -977,7 +978,7 @@ func (h *capturingRequestIngress) HandleRequest(ctx context.Context, in exchange
 	if err != nil {
 		return exchange.RequestOutput{}, err
 	}
-	out.Target = provider.NewCustomTargetSnapshot("backend-a", "https://example.test/v1", "cred-1", "chat_completions", "", "", "Authorization")
+	out.Target = provider.NewCustomTargetSnapshot("backend-a", "https://example.test/v1", "cred-1", protocolkind.ChatCompletions, "chat_completions", "Authorization", delivery.BufferedDelivery())
 	return out, nil
 }
 

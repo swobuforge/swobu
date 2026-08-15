@@ -168,7 +168,7 @@ func TestWorkspaceCommandsRoundTripProviderArmsAcrossStoreReopen(t *testing.T) {
 		"lmstudio":   `{"id":"lm-studio","model":"local-model","protocol":"responses","connection":{"lmstudio":{"credential":"env:LM_API_TOKEN"}}}`,
 		"vllm":       `{"id":"vllm","model":"served-model","protocol":"responses","connection":{"vllm":{"credential":"env:VLLM_API_KEY"}}}`,
 		"azure":      `{"id":"azure","model":"deployment","protocol":"responses","connection":{"azure":{"project_endpoint":"https://example.services.ai.azure.com/api/projects/prod","credential":"env:AZURE_KEY"}}}`,
-		"bedrock":    `{"id":"bedrock","model":"openai.gpt","protocol":"responses_stream","connection":{"bedrock":{"region":"eu-west-2","endpoint":"https://bedrock-mantle.eu-west-2.api.aws/openai/v1"}}}`,
+		"bedrock":    `{"id":"bedrock","model":"openai.gpt","protocol":"responses","connection":{"bedrock":{"region":"eu-west-2","endpoint":"https://bedrock-mantle.eu-west-2.api.aws/openai/v1"}}}`,
 		"custom":     `{"id":"custom","model":"local","protocol":"chat_completions","connection":{"custom":{"base_url":"https://example.test/v1","header":{"name":"Authorization","credential":"env:CUSTOM_KEY"}}}}`,
 	}
 	for route, target := range routes {

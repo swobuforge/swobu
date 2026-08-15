@@ -22,6 +22,12 @@ workspaces:
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
               - {id: deepseek, model: deepseek-v4-pro, connection: {deepseek: {credential: env:DEEPSEEK_API_KEY}}}
               - {id: kimi, model: kimi-k3, connection: {kimi: {credential: env:MOONSHOT_API_KEY}}}
+              - {id: mistral, model: mistral-small-latest, connection: {mistral: {base_url: https://api.eu.mistral.ai/v1, credential: env:MISTRAL_API_KEY}}}
+              - {id: cerebras, model: my-org-gpt-oss-120b, connection: {cerebras: {credential: env:CEREBRAS_API_KEY}}}
+              - {id: workersai, model: '@cf/meta/example', protocol: responses_stream, connection: {workersai: {base_url: https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1, credential: env:CLOUDFLARE_API_TOKEN}}}
+              - {id: llm7, model: fast, connection: {llm7: {credential: env:LLM7_API_KEY}}}
+              - {id: nvidia, model: publisher/model, connection: {nvidia: {credential: env:NVIDIA_API_KEY}}}
+              - {id: runpod, model: served-model, protocol: responses_stream, connection: {runpod: {base_url: abc123, credential: env:RUNPOD_API_KEY}}}
               - {id: together, model: zai-org/GLM-5.1, connection: {together: {credential: env:TOGETHER_API_KEY}}}
               - {id: deepinfra, model: deploy_id:private, connection: {deepinfra: {credential: env:DEEPINFRA_TOKEN}}}
               - {id: scaleway, model: served-model, protocol: responses_stream, connection: {scaleway: {base_url: https://dedicated.example/v1}}}
@@ -29,10 +35,14 @@ workspaces:
               - {id: stepfun, model: step-router-v1, protocol: messages_stream, connection: {stepfun: {base_url: https://api.stepfun.com/step_plan/v1, credential: env:STEP_API_KEY}}}
               - {id: friendli, model: ENDPOINT_ID:OPTIONAL_ADAPTER_ROUTE, protocol: messages_stream, connection: {friendli: {base_url: https://friendli-gateway.example/v1}}}
               - {id: nebius, model: dedicated-routing-key, protocol: responses_stream, connection: {nebius: {base_url: https://api.tokenfactory.us-central1.nebius.com/v1, credential: env:NEBIUS_API_KEY}}}
-              - {id: gmi, model: exact-model, protocol: messages_stream, connection: {gmi: {base_url: https://gmi.example/v1, credential: env:GMI_API_KEY}}}
+              - {id: gmi, model: exact-model, protocol: messages, connection: {gmi: {base_url: https://gmi.example/v1, credential: env:GMI_API_KEY}}}
               - {id: gemini, model: operator-selected-model, connection: {gemini: {credential: env:GEMINI_API_KEY}}}
               - {id: groq, model: served-model, protocol: responses_stream, connection: {groq: {credential: env:GROQ_API_KEY}}}
               - {id: fireworks, model: accounts/acme/deployments/deploy-1, protocol: responses_stream, connection: {fireworks: {base_url: https://direct.example/v1, credential: env:FIREWORKS_API_KEY}}}
+              - {id: novita, model: deployment/model, connection: {novita: {base_url: https://deployment.example/v1, credential: env:NOVITA_API_KEY}}}
+              - {id: baseten, model: served-model, protocol: messages_stream, connection: {baseten: {base_url: https://deployment.example/v1, credential: env:BASETEN_API_KEY}}}
+              - {id: hyperbolic, model: exact-model, connection: {hyperbolic: {credential: env:HYPERBOLIC_API_KEY}}}
+              - {id: siliconflow, model: Pro/model, protocol: messages_stream, connection: {siliconflow: {credential: env:SILICONFLOW_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
               - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
               - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
@@ -67,20 +77,38 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	if !strings.Contains(string(raw), "custom:") || strings.Contains(string(raw), "openai_"+"compatible") {
 		t.Fatalf("custom connection identity changed during round trip:\n%s", raw)
 	}
-	if strings.Contains(string(raw), "protocol: chat_completions_stream") {
-		t.Fatalf("derived Z.AI protocol was persisted:\n%s", raw)
+	if !strings.Contains(string(raw), "protocol: responses_stream") || !strings.Contains(string(raw), "protocol: messages") {
+		t.Fatalf("selected concrete provider protocols were not persisted:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "deepseek:") || strings.Count(string(raw), "protocol: messages_stream") != 5 {
-		t.Fatalf("DeepSeek connection or derived protocol persistence is wrong:\n%s", raw)
+	if !strings.Contains(string(raw), "deepseek:") {
+		t.Fatalf("DeepSeek connection persistence is wrong:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "kimi:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
-		t.Fatalf("Kimi connection or derived protocol persistence is wrong:\n%s", raw)
+	if !strings.Contains(string(raw), "kimi:") {
+		t.Fatalf("Kimi connection persistence is wrong:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "gemini:") || !strings.Contains(string(raw), "credential: env:GEMINI_API_KEY") || strings.Contains(string(raw), "protocol: interactions_stream") {
-		t.Fatalf("Gemini connection or derived protocol persistence is wrong:\n%s", raw)
+	if !strings.Contains(string(raw), "mistral:") || !strings.Contains(string(raw), "base_url: https://api.eu.mistral.ai/v1") || !strings.Contains(string(raw), "credential: env:MISTRAL_API_KEY") {
+		t.Fatalf("Mistral connection persistence is wrong:\n%s", raw)
 	}
-	if !strings.Contains(string(raw), "together:") || strings.Contains(string(raw), "protocol: chat_completions_stream") {
-		t.Fatalf("Together AI connection or derived protocol persistence is wrong:\n%s", raw)
+	if !strings.Contains(string(raw), "cerebras:") || !strings.Contains(string(raw), "credential: env:CEREBRAS_API_KEY") {
+		t.Fatalf("Cerebras connection persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "workersai:") || !strings.Contains(string(raw), "base_url: https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1") || !strings.Contains(string(raw), "credential: env:CLOUDFLARE_API_TOKEN") {
+		t.Fatalf("Workers AI endpoint/credential changed during round trip:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "llm7:") || !strings.Contains(string(raw), "credential: env:LLM7_API_KEY") {
+		t.Fatalf("LLM7 connection persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "runpod:") || !strings.Contains(string(raw), "base_url: https://api.runpod.ai/v2/abc123/openai/v1") || !strings.Contains(string(raw), "credential: env:RUNPOD_API_KEY") {
+		t.Fatalf("Runpod endpoint normalization or credential persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "nvidia:") || !strings.Contains(string(raw), "credential: env:NVIDIA_API_KEY") || strings.Contains(string(raw), "base_url: https://integrate.api.nvidia.com/v1") {
+		t.Fatalf("NVIDIA hosted connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "gemini:") || !strings.Contains(string(raw), "credential: env:GEMINI_API_KEY") {
+		t.Fatalf("Gemini connection persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "together:") {
+		t.Fatalf("Together AI connection persistence is wrong:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "deepinfra:") || !strings.Contains(string(raw), "credential: env:DEEPINFRA_TOKEN") || strings.Contains(string(raw), "fail_fast") {
 		t.Fatalf("DeepInfra connection or transient fail-fast boundary is wrong:\n%s", raw)
@@ -136,7 +164,7 @@ func TestGeminiAmbientAndExplicitCredentialRoundTripWithoutAuthResidue(t *testin
 				t.Fatalf("decode round trip: %v\n%s", err, encoded)
 			}
 			text := string(encoded)
-			for _, forbidden := range []string{"auth_mode", "quota_project", "access_token", "project_id", "interactions_stream"} {
+			for _, forbidden := range []string{"auth_mode", "quota_project", "access_token", "project_id", "_stream"} {
 				if strings.Contains(text, forbidden) {
 					t.Fatalf("Gemini round trip persisted %q:\n%s", forbidden, text)
 				}
@@ -301,7 +329,7 @@ func TestCodecRejectsMultipleAPIKeyProviderVariants(t *testing.T) {
 }
 
 func TestCodecRejectsEveryAuthoredZAIProtocol(t *testing.T) {
-	for _, protocol := range []string{"chat_completions_stream", "responses"} {
+	for _, protocol := range []string{"chat_completions_stream"} {
 		raw := strings.Replace(
 			allVariantsYAML,
 			"id: zai, model: manual-model, connection:",

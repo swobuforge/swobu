@@ -71,6 +71,11 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("fireworks") {
 		t.Fatal("Fireworks provider spec should be supported")
 	}
+	for _, spec := range []string{"novita", "baseten", "hyperbolic", "siliconflow"} {
+		if !SupportsSpec(spec) {
+			t.Fatalf("%s provider spec should be supported", spec)
+		}
+	}
 	obsoleteIdentity := "openai_" + "compatible"
 	if SupportsSpec(obsoleteIdentity) {
 		t.Fatal("obsolete custom-endpoint provider identity must fail closed")
@@ -83,8 +88,8 @@ func TestCatalog_SpecSupport(t *testing.T) {
 // durable shape reasons, never recreate this inventory.
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 24 {
-		t.Fatalf("provider profile count = %d, want 24", len(profiles))
+	if len(profiles) != 34 {
+		t.Fatalf("provider profile count = %d, want 34", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -102,12 +107,13 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	for _, providerID := range []ProviderID{
 		ProviderSpecOllama, ProviderSpecLMStudio, ProviderSpecVLLM,
 		ProviderSpecOpenAI, ProviderSpecChatGPT, ProviderSpecGemini, ProviderSpecAnthropic,
-		ProviderSpecDeepSeek, ProviderSpecKimi, ProviderSpecFriendli,
+		ProviderSpecDeepSeek, ProviderSpecKimi, ProviderSpecMistral, ProviderSpecCerebras, ProviderSpecWorkersAI, ProviderSpecLLM7, ProviderSpecNVIDIA, ProviderSpecRunPod, ProviderSpecFriendli,
 		ProviderSpecTogether, ProviderSpecDeepInfra, ProviderSpecScaleway,
 		ProviderSpecSambaNova, ProviderSpecStepFun, ProviderSpecNebius,
 		ProviderSpecGMI, ProviderSpecGroq, ProviderSpecFireworks,
 		ProviderSpecOpenRouter, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
+		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow,
 	} {
 		if _, ok := seen[providerID]; !ok {
 			t.Fatalf("provider catalog omits %q", providerID)
@@ -115,7 +121,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 21,
+		routing.ConnectionShapeStandard: 31,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -190,19 +196,20 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if got, ok := DerivedProtocolForSpec("deepinfra"); !ok || got != "chat_completions_stream" {
 		t.Fatalf("DeepInfra derived protocol = %q, %v", got, ok)
 	}
-	authored := Profile{
-		ProviderID: ProviderID("single-authored"),
-		ProviderProtocols: []ProviderProtocolSpec{{
-			Name:  "responses",
-			Kind:  protocolkind.Responses,
-			Frame: FrameHTTPJSONBody,
-		}},
+	if got, ok := derivedProtocolForProfile(Profile{
+		ProviderID:        ProviderID("single-semantic"),
+		ProviderProtocols: []ProviderProtocolSpec{{Name: "responses", Kind: protocolkind.Responses}},
+	}); !ok || got != "responses" {
+		t.Fatalf("single-semantic profile derived protocol = %q, %v", got, ok)
 	}
-	if authored.ProtocolAuthoring != ProtocolAuthored {
-		t.Fatalf("zero-value protocol authoring = %d, want authored", authored.ProtocolAuthoring)
-	}
-	if got, ok := derivedProtocolForProfile(authored); ok || got != "" {
-		t.Fatalf("single-protocol authored profile derived protocol = %q, %v", got, ok)
+	if got, ok := derivedProtocolForProfile(Profile{
+		ProviderID: ProviderID("multi-semantic"),
+		ProviderProtocols: []ProviderProtocolSpec{
+			{Name: "responses", Kind: protocolkind.Responses},
+			{Name: "messages", Kind: protocolkind.Messages},
+		},
+	}); ok || got != "" {
+		t.Fatalf("multi-semantic profile derived protocol = %q, %v", got, ok)
 	}
 	if !RequiresCredential("openrouter", DefaultExecuteBaseURL("openrouter")) {
 		t.Fatal("openrouter should require credential")
@@ -291,7 +298,7 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if got := DefaultExecuteBaseURL("fireworks"); got != "https://api.fireworks.ai/inference/v1" {
 		t.Fatalf("Fireworks default base URL = %q", got)
 	}
-	if !RequiresCredential("fireworks", DefaultExecuteBaseURL("fireworks")) || DefaultEnvKeyForSpec("fireworks") != "FIREWORKS_API_KEY" || ModelCatalogModeForSpec("fireworks") != ModelCatalogModeManual {
+	if !RequiresCredential("fireworks", DefaultExecuteBaseURL("fireworks")) || DefaultEnvKeyForSpec("fireworks") != "FIREWORKS_API_KEY" || ModelDiscoveryModeForSpec("fireworks") != ModelDiscoveryModeNone {
 		t.Fatal("Fireworks credential or manual catalog policy is wrong")
 	}
 	if got := ConcreteProviderProtocolsForSpec("fireworks"); !slices.Equal(got, []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}) {
@@ -354,7 +361,7 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 		}
 	}
 	if got := ConcreteProviderProtocolsForSpec("zai"); len(got) != 1 || got[0] != "chat_completions_stream" {
-		t.Fatalf("Z.AI protocols = %#v, want fixed streaming Chat Completions", got)
+		t.Fatalf("Z.AI protocols = %#v, want fixed Chat Completions", got)
 	}
 	if got := DefaultAuthHeaderForSpec("custom"); got != "Authorization" {
 		t.Fatalf("custom endpoint default auth header = %q", got)
@@ -366,8 +373,8 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if authHeaders[0] != "Authorization" || authHeaders[1] != "x-api-key" || authHeaders[2] != "api-key" {
 		t.Fatalf("custom endpoint auth headers=%v want [Authorization x-api-key api-key]", authHeaders)
 	}
-	if got := ConcreteProviderProtocolsForSpec("custom"); len(got) != 6 {
-		t.Fatalf("custom endpoint concrete protocols=%v want exactly 6", got)
+	if got := ConcreteProviderProtocolsForSpec("custom"); !slices.Equal(got, []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}) {
+		t.Fatalf("custom endpoint concrete protocols=%v want semantic standard families", got)
 	}
 	for _, tc := range []struct {
 		baseURL string
@@ -395,21 +402,51 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	if len(bedrockProtocols) != 6 {
 		t.Fatalf("bedrock concrete protocols=%v want exactly 6", bedrockProtocols)
 	}
-	if bedrockProtocols[0] != "responses" || bedrockProtocols[1] != "responses_stream" {
-		t.Fatalf("bedrock concrete protocols=%v want responses first", bedrockProtocols)
+	if bedrockProtocols[0] != "responses" || bedrockProtocols[1] != "responses_stream" || bedrockProtocols[2] != "chat_completions" {
+		t.Fatalf("bedrock concrete protocols=%v want semantic Responses first", bedrockProtocols)
 	}
-	if !SupportsProviderProtocolForSpec("bedrock", "chat_completions") || !SupportsProviderProtocolForSpec("bedrock", "messages") {
+	if !SupportsProviderProtocolForSpec("bedrock", "chat_completions") || !SupportsProviderProtocolForSpec("bedrock", "chat_completions_stream") || !SupportsProviderProtocolForSpec("bedrock", "messages") || !SupportsProviderProtocolForSpec("bedrock", "messages_stream") {
 		t.Fatal("bedrock should support chat_completions and messages")
 	}
 	if SupportsProviderProtocolForSpec("bedrock", "converse") || SupportsProviderProtocolForSpec("bedrock", "invoke_model") {
 		t.Fatal("bedrock must not advertise native runtime protocol names")
 	}
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("bedrock"); !ok || got != "responses" {
-		t.Fatalf("bedrock auto protocol=%q ok=%v want responses", got, ok)
-	}
+}
 
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("azure"); ok || got != "" {
-		t.Fatalf("azure auto protocol=%q ok=%v want unresolved", got, ok)
+func TestNormalizeProviderProtocolForSpecPreservesConcreteDeliveryToken(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		legacy   string
+		want     string
+	}{
+		{provider: "openai", legacy: "responses_stream", want: "responses_stream"},
+		{provider: "anthropic", legacy: "messages_stream", want: "messages_stream"},
+		{provider: "gemini", legacy: "interactions_stream", want: "interactions_stream"},
+		{provider: "runpod", legacy: "chat_completions_stream", want: "chat_completions_stream"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			got, err := NormalizeProviderProtocolForSpec(tc.provider, tc.legacy)
+			if err != nil || got != tc.want {
+				t.Fatalf("NormalizeProviderProtocolForSpec(%q, %q) = %q, %v; want %q", tc.provider, tc.legacy, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSupportsProviderProtocolForSpecRejectsAbsentOrUnknownProtocol(t *testing.T) {
+	for _, protocol := range []string{"", "not_a_protocol"} {
+		if SupportsProviderProtocolForSpec("openai", protocol) {
+			t.Fatalf("%q is not a supported concrete provider protocol", protocol)
+		}
+	}
+}
+
+func TestConcreteProviderProtocolsForSpecPreservesDeliveryVariants(t *testing.T) {
+	if got := ConcreteProviderProtocolsForSpec("runpod"); !slices.Equal(got, []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}) {
+		t.Fatalf("RunPod concrete protocols = %v", got)
+	}
+	if got := ConcreteProviderProtocolsForSpec("sambanova"); !slices.Equal(got, []string{"chat_completions_stream", "responses_stream", "messages_stream", "chat_completions", "responses", "messages"}) {
+		t.Fatalf("SambaNova concrete protocols = %v", got)
 	}
 }
 
@@ -444,22 +481,26 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		credential CredentialSpec
 		noun       string
 	}{
-		"ollama":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported, Authoring: CredentialAuthoringNone}, "model"},
-		"lmstudio":   {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:1234/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "LM_API_TOKEN"}, "model"},
-		"vllm":       {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:8000/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "VLLM_API_KEY"}, "model"},
-		"friendli":   {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.friendli.ai/serverless/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "FRIENDLI_TOKEN"}, "model"},
-		"scaleway":   {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.scaleway.ai/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SCW_SECRET_KEY"}, "model"},
-		"sambanova":  {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.sambanova.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SAMBANOVA_API_KEY"}, "model"},
-		"stepfun":    {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.stepfun.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "STEP_API_KEY"}, "model"},
-		"together":   {LocatorSpec{Kind: LocatorFixed, Default: "https://api.together.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "TOGETHER_API_KEY"}, "model"},
-		"openai":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
-		"chatgpt":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive}, "model"},
-		"gemini":     {LocatorSpec{Kind: LocatorFixed, Default: "https://generativelanguage.googleapis.com/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key"}, "model"},
-		"anthropic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
-		"openrouter": {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
-		"bedrock":    {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK", AmbientLabel: "AWS identity", ReferenceLabel: "Bedrock API key"}, "model"},
-		"azure":      {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
-		"custom":     {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback, Authoring: CredentialAuthoringReference}, "model"},
+		"ollama":      {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:11434/v1"}, CredentialSpec{Requirement: CredentialUnsupported, Authoring: CredentialAuthoringNone}, "model"},
+		"lmstudio":    {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:1234/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "LM_API_TOKEN"}, "model"},
+		"vllm":        {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "http://127.0.0.1:8000/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "VLLM_API_KEY"}, "model"},
+		"friendli":    {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.friendli.ai/serverless/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "FRIENDLI_TOKEN"}, "model"},
+		"scaleway":    {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.scaleway.ai/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SCW_SECRET_KEY"}, "model"},
+		"sambanova":   {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.sambanova.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SAMBANOVA_API_KEY"}, "model"},
+		"stepfun":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.stepfun.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "STEP_API_KEY"}, "model"},
+		"together":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.together.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "TOGETHER_API_KEY"}, "model"},
+		"openai":      {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
+		"chatgpt":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive}, "model"},
+		"gemini":      {LocatorSpec{Kind: LocatorFixed, Default: "https://generativelanguage.googleapis.com/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key"}, "model"},
+		"anthropic":   {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
+		"openrouter":  {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
+		"bedrock":     {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK", AmbientLabel: "AWS identity", ReferenceLabel: "Bedrock API key"}, "model"},
+		"azure":       {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
+		"custom":      {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback, Authoring: CredentialAuthoringReference}, "model"},
+		"novita":      {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.novita.ai/openai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "NOVITA_API_KEY"}, "model"},
+		"baseten":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://inference.baseten.co/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "BASETEN_API_KEY"}, "model"},
+		"hyperbolic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.hyperbolic.xyz/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "HYPERBOLIC_API_KEY"}, "model"},
+		"siliconflow": {LocatorSpec{Kind: LocatorFixed, Default: "https://api.siliconflow.cn/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SILICONFLOW_API_KEY"}, "model"},
 	}
 	for spec, want := range cases {
 		got, ok := LocatorSpecForProvider(spec)
@@ -482,33 +523,27 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 	}
 }
 
-func TestCatalog_ModelCatalogModeIsExplicit(t *testing.T) {
+func TestCatalog_ModelDiscoveryModeIsExplicit(t *testing.T) {
 	t.Parallel()
 	for _, provider := range All() {
-		if provider.ModelCatalog == ModelCatalogModeInvalid {
-			t.Fatalf("provider %q has no explicit model catalog mode", provider.ProviderID)
+		if provider.ModelDiscovery == ModelDiscoveryModeInvalid {
+			t.Fatalf("provider %q has no explicit model discovery mode", provider.ProviderID)
 		}
 	}
-	if got := ModelCatalogModeForSpec("zai"); got != ModelCatalogModeManual {
-		t.Fatalf("Z.AI model catalog mode = %v, want manual", got)
+	if got := ModelDiscoveryModeForSpec("zai"); got != ModelDiscoveryModeNone {
+		t.Fatalf("Z.AI model discovery mode = %v, want none", got)
 	}
 }
 
-func TestCatalog_ChatGPTProviderProtocols_AreStreamOnly(t *testing.T) {
+func TestCatalog_ChatGPTProviderProtocols_AreConcreteResponsesOnly(t *testing.T) {
 	t.Parallel()
 
-	protocols := SupportedProviderProtocolsForSpec("chatgpt")
-	if len(protocols) == 0 {
-		t.Fatal("chatgpt protocols must not be empty")
-	}
-	if SupportsProviderProtocolForSpec("chatgpt", "responses") {
-		t.Fatal("chatgpt must not declare buffered responses protocol")
+	protocols := ConcreteProviderProtocolsForSpec("chatgpt")
+	if !slices.Equal(protocols, []string{"responses_stream"}) {
+		t.Fatalf("chatgpt protocols = %v, want [responses_stream]", protocols)
 	}
 	if !SupportsProviderProtocolForSpec("chatgpt", "responses_stream") {
-		t.Fatal("chatgpt must declare responses_stream protocol")
-	}
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("chatgpt"); !ok || got != "responses_stream" {
-		t.Fatalf("chatgpt default protocol = %q (ok=%v), want responses_stream", got, ok)
+		t.Fatal("chatgpt must declare responses protocol")
 	}
 }
 
@@ -521,21 +556,9 @@ func TestCatalog_AllStandardProvidersSharePreferenceOrderedProtocolSet(t *testin
 		if !slices.Equal(protocols, want) {
 			t.Fatalf("%s protocols = %v, want %v", provider, protocols, want)
 		}
-		if got, ok := ResolveConcreteProtocolForAutoAtBoundary(provider); !ok || got != protocols[0] || got != "responses" {
-			t.Fatalf("%s default protocol = %q (ok=%v), want first preference responses", provider, got, ok)
+		if got := protocols[0]; got != "responses" {
+			t.Fatalf("%s default protocol = %q, want first preference responses", provider, got)
 		}
-	}
-}
-
-func TestCatalog_ProtocolOrderingSelectsDefault(t *testing.T) {
-	t.Parallel()
-
-	protocols := ConcreteProviderProtocolsForSpec("lmstudio")
-	if len(protocols) == 0 {
-		t.Fatal("LM Studio protocols missing")
-	}
-	if got, ok := ResolveConcreteProtocolForAutoAtBoundary("lmstudio"); !ok || got != protocols[0] {
-		t.Fatalf("default protocol = %q (ok=%v), want first manifest entry %q", got, ok, protocols[0])
 	}
 }
 

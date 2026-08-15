@@ -3,6 +3,7 @@ package openaifamily
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
@@ -15,7 +16,7 @@ import (
 
 // ListDeployments reads the provider-selected deployment catalog for one
 // target. This is an operator-support path, not request-path capability policy.
-func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("provider endpoint base URL is required")
 	}
@@ -36,7 +37,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	}
 }
 
-func (e BackendAdapter) listLMStudioModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) listLMStudioModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	nativeURL, err := LMStudioNativeModelsURL(target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint(err.Error())
@@ -60,31 +61,49 @@ func (e BackendAdapter) listLMStudioModels(ctx context.Context, target provider.
 	return deployments, nil
 }
 
-func (e BackendAdapter) listOpenAIModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
-	resp, err := e.getModelCatalog(ctx, target, httpedge.JoinBaseURLAndPath(target.BaseURL, "/models"))
+func (e BackendAdapter) listOpenAIModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
+	requestURL := httpedge.JoinBaseURLAndPath(target.BaseURL, "/models")
+	requestURL, err := e.profile.ModelCatalogPolicy().decorateURL(requestURL)
+	if err != nil {
+		return nil, canonical.BadEndpoint("provider endpoint model catalog URL is invalid")
+	}
+	resp, err := e.getModelCatalog(ctx, target, requestURL)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	// An enumerable provider's catalog is advisory: Cockpit keeps exact model
-	// entry open. A valid inference front door may omit /models, so only that
-	// narrow absence becomes an empty catalog; auth, rate, transport, and decode
-	// failures remain observable probe failures.
-	if (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) && profile.ModelCatalogModeForSpec(target.ProviderID()) == profile.ModelCatalogModeEnumerable {
-		return []profile.ProviderDeploymentRecord{}, nil
+	// entry open. A valid inference front door may omit /models, so only the
+	// route policy's explicit absence statuses become an empty catalog.
+	if e.profile.ModelCatalogPolicy().missingStatus(resp.StatusCode) {
+		return []profile.ModelAuthoringOption{}, nil
 	}
 	if resp.StatusCode >= 400 {
 		return nil, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
-	models, err := modelcatalogopenai.DecodeModelIDs(resp.Body)
+	rows, err := modelcatalogopenai.DecodeModelRows(resp.Body)
 	if err != nil {
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
-	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
-	for _, modelID := range models {
-		out = append(out, profile.NewProviderDeployment(modelID, modelID, target.ProviderID(), "", target.ProviderID(), nil, ""))
+	out := make([]profile.ModelAuthoringOption, 0, len(rows))
+	for _, row := range rows {
+		deployment, include, projectErr := e.profile.ModelCatalogPolicy().projectRow(e.profile.ProviderID(), row)
+		if projectErr != nil {
+			return nil, canonical.InternalError("backend model catalog row could not be projected")
+		}
+		if include {
+			out = append(out, deployment)
+		}
 	}
-	return out, nil
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	unique := out[:0]
+	for _, deployment := range out {
+		if len(unique) > 0 && unique[len(unique)-1].Name == deployment.Name {
+			continue
+		}
+		unique = append(unique, deployment)
+	}
+	return unique, nil
 }
 
 func (e BackendAdapter) getModelCatalog(ctx context.Context, target provider.TargetSnapshot, requestURL string) (*http.Response, error) {
@@ -113,5 +132,5 @@ func (e BackendAdapter) getModelCatalog(ctx context.Context, target provider.Tar
 
 func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := e.ListDeployments(ctx, target)
-	return provider.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Options: deployments}, err
 }

@@ -11,7 +11,9 @@ import (
 )
 
 // providerPath is the single resolved execution projection for one route
-// target. Provider delivery is derived from the selected protocol frame.
+// target. Client delivery is transient request input; provider delivery is the
+// durable concrete protocol's upstream carrier. Exchange performs only the
+// necessary provider/client conversion after this selection.
 type providerPath struct {
 	target   provider.TargetSnapshot
 	delivery delivery.Delivery
@@ -33,11 +35,7 @@ func resolveProviderPath(target routing.Target) (providerPath, error) {
 	if err := routable.ValidateExecutionProtocol(); err != nil {
 		return providerPath{}, canonical.BadEndpoint(err.Error())
 	}
-	providerDelivery := delivery.BufferedDelivery()
-	if routable.SelectedFrame == profile.FrameSSEEvent {
-		providerDelivery = delivery.StreamingDelivery(delivery.FramingSSE)
-	}
-	return providerPath{target: routable, delivery: providerDelivery}, nil
+	return providerPath{target: routable, delivery: routable.ProviderDelivery}, nil
 }
 
 func bindRequestToTarget(request canonical.CanonicalRequest, modelID string) canonical.CanonicalRequest {
@@ -77,26 +75,32 @@ func toProviderTarget(target routing.Target) (provider.TargetSnapshot, error) {
 // post-construction mutation. Derived URLs never enter persistence.
 func ProviderTargetFromConnection(targetID string, connection routing.Connection, providerProtocol string) (provider.TargetSnapshot, error) {
 	providerSpec := string(connection.Provider())
-	protocolKind, frame, ok := profile.ProviderProtocolKindAndFrame(providerSpec, providerProtocol)
+	normalizedProviderProtocol, err := profile.NormalizeProviderProtocolForSpec(providerSpec, providerProtocol)
+	if err != nil {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint(err.Error())
+	}
+	protocolSpec, ok := profile.ProviderProtocolSpecForSpec(providerSpec, normalizedProviderProtocol)
 	if !ok {
 		return provider.TargetSnapshot{}, canonical.BadEndpoint("selected provider protocol is unsupported")
 	}
+	protocolKind := protocolSpec.Kind
+	providerDelivery := protocolSpec.Delivery
 	switch connection := connection.(type) {
 	case routing.StandardConnection:
 		baseURL := profile.DefaultExecuteBaseURL(providerSpec)
 		if configured, ok := connection.Locator(); ok {
 			baseURL = configured.String()
 		}
-		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, connection.Credential().String(), protocolKind, frame, providerProtocol), nil
+		return provider.NewTargetSnapshot(targetID, providerSpec, baseURL, connection.Credential().String(), protocolKind, normalizedProviderProtocol, providerDelivery), nil
 	case routing.ZAIConnection:
-		return provider.NewTargetSnapshot(targetID, providerSpec, connection.BaseURL(), connection.Credential().String(), protocolKind, frame, providerProtocol), nil
+		return provider.NewTargetSnapshot(targetID, providerSpec, connection.BaseURL(), connection.Credential().String(), protocolKind, normalizedProviderProtocol, providerDelivery), nil
 	case routing.BedrockConnection:
 		region := connection.Region().String()
 		resolution, err := profile.ResolveBedrockEndpoint(connection.Endpoint(), region, protocolKind)
 		if err != nil {
 			return provider.TargetSnapshot{}, canonical.BadEndpoint(err.Error())
 		}
-		return provider.NewBedrockTargetSnapshot(targetID, resolution.BaseURL, connection.Credential().String(), protocolKind, frame, providerProtocol, region), nil
+		return provider.NewBedrockTargetSnapshot(targetID, resolution.BaseURL, connection.Credential().String(), protocolKind, normalizedProviderProtocol, region, providerDelivery), nil
 	case routing.CustomConnection:
 		baseURL := connection.BaseURL().String()
 		credential := ""
@@ -106,7 +110,7 @@ func ProviderTargetFromConnection(targetID string, connection routing.Connection
 			credential = header.Credential().String()
 			authHeader = header.Name()
 		}
-		return provider.NewCustomTargetSnapshot(targetID, baseURL, credential, protocolKind, frame, providerProtocol, authHeader), nil
+		return provider.NewCustomTargetSnapshot(targetID, baseURL, credential, protocolKind, normalizedProviderProtocol, authHeader, providerDelivery), nil
 	default:
 		return provider.TargetSnapshot{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}

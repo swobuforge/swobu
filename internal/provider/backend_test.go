@@ -39,7 +39,7 @@ func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 func TestBackendValidationDoesNotOwnTargetSupport(t *testing.T) {
 	target := TargetSnapshot{
 		TargetID: "target", TargetVersion: 1, ProviderSpec: "openai", Model: "m",
-		ProtocolKind: protocolkind.Responses, ProviderProtocol: "responses", SelectedFrame: "http_json_body",
+		ProtocolKind: protocolkind.Responses, ProviderProtocol: "responses",
 	}
 	backend := Backend{
 		Target: target,

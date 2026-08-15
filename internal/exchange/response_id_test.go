@@ -81,7 +81,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -133,7 +133,7 @@ func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -173,7 +173,7 @@ func TestRunnerWithoutCheckpointStoreRejectsBeforeProviderIngress(t *testing.T) 
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -239,7 +239,7 @@ func TestRunnerRejectsEmptyCheckpointWorkspaceSlugBeforeProviderIngress(t *testi
 		ClientDelivery:   delivery.BufferedDelivery(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -267,7 +267,7 @@ func TestRunnerWithCheckpointStoreAllocatesResponseIDWhenInputMissing(t *testing
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -313,7 +313,7 @@ func TestRunnerCheckpointCommitFailureRejectsBufferedBodyBeforePublication(t *te
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -351,7 +351,7 @@ func TestRunnerCheckpointCommitFailureReplacesStreamingTerminalSuccess(t *testin
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.StreamingDelivery(delivery.FramingSSE)),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -408,7 +408,7 @@ func TestCheckpointCommitFailureProjectsEveryProtocolFailureTerminal(t *testing.
 				WorkspaceSlug:    "alpha",
 				ProviderProtocol: protocolkind.Responses,
 				ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-				Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+				Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.StreamingDelivery(delivery.FramingSSE)),
 				Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 			})
 			if err != nil {
@@ -448,7 +448,7 @@ func TestRunnerCheckpointCommitFailureReplacesMessageTerminalSuccess(t *testing.
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -492,7 +492,7 @@ func TestCheckpointCommitFailureSuppressesResponsesWebSocketTerminalMessage(t *t
 		WorkspaceSlug:    "alpha",
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
 	})
 	if err != nil {

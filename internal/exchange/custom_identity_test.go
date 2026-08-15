@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -23,6 +24,26 @@ func TestProviderTargetFromCustomConnectionPreservesProviderIdentity(t *testing.
 				t.Fatalf("provider spec = %q, want custom", target.ProviderSpec)
 			}
 		})
+	}
+}
+
+func TestProviderTargetFromRunpodStandardConnectionUsesNormalizedEndpoint(t *testing.T) {
+	connection, err := routing.FinalizeConnection(routing.ConnectionDraft{
+		Provider: "runpod",
+		Standard: &routing.StandardConnectionDraft{Locator: "abc123", Credential: "env:RUNPOD_API_KEY"},
+	}, profile.RoutingConstructionFacts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := connection.(routing.StandardConnection); !ok {
+		t.Fatalf("Runpod connection type = %T, want routing.StandardConnection", connection)
+	}
+	target, err := ProviderTargetFromConnection("runpod-target", connection, "responses_stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.ProviderSpec != "runpod" || target.BaseURL != "https://api.runpod.ai/v2/abc123/openai/v1" || target.CredentialRef != "env:RUNPOD_API_KEY" {
+		t.Fatalf("Runpod target = %#v", target)
 	}
 }
 
@@ -67,7 +88,7 @@ func TestProviderTargetFromFriendliConnectionPreservesExactEndpointFacts(t *test
 		{name: "serverless default", credential: "env:FRIENDLI_TOKEN", protocol: "chat_completions_stream", wantURL: "https://api.friendli.ai/serverless/v1"},
 		{name: "dedicated", baseURL: "https://api.friendli.ai/dedicated/v1", credential: "env:FRIENDLI_TOKEN", protocol: "responses_stream", wantURL: "https://api.friendli.ai/dedicated/v1"},
 		{name: "container without auth", baseURL: "http://127.0.0.1:8000/v1", protocol: "messages_stream", wantURL: "http://127.0.0.1:8000/v1"},
-		{name: "arbitrary gateway", baseURL: "https://friendli-gateway.example/v1", protocol: "chat_completions_stream", wantURL: "https://friendli-gateway.example/v1"},
+		{name: "arbitrary gateway", baseURL: "https://friendli-gateway.example/v1", credential: "env:FRIENDLI_TOKEN", protocol: "chat_completions_stream", wantURL: "https://friendli-gateway.example/v1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider, _ := routing.ParseProvider("friendli", func(candidate string) bool { return candidate == "friendli" })
@@ -95,8 +116,8 @@ func TestProviderTargetFromNebiusConnectionPreservesPublicAndDedicatedFacts(t *t
 		wantURL    string
 		credential string
 	}{
-		{name: "public default", model: "meta-llama/Llama-3.3-70B-Instruct", protocol: "responses_stream", wantURL: "https://api.tokenfactory.nebius.com/v1", credential: "env:NEBIUS_API_KEY"},
-		{name: "dedicated routing key", baseURL: "https://api.tokenfactory.us-central1.nebius.com/v1", model: "dedicated-routing-key", protocol: "chat_completions_stream", wantURL: "https://api.tokenfactory.us-central1.nebius.com/v1", credential: "env:NEBIUS_API_KEY"},
+		{name: "public default", model: "meta-llama/Llama-3.3-70B-Instruct", protocol: "responses", wantURL: "https://api.tokenfactory.nebius.com/v1", credential: "env:NEBIUS_API_KEY"},
+		{name: "dedicated routing key", baseURL: "https://api.tokenfactory.us-central1.nebius.com/v1", model: "dedicated-routing-key", protocol: "chat_completions", wantURL: "https://api.tokenfactory.us-central1.nebius.com/v1", credential: "env:NEBIUS_API_KEY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider, _ := routing.ParseProvider("nebius", func(candidate string) bool { return candidate == "nebius" })
@@ -134,7 +155,7 @@ func TestProviderTargetFromBedrockConnectionCarriesEndpointAndSigningRegion(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	responsesStream := "responses_stream"
+	responsesStream := "responses"
 
 	t.Run("authored endpoint is the execution base URL", func(t *testing.T) {
 		const endpoint = "https://bedrock-mantle.eu-west-2.api.aws/openai/v1"

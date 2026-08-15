@@ -63,21 +63,11 @@ func decorateThinking(document *chatcompletions.ProviderRequestDocument, items [
 	messages := make([]requestMessage, len(document.Messages))
 	for index, message := range document.Messages {
 		messages[index].ProviderRequestMessage = message
-		if message.Role != "assistant" || message.SourceStart < 0 {
-			continue
+		raw, ok, err := protocolcodec.ProviderChatReplayForMessage(message, items, ChatReplayScope)
+		if err != nil {
+			return err
 		}
-		for source := message.SourceStart; source < message.SourceEnd && source < len(items); source++ {
-			reasoning, ok := items[source].Reasoning()
-			if !ok {
-				continue
-			}
-			raw, ok := reasoning.Opaque().ProviderChat(ChatReplayScope)
-			if !ok {
-				continue
-			}
-			if messages[index].ReasoningContent != "" {
-				return canonical.InternalError("checkpoint contains duplicate Kimi Chat opaque thinking for one assistant message")
-			}
+		if ok {
 			messages[index].ReasoningContent = string(raw)
 		}
 	}

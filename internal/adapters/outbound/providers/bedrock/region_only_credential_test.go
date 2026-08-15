@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -42,10 +43,9 @@ func TestRegionOnlyBedrockTargetWithoutCredentialTerminatesAtSigV4AmbientAuth(t 
 		upstream.URL,
 		"", // empty credential reference — forces the SigV4 ambient arm
 		protocolkind.Responses,
-		"",
-		"responses_stream",
+		"responses",
 		"us-east-1",
-	)
+		delivery.BufferedDelivery())
 	doc := carrier.NewDocument(
 		protocolkind.Responses,
 		"application/json",

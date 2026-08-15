@@ -30,7 +30,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	if err != nil {
 		return provider.TargetProbeResult{}, err
 	}
-	var deployments []profile.ProviderDeploymentRecord
+	var deployments []profile.ModelAuthoringOption
 	pageToken := ""
 	for {
 		requestURL := endpoint
@@ -81,7 +81,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 			if label == "" {
 				label = modelID
 			}
-			deployments = append(deployments, profile.NewProviderDeployment(
+			deployments = append(deployments, profile.NewModelAuthoringOption(
 				modelID, label, string(profile.ProviderSpecGemini), "", string(profile.ProviderSpecGemini),
 				profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecGemini)), "",
 			))
@@ -91,7 +91,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 			break
 		}
 	}
-	return provider.TargetProbeResult{Deployments: deployments}, nil
+	return provider.TargetProbeResult{Options: deployments}, nil
 }
 
 type geminiModelsPage struct {

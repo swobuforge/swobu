@@ -39,9 +39,8 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 		baseURL,
 		credentialRef,
 		kind,
-		"",
 		string(kind),
-		region)
+		region, delivery.BufferedDelivery())
 }
 
 func TestBedrockMantleMessagesRejectsStructuredOutputBeforeTransport(t *testing.T) {
@@ -513,9 +512,8 @@ func TestBedrockSnapshotUsesPersistedSigningRegion(t *testing.T) {
 		"http://127.0.0.1:1234/v1",
 		"",
 		protocolkind.Responses,
-		"",
 		"responses",
-		"ap-southeast-2")
+		"ap-southeast-2", delivery.BufferedDelivery())
 	if got := bedrockSigningRegionForTarget(mantle); got != "ap-southeast-2" {
 		t.Fatalf("signing region = %q want ap-southeast-2", got)
 	}

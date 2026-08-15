@@ -2,35 +2,41 @@ package profile
 
 import "strings"
 
-// ProviderDeploymentResolution interprets one deployment record against the
-// provider spec that surfaced it. It keeps discovery facts separate from
-// selection policy so callers can resolve lazily when they actually need a
-// concrete protocol or capability answer.
-type ProviderDeploymentResolution struct {
+// ModelAuthoringResolution interprets one advisory model-authoring option
+// against the provider spec that surfaced it. It keeps discovery facts
+// separate from selection policy so callers can resolve lazily when they
+// actually need a concrete protocol answer.
+type ModelAuthoringResolution struct {
 	providerSpec string
-	deployment   ProviderDeploymentRecord
+	option       ModelAuthoringOption
 }
 
-// ResolveProviderDeployment returns one conservative resolver for one
-// deployment record under one provider spec.
-func ResolveProviderDeployment(providerSpec string, deployment ProviderDeploymentRecord) ProviderDeploymentResolution {
-	return ProviderDeploymentResolution{
+// ResolveModelAuthoringOption returns one conservative resolver for one
+// model-authoring option under one provider spec.
+func ResolveModelAuthoringOption(providerSpec string, option ModelAuthoringOption) ModelAuthoringResolution {
+	return ModelAuthoringResolution{
 		providerSpec: strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
-		deployment:   deployment,
+		option:       option,
 	}
 }
 
-// ProtocolOptions returns the concrete protocols available for the deployment.
-// Explicit deployment metadata wins; sparse deployment metadata inherits the
-// provider manifest's concrete protocol list. Auto is intentionally excluded.
-func (r ProviderDeploymentResolution) ProtocolOptions() []string {
-	if options := CloneModelIDs(r.deployment.SupportedProviderProtocols); len(options) > 0 {
+// ProtocolOptions returns the concrete protocols available for the option.
+// Explicit option metadata wins; sparse option metadata inherits the
+// provider manifest's concrete protocol list.
+func (r ModelAuthoringResolution) ProtocolOptions() []string {
+	if options := CloneModelIDs(r.option.SupportedProviderProtocols); len(options) > 0 {
 		out := make([]string, 0, len(options))
+		seen := make(map[string]struct{}, len(options))
 		for _, option := range options {
-			if option == ProviderProtocolAuto {
+			canonical, err := NormalizeProviderProtocolForSpec(r.providerSpec, option)
+			if err != nil || canonical == "" {
 				continue
 			}
-			out = append(out, option)
+			if _, exists := seen[canonical]; exists {
+				continue
+			}
+			seen[canonical] = struct{}{}
+			out = append(out, canonical)
 		}
 		if len(out) > 0 {
 			return out
@@ -39,10 +45,10 @@ func (r ProviderDeploymentResolution) ProtocolOptions() []string {
 	return ConcreteProviderProtocolsForSpec(r.providerSpec)
 }
 
-// DefaultProtocol returns the explicit deployment default when present and
-// supported. Sparse deployments do not invent one.
-func (r ProviderDeploymentResolution) DefaultProtocol() string {
-	defaultProtocol := strings.TrimSpace(r.deployment.DefaultProviderProtocol) // swobu:io-string source=boundary
+// DefaultProtocol returns the explicit option default when present and
+// supported. Sparse options do not invent one.
+func (r ModelAuthoringResolution) DefaultProtocol() string {
+	defaultProtocol := strings.TrimSpace(r.option.DefaultProviderProtocol) // swobu:io-string source=boundary
 	if defaultProtocol == "" {
 		return ""
 	}
@@ -55,10 +61,10 @@ func (r ProviderDeploymentResolution) DefaultProtocol() string {
 }
 
 // SupportsProtocol reports whether one concrete protocol is present in the
-// resolved deployment options. Auto is not treated as a deployment protocol.
-func (r ProviderDeploymentResolution) SupportsProtocol(protocol string) bool {
+// resolved option set.
+func (r ModelAuthoringResolution) SupportsProtocol(protocol string) bool {
 	protocol = strings.TrimSpace(protocol) // swobu:io-string source=boundary
-	if protocol == "" || protocol == ProviderProtocolAuto {
+	if protocol == "" {
 		return false
 	}
 	for _, supported := range r.ProtocolOptions() {

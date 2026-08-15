@@ -23,9 +23,9 @@ import (
 
 func newPolicyTarget(providerID profile.ProviderID, baseURL, credential string, kind protocolkind.ProtocolKind, providerProtocol string) provider.TargetSnapshot {
 	if providerID == profile.ProviderSpecCustom {
-		return provider.NewCustomTargetSnapshot("backend", baseURL, credential, kind, "", providerProtocol, "Authorization")
+		return provider.NewCustomTargetSnapshot("backend", baseURL, credential, kind, providerProtocol, "Authorization", delivery.BufferedDelivery())
 	}
-	return provider.NewTargetSnapshot("backend", string(providerID), baseURL, credential, kind, "", providerProtocol)
+	return provider.NewTargetSnapshot("backend", string(providerID), baseURL, credential, kind, providerProtocol, delivery.BufferedDelivery())
 }
 
 func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
@@ -257,7 +257,7 @@ func TestOpenRouterTransportKernelProjectsStandardReasoningBudget(t *testing.T) 
 		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		Reasoning: reasoning,
 	})
-	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenRouter), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenRouter), "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecOpenRouter)).ResolveBackend(target)
 	if err != nil {
@@ -298,7 +298,7 @@ func TestCustomMessagesReplaysProtocolOpaqueThinking(t *testing.T) {
 		Model: canonical.Specify("compatible-model"),
 		Items: []canonical.CanonicalItem{reasoning, canonicaltest.Message(t, canonical.MessageRoleUser, "again")},
 	})
-	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "", "messages", "")
+	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "messages", "", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecCustom)).ResolveBackend(target)
 	if err != nil {
@@ -323,7 +323,7 @@ func TestCustomMessagesReplaysOpaqueThinking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "", "messages", "")
+	target := provider.NewCustomTargetSnapshot("custom-target", "https://example.test/v1", "", protocolkind.Messages, "messages", "", delivery.BufferedDelivery())
 	target.Model = "compatible-model"
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify(target.Model),
@@ -448,10 +448,7 @@ func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
 		string(profile.ProviderSpecOllama),
 		"http://127.0.0.1:11434/v1",
 		"",
-		protocolkind.Responses,
-		"",
-		"",
-	)
+		protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 
 	_, err := exec.Send(context.Background(), target, doc)
@@ -497,10 +494,7 @@ func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
 		string(profile.ProviderSpecOllama),
 		"http://127.0.0.1:11434/v1",
 		"",
-		protocolkind.Responses,
-		"",
-		"",
-	)
+		protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 
 	_, err := exec.Send(context.Background(), target, doc)
@@ -520,7 +514,7 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
 	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
-	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","tool_choice":"required"}`), carrier.Meta{})
 
@@ -546,7 +540,7 @@ func TestSendProviderRequest_Unclassified4xxDefaultsToRejectedAndMayHaveExecuted
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
 	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
-	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini"}`), carrier.Meta{})
 
@@ -568,10 +562,7 @@ func TestSendProviderRequest_MarksPreDispatchValidation(t *testing.T) {
 		string(profile.ProviderSpecOllama),
 		"",
 		"",
-		protocolkind.Responses,
-		"",
-		"",
-	)
+		protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(
 		protocolkind.Responses,
@@ -594,7 +585,7 @@ func TestSendProviderRequest_BoundsNonSSEStreamingEvidenceAndClosesBody(t *testi
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
 	})}
 	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
-	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", "")
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", delivery.BufferedDelivery())
 	target.Model = "gpt-4o-mini"
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","input":"hello","stream":true}`), carrier.Meta{})
 	_, err := exec.Send(context.Background(), target, doc)

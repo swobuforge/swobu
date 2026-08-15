@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -89,8 +88,8 @@ func TestTransportAndDiscoveryUseEffectiveEndpointWithOptionalBearer(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(result.Deployments) != 1 || result.Deployments[0].Name != "served-model" {
-				t.Fatalf("deployments = %#v", result.Deployments)
+			if len(result.Options) != 1 || result.Options[0].Name != "served-model" {
+				t.Fatalf("deployments = %#v", result.Options)
 			}
 		})
 	}
@@ -203,7 +202,7 @@ func scalewayTarget(baseURL, credential string, kind protocolkind.ProtocolKind) 
 	if kind == protocolkind.Responses {
 		protocol = "responses_stream"
 	}
-	target := provider.NewTargetSnapshot("scaleway", "scaleway", baseURL, credential, kind, profile.FrameSSEEvent, protocol)
+	target := provider.NewTargetSnapshot("scaleway", "scaleway", baseURL, credential, kind, protocol, delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "served-model"
 	return target
 }

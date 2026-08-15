@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,20 +34,10 @@ type imageIncidentTransport struct {
 func (t *imageIncidentTransport) Send(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
 	t.calls++
 	t.documents = append(t.documents, document.Clone())
-	return provider.DocumentIngress{Document: carrier.NewDocument(
-		target.ProtocolKind,
-		"application/json",
-		nil,
-		[]byte(`{
-			"id":"chatcmpl_image",
-			"object":"chat.completion",
-			"created":1,
-			"model":"chat-model",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
-		}`),
-		carrier.Meta{},
-	)}, nil
+	return provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream",
+		Body:      io.NopCloser(strings.NewReader("data: {\"id\":\"chatcmpl_image\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
+	}}, nil
 }
 
 type imageIncidentRuntime struct {
@@ -156,7 +147,7 @@ func imageIncidentWorkspace(t *testing.T) routing.Workspace {
 	model, _ := routing.ParseUpstreamModel("chat-model")
 	provider, _ := routing.ParseProvider("custom", func(raw string) bool { return raw == "custom" })
 	connection, _ := routing.NewCustomConnection(provider, "https://example.test/v1", nil)
-	protocol, err := routing.ParseProtocol("chat_completions", provider, func(routing.Provider, string) bool { return true })
+	protocol, err := routing.ParseProtocol("chat_completions_stream", provider, func(routing.Provider, string) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}

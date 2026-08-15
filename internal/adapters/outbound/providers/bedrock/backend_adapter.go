@@ -157,7 +157,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 var _ provider.BackendResolver = BackendAdapter{}
 
-func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	if strings.TrimSpace(target.BaseURL) != "" {
 		if err := validateBedrockMantleEndpoint(target.BaseURL, target.BedrockRegion()); err != nil {
 			return nil, err
@@ -174,7 +174,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	return e.listDeploymentsWithAuth(ctx, target, resolved, region)
 }
 
-func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target provider.TargetSnapshot, resolved resolvedBedrockAuthState, region string) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target provider.TargetSnapshot, resolved resolvedBedrockAuthState, region string) ([]profile.ModelAuthoringOption, error) {
 
 	// Catalog discovery is regional service connectivity, independent from the
 	// model-specific inference namespace authored on the target.
@@ -212,9 +212,9 @@ func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target prov
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
 	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecBedrock))
-	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
+	out := make([]profile.ModelAuthoringOption, 0, len(models))
 	for _, modelID := range models {
-		out = append(out, profile.NewProviderDeployment(
+		out = append(out, profile.NewModelAuthoringOption(
 			modelID,
 			modelID,
 			string(profile.ProviderSpecBedrock),
@@ -289,5 +289,5 @@ func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetS
 	if err != nil {
 		return provider.TargetProbeResult{}, canonical.InternalError("bedrock target diagnostics could not be encoded")
 	}
-	return provider.TargetProbeResult{Deployments: deployments, Diagnostics: rawDiagnostics}, nil
+	return provider.TargetProbeResult{Options: deployments, Diagnostics: rawDiagnostics}, nil
 }

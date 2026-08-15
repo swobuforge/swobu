@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -44,42 +45,52 @@ type CredentialSpec struct {
 	ReferenceLabel string
 }
 
-// ModelCatalogMode states whether target authoring can enumerate model
-// identities. It is static authoring metadata, not a conclusion drawn from an
-// empty probe result or a model name.
-type ModelCatalogMode uint8
+// ModelDiscoveryMode states whether target authoring has an advisory model
+// discovery facet. It is static authoring metadata, not a conclusion drawn
+// from an empty probe result or a model name.
+type ModelDiscoveryMode uint8
 
 const (
-	ModelCatalogModeInvalid ModelCatalogMode = iota
-	ModelCatalogModeEnumerable
-	ModelCatalogModeManual
+	ModelDiscoveryModeInvalid ModelDiscoveryMode = iota
+	ModelDiscoveryModeAdvisory
+	ModelDiscoveryModeNone
 )
 
 const (
-	ProviderSpecOllama     ProviderID = "ollama"
-	ProviderSpecLMStudio   ProviderID = "lmstudio"
-	ProviderSpecVLLM       ProviderID = "vllm"
-	ProviderSpecOpenAI     ProviderID = "openai"
-	ProviderSpecChatGPT    ProviderID = "chatgpt"
-	ProviderSpecGemini     ProviderID = "gemini"
-	ProviderSpecAnthropic  ProviderID = "anthropic"
-	ProviderSpecDeepSeek   ProviderID = "deepseek"
-	ProviderSpecKimi       ProviderID = "kimi"
-	ProviderSpecFriendli   ProviderID = "friendli"
-	ProviderSpecTogether   ProviderID = "together"
-	ProviderSpecDeepInfra  ProviderID = "deepinfra"
-	ProviderSpecScaleway   ProviderID = "scaleway"
-	ProviderSpecSambaNova  ProviderID = "sambanova"
-	ProviderSpecStepFun    ProviderID = "stepfun"
-	ProviderSpecNebius     ProviderID = "nebius"
-	ProviderSpecGMI        ProviderID = "gmi"
-	ProviderSpecGroq       ProviderID = "groq"
-	ProviderSpecFireworks  ProviderID = "fireworks"
-	ProviderSpecOpenRouter ProviderID = "openrouter"
-	ProviderSpecZAI        ProviderID = "zai"
-	ProviderSpecBedrock    ProviderID = "bedrock"
-	ProviderSpecAzure      ProviderID = "azure"
-	ProviderSpecCustom     ProviderID = "custom"
+	ProviderSpecOllama      ProviderID = "ollama"
+	ProviderSpecLMStudio    ProviderID = "lmstudio"
+	ProviderSpecVLLM        ProviderID = "vllm"
+	ProviderSpecOpenAI      ProviderID = "openai"
+	ProviderSpecChatGPT     ProviderID = "chatgpt"
+	ProviderSpecGemini      ProviderID = "gemini"
+	ProviderSpecAnthropic   ProviderID = "anthropic"
+	ProviderSpecDeepSeek    ProviderID = "deepseek"
+	ProviderSpecKimi        ProviderID = "kimi"
+	ProviderSpecMistral     ProviderID = "mistral"
+	ProviderSpecCerebras    ProviderID = "cerebras"
+	ProviderSpecWorkersAI   ProviderID = "workersai"
+	ProviderSpecLLM7        ProviderID = "llm7"
+	ProviderSpecRunPod      ProviderID = "runpod"
+	ProviderSpecNVIDIA      ProviderID = "nvidia"
+	ProviderSpecFriendli    ProviderID = "friendli"
+	ProviderSpecTogether    ProviderID = "together"
+	ProviderSpecDeepInfra   ProviderID = "deepinfra"
+	ProviderSpecScaleway    ProviderID = "scaleway"
+	ProviderSpecSambaNova   ProviderID = "sambanova"
+	ProviderSpecStepFun     ProviderID = "stepfun"
+	ProviderSpecNebius      ProviderID = "nebius"
+	ProviderSpecGMI         ProviderID = "gmi"
+	ProviderSpecGroq        ProviderID = "groq"
+	ProviderSpecFireworks   ProviderID = "fireworks"
+	ProviderSpecOpenRouter  ProviderID = "openrouter"
+	ProviderSpecZAI         ProviderID = "zai"
+	ProviderSpecBedrock     ProviderID = "bedrock"
+	ProviderSpecAzure       ProviderID = "azure"
+	ProviderSpecCustom      ProviderID = "custom"
+	ProviderSpecNovita      ProviderID = "novita"
+	ProviderSpecBaseten     ProviderID = "baseten"
+	ProviderSpecHyperbolic  ProviderID = "hyperbolic"
+	ProviderSpecSiliconFlow ProviderID = "siliconflow"
 )
 
 type LocatorKind uint8
@@ -112,13 +123,13 @@ type Profile struct {
 	Locator             LocatorSpec
 	Credential          CredentialSpec
 	ConnectionShape     routing.ConnectionShape
-	ModelCatalog        ModelCatalogMode
+	ModelDiscovery      ModelDiscoveryMode
 	CatalogItemLabel    string
 	DefaultAuthHeader   string
 	VisibleInOperatorUI bool
-	ProtocolAuthoring   ProtocolAuthoring
-	// ProviderProtocols is ordered by preference. The first concrete protocol
-	// is the provider default; operators may explicitly select any later entry.
+	// ProviderProtocols is ordered by preference. The first concrete provider
+	// contract is the static default; operators may explicitly select any later
+	// contract, including a delivery variant of the same semantic kind.
 	ProviderProtocols []ProviderProtocolSpec
 }
 
@@ -132,18 +143,21 @@ func ConnectionShapeForSpec(spec string) (routing.ConnectionShape, bool) {
 	return provider.ConnectionShape, true
 }
 
-func ModelCatalogModeForSpec(spec string) ModelCatalogMode {
+func ModelDiscoveryModeForSpec(spec string) ModelDiscoveryMode {
 	provider, ok := profileFor(spec)
 	if !ok {
-		return ModelCatalogModeInvalid
+		return ModelDiscoveryModeInvalid
 	}
-	return provider.ModelCatalog
+	return provider.ModelDiscovery
 }
 
 type ProviderProtocolSpec struct {
-	Name  string
-	Kind  protocolkind.ProtocolKind
-	Frame string
+	// Name is the concrete provider contract persisted in routing and operator
+	// projections. Kind names the shared semantic wire grammar; Delivery names
+	// the upstream response carrier selected by this concrete contract.
+	Name     string
+	Kind     protocolkind.ProtocolKind
+	Delivery delivery.Delivery
 }
 
 func profileFor(spec string) (Profile, bool) {
@@ -171,9 +185,10 @@ func ProfileForSpec(spec string) (Profile, bool) {
 }
 
 // ValidateCatalogProfile rejects incomplete profile metadata before it reaches
-// routing, codecs, or operator projections. Newly introduced semantic facts
-// deliberately have invalid zero values so a future profile cannot acquire
-// plausible Standard/reference behavior by omission.
+// routing, codecs, or operator projections. Concrete protocol names ending in
+// `_stream` are SSE contracts; suffix-free names are buffered HTTP JSON
+// contracts. Keeping that coherence in the catalog prevents a split-brain
+// target from reaching Exchange.
 func ValidateCatalogProfile(provider Profile) error {
 	if strings.TrimSpace(string(provider.ProviderID)) == "" {
 		return fmt.Errorf("provider id is required")
@@ -185,6 +200,30 @@ func ValidateCatalogProfile(provider Profile) error {
 	}
 	if !validCredentialSpec(provider.Credential) {
 		return fmt.Errorf("provider %q has incompatible credential requirement and authoring mode", provider.ProviderID)
+	}
+	seenProtocols := make(map[string]struct{}, len(provider.ProviderProtocols))
+	for _, protocol := range provider.ProviderProtocols {
+		name := strings.TrimSpace(protocol.Name) // swobu:io-string source=domain
+		if name == "" {
+			return fmt.Errorf("provider %q has an invalid concrete protocol name", provider.ProviderID)
+		}
+		if _, duplicate := seenProtocols[name]; duplicate {
+			return fmt.Errorf("provider %q duplicates concrete protocol %q", provider.ProviderID, name)
+		}
+		seenProtocols[name] = struct{}{}
+		if protocol.Kind == "" || protocol.Kind.String() == "" {
+			return fmt.Errorf("provider %q concrete protocol %q has no semantic kind", provider.ProviderID, name)
+		}
+		if err := protocol.Delivery.Validate(); err != nil {
+			return fmt.Errorf("provider %q concrete protocol %q has invalid delivery: %w", provider.ProviderID, name, err)
+		}
+		if strings.HasSuffix(name, "_stream") {
+			if !protocol.Delivery.IsStreaming() || protocol.Delivery.Framing != delivery.FramingSSE {
+				return fmt.Errorf("provider %q streaming protocol %q must use SSE delivery", provider.ProviderID, name)
+			}
+		} else if protocol.Delivery != delivery.BufferedDelivery() {
+			return fmt.Errorf("provider %q buffered protocol %q must use buffered delivery", provider.ProviderID, name)
+		}
 	}
 	return nil
 }

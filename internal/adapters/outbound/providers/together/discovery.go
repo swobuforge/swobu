@@ -34,10 +34,10 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	if modelsErr != nil && endpointsErr != nil {
 		return provider.TargetProbeResult{}, modelsErr
 	}
-	return provider.TargetProbeResult{Deployments: mergeDeployments(dedicated, serverless)}, nil
+	return provider.TargetProbeResult{Options: mergeDeployments(dedicated, serverless)}, nil
 }
 
-func (d discovery) serverlessModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (d discovery) serverlessModels(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	var payload struct {
 		Data []struct {
 			ID           string `json:"id"`
@@ -49,7 +49,7 @@ func (d discovery) serverlessModels(ctx context.Context, target provider.TargetS
 	if err := d.get(ctx, target, "/models", &payload); err != nil {
 		return nil, err
 	}
-	deployments := make([]profile.ProviderDeploymentRecord, 0, len(payload.Data))
+	deployments := make([]profile.ModelAuthoringOption, 0, len(payload.Data))
 	for _, model := range payload.Data {
 		if !togetherTextModelType(model.Type) {
 			continue
@@ -58,7 +58,7 @@ func (d discovery) serverlessModels(ctx context.Context, target provider.TargetS
 		if id == "" {
 			continue
 		}
-		deployments = append(deployments, profile.NewProviderDeployment(id, model.DisplayName, model.Organization, "", model.Type, nil, ""))
+		deployments = append(deployments, profile.NewModelAuthoringOption(id, model.DisplayName, model.Organization, "", model.Type, nil, ""))
 	}
 	return uniqueSorted(deployments), nil
 }
@@ -72,7 +72,7 @@ func togetherTextModelType(raw string) bool {
 	}
 }
 
-func (d discovery) dedicatedEndpoints(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (d discovery) dedicatedEndpoints(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	var payload struct {
 		Data []struct {
 			Name  string `json:"name"`
@@ -82,13 +82,13 @@ func (d discovery) dedicatedEndpoints(ctx context.Context, target provider.Targe
 	if err := d.get(ctx, target, "/endpoints?type=dedicated&mine=true", &payload); err != nil {
 		return nil, err
 	}
-	deployments := make([]profile.ProviderDeploymentRecord, 0, len(payload.Data))
+	deployments := make([]profile.ModelAuthoringOption, 0, len(payload.Data))
 	for _, endpoint := range payload.Data {
 		name := strings.TrimSpace(endpoint.Name)
 		if name == "" {
 			continue
 		}
-		deployments = append(deployments, profile.NewProviderDeployment(name, endpoint.Model, "Together AI", "", "dedicated", nil, ""))
+		deployments = append(deployments, profile.NewModelAuthoringOption(name, endpoint.Model, "Together AI", "", "dedicated", nil, ""))
 	}
 	return uniqueSorted(deployments), nil
 }
@@ -129,10 +129,10 @@ func (d discovery) get(ctx context.Context, target provider.TargetSnapshot, requ
 	return nil
 }
 
-func mergeDeployments(dedicated, serverless []profile.ProviderDeploymentRecord) []profile.ProviderDeploymentRecord {
+func mergeDeployments(dedicated, serverless []profile.ModelAuthoringOption) []profile.ModelAuthoringOption {
 	merged := append(uniqueSorted(dedicated), uniqueSorted(serverless)...)
 	seen := make(map[string]struct{}, len(merged))
-	out := make([]profile.ProviderDeploymentRecord, 0, len(merged))
+	out := make([]profile.ModelAuthoringOption, 0, len(merged))
 	for _, deployment := range merged {
 		if _, exists := seen[deployment.Name]; exists {
 			continue
@@ -143,8 +143,8 @@ func mergeDeployments(dedicated, serverless []profile.ProviderDeploymentRecord) 
 	return out
 }
 
-func uniqueSorted(deployments []profile.ProviderDeploymentRecord) []profile.ProviderDeploymentRecord {
-	byName := make(map[string]profile.ProviderDeploymentRecord, len(deployments))
+func uniqueSorted(deployments []profile.ModelAuthoringOption) []profile.ModelAuthoringOption {
+	byName := make(map[string]profile.ModelAuthoringOption, len(deployments))
 	for _, deployment := range deployments {
 		if deployment.Name != "" {
 			byName[deployment.Name] = deployment
@@ -155,7 +155,7 @@ func uniqueSorted(deployments []profile.ProviderDeploymentRecord) []profile.Prov
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	out := make([]profile.ProviderDeploymentRecord, 0, len(names))
+	out := make([]profile.ModelAuthoringOption, 0, len(names))
 	for _, name := range names {
 		out = append(out, byName[name])
 	}

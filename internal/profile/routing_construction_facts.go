@@ -19,7 +19,10 @@ func RoutingConstructionFacts() routing.TargetConstructionFacts {
 		},
 		ValidateStandardConnection: ValidateStandardConnection,
 		ProtocolSupported: func(provider routing.Provider, protocol string) bool {
-			return protocol != ProviderProtocolAuto && SupportsProviderProtocolForSpec(string(provider), protocol)
+			return SupportsProviderProtocolForSpec(string(provider), protocol)
+		},
+		NormalizeProtocol: func(provider routing.Provider, protocol string) (string, error) {
+			return NormalizeProviderProtocolForSpec(string(provider), protocol)
 		},
 		DerivedProtocol: func(provider routing.Provider) (string, bool) {
 			return DerivedProtocolForSpec(string(provider))
@@ -61,6 +64,14 @@ func validateStandardConnectionForProfile(entry Profile, provider routing.Provid
 		}
 		if effectiveLocator == "" {
 			return routing.StandardConnectionDraft{}, standardConnectionError(provider, field, "is required")
+		}
+		if entry.ProviderID == ProviderSpecRunPod {
+			normalized, err := NormalizeRunPodEndpoint(effectiveLocator)
+			if err != nil {
+				return routing.StandardConnectionDraft{}, standardConnectionError(provider, field, err.Error())
+			}
+			draft.Locator = normalized
+			effectiveLocator = normalized
 		}
 	case LocatorAzureProject:
 		normalized, err := NormalizeAzureProjectEndpoint(draft.Locator)
