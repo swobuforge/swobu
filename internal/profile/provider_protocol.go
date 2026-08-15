@@ -4,27 +4,38 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-const ProviderProtocolAuto = "auto"
-
-const (
-	FrameHTTPJSONBody = "http_json_body"
-	FrameSSEEvent     = "sse_event"
+var (
+	providerProtocolsNovita = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
+	providerProtocolsBaseten = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+		streamingProtocol("messages_stream", protocolkind.Messages),
+	}
+	providerProtocolsHyperbolic = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
+	providerProtocolsSiliconFlow = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+		streamingProtocol("messages_stream", protocolkind.Messages),
+	}
 )
 
-type ProviderProtocol string
+func bufferedProtocol(name string, kind protocolkind.ProtocolKind) ProviderProtocolSpec {
+	return ProviderProtocolSpec{Name: name, Kind: kind, Delivery: delivery.BufferedDelivery()}
+}
 
-type ProtocolAuthoring uint8
+func streamingProtocol(name string, kind protocolkind.ProtocolKind) ProviderProtocolSpec {
+	return ProviderProtocolSpec{Name: name, Kind: kind, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+}
 
-const (
-	ProtocolAuthored ProtocolAuthoring = iota
-	ProtocolDerived
-)
-
-// ConcreteProviderProtocolsForSpec returns provider-native concrete protocols in
-// the catalog-declared order. "auto" is intentionally excluded.
+// ConcreteProviderProtocolsForSpec returns concrete provider contracts in the
+// catalog-declared order. Buffered and streaming entries with the same Kind
+// remain distinct because they select different upstream wire contracts.
 func ConcreteProviderProtocolsForSpec(spec string) []string {
 	profile, ok := profileFor(spec)
 	if !ok {
@@ -53,61 +64,91 @@ func DerivedProtocolForSpec(spec string) (string, bool) {
 }
 
 func derivedProtocolForProfile(provider Profile) (string, bool) {
-	if provider.ProtocolAuthoring != ProtocolDerived || len(provider.ProviderProtocols) == 0 {
+	concrete := concreteProviderProtocols(provider)
+	if len(concrete) != 1 {
 		return "", false
 	}
-	return strings.TrimSpace(provider.ProviderProtocols[0].Name), true
+	return concrete[0].Name, true
 }
 
-func SupportedProviderProtocolsForSpec(spec string) []string {
-	concrete := ConcreteProviderProtocolsForSpec(spec)
-	if len(concrete) == 0 {
-		return nil
+func concreteProviderProtocols(provider Profile) []ProviderProtocolSpec {
+	concrete := make([]ProviderProtocolSpec, 0, len(provider.ProviderProtocols))
+	for _, protocol := range provider.ProviderProtocols {
+		if strings.TrimSpace(protocol.Name) == "" {
+			continue
+		}
+		concrete = append(concrete, protocol)
 	}
-	protocols := make([]string, 0, len(concrete)+1)
-	protocols = append(protocols, ProviderProtocolAuto)
-	protocols = append(protocols, concrete...)
-	return protocols
+	return concrete
 }
 
 func SupportsProviderProtocolForSpec(spec string, providerProtocol string) bool {
-	for _, supported := range SupportedProviderProtocolsForSpec(spec) {
-		if supported == providerProtocol {
+	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
+	if normalized == "" {
+		return false
+	}
+	_, err := NormalizeProviderProtocolForSpec(spec, normalized)
+	return err == nil
+}
+
+// ProviderProtocolSpecForSpec resolves one exact concrete provider contract.
+func ProviderProtocolSpecForSpec(spec string, providerProtocol string) (ProviderProtocolSpec, bool) {
+	normalized, err := NormalizeProviderProtocolForSpec(spec, providerProtocol)
+	if err != nil {
+		return ProviderProtocolSpec{}, false
+	}
+	entry, ok := profileFor(spec)
+	if !ok {
+		return ProviderProtocolSpec{}, false
+	}
+	for _, supported := range entry.ProviderProtocols {
+		if supported.Name == normalized {
+			return supported, true
+		}
+	}
+	return ProviderProtocolSpec{}, false
+}
+
+// ProviderProtocolKind resolves one exact concrete provider protocol to its
+// shared semantic wire family.
+func ProviderProtocolKind(spec string, providerProtocol string) (protocolkind.ProtocolKind, bool) {
+	protocol, ok := ProviderProtocolSpecForSpec(spec, providerProtocol)
+	if !ok {
+		return "", false
+	}
+	return protocol.Kind, true
+}
+
+// NormalizeProviderProtocolForSpec validates one authored or persisted exact
+// concrete protocol token. Delivery-bearing suffixes are not migration
+// spellings: they are part of the selected provider contract.
+func NormalizeProviderProtocolForSpec(spec string, providerProtocol string) (string, error) {
+	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=boundary
+	if normalized == "" {
+		return "", nil
+	}
+	if !supportsCanonicalProviderProtocol(spec, normalized) {
+		return "", fmt.Errorf("provider protocol %q is unsupported for provider %q", providerProtocol, spec)
+	}
+	return normalized, nil
+}
+
+func supportsCanonicalProviderProtocol(spec string, providerProtocol string) bool {
+	entry, ok := profileFor(spec)
+	if !ok {
+		return false
+	}
+	for _, supported := range entry.ProviderProtocols {
+		if supported.Name == providerProtocol {
 			return true
 		}
 	}
 	return false
 }
 
-// ResolveConcreteProtocolForAutoAtBoundary returns the first concrete protocol
-// from the provider's preference-ordered manifest.
-func ResolveConcreteProtocolForAutoAtBoundary(spec string) (string, bool) {
-	if strings.EqualFold(strings.TrimSpace(spec), string(ProviderSpecAzure)) { // swobu:io-string source=domain
-		return "", false
-	}
-	concrete := ConcreteProviderProtocolsForSpec(spec)
-	if len(concrete) == 0 {
-		return "", false
-	}
-	return concrete[0], true
-}
-
-func ProviderProtocolKindAndFrame(spec string, providerProtocol string) (protocolkind.ProtocolKind, string, bool) {
-	profile, ok := profileFor(spec)
-	if !ok {
-		return "", "", false
-	}
-	for _, supported := range profile.ProviderProtocols {
-		if supported.Name == providerProtocol {
-			return supported.Kind, supported.Frame, true
-		}
-	}
-	return "", "", false
-}
-
 func EncodeProviderProtocolForPersistence(providerProtocol string) string {
 	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=domain
-	if normalized == "" || normalized == ProviderProtocolAuto {
+	if normalized == "" {
 		return ""
 	}
 	return normalized
@@ -116,15 +157,9 @@ func EncodeProviderProtocolForPersistence(providerProtocol string) string {
 // DecodeProviderProtocolFromPersistence normalizes one persisted provider
 // protocol token. Empty means "unspecified" and is valid.
 func DecodeProviderProtocolFromPersistence(spec string, providerProtocol string) (string, error) {
-	normalized := strings.TrimSpace(providerProtocol) // swobu:io-string source=domain
-	if normalized == "" {
-		return "", nil
-	}
-	if normalized == ProviderProtocolAuto {
-		return "", fmt.Errorf("provider protocol %q is not allowed in persisted config", ProviderProtocolAuto)
-	}
-	if !SupportsProviderProtocolForSpec(spec, normalized) {
-		return "", fmt.Errorf("provider protocol %q is unsupported for provider %q", normalized, spec)
+	normalized, err := NormalizeProviderProtocolForSpec(spec, providerProtocol)
+	if err != nil {
+		return "", fmt.Errorf("provider protocol %q is invalid for provider %q: %w", providerProtocol, spec, err)
 	}
 	return normalized, nil
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -30,7 +29,7 @@ func (credentialResolver) ResolveCredential(context.Context, string, string) (st
 
 func TestRuntimeUsesDerivedChatCompletionsOnly(t *testing.T) {
 	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
-	target := provider.NewTargetSnapshot("together", "together", "https://api.together.ai/v1", "env:TOGETHER_API_KEY", protocolkind.ChatCompletions, profile.FrameSSEEvent, "chat_completions_stream")
+	target := provider.NewTargetSnapshot("together", "together", "https://api.together.ai/v1", "env:TOGETHER_API_KEY", protocolkind.ChatCompletions, "chat_completions_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "future-model"
 	backend, err := bundle.BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -104,7 +103,7 @@ func TestDiscoveryMergesDedicatedBeforeServerlessAndUsesEndpointName(t *testing.
 		t.Fatal(err)
 	}
 	var names []string
-	for _, deployment := range result.Deployments {
+	for _, deployment := range result.Options {
 		names = append(names, deployment.Name)
 	}
 	want := []string{"team/dedicated-a", "team/dedicated-b", "a-chat", "z-language"}
@@ -148,7 +147,7 @@ func TestDiscoveryUsesPartialCatalogWithoutInventingACombinedFailureType(t *test
 				t.Fatal(err)
 			}
 			var names []string
-			for _, deployment := range result.Deployments {
+			for _, deployment := range result.Options {
 				names = append(names, deployment.Name)
 			}
 			if !reflect.DeepEqual(names, tc.want) {
@@ -236,7 +235,7 @@ func TestReasoningCodecCapturesReadableReasoningOnly(t *testing.T) {
 }
 
 func togetherTarget(baseURL string) provider.TargetSnapshot {
-	target := provider.NewTargetSnapshot("together", "together", baseURL, "env:TOGETHER_API_KEY", protocolkind.ChatCompletions, profile.FrameSSEEvent, "chat_completions_stream")
+	target := provider.NewTargetSnapshot("together", "together", baseURL, "env:TOGETHER_API_KEY", protocolkind.ChatCompletions, "chat_completions_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "future-model"
 	return target
 }

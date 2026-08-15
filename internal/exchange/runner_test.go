@@ -3,6 +3,7 @@ package exchange_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -62,7 +63,7 @@ func TestRunnerRun_BufferedEndToEnd(t *testing.T) {
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -93,7 +94,7 @@ func TestRunnerRun_StreamingEndToEnd(t *testing.T) {
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -124,7 +125,7 @@ func TestRunnerRun_StreamingWebSocketPreservesJsonTransport(t *testing.T) {
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContractForDeliveries(delivery.StreamingDelivery(delivery.FramingWebSocket), delivery.BufferedDelivery()),
 	})
 	if err != nil {
@@ -171,7 +172,7 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -217,7 +218,7 @@ func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -238,7 +239,7 @@ func TestRunnerRun_RejectsBufferedDeliveryWithTransportStream(t *testing.T) {
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.BufferedDelivery(),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 		Contract:         NewExecutionContract(delivery.BufferedDelivery()),
 	})
 	if err == nil {
@@ -268,7 +269,7 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 		WorkspaceSlug:    testWorkspaceSlug(),
 		ProviderProtocol: protocolkind.Responses,
 		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
-		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "", "responses_stream"),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.StreamingDelivery(delivery.FramingSSE)),
 		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
 	})
 	if err != nil {
@@ -301,7 +302,13 @@ func TestStreamingClientChatCompletionsFirstFrameBeforeEnvelopeEOF(t *testing.T)
 }
 
 func bufferedProviderTransport(raw []byte) testProviderTransport {
-	return func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+	return func(_ context.Context, target provider.TargetSnapshot, request carrier.Document) (provider.Ingress, error) {
+		var wireRequest struct {
+			Stream bool `json:"stream"`
+		}
+		if json.Unmarshal(request.RawBytes(), &wireRequest) == nil && wireRequest.Stream {
+			return testProtocolStream(target.ProtocolKind), nil
+		}
 		return provider.DocumentIngress{Document: carrier.NewDocument(
 			target.ProtocolKind,
 			"application/json",
@@ -310,6 +317,30 @@ func bufferedProviderTransport(raw []byte) testProviderTransport {
 			carrier.Meta{},
 		)}, nil
 	}
+}
+
+func testProtocolStream(protocol protocolkind.ProtocolKind) provider.Ingress {
+	var raw string
+	switch protocol {
+	case protocolkind.Responses:
+		raw = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+			"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"delta\":\"ok\"}\n\n" +
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n"
+	case protocolkind.ChatCompletions:
+		raw = "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\n" +
+			"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n"
+	case protocolkind.Messages:
+		raw = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"m\",\"content\":[]}}\n\n" +
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	default:
+		return provider.DocumentIngress{}
+	}
+	return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}}
 }
 
 func streamingProviderTransport(stream io.ReadCloser) testProviderTransport {

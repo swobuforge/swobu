@@ -83,7 +83,7 @@ func TestKimiConnectionDerivesChatCompletionsStream(t *testing.T) {
 	}
 }
 
-func TestDeepInfraConnectionDerivesChatCompletionsStream(t *testing.T) {
+func TestDeepInfraConnectionDerivesChatCompletions(t *testing.T) {
 	deepinfra := supportedProvider("deepinfra")
 	target, err := FinalizeTarget(TargetDraft{
 		ID: "deepinfra-private", Model: "deploy_id:private",
@@ -93,16 +93,16 @@ func TestDeepInfraConnectionDerivesChatCompletionsStream(t *testing.T) {
 		ConnectionShape:            func(Provider) (ConnectionShape, bool) { return ConnectionShapeStandard, true },
 		ValidateStandardConnection: preserveStandardDraft,
 		ProtocolSupported: func(provider Provider, protocol string) bool {
-			return provider == deepinfra && protocol == "chat_completions_stream"
+			return provider == deepinfra && protocol == "chat_completions"
 		},
 		DerivedProtocol: func(provider Provider) (string, bool) {
-			return "chat_completions_stream", provider == deepinfra
+			return "chat_completions", provider == deepinfra
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target.Provider() != deepinfra || target.Protocol().String() != "chat_completions_stream" || target.Model().String() != "deploy_id:private" {
+	if target.Provider() != deepinfra || target.Protocol().String() != "chat_completions" || target.Model().String() != "deploy_id:private" {
 		t.Fatalf("target = %#v", target)
 	}
 }

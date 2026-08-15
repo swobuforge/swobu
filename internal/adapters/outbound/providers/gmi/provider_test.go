@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -26,7 +25,7 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()), canonicaltest.Message(t, canonical.MessageRoleUser, "search")}})
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
-		target := provider.NewTargetSnapshot("gmi", "gmi", "https://gmi.example/v1", "env:GMI_API_KEY", kind, profile.FrameHTTPJSONBody, string(kind))
+		target := provider.NewTargetSnapshot("gmi", "gmi", "https://gmi.example/v1", "env:GMI_API_KEY", kind, string(kind), delivery.BufferedDelivery())
 		target.Model = request.Model()
 		backend, err := bundle.BackendResolver.ResolveBackend(target)
 		if err != nil {
@@ -79,7 +78,7 @@ func TestMessagesUsesGMICompatibilityAuthWhileOtherProtocolsRemainBearer(t *test
 			}))
 			defer srv.Close()
 			bundle := NewRuntime(srv.Client(), credentialResolver{})
-			target := provider.NewTargetSnapshot("gmi", "gmi", srv.URL+"/v1", "env:GMI_API_KEY", kind, "", string(kind))
+			target := provider.NewTargetSnapshot("gmi", "gmi", srv.URL+"/v1", "env:GMI_API_KEY", kind, string(kind), delivery.BufferedDelivery())
 			target.Model = "model"
 			backend, err := bundle.BackendResolver.ResolveBackend(target)
 			if err != nil {
@@ -115,7 +114,7 @@ func TestModelCatalogUsesBearerWithoutMessagesOnlyHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 	bundle := NewRuntime(srv.Client(), credentialResolver{})
-	target := provider.NewTargetSnapshot("gmi", "gmi", srv.URL+"/v1", "env:GMI_API_KEY", protocolkind.Messages, "", "messages")
+	target := provider.NewTargetSnapshot("gmi", "gmi", srv.URL+"/v1", "env:GMI_API_KEY", protocolkind.Messages, "messages", delivery.BufferedDelivery())
 	if _, err := bundle.Discovery.ProbeTarget(context.Background(), target); err != nil {
 		t.Fatal(err)
 	}

@@ -22,9 +22,9 @@ func setupAllowsModelChoice(w *TargetConfig) bool {
 
 func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 	catalog := w.catalogResult()
-	opts := make([]ui.SearchOption, 0, len(catalog.Deployments))
-	for _, deployment := range catalog.Deployments {
-		opts = append(opts, ui.SearchOption{ID: deployment.ID, Label: deployment.Name})
+	opts := make([]ui.SearchOption, 0, len(catalog.Options))
+	for _, option := range catalog.Options {
+		opts = append(opts, ui.SearchOption{ID: option.ID, Label: option.Name})
 	}
 	picker := ui.NewSearchPicker(TargetAddMountKey(w, "model-picker"), TargetModelLabel(w), opts, func(sel ui.Selection) {
 		w.selectModelByID(sel.Value)
@@ -97,13 +97,13 @@ func protocolDisplayLabel(w *TargetConfig, protocol string) string {
 	return protocol
 }
 func SetupAllowsProtocolChoice(w *TargetConfig) bool {
-	return !w.derivesProviderProtocol() && strings.TrimSpace(w.SelectedModel.Get().ModelName) != "" && len(w.CurrentProtocolOptions()) > 0
+	return strings.TrimSpace(w.SelectedModel.Get().ModelName) != "" && len(w.CurrentProtocolOptions()) > 1
 }
 
 func fixedProviderProtocol(w *TargetConfig) (string, bool) {
-	protocols := profile.ConcreteProviderProtocolsForSpec(w.Draft.Get().ProviderSpec)
-	if len(protocols) != 1 { return "", false }
-	return protocolOptionLabel(protocols[0]), true
+	options := w.CurrentProtocolOptions()
+	if strings.TrimSpace(w.SelectedModel.Get().ModelName) == "" || len(options) != 1 { return "", false }
+	return options[0].Label, true
 }
 
 func ProtocolPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
@@ -134,7 +134,11 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 	value, action, enterable := protocol, "change ↵", true
 	switch {
 	case protocol == "":
-		value, action = "required", "choose ↵"
+		if len(options) == 1 {
+			value, action, enterable = protocolDisplayLabel(w, options[0].ID), "fixed", false
+		} else {
+			value, action = "required", "choose ↵"
+		}
 	case len(options) == 1:
 		value, action, enterable = protocolDisplayLabel(w, protocol), "fixed", false
 	default:
@@ -251,12 +255,13 @@ templ (t *targetTail) Render() {
 			@InertTargetField(TargetModelLabel(t.root), "waiting for setup", "")
 		}
 
-		if t.root.derivesProviderProtocol() {
-			// Derived protocol is intentionally absent from operator authoring.
-		} else if SetupAllowsProtocolChoice(t.root) {
+		if SetupAllowsProtocolChoice(t.root) {
 			@ProtocolSelect(t.root)
 		} else if label, fixed := fixedProviderProtocol(t.root); fixed {
 			@InertTargetField("protocol", label, "fixed")
+		} else if len(t.root.CurrentProtocolOptions()) == 1 {
+			// A singleton concrete contract is selected by provider policy and
+			// has no operator-facing row until model authoring can show it.
 		} else {
 			@InertTargetField("protocol", "waiting for "+TargetModelLabel(t.root), "")
 		}

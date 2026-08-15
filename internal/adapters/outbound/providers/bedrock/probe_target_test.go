@@ -30,7 +30,7 @@ func TestProbeTargetCatalogSuccessSurvivesSTSIdentityFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog-success probe failed because STS failed: %v", err)
 	}
-	if len(result.Deployments) != 1 || !strings.Contains(string(result.Diagnostics), "identity_probe_failed") {
+	if len(result.Options) != 1 || !strings.Contains(string(result.Diagnostics), "identity_probe_failed") {
 		t.Fatalf("result = %#v diagnostics=%s", result, result.Diagnostics)
 	}
 }

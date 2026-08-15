@@ -3,6 +3,7 @@ package openaifamily
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -40,6 +41,25 @@ func TestPolicyConstructorsRetainOnlyRealRouteDifferences(t *testing.T) {
 	}
 	if got := GMIPolicy().ProviderID(); got != profile.ProviderSpecGMI {
 		t.Fatalf("GMI provider = %q", got)
+	}
+}
+
+func TestWorkersAIPolicyAppliesDefaultGatewayHeaderOnlyToItsGenerationRoute(t *testing.T) {
+	workers := WorkersAIPolicy()
+	if workers.ProviderID() != profile.ProviderSpecWorkersAI || workers.AuthStrategy() != BearerAuthStrategy() {
+		t.Fatalf("Workers AI policy = %#v", workers)
+	}
+	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		headers := http.Header{}
+		workers.ApplyProtocolHeaders(kind, "token", headers)
+		if headers.Get("cf-aig-gateway-id") != "default" {
+			t.Fatalf("%s Workers AI headers = %#v", kind, headers)
+		}
+	}
+	standardHeaders := http.Header{}
+	StandardBearerPolicy(profile.ProviderSpecOpenAI).ApplyProtocolHeaders(protocolkind.ChatCompletions, "token", standardHeaders)
+	if !reflect.DeepEqual(standardHeaders, http.Header{}) {
+		t.Fatalf("Workers AI header leaked to standard provider: %#v", standardHeaders)
 	}
 }
 

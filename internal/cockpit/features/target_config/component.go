@@ -266,8 +266,8 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 // selectedModelSeedFromTarget keeps persisted selection distinct from model
 // capability evidence. The target protocol is a default selection only;
 // supported protocols remain sparse for profile resolution to own.
-func selectedModelSeedFromTarget(target readmodel.TargetReadModel) readmodel.ModelDeploymentReadModel {
-	return readmodel.ModelDeploymentReadModel{
+func selectedModelSeedFromTarget(target readmodel.TargetReadModel) readmodel.ModelAuthoringOptionReadModel {
+	return readmodel.ModelAuthoringOptionReadModel{
 		ID:                      target.Model,
 		Name:                    target.Model,
 		ModelName:               target.Model,

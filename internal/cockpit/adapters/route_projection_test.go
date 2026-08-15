@@ -48,6 +48,7 @@ func TestOperatorConnectionFactsSurviveCockpitProjection(t *testing.T) {
 		{"openai", workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
 		{"anthropic", workspaceapi.StandardConnection("anthropic", "", "env:ANTHROPIC_API_KEY"), readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
 		{"deepseek", workspaceapi.StandardConnection("deepseek", "", "file:/home/metrofun/.config/deepseek.key"), readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/metrofun/.config/deepseek.key"}},
+		{"runpod", workspaceapi.StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), readmodel.TargetReadModel{Provider: "runpod", BaseURL: "https://api.runpod.ai/v2/abc123/openai/v1", CredentialRef: "env:RUNPOD_API_KEY"}},
 		{"openrouter", workspaceapi.StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
 		{"chatgpt", workspaceapi.StandardConnection("chatgpt", "", "secret:chatgpt/session"), readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},
 		{"zai", workspaceapi.ZAIConnectionDocument("coding_plan", "env:ZAI_API_KEY"), readmodel.TargetReadModel{Provider: "zai", ZAIAccess: "coding_plan", CredentialRef: "env:ZAI_API_KEY"}},

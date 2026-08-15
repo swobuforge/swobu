@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -28,12 +28,12 @@ func TestRuntimeAdmitsOnlyExactGeminiInteractionsTarget(t *testing.T) {
 	if !backend.Target.Equal(target) {
 		t.Fatalf("backend target = %#v, want %#v", backend.Target, target)
 	}
-	falseResponses := provider.NewTargetSnapshot("gemini", "gemini", "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Responses, "", "responses_stream")
+	falseResponses := provider.NewTargetSnapshot("gemini", "gemini", "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	falseResponses.Model = "operator-selected-model"
 	if _, err := bundle.BackendResolver.ResolveBackend(falseResponses); err == nil {
 		t.Fatal("Gemini runtime accepted a false Responses identity")
 	}
-	otherProvider := provider.NewTargetSnapshot("openai", "openai", "https://api.openai.com/v1", "env:OPENAI_API_KEY", protocolkind.Interactions, "", "interactions_stream")
+	otherProvider := provider.NewTargetSnapshot("openai", "openai", "https://api.openai.com/v1", "env:OPENAI_API_KEY", protocolkind.Interactions, "interactions_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	otherProvider.Model = "operator-selected-model"
 	if _, err := bundle.BackendResolver.ResolveBackend(otherProvider); err == nil {
 		t.Fatal("Gemini runtime accepted another provider's target")
@@ -47,7 +47,7 @@ func TestRuntimeDoesNotClaimProviderNativeMCPAuthority(t *testing.T) {
 	}
 	falseProtocol := geminiTarget()
 	falseProtocol.ProtocolKind = protocolkind.Responses
-	falseProtocol.ProviderProtocol = "responses_stream"
+	falseProtocol.ProviderProtocol = "responses"
 	if got := bundle.TargetSupport.ResolveTargetSupport(falseProtocol); got.Get(canonical.RequestToolsDiscovery) != provider.SupportUnknown {
 		t.Fatalf("false protocol support = %#v, want unknown", got)
 	}
@@ -59,9 +59,7 @@ func TestRuntimeDoesNotClaimProviderNativeMCPAuthority(t *testing.T) {
 }
 
 func geminiTarget() provider.TargetSnapshot {
-	target := provider.NewTargetSnapshot("gemini", string(profile.ProviderSpecGemini), "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Interactions, profile.FrameSSEEvent, "interactions_stream")
+	target := provider.NewTargetSnapshot("gemini", string(profile.ProviderSpecGemini), "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Interactions, "interactions_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "operator-selected-model"
 	return target
 }
-
-var _ providersruntime.CredentialProvider = credentialResolver{}

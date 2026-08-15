@@ -27,7 +27,7 @@ func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("deployment"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls})
-	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestContinueEmptyStopListIsOmittedFromAzureChatCompletionsProviderRequest(t
 		t.Fatal(err)
 	}
 	request := decoded.Request.Request
-	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -145,14 +145,11 @@ func TestNewRuntime_UsesAzureProjectDeploymentsEndpointOnProjectEndpoint(t *test
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.ChatCompletions,
-
-		"",
-		string(protocolkind.ChatCompletions)))
+		protocolkind.ChatCompletions, string(protocolkind.ChatCompletions), delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
-	deployments := probe.Deployments
+	deployments := probe.Options
 	if len(deployments) != 2 {
 		t.Fatalf("deployments=%v want 2", deployments)
 	}
@@ -195,14 +192,11 @@ func TestListDeployments_UsesTargetProjectEndpoint(t *testing.T) {
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.ChatCompletions,
-
-		"",
-		string(protocolkind.ChatCompletions)))
+		protocolkind.ChatCompletions, string(protocolkind.ChatCompletions), delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
-	deployments := probe.Deployments
+	deployments := probe.Options
 	if len(deployments) != 1 {
 		t.Fatalf("deployments=%v want 1", deployments)
 	}
@@ -229,10 +223,7 @@ func TestListDeployments_PreservesBackendErrorOrigin(t *testing.T) {
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.ChatCompletions,
-
-		"",
-		string(protocolkind.ChatCompletions)))
+		protocolkind.ChatCompletions, string(protocolkind.ChatCompletions), delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatal("ListDeployments returned nil error, want backend error")
 	}
@@ -276,10 +267,7 @@ func TestSendProviderRequest_UsesAnthropicPathForMessages(t *testing.T) {
 		string(profile.ProviderSpecAzure),
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.Messages,
-
-		"",
-		"messages")
+		protocolkind.Messages, "messages", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := bundle.BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -315,14 +303,11 @@ func TestNewRuntime_PreservesAzureDeploymentsWithoutMetadata(t *testing.T) {
 		"azure",
 		"https://contact-8837-resource.services.ai.azure.com/api/projects/contact-8837",
 		"env:AZURE_OPENAI_API_KEY",
-		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("ListDeployments returned error: %v", err)
 	}
-	deployments := probe.Deployments
+	deployments := probe.Options
 	if len(deployments) != 1 {
 		t.Fatalf("deployments=%v want 1", deployments)
 	}

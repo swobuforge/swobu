@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -125,7 +126,7 @@ func TestChatGPTResponseIDDoesNotBecomeNativeContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", "responses", "", "responses")
+	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "gpt-5.4-mini"
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, canonical.ResponseBinding{SwobuID: "resp_test", TargetID: target.TargetID, TargetVersion: target.TargetVersion}), canonical.EnvResponse)
 	if err != nil {
@@ -387,7 +388,7 @@ func TestChatGPTWebSearchReplayOmitsActionSources(t *testing.T) {
 func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	t.Parallel()
 
-	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", "responses", "", "responses")
+	target := provider.NewTargetSnapshot("chatgpt-target", "chatgpt", "https://chatgpt.test", "", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "gpt-5.4-mini"
 
 	turnOne := canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -461,6 +462,6 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if store, ok := payload["store"].(bool); !ok || store {
-		t.Fatalf("store=%#v, want false (ChatGPT/Codex requires store:false)", payload["store"])
+		t.Fatalf("store=%#v, want false (ChatGPT is stateless for replay)", payload["store"])
 	}
 }

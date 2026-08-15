@@ -35,14 +35,16 @@ type AuthSessionRetryResult struct {
 
 // ModelCatalogResult is the response from POST /_swobu/target-probe.
 type ModelCatalogResult struct {
-	Deployments              []ModelCatalogDeployment `json:"deployments,omitempty"`
-	Error                    string                   `json:"error,omitempty"`
-	ResolvedProviderProtocol string                   `json:"resolved_provider_protocol,omitempty"`
-	Diagnostics              json.RawMessage          `json:"diagnostics,omitempty"`
+	Options                  []ModelAuthoringOption `json:"deployments,omitempty"`
+	Error                    string                 `json:"error,omitempty"`
+	ResolvedProviderProtocol string                 `json:"resolved_provider_protocol,omitempty"`
+	Diagnostics              json.RawMessage        `json:"diagnostics,omitempty"`
 }
 
-// ModelCatalogDeployment is one deployment returned by the catalog probe.
-type ModelCatalogDeployment struct {
+// ModelAuthoringOption is one advisory model-authoring option returned by the
+// catalog probe. The containing result retains the public JSON key
+// "deployments" for operator API compatibility.
+type ModelAuthoringOption struct {
 	Name                       string   `json:"name"`
 	ModelName                  string   `json:"model_name"`
 	ModelPublisher             string   `json:"model_publisher,omitempty"`

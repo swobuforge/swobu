@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,15 +202,97 @@ func RunPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 
 func bufferedProviderTransport(raw []byte) testProviderTransport {
 	_ = raw
-	return func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
-		return provider.DocumentIngress{Document: carrier.NewDocument(
+	return func(_ context.Context, target provider.TargetSnapshot, request carrier.Document) (provider.Ingress, error) {
+		response := carrier.NewDocument(
 			target.ProtocolKind,
 			"application/json",
 			nil,
 			[]byte(`{"id":"resp_1","model":"m","output_text":"ok"}`),
 			carrier.Meta{},
-		)}, nil
+		)
+		var wireRequest struct {
+			Stream bool `json:"stream"`
+		}
+		if json.Unmarshal(request.RawBytes(), &wireRequest) == nil && wireRequest.Stream {
+			return streamingProviderIngressForDocument(target, response), nil
+		}
+		return provider.DocumentIngress{Document: response}, nil
 	}
+}
+
+// streamingProviderIngressForDocument supplies a valid protocol-family SSE
+// carrier for Exchange tests whose production path requests transient upstream
+// streaming. The helper converts only test documents; provider adapters retain
+// ownership of real response framing.
+func streamingProviderIngressForDocument(target provider.TargetSnapshot, document carrier.Document) provider.Ingress {
+	switch target.ProtocolKind {
+	case protocolkind.ChatCompletions:
+		return provider.StreamIngress{Stream: carrier.ByteStream{
+			MediaType: "text/event-stream",
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}\n\n" +
+					"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			)),
+		}}
+	case protocolkind.Messages:
+		return provider.StreamIngress{Stream: carrier.ByteStream{
+			MediaType: "text/event-stream",
+			Body: io.NopCloser(strings.NewReader(
+				"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"m\",\"content\":[]}}\n\n" +
+					"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+					"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+					"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+					"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+					"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+			)),
+		}}
+	case protocolkind.Responses:
+		return responsesDocumentAsStream(document)
+	default:
+		return provider.DocumentIngress{Document: document}
+	}
+}
+
+func responsesDocumentAsStream(document carrier.Document) provider.Ingress {
+	var response struct {
+		ID         string            `json:"id"`
+		Model      string            `json:"model"`
+		Status     string            `json:"status"`
+		OutputText string            `json:"output_text"`
+		Output     []json.RawMessage `json:"output"`
+	}
+	_ = json.Unmarshal(document.RawBytes(), &response)
+	if response.ID == "" {
+		response.ID = "resp_1"
+	}
+	if response.Model == "" {
+		response.Model = "m"
+	}
+	if response.Status == "" {
+		response.Status = "completed"
+	}
+	var frames strings.Builder
+	fmt.Fprintf(&frames, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"model\":%q,\"status\":\"in_progress\",\"output\":[]}}\n\n", response.ID, response.Model)
+	if response.OutputText != "" {
+		fmt.Fprintf(&frames, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":%q,\"delta\":%q}\n\n", response.ID, response.OutputText)
+	}
+	for index, item := range response.Output {
+		fmt.Fprintf(&frames, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", index, item)
+	}
+	completed := map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id": response.ID, "model": response.Model, "status": response.Status,
+			"output": response.Output, "output_text": response.OutputText,
+		},
+	}
+	raw, _ := json.Marshal(completed)
+	fmt.Fprintf(&frames, "event: response.completed\ndata: %s\n\n", raw)
+	return provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream",
+		Body:      io.NopCloser(strings.NewReader(frames.String())),
+	}}
 }
 
 func streamingProviderTransport(stream io.ReadCloser) testProviderTransport {
@@ -337,7 +421,40 @@ func newTestBackend(target provider.TargetSnapshot, transport testProviderTransp
 	if target.Model == "" {
 		target.Model = "m"
 	}
-	return provider.Backend{Target: target, Codec: testBackendCodec{}, Transport: provider.BindTransport(target, transport)}, nil
+	return provider.Backend{
+		Target: target,
+		Codec:  testBackendCodec{},
+		Transport: provider.BindTransport(target, func(ctx context.Context, selected provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+			ingress, err := transport.Send(ctx, selected, document)
+			if err != nil {
+				return ingress, err
+			}
+			return normalizeTestProviderIngress(selected, document, ingress), nil
+		}),
+	}, nil
+}
+
+func normalizeTestProviderIngress(target provider.TargetSnapshot, request carrier.Document, ingress provider.Ingress) provider.Ingress {
+	if _, streamed := ingress.(provider.DocumentIngress); !streamed {
+		return ingress
+	}
+	var wireRequest struct {
+		Stream bool `json:"stream"`
+	}
+	if json.Unmarshal(request.RawBytes(), &wireRequest) != nil || !wireRequest.Stream {
+		return ingress
+	}
+	return streamingProviderIngressForDocument(target, ingress.(provider.DocumentIngress).Document)
+}
+
+func bindTestProviderTransport(target provider.TargetSnapshot, transport testProviderTransport) provider.Transport {
+	return provider.BindTransport(target, func(ctx context.Context, selected provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+		ingress, err := transport.Send(ctx, selected, document)
+		if err != nil {
+			return ingress, err
+		}
+		return normalizeTestProviderIngress(selected, document, ingress), nil
+	})
 }
 
 type testClientCodec struct{}
@@ -446,9 +563,13 @@ func (testClientCodec) EncodeResponseMessages(_ context.Context, _ canonical.Can
 type testProviderRequestDocumentEncoder struct{}
 
 func (testProviderRequestDocumentEncoder) EncodeProviderRequestDocument(input wire.ProviderEncodeInput, d delivery.Delivery, exchangeID string) (wire.ProviderEncodeResult, error) {
-	_ = d
 	_ = exchangeID
-	return wire.ProviderEncodeResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"`+input.Request.Model()+`"}`), carrier.Meta{})}, nil
+	raw := `{"model":"` + input.Request.Model() + `"`
+	if d.IsStreaming() {
+		raw += `,"stream":true`
+	}
+	raw += `}`
+	return wire.ProviderEncodeResult{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(raw), carrier.Meta{})}, nil
 }
 
 type testProviderEnvelopeDecoder struct{}

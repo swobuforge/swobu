@@ -95,6 +95,34 @@ func TestConnectionJSONRoundTripCoversEveryProfile(t *testing.T) {
 	}
 }
 
+func TestRunPodOperatorJSONNormalizesEndpointAndFinalizesStandardConnection(t *testing.T) {
+	var connection Connection
+	if err := json.Unmarshal([]byte(`{"runpod":{"base_url":"abc123","credential":"env:RUNPOD_API_KEY"}}`), &connection); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"runpod":{"base_url":"https://api.runpod.ai/v2/abc123/openai/v1","credential":"env:RUNPOD_API_KEY"}}`
+	if string(raw) != want {
+		t.Fatalf("Runpod JSON = %s, want %s", raw, want)
+	}
+
+	finalized, err := connection.RoutingConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard, ok := finalized.(routing.StandardConnection)
+	if !ok {
+		t.Fatalf("Runpod connection type = %T, want routing.StandardConnection", finalized)
+	}
+	locator, ok := standard.Locator()
+	if !ok || locator.String() != "https://api.runpod.ai/v2/abc123/openai/v1" {
+		t.Fatalf("Runpod locator = %q/%t", locator.String(), ok)
+	}
+}
+
 // TestConnectionDocumentCarriesOnlyShapeDraft guards the operator JSON N+1
 // boundary. The public document stays provider-keyed at the wire edge, while
 // its Go value has one shape-oriented draft rather than one field per provider.
@@ -214,10 +242,12 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"sambanova":  {"messages_stream", StandardConnection("sambanova", "https://stack.example/v1", "env:SAMBANOVA_API_KEY"), routing.Provider("sambanova")},
 		"stepfun":    {"chat_completions_stream", StandardConnection("stepfun", "https://api.stepfun.com/step_plan/v1", "env:STEP_API_KEY"), routing.Provider("stepfun")},
 		"friendli":   {"messages_stream", StandardConnection("friendli", "https://friendli-gateway.example/v1", ""), routing.Provider("friendli")},
-		"nebius":     {"responses_stream", StandardConnection("nebius", "", "env:NEBIUS_API_KEY"), routing.Provider("nebius")},
-		"gmi":        {"messages_stream", StandardConnection("gmi", "", "env:GMI_API_KEY"), routing.Provider("gmi")},
+		"llm7":       {"", StandardConnection("llm7", "", ""), routing.Provider("llm7")},
+		"runpod":     {"responses", StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), routing.Provider("runpod")},
+		"nebius":     {"responses", StandardConnection("nebius", "", "env:NEBIUS_API_KEY"), routing.Provider("nebius")},
+		"gmi":        {"messages", StandardConnection("gmi", "", "env:GMI_API_KEY"), routing.Provider("gmi")},
 		"groq":       {"responses_stream", StandardConnection("groq", "", "env:GROQ_API_KEY"), routing.Provider("groq")},
-		"fireworks":  {"responses_stream", StandardConnection("fireworks", "https://direct.example/v1", "env:FIREWORKS_API_KEY"), routing.Provider("fireworks")},
+		"fireworks":  {"responses", StandardConnection("fireworks", "https://direct.example/v1", "env:FIREWORKS_API_KEY"), routing.Provider("fireworks")},
 		"openrouter": {"chat_completions", StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), routing.Provider("openrouter")},
 		"zai":        {"", ZAIConnectionDocument("coding_plan", "env:ZAI_API_KEY"), routing.Provider("zai")},
 		"chatgpt":    {"", StandardConnection("chatgpt", "", "secretfile:chatgpt/default"), routing.Provider("chatgpt")},
@@ -225,7 +255,7 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"lmstudio":   {"responses", StandardConnection("lmstudio", "", "env:LM_API_TOKEN"), routing.Provider("lmstudio")},
 		"vllm":       {"responses", StandardConnection("vllm", "", "env:VLLM_API_KEY"), routing.Provider("vllm")},
 		"azure":      {"responses", StandardConnection("azure", "https://example.services.ai.azure.com/api/projects/prod", "env:AZURE_KEY"), routing.Provider("azure")},
-		"bedrock":    {"responses_stream", BedrockConnectionDocument("eu-west-2", "https://bedrock-mantle.eu-west-2.api.aws/v1", ""), routing.Provider("bedrock")},
+		"bedrock":    {"responses", BedrockConnectionDocument("eu-west-2", "https://bedrock-mantle.eu-west-2.api.aws/v1", ""), routing.Provider("bedrock")},
 		"custom":     {"chat_completions", CustomConnectionDocument("https://example.test/v1", &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}), routing.Provider("custom")},
 	} {
 		t.Run(name, func(t *testing.T) {

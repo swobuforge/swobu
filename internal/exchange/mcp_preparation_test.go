@@ -35,7 +35,7 @@ func (r nativeMessagesDiscoveryRuntime) ResolveBackend(target provider.TargetSna
 	return provider.Backend{
 		Target:    target,
 		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
-		Transport: provider.BindTransport(target, r.transport),
+		Transport: bindTestProviderTransport(target, r.transport),
 	}, nil
 }
 
@@ -43,7 +43,7 @@ func (r toolDiscoveryResponsesRuntime) ResolveBackend(target provider.TargetSnap
 	return provider.Backend{
 		Target:    target,
 		Codec:     protocolcodec.Codec{Protocol: protocolkind.Responses},
-		Transport: provider.BindTransport(target, r.transport),
+		Transport: bindTestProviderTransport(target, r.transport),
 	}, nil
 }
 

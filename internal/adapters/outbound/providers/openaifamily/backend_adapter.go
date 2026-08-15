@@ -46,14 +46,20 @@ func NewExecutor(client *http.Client, credentials providersruntime.CredentialPro
 }
 
 // NewRuntime builds a complete OpenAI-family provider runtime for one provider policy.
-func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, profile ProviderRoutePolicy) providersruntime.ProviderRuntimeBundle {
-	executor := NewExecutor(client, credentials, profile)
+func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider, policy ProviderRoutePolicy) providersruntime.ProviderRuntimeBundle {
+	executor := NewExecutor(client, credentials, policy)
+	discovery := providersruntime.Discovery(executor)
+	if manifest, ok := profile.ProfileForSpec(string(policy.ProviderID())); ok && manifest.ModelDiscovery == profile.ModelDiscoveryModeNone {
+		// Manual is an authoring fact. It closes the discovery facet without
+		// changing the shared inference runtime or exact model acceptance.
+		discovery = noDiscovery{}
+	}
 	return providersruntime.ProviderRuntimeBundle{
-		ProviderID:         profile.ProviderID(),
+		ProviderID:         policy.ProviderID(),
 		BackendResolver:    executor,
 		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
-		Discovery:          executor,
+		Discovery:          discovery,
 	}
 }
 

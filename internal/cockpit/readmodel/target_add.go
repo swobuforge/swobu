@@ -13,10 +13,10 @@ type ProviderOptionReadModel struct {
 	SetupHint string
 }
 
-// ModelCatalogReadModel is the result of probing the model catalog for a
+// ModelCatalogReadModel is the advisory model-authoring result of probing a
 // provider after setup/auth is ready.
 type ModelCatalogReadModel struct {
-	Deployments              []ModelDeploymentReadModel
+	Options                  []ModelAuthoringOptionReadModel
 	ResolvedProviderProtocol string
 	BedrockAuthentication    BedrockAuthenticationEvidence
 }
@@ -46,8 +46,9 @@ type AWSIdentityReadModel struct {
 	Error   string
 }
 
-// ModelDeploymentReadModel is one selectable model option from a catalog probe.
-type ModelDeploymentReadModel struct {
+// ModelAuthoringOptionReadModel is one selectable model-authoring option from
+// a catalog probe.
+type ModelAuthoringOptionReadModel struct {
 	ID                         string
 	Name                       string
 	ModelName                  string

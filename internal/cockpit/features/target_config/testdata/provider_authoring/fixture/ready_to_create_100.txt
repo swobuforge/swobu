@@ -2,7 +2,7 @@
      provider          OpenAI                                                         change ↵
      credential        environment · OPENAI_API_KEY                                   change ↵
      model             gpt-4.1                                                        change ↵
-     protocol          OpenAI · Responses · stream                                    change ↵
+     protocol          OpenAI · Responses · buffered                                  change ↵
      routing           fallback after step 1                                          change ↵
    > create                                                                           create ↵
 

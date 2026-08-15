@@ -120,7 +120,7 @@ func (r azureBackendAdapter) Send(ctx context.Context, target provider.TargetSna
 
 var _ provider.BackendResolver = azureBackendAdapter{}
 
-func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	projectEndpoint, err := resolveAzureProjectEndpoint(target.BaseURL)
 	if err != nil {
 		return nil, canonical.BadEndpoint("azure project endpoint is required")
@@ -129,7 +129,7 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 	// /api/projects/<project> prefix intact instead of collapsing to the
 	// resource root here.
 	nextURL := strings.TrimRight(projectEndpoint, "/") + azureDeploymentListPath
-	out := make([]profile.ProviderDeploymentRecord, 0, 16)
+	out := make([]profile.ModelAuthoringOption, 0, 16)
 	for nextURL != "" {
 		deployments, nextLink, err := c.listDeploymentsPage(ctx, target, nextURL)
 		if err != nil {
@@ -146,10 +146,10 @@ func (c azureProviderModelCatalogClient) ListDeployments(ctx context.Context, ta
 
 func (c azureProviderModelCatalogClient) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := c.ListDeployments(ctx, target)
-	return provider.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Options: deployments}, err
 }
 
-func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target provider.TargetSnapshot, requestURL string) ([]profile.ProviderDeploymentRecord, string, error) {
+func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context, target provider.TargetSnapshot, requestURL string) ([]profile.ModelAuthoringOption, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, "", canonical.BadEndpoint("azure provider deployment inventory request could not be built")
@@ -182,7 +182,7 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	if err != nil {
 		return nil, "", canonical.InternalError("backend deployment inventory could not be decoded")
 	}
-	deployments := make([]profile.ProviderDeploymentRecord, 0, len(documents))
+	deployments := make([]profile.ModelAuthoringOption, 0, len(documents))
 	for _, doc := range documents {
 		if dep, ok := azureDeploymentDocumentToDeployment(doc); ok {
 			deployments = append(deployments, dep)
@@ -232,10 +232,10 @@ func decodeAzureDeploymentDocuments(raw []byte) ([]azureDeploymentDocument, stri
 	return nil, "", fmt.Errorf("azure deployment inventory payload was not a deployment array or page")
 }
 
-func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (profile.ProviderDeploymentRecord, bool) {
+func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (profile.ModelAuthoringOption, bool) {
 	name := azureDeploymentName(doc)
 	if name == "" {
-		return profile.ProviderDeploymentRecord{}, false
+		return profile.ModelAuthoringOption{}, false
 	}
 	modelName := strings.TrimSpace(doc.ModelName) // swobu:io-string source=boundary
 	if modelName == "" {
@@ -247,7 +247,7 @@ func azureDeploymentDocumentToDeployment(doc azureDeploymentDocument) (profile.P
 	if defaultProtocol == "" && len(supportedProtocols) > 0 {
 		defaultProtocol = supportedProtocols[0]
 	}
-	return profile.NewProviderDeployment(
+	return profile.NewModelAuthoringOption(
 		name,
 		modelName,
 		doc.ModelPublisher,

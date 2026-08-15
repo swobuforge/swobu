@@ -157,20 +157,15 @@ func decorateOpenRouterThinking(document *chatcompletions.ProviderRequestDocumen
 	messages := make([]openRouterRequestMessage, len(document.Messages))
 	for index, message := range document.Messages {
 		messages[index].ProviderRequestMessage = message
-		if message.Role != "assistant" || message.SourceStart < 0 {
-			continue
+		opaque, ok, err := protocolcodec.ProviderChatReplayForMessage(message, items, ChatReplayScope)
+		if err != nil {
+			return err
 		}
-		for source := message.SourceStart; source < message.SourceEnd && source < len(items); source++ {
-			reasoning, ok := items[source].Reasoning()
-			if !ok {
-				continue
+		if ok {
+			if !json.Valid(opaque) {
+				return canonical.InternalError("checkpoint contains invalid OpenRouter opaque thinking")
 			}
-			if opaque, ok := reasoning.Opaque().ProviderChat(ChatReplayScope); ok {
-				if !json.Valid(opaque) {
-					return canonical.InternalError("checkpoint contains invalid OpenRouter opaque thinking")
-				}
-				messages[index].ReasoningDetails = json.RawMessage(opaque)
-			}
+			messages[index].ReasoningDetails = json.RawMessage(opaque)
 		}
 	}
 	document.Payload["messages"] = messages

@@ -18,30 +18,21 @@ type protocolOption struct {
 	Keywords []string
 }
 
-var protocolPreference = []string{
-	"responses",
-	"responses_stream",
-	"chat_completions",
-	"chat_completions_stream",
-	"messages",
-	"messages_stream",
-}
-
 // resolveProtocolOptions returns concrete protocol choices in product order.
 // Provider/profile resolution owns protocol policy; Cockpit only converts the
 // resolved list into picker options.
-func resolveProtocolOptions(providerSpec string, model readmodel.ModelDeploymentReadModel) []protocolOption {
+func resolveProtocolOptions(providerSpec string, model readmodel.ModelAuthoringOptionReadModel) []protocolOption {
 	providerSpec = strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
-	resolution := profile.ResolveProviderDeployment(providerSpec, providerDeploymentRecordFromReadModel(model))
+	resolution := profile.ResolveModelAuthoringOption(providerSpec, modelAuthoringOptionFromReadModel(model))
 	return orderedProtocolOptions(providerSpec, resolution.ProtocolOptions())
 }
 
-func providerDeploymentRecordFromReadModel(model readmodel.ModelDeploymentReadModel) profile.ProviderDeploymentRecord {
+func modelAuthoringOptionFromReadModel(model readmodel.ModelAuthoringOptionReadModel) profile.ModelAuthoringOption {
 	name := strings.TrimSpace(model.Name) // swobu:io-string source=boundary
 	if name == "" {
 		name = strings.TrimSpace(model.ID) // swobu:io-string source=boundary
 	}
-	return profile.NewProviderDeployment(
+	return profile.NewModelAuthoringOption(
 		name,
 		model.ModelName,
 		model.ModelPublisher,
@@ -56,61 +47,77 @@ func orderedProtocolOptions(providerSpec string, candidates []string) []protocol
 	allowed := map[string]struct{}{}
 	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate) // swobu:io-string source=boundary
-		if candidate == "" || candidate == profile.ProviderProtocolAuto {
+		if candidate == "" {
 			continue
 		}
-		if !profile.SupportsProviderProtocolForSpec(providerSpec, candidate) {
+		canonical, err := profile.NormalizeProviderProtocolForSpec(providerSpec, candidate)
+		if err != nil {
 			continue
 		}
-		allowed[candidate] = struct{}{}
+		allowed[canonical] = struct{}{}
 	}
+	// The profile manifest is the concrete-contract authority. Model metadata
+	// may narrow it, but it must not reorder delivery variants or collapse two
+	// concrete contracts that share one semantic protocol kind.
 	out := make([]protocolOption, 0, len(allowed))
-	for _, protocol := range protocolPreference {
+	for _, protocol := range profile.ConcreteProviderProtocolsForSpec(providerSpec) {
 		if _, ok := allowed[protocol]; !ok {
 			continue
 		}
 		out = append(out, protocolOption{
 			ID:       protocol,
-			Label:    protocolOptionLabel(protocol),
-			Keywords: protocolOptionKeywords(protocol),
+			Label:    protocolOptionLabel(providerSpec, protocol),
+			Keywords: protocolOptionKeywords(providerSpec, protocol),
 		})
-		delete(allowed, protocol)
-	}
-	for _, protocol := range profile.SupportedProviderProtocolsForSpec(providerSpec) {
-		if _, ok := allowed[protocol]; !ok {
-			continue
-		}
-		out = append(out, protocolOption{
-			ID:       protocol,
-			Label:    protocolOptionLabel(protocol),
-			Keywords: protocolOptionKeywords(protocol),
-		})
-		delete(allowed, protocol)
 	}
 	return out
 }
 
-func protocolOptionLabel(protocol string) string {
+func protocolOptionLabel(providerSpec, protocol string) string {
+	providerName := strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
+	semanticName := protocol
+	deliveryName := ""
+	if spec, ok := profile.ProviderProtocolSpecForSpec(providerSpec, protocol); ok {
+		providerName = protocolProviderLabel(spec.Kind.String())
+		semanticName = protocolKindLabel(spec.Kind.String())
+		deliveryName = spec.Delivery.Mode.String()
+	}
+	if deliveryName == "" {
+		return providerName + " · " + semanticName
+	}
+	return providerName + " · " + semanticName + " · " + deliveryName
+}
+
+func protocolProviderLabel(protocol string) string {
 	switch protocol {
-	case "responses_stream":
-		return "OpenAI · Responses · stream"
-	case "responses":
-		return "OpenAI · Responses"
-	case "chat_completions_stream":
-		return "OpenAI · Chat Completions · stream"
-	case "chat_completions":
-		return "OpenAI · Chat Completions"
-	case "messages_stream":
-		return "Anthropic · Messages · stream"
+	case "responses", "chat_completions":
+		return "OpenAI"
 	case "messages":
-		return "Anthropic · Messages"
+		return "Anthropic"
+	case "interactions":
+		return "Gemini"
 	default:
 		return protocol
 	}
 }
 
-func protocolOptionKeywords(protocol string) []string {
-	label := protocolOptionLabel(protocol)
+func protocolKindLabel(protocol string) string {
+	switch protocol {
+	case "responses":
+		return "Responses"
+	case "chat_completions":
+		return "Chat Completions"
+	case "messages":
+		return "Messages"
+	case "interactions":
+		return "Interactions"
+	default:
+		return protocol
+	}
+}
+
+func protocolOptionKeywords(providerSpec, protocol string) []string {
+	label := protocolOptionLabel(providerSpec, protocol)
 	return []string{
 		protocol,
 		strings.ReplaceAll(protocol, "_", " "),

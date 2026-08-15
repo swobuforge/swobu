@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -149,7 +148,7 @@ func fireworksResponsesBackend(t *testing.T) provider.Backend {
 }
 
 func fireworksTarget(kind protocolkind.ProtocolKind) provider.TargetSnapshot {
-	target := provider.NewTargetSnapshot("fireworks", "fireworks", "https://api.fireworks.ai/inference/v1", "env:FIREWORKS_API_KEY", kind, profile.FrameHTTPJSONBody, string(kind))
+	target := provider.NewTargetSnapshot("fireworks", "fireworks", "https://api.fireworks.ai/inference/v1", "env:FIREWORKS_API_KEY", kind, string(kind), delivery.BufferedDelivery())
 	target.Model = "accounts/acme/deployments/deploy-1"
 	return target
 }

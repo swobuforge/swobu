@@ -4,16 +4,16 @@
      credential        environment · CUSTOM_API_KEY               change ↵
      credential header Authorization                              change ↵
      model             model-x                                    change ↵
-     protocol          OpenAI · Responses · stream                close ↵
+     protocol          OpenAI · Responses · buffered              close ↵
         protocol
         search            _
 
-      > OpenAI · Responses                                        select ↵
-        OpenAI · Responses · stream                               select ↵
-        OpenAI · Chat Completions                                 select ↵
-        OpenAI · Chat Completions · stream                        select ↵
-        Anthropic · Messages                                      select ↵
-        Anthropic · Messages · stream                             select ↵
+      > OpenAI · Responses · buffered                             select ↵
+        OpenAI · Responses · streaming                            select ↵
+        OpenAI · Chat Completions · buffered                      select ↵
+        OpenAI · Chat Completions · streaming                     select ↵
+        Anthropic · Messages · buffered                           select ↵
+        Anthropic · Messages · streaming                          select ↵
 
         6 of 6 shown                                              ↑↓ search
      routing           fallback after step 1                      change ↵

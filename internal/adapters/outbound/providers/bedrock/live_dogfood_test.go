@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -52,12 +51,11 @@ func assertLiveCatalog(t *testing.T, ctx context.Context, exec BackendAdapter, r
 		endpoint,
 		credentialRef,
 		protocolkind.Responses,
-		profile.FrameHTTPJSONBody,
 		"responses",
 		// The signing region is the durable fact, fixed at construction so the
 		// SigV4 catalog call signs with the authored region (never empty), which
 		// would otherwise be rejected as "scoped to a valid region".
-		region)
+		region, delivery.BufferedDelivery())
 
 	models, err := exec.ListDeployments(ctx, target)
 	if err != nil {
@@ -96,12 +94,11 @@ func TestLiveBedrockMantleSendSignsBedrockRegion(t *testing.T) {
 		endpoint,
 		"",
 		protocolkind.Responses,
-		profile.FrameHTTPJSONBody,
 		"responses",
 		// The signing region is the durable fact, NOT parsed from the host, fixed
 		// at construction. Use a distinct field to prove it drives signing
 		// regardless of how the endpoint namespace was authored.
-		region)
+		region, delivery.BufferedDelivery())
 	target.Model = model
 
 	exec := NewExecutor(http.DefaultClient)
@@ -166,9 +163,8 @@ func TestLiveBedrockMantleResponsesReasoningReplayRoundTrip(t *testing.T) {
 		endpoint,
 		credentialRef,
 		protocolkind.Responses,
-		profile.FrameHTTPJSONBody,
 		"responses",
-		region)
+		region, delivery.BufferedDelivery())
 	target.Model = model
 
 	backend, err := exec.ResolveBackend(target)
@@ -280,9 +276,4 @@ func TestLiveBedrockMantleResponsesReasoningReplayRoundTrip(t *testing.T) {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
+		if trimmed

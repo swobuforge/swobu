@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -152,13 +151,13 @@ func TestDiscoveryUsesOfficialCatalogAndFiltersTextGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Deployments) != 2 || result.Deployments[0].Name != "text/a:1" || result.Deployments[1].Name != "text/b" {
-		t.Fatalf("deployments = %#v", result.Deployments)
+	if len(result.Options) != 2 || result.Options[0].Name != "text/a:1" || result.Options[1].Name != "text/b" {
+		t.Fatalf("deployments = %#v", result.Options)
 	}
 }
 
 func deepInfraTarget(baseURL string) provider.TargetSnapshot {
-	target := provider.NewTargetSnapshot("deepinfra", "deepinfra", baseURL, "env:DEEPINFRA_TOKEN", protocolkind.ChatCompletions, profile.FrameSSEEvent, "chat_completions_stream")
+	target := provider.NewTargetSnapshot("deepinfra", "deepinfra", baseURL, "env:DEEPINFRA_TOKEN", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = "future:model"
 	return target
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -57,9 +58,8 @@ func TestRuntimeUsesSharedMessagesTransport(t *testing.T) {
 		server.URL+"/anthropic/v1",
 		"env:DEEPSEEK_API_KEY",
 		protocolkind.Messages,
-		profile.FrameSSEEvent,
 		"messages_stream",
-	)
+		delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "deepseek-v4-pro"
 	backend, err := runtime.BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestDiscoveryUsesRootModelsBearerAndPreservesIDs(t *testing.T) {
 		credentials: staticCredentialProvider{token: "deepseek-token"},
 		catalogURL:  server.URL + "/models",
 	}
-	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, profile.FrameSSEEvent, "messages_stream")
+	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, "messages_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	deployments, err := discovery.ListDeployments(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestDiscoveryAcceptsSuccessfulEmptyCatalog(t *testing.T) {
 	}))
 	defer server.Close()
 	discovery := Discovery{client: server.Client(), credentials: staticCredentialProvider{token: "token"}, catalogURL: server.URL + "/models"}
-	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, profile.FrameSSEEvent, "messages_stream")
+	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, "messages_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	deployments, err := discovery.ListDeployments(context.Background(), target)
 	if err != nil || len(deployments) != 0 {
 		t.Fatalf("deployments = %#v, error = %v", deployments, err)
@@ -147,11 +147,11 @@ func TestDiscoveryReturnsUnsupportedContentEncodingWithoutPanic(t *testing.T) {
 		}, nil
 	})}
 	discovery := Discovery{client: client, credentials: staticCredentialProvider{token: "token"}, catalogURL: "https://api.deepseek.test/models"}
-	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, profile.FrameSSEEvent, "messages_stream")
+	target := provider.NewTargetSnapshot("deepseek-pro", "deepseek", "ignored", "env:DEEPSEEK_API_KEY", protocolkind.Messages, "messages_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	if _, err := discovery.ListDeployments(context.Background(), target); err == nil {
 		t.Fatal("discovery unexpectedly accepted unsupported content encoding")
 	}
 	if !body.closed {
-		t.Fatal("discovery did not close the original response body")
+		t.Fatal("unsupported content-encoding response body was not closed")
 	}
 }

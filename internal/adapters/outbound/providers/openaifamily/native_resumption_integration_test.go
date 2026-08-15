@@ -25,9 +25,7 @@ func TestResponsesContinuationConsumptionUsesVersionedCanonicalRefinement(t *tes
 		"openai",
 		"https://api.openai.com/v1",
 		"env:OPENAI_API_KEY",
-		protocolkind.Responses,
-		"",
-		"responses",
+		protocolkind.Responses, "responses", delivery.BufferedDelivery(),
 	)
 	target.Model = "gpt-test"
 	backend, err := NewExecutor(nil, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI)).ResolveBackend(target)
@@ -79,7 +77,7 @@ func TestResponsesContinuationConsumptionUsesVersionedCanonicalRefinement(t *tes
 }
 
 func TestResponsesContinuationAfterLocalResultSendsOnlyFunctionOutput(t *testing.T) {
-	target := provider.NewTargetSnapshot("official-openai", "openai", "https://api.openai.com/v1", "env:OPENAI_API_KEY", protocolkind.Responses, "", "responses")
+	target := provider.NewTargetSnapshot("official-openai", "openai", "https://api.openai.com/v1", "env:OPENAI_API_KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "gpt-test"
 	backend, err := NewExecutor(nil, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI)).ResolveBackend(target)
 	if err != nil {
@@ -130,9 +128,7 @@ func TestOfficialOpenAIStoreFalseUsesFullHistoryWithoutNativeContinuation(t *tes
 		"openai",
 		"https://api.openai.com/v1",
 		"env:OPENAI_API_KEY",
-		protocolkind.Responses,
-		"",
-		"responses",
+		protocolkind.Responses, "responses", delivery.BufferedDelivery(),
 	)
 	target.Model = "gpt-test"
 	backend, err := NewExecutor(nil, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI)).ResolveBackend(target)

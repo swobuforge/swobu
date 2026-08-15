@@ -223,7 +223,7 @@ func (w *TargetConfig) derivesProviderProtocol() bool {
 }
 
 func (w *TargetConfig) usesManualModelInput() bool {
-	return profile.ModelCatalogModeForSpec(w.Draft.Get().ProviderSpec) == profile.ModelCatalogModeManual
+	return profile.ModelDiscoveryModeForSpec(w.Draft.Get().ProviderSpec) == profile.ModelDiscoveryModeNone
 }
 
 func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
@@ -339,7 +339,7 @@ type appState struct {
 	Catalog       *tui.State[catalogOperationState]
 	SaveOperation *tui.State[createOperationState]
 
-	SelectedModel *tui.State[readmodel.ModelDeploymentReadModel]
+	SelectedModel *tui.State[readmodel.ModelAuthoringOptionReadModel]
 
 	Placement *tui.State[readmodel.PlacementOptionReadModel]
 }
@@ -379,7 +379,7 @@ func newStates() appState {
 		Catalog:       tui.NewState(catalogOperationState{}),
 		SaveOperation: tui.NewState(createOperationState{}),
 
-		SelectedModel: tui.NewState(readmodel.ModelDeploymentReadModel{}),
+		SelectedModel: tui.NewState(readmodel.ModelAuthoringOptionReadModel{}),
 
 		Placement: nil, // set by caller (route/target-derived)
 	}
@@ -408,7 +408,7 @@ func (w *TargetConfig) resetSetupState() {
 	w.AuthSession.Set(readmodel.AuthSessionReadModel{})
 	w.Catalog.Set(catalogOperationState{})
 	w.SaveOperation.Set(createOperationState{})
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{})
+	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{})
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ProviderProtocol = ""
 		return d

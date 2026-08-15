@@ -161,7 +161,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 		return provider.TargetProbeResult{}, canonical.InternalError("DeepInfra catalog response could not be decoded")
 	}
-	deployments := make([]profile.ProviderDeploymentRecord, 0, len(rows))
+	deployments := make([]profile.ModelAuthoringOption, 0, len(rows))
 	for _, row := range rows {
 		if strings.TrimSpace(row.ReportedType) != "text-generation" {
 			continue
@@ -173,9 +173,9 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 		if id == "" {
 			continue
 		}
-		deployments = append(deployments, profile.NewProviderDeployment(id, id, "DeepInfra", "", row.ReportedType, nil, ""))
+		deployments = append(deployments, profile.NewModelAuthoringOption(id, id, "DeepInfra", "", row.ReportedType, nil, ""))
 	}
-	return provider.TargetProbeResult{Deployments: deployments}, nil
+	return provider.TargetProbeResult{Options: deployments}, nil
 }
 
 var _ provider.Codec = failFastCodec{}

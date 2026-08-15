@@ -20,7 +20,7 @@ import (
 )
 
 func TestOpenAIRequestMutationPreservesRawJSONIntegers(t *testing.T) {
-	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = "model"
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestRuntimeOwnsOpenAIChatCompletionsTokenSpelling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.ChatCompletions, "", "chat_completions")
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = "model"
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestRuntimeUsesSharedOfficialResponsesToolLowering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.Responses, "", "responses")
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "model"
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 	}))
 	defer server.Close()
 
-	target := provider.NewTargetSnapshot("official-openai", string(profile.ProviderSpecOpenAI), server.URL, "env:TOKEN", protocolkind.Responses, "", "responses")
+	target := provider.NewTargetSnapshot("official-openai", string(profile.ProviderSpecOpenAI), server.URL, "env:TOKEN", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "gpt-test"
 	backend, err := NewRuntime(server.Client(), staticCredentialProvider{}).BackendResolver.ResolveBackend(target)
 	if err != nil {

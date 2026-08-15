@@ -26,6 +26,10 @@
 // the version; session resolution uses it to reject native handles captured
 // before a target save. Version is intentionally process-local.
 //
+// A standard connection persists the provider, effective locator, and optional
+// credential. Provider-specific locator shorthand is normalized before this
+// value is constructed; it does not create a new durable connection arm.
+//
 // A Bedrock connection persists the signing region and an optional explicit API
 // URL as separate facts. An empty endpoint remains empty in routing; effective
 // endpoint, request, and catalog URLs are derived only after protocol selection.

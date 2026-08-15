@@ -121,7 +121,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		}},
 		{name: "api_key_environment_ready", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
-			selectReadyModel(w, "gpt-4.1", "responses_stream")
+			selectReadyModel(w, "gpt-4.1", "responses")
 			return w
 		}},
 		{name: "gemini_adc_default", build: func(t *testing.T) tui.Component {
@@ -173,7 +173,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		}},
 		{name: "custom_loopback_anonymous", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecCustom, "http://127.0.0.1:8080/v1", "")
-			selectReadyModel(w, "local-model", "chat_completions_stream")
+			selectReadyModel(w, "local-model", "chat_completions")
 			return w
 		}},
 		{name: "custom_remote_credential_required", build: func(t *testing.T) tui.Component {
@@ -181,7 +181,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		}},
 		{name: "custom_ready", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
-			selectReadyModel(w, "custom-model", "chat_completions_stream")
+			selectReadyModel(w, "custom-model", "chat_completions")
 			return w
 		}},
 		{name: "custom_manual_model", build: func(t *testing.T) tui.Component {
@@ -237,7 +237,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "chatgpt_signed_in", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
 			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
-			selectReadyModel(w, "GPT-5.2", "responses_stream")
+			selectReadyModel(w, "GPT-5.2", "responses")
 			return w
 		}},
 		{name: "chatgpt_failed", build: func(t *testing.T) tui.Component {
@@ -253,14 +253,14 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "azure_protocol_required", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 			w.Route = readmodel.RouteReadModel{ID: "openai"}
-			deployment := readmodel.ModelDeploymentReadModel{ID: "gpt-5.6-sol", Name: "gpt-5.6-sol", ModelName: "gpt-5.6-sol"}
-			w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Deployments: []readmodel.ModelDeploymentReadModel{deployment}}})
+			deployment := readmodel.ModelAuthoringOptionReadModel{ID: "gpt-5.6-sol", Name: "gpt-5.6-sol", ModelName: "gpt-5.6-sol"}
+			w.Catalog.Set(catalogOperationState{Result: readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{deployment}}})
 			w.SelectModel(deployment)
 			return w
 		}},
 		{name: "azure_ready", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
-			selectReadyModel(w, "claude-opus-4-8", "messages_stream")
+			selectReadyModel(w, "claude-opus-4-8", "messages")
 			return w
 		}},
 		{name: "ollama_default_url", build: func(t *testing.T) tui.Component {
@@ -275,7 +275,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "protocol_picker", render: renderProtocolPicker},
 		{name: "ready_to_create", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
-			selectReadyModel(w, "gpt-4.1", "responses_stream")
+			selectReadyModel(w, "gpt-4.1", "responses")
 			return w
 		}},
 	}
@@ -291,9 +291,9 @@ func ambientOrReferenceVisual(ref string) *ambientOrReferenceAuthentication {
 func renderModelPicker(t *testing.T, width int) string {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
-	selectReadyModel(w, "GPT-4.1", "responses_stream")
+	selectReadyModel(w, "GPT-4.1", "responses")
 	catalog := w.Catalog.Get()
-	catalog.Result.Deployments = []readmodel.ModelDeploymentReadModel{
+	catalog.Result.Options = []readmodel.ModelAuthoringOptionReadModel{
 		{ID: "GPT-4.1", Name: "GPT-4.1", ModelName: "GPT-4.1"},
 		{ID: "gpt-4.1-small", Name: "GPT-4.1 small", ModelName: "gpt-4.1-small"},
 		{ID: "gpt-4o", Name: "GPT-4o", ModelName: "gpt-4o"},
@@ -306,9 +306,9 @@ func renderModelPicker(t *testing.T, width int) string {
 func renderDeploymentPicker(t *testing.T, width int) string {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
-	selectReadyModel(w, "claude-opus-4-8", "messages_stream")
+	selectReadyModel(w, "claude-opus-4-8", "messages")
 	catalog := w.Catalog.Get()
-	catalog.Result.Deployments = []readmodel.ModelDeploymentReadModel{
+	catalog.Result.Options = []readmodel.ModelAuthoringOptionReadModel{
 		{ID: "claude-opus-4-8", Name: "claude-opus-4-8", ModelName: "claude-opus-4-8"},
 		{ID: "claude-sonnet-4-6", Name: "claude-sonnet-4-6", ModelName: "claude-sonnet-4-6"},
 	}
@@ -320,14 +320,14 @@ func renderDeploymentPicker(t *testing.T, width int) string {
 func renderProtocolPicker(t *testing.T, width int) string {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
-	selectReadyModel(w, "model-x", "responses_stream")
+	selectReadyModel(w, "model-x", "responses")
 	return renderAuthoringKeys(t, width, w, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 }
 
 func renderCustomHeaderJourney(t *testing.T, width int, query string) string {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
-	selectReadyModel(w, "model-x", "responses_stream")
+	selectReadyModel(w, "model-x", "responses")
 	keys := []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}}
 	keys = append(keys, runeKeys(query)...)
 	return renderAuthoringKeys(t, width, w, keys)
@@ -367,7 +367,7 @@ func bedrockVisualConfig(t *testing.T, authentication, credential string, identi
 		catalog.BedrockAuthentication.Error = "AWS credentials are unavailable or expired"
 	}
 	if !strings.HasSuffix(authentication, "_failure") {
-		catalog.Deployments = []readmodel.ModelDeploymentReadModel{{
+		catalog.Options = []readmodel.ModelAuthoringOptionReadModel{{
 			ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ModelName: "Claude Sonnet 4.6",
 		}}
 	}
@@ -377,7 +377,7 @@ func bedrockVisualConfig(t *testing.T, authentication, credential string, identi
 		w.Catalog.Set(catalogOperationState{Result: catalog})
 	}
 	if !strings.HasSuffix(authentication, "_failure") {
-		selectReadyModel(w, "Claude Sonnet 4.6", "messages_stream")
+		selectReadyModel(w, "Claude Sonnet 4.6", "messages")
 	}
 	return w
 }
@@ -577,9 +577,9 @@ func authoringConfig(t *testing.T, provider profile.ProviderID, locator, credent
 
 func selectReadyModel(w *TargetConfig, model, protocol string) {
 	catalog := w.Catalog.Get()
-	catalog.Result.Deployments = []readmodel.ModelDeploymentReadModel{{ID: model, Name: model, ModelName: model}}
+	catalog.Result.Options = []readmodel.ModelAuthoringOptionReadModel{{ID: model, Name: model, ModelName: model}}
 	w.Catalog.Set(catalog)
-	w.SelectedModel.Set(readmodel.ModelDeploymentReadModel{ID: model, Name: model, ModelName: model})
+	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{ID: model, Name: model, ModelName: model})
 	w.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
 		d.ModelID = model
 		d.ProviderProtocol = protocol

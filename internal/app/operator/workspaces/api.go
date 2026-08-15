@@ -147,7 +147,18 @@ func (c Connection) MarshalJSON() ([]byte, error) {
 				Credential string `json:"credential"`
 			}{Credential: c.draft.Standard.Credential}})
 		}
-		return json.Marshal(map[string]any{provider: standardConnectionDTO{BaseURL: c.draft.Standard.Locator, Credential: c.draft.Standard.Credential}})
+		baseURL := c.draft.Standard.Locator
+		if provider == string(profile.ProviderSpecRunPod) {
+			// Operator JSON may be marshaled before routing finalization. Keep
+			// shorthand out of the public document here; durable construction
+			// remains owned by ValidateStandardConnection.
+			normalized, err := profile.NormalizeRunPodEndpoint(baseURL)
+			if err != nil {
+				return nil, fmt.Errorf("connection.%s.base_url: %w", provider, err)
+			}
+			baseURL = normalized
+		}
+		return json.Marshal(map[string]any{provider: standardConnectionDTO{BaseURL: baseURL, Credential: c.draft.Standard.Credential}})
 	case routing.ConnectionShapeZAI:
 		if c.draft.ZAI == nil {
 			return nil, fmt.Errorf("connection.%s: Z.AI payload is required", provider)

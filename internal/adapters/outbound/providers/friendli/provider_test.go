@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -30,7 +29,7 @@ func (credentialResolver) ResolveCredential(context.Context, string, string) (st
 func TestRuntimeComposesSharedProtocolsAndManualDiscovery(t *testing.T) {
 	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
-		target := provider.NewTargetSnapshot("friendli", "friendli", "https://friendli-gateway.example/v1", "", kind, profile.FrameSSEEvent, string(kind)+"_stream")
+		target := provider.NewTargetSnapshot("friendli", "friendli", "https://friendli-gateway.example/v1", "", kind, string(kind), delivery.BufferedDelivery())
 		target.Model = "exact-route"
 		backend, err := bundle.BackendResolver.ResolveBackend(target)
 		if err != nil {
@@ -68,7 +67,7 @@ func TestTransportUsesExactEndpointAndOptionalBearerCredential(t *testing.T) {
 			}))
 			defer srv.Close()
 			bundle := NewRuntime(srv.Client(), credentialResolver{})
-			target := provider.NewTargetSnapshot("friendli", "friendli", srv.URL+tc.baseURL, tc.credential, protocolkind.ChatCompletions, "", "chat_completions_stream")
+			target := provider.NewTargetSnapshot("friendli", "friendli", srv.URL+tc.baseURL, tc.credential, protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 			target.Model = "exact-route"
 			backend, err := bundle.BackendResolver.ResolveBackend(target)
 			if err != nil {

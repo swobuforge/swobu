@@ -33,7 +33,7 @@ func LMStudioNativeModelsURL(executionBaseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
-func decodeLMStudioModels(body io.Reader) ([]profile.ProviderDeploymentRecord, error) {
+func decodeLMStudioModels(body io.Reader) ([]profile.ModelAuthoringOption, error) {
 	var payload struct {
 		Models []struct {
 			Type         string `json:"type"`
@@ -47,13 +47,13 @@ func decodeLMStudioModels(body io.Reader) ([]profile.ProviderDeploymentRecord, e
 		return nil, err
 	}
 
-	byKey := make(map[string]profile.ProviderDeploymentRecord, len(payload.Models))
+	byKey := make(map[string]profile.ModelAuthoringOption, len(payload.Models))
 	for _, model := range payload.Models {
 		key := strings.TrimSpace(model.Key)                                        // swobu:io-string source=boundary
 		if !strings.EqualFold(strings.TrimSpace(model.Type), "llm") || key == "" { // swobu:io-string source=boundary
 			continue
 		}
-		byKey[key] = profile.NewProviderDeployment(
+		byKey[key] = profile.NewModelAuthoringOption(
 			key,
 			model.DisplayName,
 			model.Publisher,
@@ -69,7 +69,7 @@ func decodeLMStudioModels(body io.Reader) ([]profile.ProviderDeploymentRecord, e
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
-	out := make([]profile.ProviderDeploymentRecord, 0, len(keys))
+	out := make([]profile.ModelAuthoringOption, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, byKey[key])
 	}

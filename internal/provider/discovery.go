@@ -10,7 +10,7 @@ import (
 // generic dispatch and transport layers. Diagnostics is optional provider-
 // owned JSON interpreted only by that provider's operator surface.
 type TargetProbeResult struct {
-	Deployments []profile.ProviderDeploymentRecord
+	Options     []profile.ModelAuthoringOption
 	Diagnostics []byte
 }
 

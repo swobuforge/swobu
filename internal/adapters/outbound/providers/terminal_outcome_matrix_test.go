@@ -190,9 +190,9 @@ func TestProviderIngress_TerminalOutcomeMatrix(t *testing.T) {
 			baseURL := targetBaseURLForCase(srv.URL, tc)
 			var target provider.TargetSnapshot
 			if tc.providerID == string(profile.ProviderSpecBedrock) {
-				target = provider.NewBedrockTargetSnapshot("backend-a", baseURL, tc.credentialRef, tc.protocolKind, "", tc.providerProtocol, "us-east-1")
+				target = provider.NewBedrockTargetSnapshot("backend-a", baseURL, tc.credentialRef, tc.protocolKind, tc.providerProtocol, "us-east-1", tc.providerDelivery)
 			} else {
-				target = provider.NewTargetSnapshot("backend-a", tc.providerID, baseURL, tc.credentialRef, tc.protocolKind, "", tc.providerProtocol)
+				target = provider.NewTargetSnapshot("backend-a", tc.providerID, baseURL, tc.credentialRef, tc.protocolKind, tc.providerProtocol, tc.providerDelivery)
 			}
 			req := newTestProviderRequest(
 				"ex_matrix",
@@ -310,7 +310,7 @@ func TestProviderIngress_AzurePromptContentFilterReturnsBackendError(t *testing.
 		request,
 		carrier.Document{},
 		exchange.NewExecutionContract(delivery.BufferedDelivery()),
-		provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "", "responses"),
+		provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecAzure), "contact-8837-resource", "cred-1", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
 	)
 
 	_, err := executeProviderRequest(registry, context.Background(), req)

@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestResolveProviderDeployment_ExplicitFactsWinOverProviderDefaults(t *testing.T) {
+func TestResolveModelAuthoringOption_ExplicitFactsWinOverProviderDefaults(t *testing.T) {
 	t.Parallel()
 
-	resolution := ResolveProviderDeployment("anthropic", ProviderDeploymentRecord{
+	resolution := ResolveModelAuthoringOption("anthropic", ModelAuthoringOption{
 		SupportedProviderProtocols: []string{"messages"},
 		DefaultProviderProtocol:    "messages",
 	})
@@ -20,14 +20,14 @@ func TestResolveProviderDeployment_ExplicitFactsWinOverProviderDefaults(t *testi
 		t.Fatalf("default protocol=%q want messages", got)
 	}
 	if !resolution.SupportsProtocol("messages") {
-		t.Fatal("expected explicit deployment protocol to be supported")
+		t.Fatal("expected explicit option protocol to be supported")
 	}
 }
 
-func TestResolveProviderDeployment_SparseMetadataInheritsProviderManifestProtocols(t *testing.T) {
+func TestResolveModelAuthoringOption_SparseMetadataInheritsProviderManifestProtocols(t *testing.T) {
 	t.Parallel()
 
-	resolution := ResolveProviderDeployment("openai", ProviderDeploymentRecord{})
+	resolution := ResolveModelAuthoringOption("openai", ModelAuthoringOption{})
 	want := ConcreteProviderProtocolsForSpec("openai")
 	if got := resolution.ProtocolOptions(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("protocol options=%v want %v", got, want)
@@ -37,10 +37,10 @@ func TestResolveProviderDeployment_SparseMetadataInheritsProviderManifestProtoco
 	}
 }
 
-func TestResolveProviderDeployment_AmbiguousMetadataDoesNotAutoSelect(t *testing.T) {
+func TestResolveModelAuthoringOption_AmbiguousMetadataDoesNotAutoSelect(t *testing.T) {
 	t.Parallel()
 
-	resolution := ResolveProviderDeployment("openai", ProviderDeploymentRecord{
+	resolution := ResolveModelAuthoringOption("openai", ModelAuthoringOption{
 		SupportedProviderProtocols: []string{"responses", "chat_completions"},
 	})
 	if got := resolution.DefaultProtocol(); got != "" {
@@ -49,7 +49,7 @@ func TestResolveProviderDeployment_AmbiguousMetadataDoesNotAutoSelect(t *testing
 	if !resolution.SupportsProtocol("responses") {
 		t.Fatal("expected explicit supported protocol to be accepted")
 	}
-	if resolution.SupportsProtocol(ProviderProtocolAuto) {
-		t.Fatal("auto must not be treated as a deployment protocol")
+	if resolution.SupportsProtocol("") || resolution.SupportsProtocol("not_a_protocol") {
+		t.Fatal("absent or unknown values must not be treated as model-authoring protocols")
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -98,7 +99,7 @@ func TestTransportFailurePreservesInvocationCancellation(t *testing.T) {
 }
 
 func TestBindTransportDefaultsUntypedFailureToPossibleExecution(t *testing.T) {
-	target := NewTargetSnapshot("target-a", "openai", "https://example.test", "", "responses", "", "responses")
+	target := NewTargetSnapshot("target-a", "openai", "https://example.test", "", "responses", "responses", delivery.BufferedDelivery())
 	target.Model = "m"
 	transport := BindTransport(target, func(context.Context, TargetSnapshot, carrier.Document) (Ingress, error) {
 		return nil, errors.New("connection disappeared")

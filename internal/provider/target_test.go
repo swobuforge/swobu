@@ -3,21 +3,22 @@ package provider
 import (
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 func TestTargetSnapshotExecutionProtocolRejectsSplitBrain(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		kind  protocolkind.ProtocolKind
-		frame string
-		name_ string
+		name       string
+		kind       protocolkind.ProtocolKind
+		name_      string
+		providerDel delivery.Delivery
 	}{
-		{name: "protocol contradicts kind", kind: protocolkind.Messages, frame: executionFrameHTTPJSONBody, name_: "responses"},
-		{name: "stream protocol contradicts frame", kind: protocolkind.Responses, frame: executionFrameHTTPJSONBody, name_: "responses_stream"},
+		{name: "protocol contradicts kind", kind: protocolkind.Messages, name_: "responses", providerDel: delivery.BufferedDelivery()},
+		{name: "streaming protocol with buffered delivery", kind: protocolkind.Responses, name_: "responses_stream", providerDel: delivery.BufferedDelivery()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			target := NewTargetSnapshot("target", "openai", "https://example.test", "cred", tc.kind, tc.frame, tc.name_)
+			target := NewTargetSnapshot("target", "openai", "https://example.test", "cred", tc.kind, tc.name_, tc.providerDel)
 			if err := target.ValidateExecutionProtocol(); err == nil {
 				t.Fatalf("incoherent target accepted: %#v", target)
 			}
@@ -25,28 +26,22 @@ func TestTargetSnapshotExecutionProtocolRejectsSplitBrain(t *testing.T) {
 	}
 }
 
-func TestTargetSnapshotConstructorDerivesOneCoherentFrame(t *testing.T) {
-	target := NewTargetSnapshot("target", "openai", "https://example.test", "cred", protocolkind.Responses, "", "responses_stream")
-	if target.SelectedFrame != executionFrameSSEEvent {
-		t.Fatalf("selected frame = %q, want %q", target.SelectedFrame, executionFrameSSEEvent)
-	}
+func TestTargetSnapshotCarriesOneSemanticProtocol(t *testing.T) {
+	target := NewTargetSnapshot("target", "openai", "https://example.test", "cred", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	if err := target.ValidateExecutionProtocol(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestTargetSnapshotAcceptsProviderOnlyInteractionsStream(t *testing.T) {
-	target := NewTargetSnapshot("target", "gemini", "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Interactions, "", "interactions_stream")
-	if target.SelectedFrame != executionFrameSSEEvent {
-		t.Fatalf("selected frame = %q, want %q", target.SelectedFrame, executionFrameSSEEvent)
-	}
+func TestTargetSnapshotAcceptsSemanticInteractionsProtocol(t *testing.T) {
+	target := NewTargetSnapshot("target", "gemini", "https://generativelanguage.googleapis.com/v1", "env:GEMINI_API_KEY", protocolkind.Interactions, "interactions_stream", delivery.StreamingDelivery(delivery.FramingSSE))
 	if err := target.ValidateExecutionProtocol(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestTargetSnapshotConstructorsExposeExactlyOneProviderOptionsArm(t *testing.T) {
-	custom := NewCustomTargetSnapshot("custom", "https://example.test", "cred", protocolkind.Responses, "", "responses", "X-API-Key")
+	custom := NewCustomTargetSnapshot("custom", "https://example.test", "cred", protocolkind.Responses, "responses", "X-API-Key", delivery.BufferedDelivery())
 	if custom.AuthHeader() != "X-API-Key" {
 		t.Fatalf("custom auth header = %q, want %q", custom.AuthHeader(), "X-API-Key")
 	}
@@ -54,7 +49,7 @@ func TestTargetSnapshotConstructorsExposeExactlyOneProviderOptionsArm(t *testing
 		t.Fatalf("custom target exposed Bedrock region %q", custom.BedrockRegion())
 	}
 
-	bedrock := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "us-east-1")
+	bedrock := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "responses", "us-east-1", delivery.BufferedDelivery())
 	if bedrock.BedrockRegion() != "us-east-1" {
 		t.Fatalf("Bedrock region = %q, want %q", bedrock.BedrockRegion(), "us-east-1")
 	}
@@ -71,7 +66,7 @@ func TestGenericTargetSnapshotRejectsProviderSpecificTargets(t *testing.T) {
 					t.Fatalf("generic constructor admitted provider %q", providerSpec)
 				}
 			}()
-			_ = NewTargetSnapshot("target", providerSpec, "https://example.test", "cred", protocolkind.Responses, "", "responses")
+			_ = NewTargetSnapshot("target", providerSpec, "https://example.test", "cred", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 		})
 	}
 }
@@ -82,11 +77,11 @@ func TestBedrockTargetSnapshotRejectsMissingSigningRegionAtConstruction(t *testi
 			t.Fatal("Bedrock constructor admitted an empty signing region")
 		}
 	}()
-	_ = NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "")
+	_ = NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "responses", "", delivery.BufferedDelivery())
 }
 
 func TestTargetSnapshotEqualityUsesComparableConcreteOptions(t *testing.T) {
-	left := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "", "responses", "us-east-1")
+	left := NewBedrockTargetSnapshot("bedrock", "https://example.test", "cred", protocolkind.Responses, "responses", "us-east-1", delivery.BufferedDelivery())
 	right := left.Clone()
 	if !left.Equal(right) {
 		t.Fatal("equal snapshots compare unequal")

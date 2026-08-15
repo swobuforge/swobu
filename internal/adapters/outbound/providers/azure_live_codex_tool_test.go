@@ -51,9 +51,7 @@ func TestLiveAzureCodexResponsesRequiredFunctionTool(t *testing.T) {
 		"https://contact-8837-resource.services.ai.azure.com",
 		"secret:azure-live",
 		protocolkind.Responses,
-
-		"",
-		"responses_stream")
+		"responses", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := registry.ResolveBackend(target)
 	if err != nil {

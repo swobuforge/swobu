@@ -163,7 +163,7 @@ func (w *TargetConfig) syncBedrockEndpointRow(row *ui.EditableRow) {
 // check — only forgiveness then applies, and the row stays None.
 func bedrockEndpointProtocolKind(w *TargetConfig) protocolkind.ProtocolKind {
 	draft := w.Draft.Get()
-	if kind, _, ok := profile.ProviderProtocolKindAndFrame(draft.ProviderSpec, draft.ProviderProtocol); ok {
+	if kind, ok := profile.ProviderProtocolKind(draft.ProviderSpec, draft.ProviderProtocol); ok {
 		return kind
 	}
 	return protocolkind.ProtocolKind("")

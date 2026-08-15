@@ -204,7 +204,7 @@ func validateTarget(target provider.TargetSnapshot) error {
 	if target.ProviderID() != string(profile.ProviderSpecGemini) {
 		return canonical.BadEndpoint("selected provider does not match Gemini runtime")
 	}
-	if target.ProtocolKind != protocolkind.Interactions || target.ProviderProtocol != "interactions_stream" || target.SelectedFrame != profile.FrameSSEEvent {
+	if target.ProtocolKind != protocolkind.Interactions || target.ProviderProtocol != "interactions_stream" {
 		return canonical.BadEndpoint("Gemini target must use interactions_stream")
 	}
 	if err := target.ValidateExecutionProtocol(); err != nil {

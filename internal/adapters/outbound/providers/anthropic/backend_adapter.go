@@ -140,7 +140,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 var _ provider.BackendResolver = BackendAdapter{}
 
-func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ProviderDeploymentRecord, error) {
+func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
 	if strings.TrimSpace(target.BaseURL) == "" { // swobu:io-string source=boundary
 		return nil, canonical.BadEndpoint("anthropic provider base URL is required")
 	}
@@ -172,9 +172,9 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 		return nil, canonical.InternalError("backend model catalog could not be decoded")
 	}
 	supportedProtocols := profile.ConcreteProviderProtocolsForSpec(string(e.providerID))
-	out := make([]profile.ProviderDeploymentRecord, 0, len(models))
+	out := make([]profile.ModelAuthoringOption, 0, len(models))
 	for _, modelID := range models {
-		out = append(out, profile.NewProviderDeployment(
+		out = append(out, profile.NewModelAuthoringOption(
 			modelID,
 			modelID,
 			string(e.providerID),
@@ -189,7 +189,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 
 func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
 	deployments, err := e.ListDeployments(ctx, target)
-	return provider.TargetProbeResult{Deployments: deployments}, err
+	return provider.TargetProbeResult{Options: deployments}, err
 }
 
 func (e BackendAdapter) validateProviderTarget(target provider.TargetSnapshot) error {
@@ -205,10 +205,10 @@ func (e BackendAdapter) validateProviderTarget(target provider.TargetSnapshot) e
 // multiple protocol families through separate shared adapters.
 func validateProviderProtocol(providerID profile.ProviderID, target provider.TargetSnapshot) error {
 	providerProtocol := strings.TrimSpace(target.ProviderProtocol) // swobu:io-string source=boundary
-	if providerProtocol == "" || providerProtocol == profile.ProviderProtocolAuto {
+	if providerProtocol == "" {
 		return canonical.BadEndpoint("messages provider protocol must be concrete")
 	}
-	kind, frame, ok := profile.ProviderProtocolKindAndFrame(string(providerID), providerProtocol)
+	kind, ok := profile.ProviderProtocolKind(string(providerID), providerProtocol)
 	if !ok {
 		return canonical.BadEndpoint("selected provider protocol is unsupported for messages adapter")
 	}
@@ -217,9 +217,6 @@ func validateProviderProtocol(providerID profile.ProviderID, target provider.Tar
 	}
 	if target.ProtocolKind != kind {
 		return canonical.BadEndpoint("selected provider protocol kind does not match messages target")
-	}
-	if target.SelectedFrame != frame {
-		return canonical.BadEndpoint("selected provider protocol frame does not match messages target")
 	}
 	return nil
 }

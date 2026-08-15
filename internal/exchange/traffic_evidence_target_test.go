@@ -5,6 +5,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -12,7 +13,7 @@ import (
 
 func TestBuildTerminalTrafficEventPreservesResolvedProviderAndModel(t *testing.T) {
 	routeName, _ := routing.ParseRouteName("openai")
-	target := provider.NewTargetSnapshot("tgt_opaque", "anthropic", "https://api.anthropic.com", "env:KEY", "messages", "", "messages")
+	target := provider.NewTargetSnapshot("tgt_opaque", "anthropic", "https://api.anthropic.com", "env:KEY", protocolkind.Messages, "messages", delivery.BufferedDelivery())
 	target.Model = "claude-sonnet-4-6"
 	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
 		workspace:   requestpathWorkspace(t),
@@ -32,7 +33,7 @@ func TestBuildTerminalTrafficEventPreservesResolvedProviderAndModel(t *testing.T
 
 func TestBuildTerminalTrafficEventExposesPossibleDuplicateProviderWork(t *testing.T) {
 	routeName, _ := routing.ParseRouteName("openai")
-	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.com", "env:KEY", "responses", "", "responses")
+	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.com", "env:KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "model"
 	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
 		workspace:   requestpathWorkspace(t),

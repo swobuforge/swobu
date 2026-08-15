@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -35,10 +36,7 @@ func TestListModels_NonChatGPTMissingModelReadScopeDoesNotFallback(t *testing.T)
 		"openrouter",
 		srv.URL+"/v1",
 		"env:OPENROUTER_API_KEY",
-		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatal("expected backend error for non-chatgpt provider")
 	}
@@ -60,10 +58,7 @@ func TestListModels_OpenAIRequiresCredentialRef(t *testing.T) {
 		"openai",
 		srv.URL+"/v1",
 		"",
-		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")
 	}
@@ -92,10 +87,7 @@ func TestListModels_OpenRouterRequiresCredentialRef(t *testing.T) {
 		"openrouter",
 		srv.URL+"/v1",
 		"",
-		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatal("expected missing credential ref error")
 	}
@@ -132,7 +124,7 @@ func TestListModels_LMStudioUsesNativeCatalogAndOptionalBearerAuth(t *testing.T)
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, LMStudioPolicy())
 			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 				"draft", "lmstudio", srv.URL+"/v1", tc.credentialRef,
-				protocolkind.Responses, "", "responses"))
+				protocolkind.Responses, "responses", delivery.BufferedDelivery()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +159,7 @@ func TestListModels_VLLMUsesSparseOpenAICatalogAndOptionalBearerAuth(t *testing.
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecVLLM))
 			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 				"draft", "vllm", srv.URL+"/serve", tc.credentialRef,
-				protocolkind.Responses, "", "responses"))
+				protocolkind.Responses, "responses", delivery.BufferedDelivery()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +167,7 @@ func TestListModels_VLLMUsesSparseOpenAICatalogAndOptionalBearerAuth(t *testing.
 				t.Fatalf("models = %#v", models)
 			}
 			want := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
-			if got := profile.ResolveProviderDeployment("vllm", models[0]).ProtocolOptions(); !slices.Equal(got, want) {
+			if got := profile.ResolveModelAuthoringOption("vllm", models[0]).ProtocolOptions(); !slices.Equal(got, want) {
 				t.Fatalf("resolved protocols = %#v, want %#v", got, want)
 			}
 		})
@@ -196,7 +188,7 @@ func TestListModels_NebiusUsesSparseOpenAICatalogAndBearerAuth(t *testing.T) {
 
 	exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
 	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
-		"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses"))
+		"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +206,7 @@ func TestListModels_OpenCatalogAbsenceIsEmptyOnlyForEnumerableProvider(t *testin
 			defer srv.Close()
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
 			models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
-				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses"))
+				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery()))
 			if err != nil || len(models) != 0 {
 				t.Fatalf("models/error = %#v / %v, want empty / nil", models, err)
 			}
@@ -228,7 +220,7 @@ func TestListModels_OpenCatalogAbsenceIsEmptyOnlyForEnumerableProvider(t *testin
 			defer srv.Close()
 			exec := NewExecutor(srv.Client(), stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecNebius))
 			if _, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
-				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "", "responses")); err == nil {
+				"draft", "nebius", srv.URL+"/v1", "env:NEBIUS_API_KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery())); err == nil {
 				t.Fatalf("status %d returned nil error", status)
 			}
 		})
@@ -271,11 +263,8 @@ func TestListModels_CustomUsesSelectedAuthHeader(t *testing.T) {
 				"draft",
 				srv.URL+"/v1",
 				"env:OPENAI_API_KEY",
-				protocolkind.ChatCompletions,
-
-				"",
-				"",
-				tt.authHeader)
+				protocolkind.ChatCompletions, "chat_completions",
+				tt.authHeader, delivery.BufferedDelivery())
 
 			models, err := exec.ListDeployments(context.Background(), target)
 			if err != nil {

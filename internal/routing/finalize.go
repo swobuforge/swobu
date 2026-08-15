@@ -67,6 +67,7 @@ type TargetConstructionFacts struct {
 	ConnectionShape              func(Provider) (ConnectionShape, bool)
 	ValidateStandardConnection   func(Provider, StandardConnectionDraft) (StandardConnectionDraft, error)
 	ProtocolSupported            ProtocolSupport
+	NormalizeProtocol            func(Provider, string) (string, error)
 	DerivedProtocol              func(Provider) (string, bool)
 	NormalizeAzureProjectLocator func(string) (string, error)
 	BedrockRegionSupported       func(string) bool
@@ -88,6 +89,13 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 		return Target{}, err
 	}
 	rawProtocol := strings.TrimSpace(draft.Protocol)
+	if facts.NormalizeProtocol != nil {
+		normalized, normalizeErr := facts.NormalizeProtocol(connection.Provider(), rawProtocol)
+		if normalizeErr != nil {
+			return Target{}, pathError("target.protocol", normalizeErr.Error())
+		}
+		rawProtocol = normalized
+	}
 	if facts.DerivedProtocol != nil {
 		if derivedProtocol, derived := facts.DerivedProtocol(connection.Provider()); derived {
 			if rawProtocol != "" {

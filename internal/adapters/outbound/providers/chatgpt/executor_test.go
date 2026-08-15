@@ -155,9 +155,7 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 		"https://chatgpt.com/backend-api/codex",
 		"secretfile:chatgpt/acct_plus",
 		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		"", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,9 +176,7 @@ func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
 		"https://chatgpt.com/backend-api/codex",
 		"secretfile:chatgpt/plus/sess_abc",
 		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		"", delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatalf("expected error, got models=%v", models)
 	}
@@ -193,9 +189,8 @@ func TestResolveBackendResponsesNeedsNoResumptionCallback(t *testing.T) {
 		"",
 		"secret:chatgpt/default",
 		protocolkind.Responses,
-		"",
 		"responses_stream",
-	)
+		delivery.StreamingDelivery(delivery.FramingSSE))
 	target.Model = "gpt-test"
 	backend, err := NewExecutor(nil, stubCredentialResolver{}).ResolveBackend(target)
 	if err != nil {
@@ -238,9 +233,7 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 		srv.URL+"/v1",
 		"secretfile:chatgpt/default",
 		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		"", delivery.BufferedDelivery()))
 	if err == nil {
 		t.Fatalf("expected error, got models=%v", models)
 	}
@@ -274,9 +267,7 @@ func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t 
 		"https://chatgpt.com/backend-api/codex",
 		"secretfile:chatgpt/sess_abc",
 		protocolkind.ChatCompletions,
-
-		"",
-		""))
+		"", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -303,8 +294,7 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 			"https://api.openai.com/v1",
 			"secret:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
 	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
@@ -358,8 +348,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 			"https://api.openai.com/v1",
 			"secret:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 
 		sink,
 	)
@@ -414,8 +403,7 @@ func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 			srv.URL+"/backend-api/codex",
 			"secret:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
 	if _, err := executeTestProviderRequest(context.Background(), exec, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -459,9 +447,8 @@ func TestSend_NonSSEStreamingSuccessReturnsBoundedBackendFailure(t *testing.T) {
 				"https://chatgpt.com/backend-api/codex",
 				"secretfile:chatgpt/test",
 				protocolkind.Responses,
-				"",
 				"responses_stream",
-			)
+				delivery.StreamingDelivery(delivery.FramingSSE))
 			doc := carrier.NewDocument(
 				protocolkind.Responses,
 				"application/json",
@@ -512,9 +499,8 @@ func TestSend_MissingContentTypeNormalizesChatGPTStreamCarrier(t *testing.T) {
 		"https://chatgpt.com/backend-api/codex",
 		"secretfile:chatgpt/test",
 		protocolkind.Responses,
-		"",
 		"responses_stream",
-	)
+		delivery.StreamingDelivery(delivery.FramingSSE))
 	doc := carrier.NewDocument(
 		protocolkind.Responses,
 		"application/json",
@@ -566,8 +552,7 @@ func TestExecute_CredentialResolutionFailureReturnsBadEndpoint(t *testing.T) {
 			srv.URL+"/backend-api/codex",
 			"secret:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
 	_, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err == nil {
@@ -638,8 +623,7 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 			srv.URL+"/backend-api/codex",
 			ref,
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
 	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {
@@ -690,8 +674,7 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 			srv.URL+"/backend-api/codex",
 			"secret:chatgpt/plus/sess_abc",
 			protocolkind.Responses,
-
-			"", "responses_stream"),
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
 	resp, err := executeTestProviderRequest(context.Background(), exec, req)
 	if err != nil {

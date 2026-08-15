@@ -309,11 +309,11 @@ func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports
 	if err != nil {
 		return readmodel.ModelCatalogReadModel{}, err
 	}
-	var deployments []readmodel.ModelDeploymentReadModel
-	for _, d := range result.Deployments {
-		deployments = append(deployments, readmodel.ModelDeploymentReadModel{ID: d.Name, Name: d.Name, ModelName: d.ModelName, ModelPublisher: d.ModelPublisher, ModelVersion: d.ModelVersion, Family: d.Family, SupportedProviderProtocols: d.SupportedProviderProtocols, DefaultProviderProtocol: d.DefaultProviderProtocol})
+	var options []readmodel.ModelAuthoringOptionReadModel
+	for _, d := range result.Options {
+		options = append(options, readmodel.ModelAuthoringOptionReadModel{ID: d.Name, Name: d.Name, ModelName: d.ModelName, ModelPublisher: d.ModelPublisher, ModelVersion: d.ModelVersion, Family: d.Family, SupportedProviderProtocols: d.SupportedProviderProtocols, DefaultProviderProtocol: d.DefaultProviderProtocol})
 	}
-	model := readmodel.ModelCatalogReadModel{Deployments: deployments, ResolvedProviderProtocol: result.ResolvedProviderProtocol}
+	model := readmodel.ModelCatalogReadModel{Options: options, ResolvedProviderProtocol: result.ResolvedProviderProtocol}
 	if bedrockProbe && len(result.Diagnostics) > 0 {
 		evidence, err := decodeBedrockAuthenticationDiagnostics(result.Diagnostics)
 		if err != nil {
