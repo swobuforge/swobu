@@ -13,16 +13,27 @@ import (
 
 type workspaceClientStub struct {
 	operatorClient
-	getResponses   []workspaceapi.Workspace
-	getErrors      []error
-	getCalls       int
-	createResponse workspaceapi.Workspace
-	created        workspaceapi.CreateWorkspace
-	deleteErr      error
-	deleteCalls    int
-	updateResponse workspaceapi.Workspace
-	updated        workspaceapi.UpdateTargetSettings
+	summaries        []workspaceapi.WorkspaceSummary
+	listCalls        int
+	getResponses     []workspaceapi.Workspace
+	getErrors        []error
+	getCalls         int
+	createResponse   workspaceapi.Workspace
+	echoCreateTarget bool
+	created          workspaceapi.CreateWorkspace
+	createCalls      int
+	deleteErr        error
+	deleteCalls      int
+	updateResponse   workspaceapi.Workspace
+	updated          workspaceapi.UpdateTargetSettings
 }
+
+func (s *workspaceClientStub) ListWorkspaces(context.Context) ([]workspaceapi.WorkspaceSummary, error) {
+	s.listCalls++
+	return append([]workspaceapi.WorkspaceSummary(nil), s.summaries...), nil
+}
+
+func (s *workspaceClientStub) DaemonVersion(context.Context) (string, error) { return "", nil }
 
 func (s *workspaceClientStub) GetWorkspace(context.Context, string) (workspaceapi.Workspace, error) {
 	index := s.getCalls
@@ -38,7 +49,17 @@ func (s *workspaceClientStub) GetWorkspace(context.Context, string) (workspaceap
 }
 
 func (s *workspaceClientStub) CreateWorkspace(_ context.Context, cmd workspaceapi.CreateWorkspace) (workspaceapi.Workspace, error) {
+	s.createCalls++
 	s.created = cmd
+	if s.echoCreateTarget && len(s.createResponse.Routes) > 0 && len(s.createResponse.Routes[0].Tiers) > 0 && len(s.createResponse.Routes[0].Tiers[0].Targets) > 0 {
+		s.createResponse.Slug = cmd.Slug
+		s.createResponse.DefaultRoute = cmd.InitialRoute
+		s.createResponse.Routes[0].Name = cmd.InitialRoute
+		s.createResponse.Routes[0].Tiers[0].Targets[0].ID = cmd.Target.ID
+		s.createResponse.Routes[0].Tiers[0].Targets[0].Model = cmd.Target.Model
+		s.createResponse.Routes[0].Tiers[0].Targets[0].Protocol = cmd.Target.Protocol
+		s.createResponse.Routes[0].Tiers[0].Targets[0].Connection = cmd.Target.Connection
+	}
 	return s.createResponse, nil
 }
 
@@ -94,12 +115,63 @@ func TestRenameWorkspaceRejectsDraftNamingAtPersistenceBoundary(t *testing.T) {
 	}
 }
 
+func TestLoadCockpitProjectsConventionalFirstWorkspaceWithoutPersistence(t *testing.T) {
+	stub := &workspaceClientStub{}
+	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:9000"}
+
+	for load := 1; load <= 2; load++ {
+		model, err := adapter.LoadCockpit(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := model.SelectedWorkspace; !got.IsBootstrap() || got.ID != "default" || got.Slug != "default" {
+			t.Fatalf("load %d conventional projection = %#v", load, got)
+		}
+		if got := model.SelectedWorkspace.WorkspaceURL; got != "http://127.0.0.1:9000/c/default" {
+			t.Fatalf("load %d endpoint = %q", load, got)
+		}
+		if len(model.Tabs) != 2 || model.Tabs[0].Kind != readmodel.WorkspaceTabBootstrap || !model.Tabs[0].Selected || model.Tabs[1].Kind != readmodel.WorkspaceTabHelp {
+			t.Fatalf("load %d tabs = %#v, want [default, ?]", load, model.Tabs)
+		}
+	}
+	if stub.listCalls != 2 || stub.getCalls != 0 || stub.created.Slug != "" {
+		t.Fatalf("restart projection effects: list=%d get=%d create=%#v", stub.listCalls, stub.getCalls, stub.created)
+	}
+}
+
+func TestLoadCockpitKeepsExistingInstallationsOrdinary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		summaries []workspaceapi.WorkspaceSummary
+		selected  workspaceapi.Workspace
+	}{
+		{name: "one", summaries: []workspaceapi.WorkspaceSummary{{Slug: "work"}}, selected: workspaceWithSlug("work")},
+		{name: "many", summaries: []workspaceapi.WorkspaceSummary{{Slug: "work"}, {Slug: "personal"}}, selected: workspaceWithSlug("personal")},
+		{name: "persisted default", summaries: []workspaceapi.WorkspaceSummary{{Slug: "default"}}, selected: workspaceWithSlug("default")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &workspaceClientStub{summaries: tc.summaries, getResponses: []workspaceapi.Workspace{tc.selected}}
+			model, err := (&LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}).LoadCockpit(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !model.SelectedWorkspace.IsPersisted() || model.Tabs[0].Kind != readmodel.WorkspaceTabExisting {
+				t.Fatalf("existing installation projected as onboarding: workspace=%#v tabs=%#v", model.SelectedWorkspace, model.Tabs)
+			}
+			if _, ok := draftTabIndexForTest(model.Tabs); !ok {
+				t.Fatalf("existing installation tabs omit +: %#v", model.Tabs)
+			}
+		})
+	}
+}
+
 func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 	committed := workspaceView("gpt-4.1", "env:OPENAI_API_KEY")
 	committed.Slug = "buildweek"
 	stub := &workspaceClientStub{
-		getErrors:      []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
-		createResponse: committed,
+		getErrors:        []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
+		createResponse:   committed,
+		echoCreateTarget: true,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
 	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
@@ -118,6 +190,33 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 	}
 	if result.Workspace.ID != "buildweek" || result.Workspace.IsDraft() || len(result.Workspace.Routes) != 1 {
 		t.Fatalf("persisted workspace result = %#v", result.Workspace)
+	}
+}
+
+func TestSaveFirstTargetAtomicallyPersistsConventionalDefault(t *testing.T) {
+	committed := workspaceWithSlug("default")
+	stub := &workspaceClientStub{
+		getErrors:        []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
+		createResponse:   committed,
+		echoCreateTarget: true,
+	}
+	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:9000"}
+	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
+	connection, err := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
+		WorkspaceID: "default", RouteID: "coding", ModelID: "gpt-5.3-codex", Protocol: "responses", Connection: connection,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stub.getCalls != 1 || stub.createCalls != 1 || stub.created.Slug != "default" || stub.created.InitialRoute != "coding" || stub.created.Target.Model != "gpt-5.3-codex" {
+		t.Fatalf("atomic conventional create: get=%d create=%d command=%#v", stub.getCalls, stub.createCalls, stub.created)
+	}
+	if result.Workspace.WorkspaceURL != "http://127.0.0.1:9000/c/default" || !result.Workspace.IsPersisted() || len(result.Workspace.Routes) != 1 {
+		t.Fatalf("committed projection = %#v", result.Workspace)
 	}
 }
 
@@ -173,4 +272,20 @@ func workspaceView(model, credential string) workspaceapi.Workspace {
 			}}}},
 		}},
 	}
+}
+
+func workspaceWithSlug(slug string) workspaceapi.Workspace {
+	workspace := workspaceView("gpt-5.3-codex", "env:OPENAI_API_KEY")
+	workspace.Slug = slug
+	workspace.DefaultRoute = "chat"
+	return workspace
+}
+
+func draftTabIndexForTest(tabs []readmodel.WorkspaceTabReadModel) (int, bool) {
+	for i, tab := range tabs {
+		if tab.Kind == readmodel.WorkspaceTabDraft {
+			return i, true
+		}
+	}
+	return 0, false
 }

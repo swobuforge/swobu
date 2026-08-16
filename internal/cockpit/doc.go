@@ -19,5 +19,8 @@
 //
 // Launch loads the daemon-backed Cockpit read model, enters the go-tui app loop
 // for interactive terminals, and renders deterministic snapshots for
-// non-interactive tests and transcript contexts.
+// non-interactive tests and transcript contexts. When the daemon owns zero
+// workspaces, Cockpit locally projects the conventional `default` authoring
+// surface. The projection remounts as a persisted page only after the first
+// target atomically materializes its workspace, route, and target.
 package cockpit

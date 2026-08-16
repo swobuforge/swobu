@@ -23,7 +23,7 @@ const cockpitRefreshTimeout = 5 * time.Second
 type Cockpit struct {
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
-	RefreshNotice  *tui.State[readmodel.Notice]
+	Notice         *tui.State[readmodel.Notice]
 	BodyViewport   *ui.Viewport
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
@@ -46,7 +46,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 	cockpit := &Cockpit{
 		Model:           model,
 		ActiveTabIndex:  tui.NewState(activeTab),
-		RefreshNotice:   tui.NewState(readmodel.Notice{}),
+		Notice:          tui.NewState(readmodel.Notice{}),
 		BodyViewport:    &ui.Viewport{Ref: tui.NewRef(), ScrollY: tui.NewState(0), FollowFocused: true, MarginRows: 2},
 		Reloader:        NewModelReloader(ctx, query, cockpitRefreshTimeout),
 		HelpPage:        help_page.View(model.Help),
@@ -170,11 +170,11 @@ func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
 	active := c.activeModel()
 	previousPage := c.currentWorkspacePage()
-	wasDraft := active.SelectedWorkspace.IsDraft()
+	wasOnboarding := active.SelectedWorkspace.IsOnboarding()
 	model, notice := c.Reloader.RefreshAfterSave(active, saved)
-	c.RefreshNotice.Set(notice)
-	c.replaceModel(model, !wasDraft)
-	if previousPage != nil && !wasDraft {
+	c.Notice.Set(notice)
+	c.replaceModel(model, !wasOnboarding)
+	if previousPage != nil && !wasOnboarding {
 		if freshPage := c.WorkspacePages[saved.ID]; freshPage != nil && freshPage != previousPage {
 			if previousPage.OverviewSection != nil && freshPage.OverviewSection != nil {
 				previousPage.OverviewSection.UpdateProps(freshPage.OverviewSection)
@@ -189,8 +189,12 @@ func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) 
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
 	model, notice := c.Reloader.RefreshAfterDelete(c.Model, deleted)
-	c.RefreshNotice.Set(notice)
+	c.Notice.Set(notice)
 	c.replaceModel(model, true)
+}
+
+func (c *Cockpit) publishNotice(notice readmodel.Notice) {
+	c.Notice.Set(notice)
 }
 
 // discardWorkspaceDraft resets the selected [+] onboarding draft without
@@ -259,6 +263,12 @@ func ActiveWorkspacePage(c *Cockpit, model readmodel.CockpitReadModel) *workspac
 
 func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
 	key := "workspace-page:" + string(model.SelectedWorkspaceID)
+	// Projected and persisted `default` deliberately share product identity but
+	// not component lifetime. Promotion must remount persisted-only Activity and
+	// discard onboarding workflow state.
+	if model.SelectedWorkspace.IsBootstrap() {
+		return key + ":bootstrap"
+	}
 	if model.SelectedWorkspace.IsDraft() && model.SelectedWorkspace.Slug != "" {
 		return key + ":" + model.SelectedWorkspace.Slug
 	}
@@ -266,10 +276,10 @@ func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
 }
 
 templ (c *Cockpit) Render() {
-	<div class="flex-col h-full w-full" deps={c.ActiveTabIndex, c.RefreshNotice}>
+	<div class="flex-col h-full w-full" deps={c.ActiveTabIndex, c.Notice}>
 		@ShellHeader(c.activeModel())
-		if c.RefreshNotice.Get().Visible() {
-			@RefreshNotice(c.RefreshNotice.Get())
+		if c.Notice.Get().Visible() {
+			@ShellNotice(c.Notice.Get())
 		}
 		<hr />
 		@CockpitBodyViewport(c)
@@ -282,7 +292,7 @@ func staleRefreshNotice(message string) readmodel.Notice {
 	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
 }
 
-templ RefreshNotice(notice readmodel.Notice) {
+templ ShellNotice(notice readmodel.Notice) {
 	<div class="flex-row w-full">
 		<span>{notice.Message}</span>
 	</div>
@@ -360,6 +370,7 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 	page.OnWorkspaceSaved = c.refreshAfterWorkspaceSave
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
 	page.OnWorkspaceDiscarded = c.discardWorkspaceDraft
+	page.OnNotice = c.publishNotice
 	return page
 }
 
@@ -393,130 +404,4 @@ func targetCredentialCommandsPort(commands ports.WorkspaceCommands) ports.Target
 		return credentialCommands
 	}
 	return nil
-}
-
-func workspaceForTab(model readmodel.CockpitReadModel, tab readmodel.WorkspaceTabReadModel) readmodel.WorkspaceReadModel {
-	if tab.Kind == readmodel.WorkspaceTabDraft {
-		draft := readmodel.NewDraftWorkspace(model.SelectedWorkspace.ProviderOptions)
-		draft.ID = tab.ID
-		draft.Slug = tab.Slug
-		if model.SelectedWorkspace.IsDraft() && model.SelectedWorkspace.ID == tab.ID {
-			draft = mergeWorkspaceProjection(model.SelectedWorkspace, draft)
-		}
-		return draft
-	}
-	if tab.ID == model.SelectedWorkspaceID {
-		return model.SelectedWorkspace
-	}
-	return readmodel.WorkspaceReadModel{
-		ID:    tab.ID,
-		Slug:  tab.Slug,
-		State: readmodel.WorkspaceExisting,
-	}
-}
-
-func selectWorkspace(model readmodel.CockpitReadModel, id readmodel.WorkspaceID) readmodel.CockpitReadModel {
-	for i := range model.Tabs {
-		selected := model.Tabs[i].ID == id
-		model.Tabs[i].Selected = selected
-		if selected {
-			workspace := workspaceForTab(model, model.Tabs[i])
-			model.SelectedWorkspaceID = model.Tabs[i].ID
-			model.ActivePage = readmodel.CockpitWorkspacePage
-			model.SelectedWorkspace = workspace
-		}
-	}
-	return model
-}
-
-func updateWorkspaceInModel(model readmodel.CockpitReadModel, workspace readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
-	replaced := false
-	for i := range model.Tabs {
-		if model.Tabs[i].ID != workspace.ID {
-			continue
-		}
-		model.Tabs[i].Slug = workspace.Slug
-		replaced = true
-		break
-	}
-	if !replaced {
-		model.Tabs = append(model.Tabs, readmodel.WorkspaceTabReadModel{
-			ID:   workspace.ID,
-			Slug: workspace.Slug,
-			Kind: readmodel.WorkspaceTabExisting,
-		})
-	}
-	model.SelectedWorkspaceID = workspace.ID
-	model.SelectedWorkspace = workspace
-	return model
-}
-
-func removeWorkspaceFromModel(model readmodel.CockpitReadModel, deleted readmodel.WorkspaceID) readmodel.CockpitReadModel {
-	tabs := make([]readmodel.WorkspaceTabReadModel, 0, len(model.Tabs))
-	for _, tab := range model.Tabs {
-		if tab.ID != deleted {
-			tab.Selected = false
-			tabs = append(tabs, tab)
-		}
-	}
-	model.Tabs = tabs
-	for i := range model.Tabs {
-		if model.Tabs[i].Kind != readmodel.WorkspaceTabExisting {
-			continue
-		}
-		model.Tabs[i].Selected = true
-		workspace := workspaceForTab(model, model.Tabs[i])
-		model.SelectedWorkspaceID = model.Tabs[i].ID
-		model.ActivePage = readmodel.CockpitWorkspacePage
-		model.SelectedWorkspace = workspace
-		return model
-	}
-	model.SelectedWorkspaceID = ""
-	model.SelectedWorkspace = readmodel.WorkspaceReadModel{}
-	model.ActivePage = readmodel.CockpitWorkspacePage
-	if index, ok := draftTabIndex(model.Tabs); ok {
-		model.Tabs[index].Selected = true
-		workspace := workspaceForTab(model, model.Tabs[index])
-		model.SelectedWorkspaceID = model.Tabs[index].ID
-		model.SelectedWorkspace = workspace
-	}
-	return model
-}
-
-func selectedTabIndex(tabs []readmodel.WorkspaceTabReadModel) int {
-	for i, tab := range tabs {
-		if tab.Selected {
-			return i
-		}
-	}
-	return 0
-}
-
-func helpTabIndex(tabs []readmodel.WorkspaceTabReadModel) (int, bool) {
-	for i, tab := range tabs {
-		if tab.Kind == readmodel.WorkspaceTabHelp {
-			return i, true
-		}
-	}
-	return 0, false
-}
-
-func draftTabIndex(tabs []readmodel.WorkspaceTabReadModel) (int, bool) {
-	for i, tab := range tabs {
-		if tab.Kind == readmodel.WorkspaceTabDraft {
-			return i, true
-		}
-	}
-	return 0, false
-}
-
-func wrapTabIndex(index int, tabCount int) int {
-	if tabCount <= 0 {
-		return 0
-	}
-	index %= tabCount
-	if index < 0 {
-		index += tabCount
-	}
-	return index
 }

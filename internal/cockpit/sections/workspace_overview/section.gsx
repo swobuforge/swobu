@@ -16,12 +16,12 @@ import (
 type SectionView struct {
 	Model                    readmodel.WorkspaceReadModel
 	Expanded                 *tui.State[bool]
-	CopiedEndpoint           *tui.State[bool]
 	RenameWorkspace          workspace_edit.RenameFunc
 	DeleteWorkspace          workspace_delete.DeleteFunc
 	OnWorkspaceSaved         func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted       func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded     func()
+	OnNotice                 func(readmodel.Notice)
 	// PendingDeleteWorkspaceID seeds the delete confirmation child while the
 	// delete row is armed. The parent keeps the request here so Back() can clear
 	// it without holding a persistent child reference.
@@ -32,7 +32,6 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 	section := &SectionView{
 		Model:                    model,
 		Expanded:                 tui.NewState(true),
-		CopiedEndpoint:           tui.NewState(false),
 		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 	}
 	if len(commands) > 0 && commands[0] != nil {
@@ -71,12 +70,7 @@ func (s *SectionView) workspaceDiscarded() error {
 	return nil
 }
 
-func (s *SectionView) copyEndpoint() {
-	s.CopiedEndpoint.Set(true)
-}
-
 func (s *SectionView) resetTransientState() {
-	s.CopiedEndpoint.Set(false)
 	s.PendingDeleteWorkspaceID.Set("")
 }
 
@@ -184,21 +178,25 @@ templ (s *SectionView) Render() {
 		}
 		if s.Expanded.Get() {
 			<div class="pl-3 w-full">
-				if s.Model.IsDraft() {
-					<div key={workspaceEditKey(s)} class="w-full">
-						@WorkspaceEdit(s)
-					</div>
+			if s.Model.IsDraft() {
+				<div key={workspaceEditKey(s)} class="w-full">
+					@WorkspaceEdit(s)
+				</div>
 					if s.Model.Slug != "" {
 						<div key={"workspace-discard:+"} class="w-full">
 							@DraftDiscardComponent(s)
 						</div>
 					}
-				} else {
+				} else if s.Model.IsBootstrap() {
 					<div key={endpointRowKey(s)} class="w-full">
 						@EndpointRowComponent(s)
 					</div>
+				} else {
 					<div key={workspaceEditKey(s)} class="w-full">
 						@WorkspaceEdit(s)
+					</div>
+					<div key={endpointRowKey(s)} class="w-full">
+						@EndpointRowComponent(s)
 					</div>
 					<div key={workspaceDeleteKey(s)} class="w-full">
 						@DeleteConfirmation(s)

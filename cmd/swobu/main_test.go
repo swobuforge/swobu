@@ -25,6 +25,8 @@ func TestRootHelpDiscoversLauncherStartupControls(t *testing.T) {
 	}
 	help := stdout.String()
 	for _, want := range []string{
+		"connect",
+		"Configure a supported local client",
 		"--addr string",
 		"daemon address for Cockpit attach-or-start (env: SWOBU_ADDR) (default: 127.0.0.1:7926)",
 		"--config string",

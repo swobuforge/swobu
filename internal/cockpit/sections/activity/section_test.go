@@ -12,9 +12,12 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 )
 
-func TestSection_RendersSuccessfulLatest(t *testing.T) {
-	m := successfulModel()
-	m.Activity.Latest.ProviderModel = "gpt-4.1-with-a-long-evidence-label"
+func TestSection_RendersCatchAllResolutionPathAtSupportedWidths(t *testing.T) {
+	m := catchAllModel()
+	m.Activity.Latest.RequestedModel = "gpt-5.3-codex-with-a-long-client-model"
+	m.Activity.Latest.RouteID = "free-coding-route"
+	m.Activity.Latest.RouteLabel = "free-coding-route"
+	m.Activity.Latest.ProviderModel = "glm-4.5-air-with-a-long-target-identity"
 	m.Activity.Latest.ClientLabel = "claude-cli/2.1.204"
 	section := Section(m, context.Background(), nil)
 	for _, tc := range []struct {
@@ -38,6 +41,87 @@ func TestSection_RendersSuccessfulLatest(t *testing.T) {
 			}
 			if got := physicalRowCount(rendered); got != 2 {
 				t.Fatalf("rendered physical rows = %d, want section title + one event\n%s", got, rendered)
+			}
+		})
+	}
+}
+
+func TestSection_IndentsActivityRowsAsSectionChildren(t *testing.T) {
+	rendered := testkit.RenderMountedTrimmed(t, Section(successfulModel(), context.Background(), nil), 100, 2)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("activity frame has %d rows, want header and child:\n%s", len(lines), rendered)
+	}
+	if !strings.HasPrefix(lines[0], "  activity") || !strings.HasPrefix(lines[1], "     14:32:01") {
+		t.Fatalf("activity hierarchy is not header-at-2, child-at-5:\n%s", rendered)
+	}
+}
+
+func TestActivityPathPartsFollowResolutionEvidenceGrammar(t *testing.T) {
+	target := readmodel.ActivityRowReadModel{ProviderSpec: "zai", ProviderModel: "glm-4.5-air"}
+	for _, tc := range []struct {
+		name                                 string
+		row                                  readmodel.ActivityRowReadModel
+		wantRequested, wantRoute, wantTarget string
+	}{
+		{
+			name:      "exact route suppresses requested duplicate",
+			row:       mergeActivityPath(target, "review", "review", "review"),
+			wantRoute: "review", wantTarget: "zai/glm-4.5-air",
+		},
+		{
+			name:          "catch all preserves requested and route",
+			row:           mergeActivityPath(target, "gpt-5.3-codex", "free", "free"),
+			wantRequested: "gpt-5.3-codex", wantRoute: "free", wantTarget: "zai/glm-4.5-air",
+		},
+		{
+			name:          "explicit default is not selected route",
+			row:           mergeActivityPath(target, "default", "coding", "coding"),
+			wantRequested: "default", wantRoute: "coding", wantTarget: "zai/glm-4.5-air",
+		},
+		{
+			name:          "requested only",
+			row:           mergeActivityPath(readmodel.ActivityRowReadModel{}, "gpt-5.3-codex", "", ""),
+			wantRequested: "gpt-5.3-codex",
+		},
+		{
+			name:          "requested and route without target",
+			row:           mergeActivityPath(readmodel.ActivityRowReadModel{}, "gpt-5.3-codex", "free", "free"),
+			wantRequested: "gpt-5.3-codex", wantRoute: "free",
+		},
+		{
+			name:      "route and target without requested",
+			row:       mergeActivityPath(target, "", "free", "free"),
+			wantRoute: "free", wantTarget: "zai/glm-4.5-air",
+		},
+		{
+			name:      "route only",
+			row:       mergeActivityPath(readmodel.ActivityRowReadModel{}, "", "free", "free"),
+			wantRoute: "free",
+		},
+		{
+			name:          "deduplication uses route ID not label",
+			row:           mergeActivityPath(target, "friendly", "route-id", "friendly"),
+			wantRequested: "friendly", wantRoute: "friendly", wantTarget: "zai/glm-4.5-air",
+		},
+		{
+			name: "provider model remains a distinct terminal hop",
+			row: readmodel.ActivityRowReadModel{
+				RequestedModel: "gpt-5.3-codex", RouteID: "gpt-5.3-codex", RouteLabel: "gpt-5.3-codex",
+				ProviderSpec: "openai", ProviderModel: "gpt-5.3-codex",
+			},
+			wantRoute: "gpt-5.3-codex", wantTarget: "openai/gpt-5.3-codex",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requested, route, gotTarget := activityPathParts(tc.row)
+			if requested != tc.wantRequested || route != tc.wantRoute || gotTarget != tc.wantTarget {
+				t.Fatalf("path parts = %q, %q, %q; want %q, %q, %q", requested, route, gotTarget, tc.wantRequested, tc.wantRoute, tc.wantTarget)
+			}
+			for _, placeholder := range []string{"unknown", "none", "?", "unresolved"} {
+				if requested == placeholder || route == placeholder || gotTarget == placeholder {
+					t.Fatalf("path invented placeholder %q", placeholder)
+				}
 			}
 		})
 	}
@@ -113,7 +197,9 @@ func TestActivityStatusLabelUsesRequestStateOnly(t *testing.T) {
 }
 
 func TestSection_RendersFailoverAttemptEvidence(t *testing.T) {
-	m := successfulModel()
+	m := catchAllModel()
+	m.Activity.Latest.ProviderSpec = "google"
+	m.Activity.Latest.ProviderModel = "gemini-2.5-pro"
 	m.Activity.Latest.AttemptCount = 2
 	section := Section(m, context.Background(), nil)
 	rendered := testkit.RenderMountedTrimmed(t, section, 100, 2)
@@ -140,6 +226,17 @@ func TestSection_RendersEmptyState(t *testing.T) {
 		Fixture("testdata/activity_section/fixture/empty.txt").
 		Viewport(80, 2).
 		Now(t, rendered)
+}
+
+func TestSection_BootstrapShowsNoRequestsWithoutQueryingDaemon(t *testing.T) {
+	workspace := readmodel.NewConventionalFirstWorkspace("http://127.0.0.1:7926/c/default", nil)
+	query := &fakeActivityQueries{activity: successfulModel().Activity}
+	section := Section(workspace, context.Background(), query)
+	rendered := testkit.RenderMountedTrimmed(t, section, 80, 2)
+	testkit.AssertNow(t, rendered, testkit.Text("no requests yet").Exists())
+	if got := query.calls(); got != 0 {
+		t.Fatalf("bootstrap activity query calls = %d, want 0", got)
+	}
 }
 
 func TestSection_QueriesLatestActivity(t *testing.T) {
@@ -347,18 +444,36 @@ func (f *fakeActivityQueries) calls() int {
 
 func successfulModel() readmodel.WorkspaceReadModel {
 	row := readmodel.ActivityRowReadModel{
-		ID:            "req-1",
-		ObservedAt:    "14:32:01",
-		ClientLabel:   "codex",
-		RouteID:       "gpt",
-		ProviderSpec:  "openai",
-		ProviderModel: "gpt-4.1",
-		Status:        readmodel.ActivitySucceeded,
-		HTTPStatus:    200,
-		Duration:      145 * time.Millisecond,
-		DurationKnown: true,
+		ID:             "req-1",
+		ObservedAt:     "14:32:01",
+		RequestedModel: "gpt",
+		ClientLabel:    "codex",
+		RouteID:        "gpt",
+		ProviderSpec:   "openai",
+		ProviderModel:  "gpt-4.1",
+		Status:         readmodel.ActivitySucceeded,
+		HTTPStatus:     200,
+		Duration:       145 * time.Millisecond,
+		DurationKnown:  true,
 	}
 	return activityModel(readmodel.ActivityReadModel{Latest: &row})
+}
+
+func catchAllModel() readmodel.WorkspaceReadModel {
+	m := successfulModel()
+	m.Activity.Latest.RequestedModel = "gpt-5.3-codex"
+	m.Activity.Latest.RouteID = "free"
+	m.Activity.Latest.RouteLabel = "free"
+	m.Activity.Latest.ProviderSpec = "zai"
+	m.Activity.Latest.ProviderModel = "glm-4.5-air"
+	return m
+}
+
+func mergeActivityPath(row readmodel.ActivityRowReadModel, requested string, routeID readmodel.RouteID, routeLabel string) readmodel.ActivityRowReadModel {
+	row.RequestedModel = requested
+	row.RouteID = routeID
+	row.RouteLabel = routeLabel
+	return row
 }
 
 func activityModel(activity readmodel.ActivityReadModel) readmodel.WorkspaceReadModel {

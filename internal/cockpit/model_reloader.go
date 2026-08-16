@@ -37,7 +37,7 @@ func NewModelReloader(ctx context.Context, query ports.WorkspaceQueries, timeout
 // unreachable for persisted renames, it patches the current model and reports
 // a stale notice so the UI does not silently hide the mutation.
 func (r *ModelReloader) RefreshAfterSave(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) (readmodel.CockpitReadModel, readmodel.Notice) {
-	if r.query == nil || current.SelectedWorkspace.IsDraft() {
+	if r.query == nil || current.SelectedWorkspace.IsOnboarding() {
 		return r.localSaveProjection(current, saved), readmodel.Notice{}
 	}
 	ctx, cancel := r.refreshContext()
@@ -86,20 +86,20 @@ func (r *ModelReloader) refreshContext() (context.Context, context.CancelFunc) {
 // authoritative persisted workspace and promotes it to a normal tab.
 func (r *ModelReloader) localSaveProjection(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
 	merged := mergeWorkspaceProjection(current.SelectedWorkspace, saved)
-	if !merged.IsDraft() && merged.ClientBaseURL == "" {
-		merged.ClientBaseURL = derivedClientBaseURL(current, merged.Slug)
+	if !merged.IsOnboarding() && merged.WorkspaceURL == "" {
+		merged.WorkspaceURL = derivedWorkspaceURL(current, merged.Slug)
 	}
 	return selectWorkspace(updateWorkspaceInModel(current, merged), saved.ID)
 }
 
-func derivedClientBaseURL(current readmodel.CockpitReadModel, slug string) string {
+func derivedWorkspaceURL(current readmodel.CockpitReadModel, slug string) string {
 	slug = strings.TrimSpace(slug) // swobu:io-string source=boundary
 	if slug == "" {
 		return ""
 	}
 	for _, candidate := range []string{
-		strings.TrimSpace(current.SelectedWorkspace.ClientBaseURL), // swobu:io-string source=boundary
-		strings.TrimSpace(current.HeaderRight),                     // swobu:io-string source=boundary
+		strings.TrimSpace(current.SelectedWorkspace.WorkspaceURL), // swobu:io-string source=boundary
+		strings.TrimSpace(current.HeaderRight),                    // swobu:io-string source=boundary
 	} {
 		if candidate == "" || !strings.Contains(candidate, "://") {
 			continue
@@ -121,8 +121,8 @@ func mergeWorkspaceProjection(current readmodel.WorkspaceReadModel, saved readmo
 		merged.Slug = saved.Slug
 	}
 	merged.State = saved.State
-	if saved.ClientBaseURL != "" {
-		merged.ClientBaseURL = saved.ClientBaseURL
+	if saved.WorkspaceURL != "" {
+		merged.WorkspaceURL = saved.WorkspaceURL
 	}
 	if len(merged.Routes) == 0 && len(saved.Routes) > 0 {
 		merged.Routes = saved.Routes

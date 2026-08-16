@@ -49,6 +49,9 @@ type Runner struct {
 	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer, string) error
 	StartupHandoffFloor time.Duration
 	Sleep               func(time.Duration)
+	ConnectOperations   connectOperations
+	ConnectAttach       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
+	ConnectWorkspaces   connectWorkspaceLister
 }
 
 // daemon control, explicit lifecycle commands, and go-tui launch handoff.
@@ -74,7 +77,7 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 		start = bootstrap.Start
 	}
 	if len(args) != 0 {
-		return dispatchSubcommand(ctx, args, start, client, stdout, stderr)
+		return dispatchSubcommand(ctx, args, start, client, stdout, stderr, r)
 	}
 	startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
 	if err != nil {
@@ -200,7 +203,7 @@ func clearInteractiveScreen(out io.Writer) {
 	_, _ = out.Write([]byte("\x1b[2J\x1b[H"))
 }
 
-func dispatchSubcommand(ctx context.Context, args []string, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), client *http.Client, stdout io.Writer, stderr io.Writer) ExitCode {
+func dispatchSubcommand(ctx context.Context, args []string, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), client *http.Client, stdout io.Writer, stderr io.Writer, runner Runner) ExitCode {
 	subcommand := args[0] // swobu:io-string source=cli-args
 	switch subcommand {
 	case "--version", "-v", "version":
@@ -215,6 +218,8 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		return runStatus(ctx, client, stdout, stderr, args[1:])
 	case "telemetry":
 		return runTelemetry(stdout, stderr, args[1:])
+	case "connect":
+		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", subcommand)
 		return ExitDown

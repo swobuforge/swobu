@@ -203,7 +203,7 @@ func (w *Workflow) Submit(ctx context.Context) {
 		workspace.ID = "+"
 		workspace.Slug = slug
 		workspace.State = readmodel.WorkspaceDraft
-		workspace.ClientBaseURL = w.ClientBaseURLPreview()
+		workspace.WorkspaceURL = w.WorkspaceURLPreview()
 		w.finishSubmit(workspace)
 		return
 	}
@@ -288,7 +288,7 @@ func (w *Workflow) visibleError() string {
 	return w.ErrorMessage()
 }
 
-func (w *Workflow) ClientBaseURLPreview() string {
+func (w *Workflow) WorkspaceURLPreview() string {
 	if msg := strings.TrimSpace(w.ErrorMessage()); msg != "" {
 		return "after first target"
 	}
@@ -296,7 +296,7 @@ func (w *Workflow) ClientBaseURLPreview() string {
 	if err != nil {
 		return "after first target"
 	}
-	baseURL := w.Workspace.ClientBaseURL
+	baseURL := w.Workspace.WorkspaceURL
 	if baseURL == "" {
 		return "http://127.0.0.1:7926/c/" + slug
 	}

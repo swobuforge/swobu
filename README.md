@@ -70,6 +70,22 @@ Stop the daemon:
 swobu daemon down
 ```
 
+Configure a supported local client through the same Workspace Connect operation
+used by Cockpit:
+
+```bash
+swobu connect codex
+swobu connect claude
+swobu connect kilo
+swobu connect pi
+swobu connect openclaw
+swobu connect hermes
+```
+
+Use `--workspace <name>` when multiple workspaces exist, `--addr <host:port>`
+for another loopback daemon address, and `--replace` only to replace existing
+different client configuration.
+
 You can leave the daemon running between Cockpit sessions.
 
 ---
@@ -83,7 +99,7 @@ Open Cockpit, then:
 3. Add one target to the route.
 4. Select a provider for the target.
 5. Set the connection, the model, and the credential reference.
-6. Note the workspace endpoint that Cockpit shows.
+6. Open the workspace endpoint row to connect a client or copy the workspace URL.
 
 Each workspace has one default route. The model value `default` selects it. A different non-empty model value that does not match a route also selects it. An empty model value causes an error.
 
@@ -91,24 +107,25 @@ Each workspace has one default route. The model value `default` selects it. A di
 
 ## Connect a client
 
-A client needs two Swobu values:
+In Cockpit, open the workspace's `endpoint` row. Eligible Codex CLI, Claude
+Code, Kilo Code, pi, OpenClaw, and Hermes Agent installations appear as direct
+rows. Select one, review the backend, endpoint, protocol, or capability leaves
+that actually change, and apply them. Cockpit reports `configured` after the
+configuration update succeeds.
 
-1. The workspace endpoint.
-2. The route name, sent as `model`.
-
-Cockpit shows the workspace endpoint:
+For every other client, use `Other clients` to copy the canonical workspace
+URL:
 
 ```text
 http://127.0.0.1:7926/c/<workspace>
 ```
 
-OpenAI-family clients use the workspace endpoint with `/v1`:
-
-```text
-http://127.0.0.1:7926/c/dev/v1
-```
-
-Anthropic-family clients use the workspace endpoint without `/v1`. They send requests to `/messages` and include an `anthropic-version` header.
+Use that value as the client's Base URL or Endpoint. Swobu accepts bare and
+`/v1`-prefixed operation paths for Responses, Chat Completions, Messages, and
+Models, so `/v1` is compatibility spelling rather than workspace identity. A
+particular client may still impose its own validation or require a complete
+operation URL; named integrations are added only after their root-URL contract
+is verified.
 
 If a client needs an API key field, use a non-secret placeholder such as `swobu`. Provider credentials stay in Swobu. Do not put a real provider credential in the client configuration.
 

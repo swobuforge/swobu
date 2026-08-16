@@ -1,2 +1,2 @@
   activity
-   14:32:01  gpt                 openai/gpt-4.1-with-a-long-evidence-label · claude-cli/2.1.204             200  145ms
+     14:32:01  gpt-5.3-codex-with-a-long-clie… → free-coding-ro… → zai/glm-4.5-air-with-a-long-t…· claude…  200 145ms

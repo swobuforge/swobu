@@ -18,12 +18,14 @@ type PageView struct {
 	OnWorkspaceSaved       func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted     func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded   func()
+	OnNotice               func(readmodel.Notice)
 }
 
 // Page composes one workspace surface from explicit ports.
 //
-// Draft workspaces render only the overview/create flow until the workspace
-// exists. Existing workspaces render overview, routes, and activity.
+// Ordinary drafts render only the overview/create flow until named. Bootstrap
+// and persisted workspaces render overview, routes, and activity; bootstrap's
+// Activity section remains local and never starts the persisted query lifecycle.
 //
 // Target setup and auth capabilities are supplied separately so the page does
 // not have to rediscover optional adapter interfaces from WorkspaceCommands.
@@ -45,8 +47,15 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 	page.OverviewSection.OnWorkspaceSaved = page.workspaceSaved
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
 	page.OverviewSection.OnWorkspaceDiscarded = page.workspaceDiscarded
+	page.OverviewSection.OnNotice = page.publishNotice
 	page.RoutesSection.OnWorkspacePersisted = page.workspacePersisted
 	return page
+}
+
+func (v *PageView) publishNotice(notice readmodel.Notice) {
+	if v.OnNotice != nil {
+		v.OnNotice(notice)
+	}
 }
 
 func routeCommandPort(commands ports.WorkspaceCommands) ports.RouteCommands {

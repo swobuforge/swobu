@@ -1,9 +1,0 @@
-  workspace ▾
-     endpoint          http://127.0.0.1:7926/c/dev                                    copied
-                       OpenAI · Anthropic
-     name              dev                                                            edit ↵
-     delete            workspace                                                      delete ↵
-
-
-
-

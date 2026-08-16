@@ -10,6 +10,7 @@ import (
 
 func TestActivityProjectionPreservesResolvedProviderAndModel(t *testing.T) {
 	row := activityRowFromTraffic(operatorclient.RecentTrafficRow{
+		ModelRequested:        "gpt-5.3-codex",
 		WorkspaceRouteModelID: "openai",
 		Route:                 "tgt_opaque:openai",
 		ProviderSpec:          "anthropic",
@@ -17,6 +18,20 @@ func TestActivityProjectionPreservesResolvedProviderAndModel(t *testing.T) {
 	})
 	if row.ProviderSpec != "anthropic" || row.ProviderModel != "claude-sonnet-4-6" {
 		t.Fatalf("resolved target = %q/%q", row.ProviderSpec, row.ProviderModel)
+	}
+	if row.RequestedModel != "gpt-5.3-codex" || row.RouteID != "openai" {
+		t.Fatalf("requested/route evidence = %q/%q", row.RequestedModel, row.RouteID)
+	}
+}
+
+func TestActivityProjectionFallsBackToHistoricalRouteWithoutUsingResolvedModel(t *testing.T) {
+	row := activityRowFromTraffic(operatorclient.RecentTrafficRow{
+		ModelRequested: "client-model",
+		ModelResolved:  "provider-model-must-not-be-route",
+		Route:          "historical-route",
+	})
+	if row.RequestedModel != "client-model" || row.RouteID != "historical-route" || row.RouteLabel != "historical-route" {
+		t.Fatalf("requested/route projection = %#v", row)
 	}
 }
 

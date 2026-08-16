@@ -72,28 +72,39 @@ func activityObservedAt(row readmodel.ActivityRowReadModel) string {
 	return observedAt
 }
 
-func activityRoute(row readmodel.ActivityRowReadModel) string {
+func activityRouteIdentity(row readmodel.ActivityRowReadModel) string {
+	return strings.TrimSpace(string(row.RouteID)) // swobu:io-string source=boundary
+}
+
+func activityRouteLabel(row readmodel.ActivityRowReadModel) string {
 	if route := strings.TrimSpace(row.RouteLabel); route != "" { // swobu:io-string source=boundary
 		return route
 	}
 	return string(row.RouteID)
 }
 
-func activityMiddleEvidence(row readmodel.ActivityRowReadModel) string {
+func activityTarget(row readmodel.ActivityRowReadModel) string {
 	provider := strings.TrimSpace(row.ProviderSpec) // swobu:io-string source=boundary
-	model := strings.TrimSpace(row.ProviderModel) // swobu:io-string source=boundary
+	model := strings.TrimSpace(row.ProviderModel)   // swobu:io-string source=boundary
+	if provider == "" || model == "" {
+		return ""
+	}
+	return provider + "/" + model
+}
+
+func activityClientEvidence(row readmodel.ActivityRowReadModel) string {
 	client := strings.TrimSpace(row.ClientLabel) // swobu:io-string source=boundary
-	parts := make([]string, 0, 3)
-	if provider != "" && model != "" {
-		parts = append(parts, provider+"/"+model)
+	if client == "" {
+		return ""
 	}
-	if client != "" {
-		parts = append(parts, client)
+	return "· " + client
+}
+
+func activityAttemptEvidence(row readmodel.ActivityRowReadModel) string {
+	if row.AttemptCount <= 1 {
+		return ""
 	}
-	if row.AttemptCount > 1 {
-		parts = append(parts, fmt.Sprintf("%d attempts", row.AttemptCount))
-	}
-	return strings.Join(parts, " · ")
+	return fmt.Sprintf("%d attempts", row.AttemptCount)
 }
 
 func activityStatusLabel(row readmodel.ActivityRowReadModel) string {
@@ -127,16 +138,24 @@ var _ tui.Component = (*SectionView)(nil)
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
 		@ActivityHeader()
-		<div class="pl-3 flex-col w-full">
+		<div class="flex-col w-full">
 			if rows := s.activityRows(); len(rows) > 0 {
 				for _, row := range rows {
-					@ActivityRow(row)
+					@ActivityRow(row, activityShowsClient(app))
 				}
 			} else {
 				@ActivityColumns("", "", s.emptyActivityText(), "", "")
 			}
 		</div>
 	</div>
+}
+
+func activityShowsClient(app *tui.App) bool {
+	if app == nil {
+		return false
+	}
+	width, _ := app.Size()
+	return width >= 112
 }
 
 templ ActivityHeader() {
@@ -146,20 +165,73 @@ templ ActivityHeader() {
 	</div>
 }
 
-// ActivityRow composes one request into five left-aligned columns. Evidence is
-// the sole elastic cell. Route receives enough fixed width for normal
-// human-authored aliases because route identity outranks repeated client and
-// attempt telemetry. Every row remains a single physical line.
-templ ActivityRow(row readmodel.ActivityRowReadModel) {
-	@ActivityColumns(activityObservedAt(row), activityRoute(row), activityMiddleEvidence(row), activityStatusLabel(row), activityDurationLabel(row))
+// ActivityRow keeps path identities as independently truncatable flex children.
+// Explicit outer gutters align the inert row with sibling section children and
+// bound the inner flex width; padding on a full-width row would overflow before
+// path evidence could yield. Client text shrinks first and attempt/outcome
+// evidence keeps stable cells at the right.
+templ ActivityRow(row readmodel.ActivityRowReadModel, showClient bool) {
+	<div class="flex-row flex-nowrap w-full">
+		<span class="w-5 shrink-0"></span>
+		<div class="flex-row flex-nowrap flex-1 min-w-0">
+		<span class="w-8 shrink-0 nowrap truncate overflow-hidden">{activityObservedAt(row)}</span>
+		<span class="w-2 shrink-0"></span>
+		if requested, route, target := activityPathParts(row); requested != "" || route != "" || target != "" {
+			if requested != "" {
+				<span class="flex-shrink-3 min-w-3 nowrap truncate overflow-hidden">{requested}</span>
+				if route != "" || target != "" {
+					<span class="px-1 shrink-0">→</span>
+				}
+			}
+			if route != "" {
+				<span class="shrink min-w-3 nowrap truncate overflow-hidden">{route}</span>
+				if target != "" {
+					<span class="px-1 shrink-0">→</span>
+				}
+			}
+			if target != "" {
+				<span class="flex-shrink-5 min-w-5 nowrap truncate overflow-hidden">{target}</span>
+			}
+		}
+		<span class="w-2 grow shrink min-w-0"></span>
+		if attempts := activityAttemptEvidence(row); attempts != "" {
+			if client := activityClientEvidence(row); showClient && client != "" {
+				<span class="w-18 flex-shrink-5 min-w-0 nowrap truncate overflow-hidden">{client}</span>
+				<span class="w-2 shrink-0"></span>
+			}
+			<span class="shrink-0 nowrap">{attempts}</span>
+		} else if client := activityClientEvidence(row); showClient && client != "" {
+			<span class="w-22 flex-shrink-5 min-w-0 nowrap truncate overflow-hidden">{client}</span>
+		}
+		<span class="w-2 shrink-0"></span>
+		<span class="w-3 shrink-0 nowrap truncate overflow-hidden">{activityStatusLabel(row)}</span>
+		<span class="w-1 shrink-0"></span>
+		<span class="w-7 shrink-0 nowrap truncate overflow-hidden">{activityDurationLabel(row)}</span>
+		<span class="w-3 shrink-0"></span>
+		</div>
+	</div>
+}
+
+func activityPathParts(row readmodel.ActivityRowReadModel) (string, string, string) {
+	requested := strings.TrimSpace(row.RequestedModel) // swobu:io-string source=boundary
+	routeID := activityRouteIdentity(row)
+	route := activityRouteLabel(row)
+	if requested != "" && requested == routeID {
+		requested = ""
+	}
+	return requested, route, activityTarget(row)
 }
 
 templ ActivityColumns(observedAt string, route string, evidence string, status string, duration string) {
-	<div class="flex-row flex-nowrap gap-2 w-full">
+	<div class="flex-row flex-nowrap w-full">
+		<span class="w-5 shrink-0"></span>
+		<div class="flex-row flex-nowrap gap-2 flex-1 min-w-0">
 		<span class="w-8 shrink-0 nowrap truncate overflow-hidden">{observedAt}</span>
 		<span class="w-18 shrink-0 min-w-0 nowrap truncate overflow-hidden">{route}</span>
 		<span class="grow shrink min-w-0 nowrap truncate overflow-hidden">{evidence}</span>
 		<span class="w-3 shrink-0 nowrap truncate overflow-hidden">{status}</span>
 		<span class="w-7 shrink-0 nowrap truncate overflow-hidden">{duration}</span>
+		<span class="w-3 shrink-0"></span>
+		</div>
 	</div>
 }

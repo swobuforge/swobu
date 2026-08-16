@@ -356,6 +356,48 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	}
 }
 
+func TestHandler_MissingWorkspaceRequestsAndModelsReturnSlugSpecificBadEndpoint(t *testing.T) {
+	missing := canonical.BadEndpoint(`Workspace "default" does not exist. Create it in Swobu or check the workspace name in this endpoint.`)
+	for _, tc := range []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		ingress *modelsCapableHandler
+	}{
+		{
+			name: "request", method: http.MethodPost, path: "/c/default/responses",
+			body:    `{"model":"gpt-5.3-codex","input":"hi"}`,
+			ingress: &modelsCapableHandler{requestErr: missing},
+		},
+		{
+			name: "models", method: http.MethodGet, path: "/c/default/v1/models",
+			ingress: &modelsCapableHandler{modelsErr: missing},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := newTestHandler(tc.ingress)
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", rec.Code)
+			}
+			body := rec.Body.String()
+			for _, want := range []string{`"code":"BAD_ENDPOINT"`, "default", "does not exist", "Create it in Swobu"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("body %q missing %q", body, want)
+				}
+			}
+			if strings.Contains(body, `"object":"list"`) || strings.Contains(body, `"id":"default"`) || strings.Contains(body, `"output"`) {
+				t.Fatalf("missing workspace returned synthetic success payload: %s", body)
+			}
+		})
+	}
+}
+
 func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
@@ -1089,10 +1131,14 @@ func testStreamingToolResponse(resultID string, model string, itemID string, too
 type modelsCapableHandler struct {
 	modelsOut   exchange.ListModelsOutput
 	modelsErr   error
+	requestErr  error
 	gotModelsIn exchange.ListModelsInput
 }
 
 func (h *modelsCapableHandler) HandleRequest(_ context.Context, _ exchange.RequestInput) (exchange.RequestOutput, error) {
+	if h.requestErr != nil {
+		return exchange.RequestOutput{}, h.requestErr
+	}
 	return exchange.RequestOutput{Response: exchange.NewBufferedResponse(testDocumentFromOutput(
 		canonical.ClientFamilyChatCompletions,
 		canonicaltest.MustResponse(

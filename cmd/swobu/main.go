@@ -98,6 +98,12 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		DisableFlagParsing: true,
 		RunE:               delegate("status"),
 	}
+	connectCmd := &cobra.Command{
+		Use:                "connect <client> [args]",
+		Short:              "Configure a supported local client",
+		DisableFlagParsing: true,
+		RunE:               delegate("connect"),
+	}
 	downCmd := &cobra.Command{
 		Use:                "down [args]",
 		Short:              "Request daemon shutdown",
@@ -135,7 +141,7 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		RunE:  delegate("version"),
 	}
 
-	root.AddCommand(daemonCmd, statusCmd, telemetryCmd, versionCmd)
+	root.AddCommand(connectCmd, daemonCmd, statusCmd, telemetryCmd, versionCmd)
 	return root
 }
 

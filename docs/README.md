@@ -6,6 +6,10 @@ These docs contain practical setup recipes and troubleshooting references that a
 
 - [Claude Code](./clients/claude-code.md)
 - [Codex CLI](./clients/codex-cli.md)
+- [Kilo Code](./clients/kilo-code.md)
+- [pi](./clients/pi.md)
+- [OpenClaw](./clients/openclaw.md)
+- [Hermes Agent](./clients/hermes-agent.md)
 - [Continue](./clients/continue.md)
 - [OpenAI-compatible clients](./clients/openai-compatible.md)
 - [Anthropic-compatible clients](./clients/anthropic-compatible.md)
