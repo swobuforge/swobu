@@ -152,7 +152,7 @@ func (s *SectionView) configureTargetConfigMounts() {
 	s.TargetConfigs.Callbacks.OnCreated = func(result ports.SaveTargetResult) {
 		s.applyRouteUpsert(result.Route)
 		s.State.AddTargetRoute.Set("")
-		if s.Model.IsDraft() && result.Workspace.ID != "" && s.OnWorkspacePersisted != nil {
+		if s.Model.IsOnboarding() && result.Workspace.ID != "" && s.OnWorkspacePersisted != nil {
 			s.OnWorkspacePersisted(result.Workspace)
 		}
 	}
@@ -378,7 +378,7 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 	if existing.ID == "" {
 		return
 	}
-	if s.Model.IsDraft() {
+	if s.Model.IsOnboarding() {
 		saved := existing
 		saved.ID = readmodel.RouteID(name)
 		saved.ModelName = name
@@ -429,7 +429,7 @@ func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
 }
 
 func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) error {
-	if s.Model.IsDraft() {
+	if s.Model.IsOnboarding() {
 		s.deleteRoute(routeID)
 		return nil
 	}

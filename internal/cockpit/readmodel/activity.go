@@ -21,6 +21,10 @@ type ActivityRowReadModel struct {
 	// ObservedAt preserves the daemon's observation label as display text.
 	// Cockpit does not synthesize a timestamp from partial clock data.
 	ObservedAt string
+	// RequestedModel preserves the client model selector from historical traffic
+	// evidence. It is distinct from the resolved workspace route and terminal
+	// provider/model shown by Activity.
+	RequestedModel string
 	// ClientLabel is the normalized client handler shown in the activity row.
 	ClientLabel string
 	RouteID     RouteID

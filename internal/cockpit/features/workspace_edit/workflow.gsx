@@ -4,7 +4,7 @@ templ (w *Workflow) Render() {
 	<div class="flex-col w-full">
 		@RowComponent(w)
 		if w.Workspace.IsDraft() {
-			@EndpointPreviewRow(w.ClientBaseURLPreview())
+			@EndpointPreviewRow(w.WorkspaceURLPreview())
 		}
 	</div>
 }

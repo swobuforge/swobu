@@ -474,19 +474,19 @@ func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 		Now(t, rendered)
 }
 
-func TestWorkflow_ClientBaseURLPreviewDerivesFromSlug(t *testing.T) {
-	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ClientBaseURL: "http://127.0.0.1:7926/c/dev"}, nil, nil)
+func TestWorkflow_WorkspaceURLPreviewDerivesFromSlug(t *testing.T) {
+	workflow := NewWorkflow(readmodel.WorkspaceReadModel{WorkspaceURL: "http://127.0.0.1:7926/c/dev"}, nil, nil)
 	workflow.OpenDraft()
-	if got, want := workflow.ClientBaseURLPreview(), "after first target"; got != want {
+	if got, want := workflow.WorkspaceURLPreview(), "after first target"; got != want {
 		t.Fatalf("empty preview = %q, want %q", got, want)
 	}
 	workflow.Slug.Set("staging")
-	if got, want := workflow.ClientBaseURLPreview(), "http://127.0.0.1:7926/c/staging"; got != want {
+	if got, want := workflow.WorkspaceURLPreview(), "http://127.0.0.1:7926/c/staging"; got != want {
 		t.Fatalf("preview = %q, want %q", got, want)
 	}
 
 	workflow.Slug.Set("staging!")
-	if got, want := workflow.ClientBaseURLPreview(), "after first target"; got != want {
+	if got, want := workflow.WorkspaceURLPreview(), "after first target"; got != want {
 		t.Fatalf("invalid preview = %q, want %q", got, want)
 	}
 }

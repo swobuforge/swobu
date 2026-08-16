@@ -46,14 +46,15 @@ func activityFromProjection(projection operatorclient.StatusProjection, limit in
 func activityRowFromTraffic(row operatorclient.RecentTrafficRow) readmodel.ActivityRowReadModel {
 	duration, durationKnown := trafficDuration(row)
 	return readmodel.ActivityRowReadModel{
-		ID:         readmodel.ActivityID(row.RequestID),
-		ObservedAt: strings.TrimSpace(row.ObservedAt), // swobu:io-string source=boundary
+		ID:             readmodel.ActivityID(row.RequestID),
+		ObservedAt:     strings.TrimSpace(row.ObservedAt),     // swobu:io-string source=boundary
+		RequestedModel: strings.TrimSpace(row.ModelRequested), // swobu:io-string source=boundary
 		// The evidence layer owns client-handler normalization; Cockpit reads the
 		// canonical handler label directly and does not re-guess from other fields.
 		ClientLabel: row.ClientHandler,
-		RouteID:     readmodel.RouteID(row.Route),
-		// Prefer the workspace route model name (what the client sent) over the
-		// internal provider config ref so the Cockpit activity row is human readable.
+		// WorkspaceRouteModelID is the route selected by routing. Keep the lower-
+		// level Route only as a compatibility fallback for older evidence.
+		RouteID:       readmodel.RouteID(firstNonEmpty(row.WorkspaceRouteModelID, row.Route)),
 		RouteLabel:    firstNonEmpty(row.WorkspaceRouteModelID, row.Route),
 		ProviderSpec:  row.ProviderSpec,
 		ProviderModel: row.ProviderModel,

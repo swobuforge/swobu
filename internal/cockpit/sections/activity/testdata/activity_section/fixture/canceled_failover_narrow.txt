@@ -1,2 +1,2 @@
   activity
-   14:32:01  gpt                 openai/gpt-4.1 · codex · 2 attempts                         23ms
+     14:32:01  gpt-5.3-codex → free → google/gemini-2.5-pro               2 attempts      23ms

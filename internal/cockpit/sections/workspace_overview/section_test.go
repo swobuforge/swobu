@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	workspace_connect "github.com/swobuforge/swobu/internal/cockpit/features/workspace_connect"
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
@@ -15,31 +16,8 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
-func TestSection_CopyEndpointSetsState(t *testing.T) {
-	section := Section(workspaceSectionModel())
-	section.copyEndpoint()
-	if !section.CopiedEndpoint.Get() {
-		t.Fatal("copy row did not record local copy intent")
-	}
-}
-
-func TestSection_CopyEndpointShowsVisibleFeedback(t *testing.T) {
-	section := Section(workspaceSectionModel())
-	section.copyEndpoint()
-
-	if !section.CopiedEndpoint.Get() {
-		t.Fatal("copy row did not record visible copy state")
-	}
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 10)
-	testkit.AssertVisual("copied_endpoint").
-		Fixture("testdata/workspace_overview/fixture/copied_endpoint.txt").
-		Viewport(100, 10).
-		Now(t, rendered)
-}
-
 func TestSection_WorkspaceSavedResetsTransientState(t *testing.T) {
 	section := Section(workspaceSectionModel())
-	section.copyEndpoint()
 	section.OpenDeleteConfirmation("dev")
 
 	section.workspaceSaved(readmodel.WorkspaceReadModel{
@@ -47,9 +25,6 @@ func TestSection_WorkspaceSavedResetsTransientState(t *testing.T) {
 		Slug: "dev-2",
 	})
 
-	if section.CopiedEndpoint.Get() {
-		t.Fatal("copied state should reset after workspace save")
-	}
 	if got := section.PendingDeleteWorkspaceID.Get(); got != "" {
 		t.Fatalf("pending delete workspace id after workspace save = %q, want empty", got)
 	}
@@ -88,6 +63,35 @@ func TestSection_DraftHeaderUsesLayoutGutter(t *testing.T) {
 	}
 	if strings.Contains(rendered, "\nnew workspace") {
 		t.Fatalf("draft header should not rely on unstructured leading text:\n%s", rendered)
+	}
+}
+
+func TestSection_ConventionalFirstWorkspaceShowsConnectEndpoint(t *testing.T) {
+	section := Section(readmodel.NewConventionalFirstWorkspace(
+		"http://127.0.0.1:7926/c/default",
+		[]readmodel.ProviderOptionReadModel{{ProviderSpec: "openai", DisplayName: "OpenAI"}},
+	))
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+
+	frame := h.FrameTrimmed()
+	for _, want := range []string{"workspace", "endpoint", "http://127.0.0.1:7926/c/default", "connect ↵", "OpenAI · Anthropic"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("bootstrap overview missing %q:\n%s", want, frame)
+		}
+	}
+	for _, forbidden := range []string{"derived from slug", "rename ↵", "delete ↵", "discard ↵"} {
+		if strings.Contains(frame, forbidden) {
+			t.Fatalf("bootstrap overview exposes %q:\n%s", forbidden, frame)
+		}
+	}
+	if got := len(collectFocusables(h.App().Root())); got != 2 {
+		t.Fatalf("bootstrap overview focusables = %d, want disclosure + endpoint", got)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if !strings.Contains(h.Frame(), "Other clients") {
+		t.Fatal("bootstrap endpoint did not disclose Connect before persistence")
 	}
 }
 
@@ -141,9 +145,34 @@ func TestSection_FocusTraversal(t *testing.T) {
 		t.Fatal("app.Root() returned nil")
 	}
 	focusables := collectFocusables(root)
-	// header, endpoint, slug, delete = 4
+	// header, name, endpoint, delete = 4
 	if got, want := len(focusables), 4; got != want {
 		t.Fatalf("workspace focusables = %d, want %d", got, want)
+	}
+}
+
+func TestSection_PersistedWorkspaceShowsNameBeforeEndpoint(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	rendered := testkit.RenderMountedTrimmed(t, section, 100, 10)
+
+	name := strings.Index(rendered, "name")
+	endpoint := strings.Index(rendered, "endpoint")
+	if name < 0 || endpoint < 0 {
+		t.Fatalf("workspace frame missing identity rows:\n%s", rendered)
+	}
+	if name > endpoint {
+		t.Fatalf("workspace identity order = endpoint then name, want name then endpoint:\n%s", rendered)
+	}
+}
+
+func TestSection_InvalidWorkspaceURLCannotCreateConnectDisclosure(t *testing.T) {
+	section := Section(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, WorkspaceURL: "not-a-workspace-url"})
+	if _, ok := EndpointRowComponent(section).(*workspace_connect.Disclosure); ok {
+		t.Fatal("invalid workspace URL manufactured an automatic Connect target")
+	}
+	frame := testkit.RenderMountedTrimmed(t, section, 100, 10)
+	if !strings.Contains(frame, "not-a-workspace-url") || strings.Contains(frame, "connect ↵") {
+		t.Fatalf("invalid endpoint row exposed Connect:\n%s", frame)
 	}
 }
 
@@ -174,11 +203,12 @@ func TestSection_FocusMoveUpdatesMarker(t *testing.T) {
 	}
 }
 
-func TestSection_EnterActivatesEndpointRow(t *testing.T) {
+func TestSection_EnterDisclosesEndpointConnect(t *testing.T) {
 	section := Section(workspaceSectionModel())
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
@@ -188,21 +218,22 @@ func TestSection_EnterActivatesEndpointRow(t *testing.T) {
 		h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	}, "> ")
 
-	if !section.CopiedEndpoint.Get() {
-		t.Fatal("expected copy state set after Enter activation")
+	if !strings.Contains(h.Frame(), "Other clients") {
+		t.Fatal("expected Other clients row after Enter activation")
 	}
 }
 
-func TestSection_SpaceActivatesEndpointRow(t *testing.T) {
+func TestSection_SpaceDisclosesEndpointConnect(t *testing.T) {
 	section := Section(workspaceSectionModel())
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: ' '})
 
-	if !section.CopiedEndpoint.Get() {
-		t.Fatal("expected copy state set after Space activation")
+	if !strings.Contains(h.Frame(), "Other clients") {
+		t.Fatal("expected Other clients row after Space activation")
 	}
 }
 
@@ -211,7 +242,6 @@ func TestSection_EnterActivatesSlugRow(t *testing.T) {
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frameBefore := h.Frame()
@@ -243,7 +273,6 @@ func TestSection_SpaceActivatesSlugRow(t *testing.T) {
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: ' '})
 
@@ -342,8 +371,8 @@ func activate(t *testing.T, focusable tui.Focusable) {
 
 func workspaceSectionModel() readmodel.WorkspaceReadModel {
 	return readmodel.WorkspaceReadModel{
-		Slug:          "dev",
-		State:         readmodel.WorkspaceExisting,
-		ClientBaseURL: "http://127.0.0.1:7926/c/dev",
+		Slug:         "dev",
+		State:        readmodel.WorkspaceExisting,
+		WorkspaceURL: "http://127.0.0.1:7926/c/dev",
 	}
 }

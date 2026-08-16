@@ -30,7 +30,7 @@ func (s *SectionView) stopActivityRefresh() {
 }
 
 func (s *SectionView) startActivityRefresh(app *tui.App) {
-	if app == nil || s.ActivityQuery == nil || s.Workspace.IsDraft() {
+	if app == nil || s.ActivityQuery == nil || !s.Workspace.IsPersisted() {
 		return
 	}
 	query := s.ActivityQuery

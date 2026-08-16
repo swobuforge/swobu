@@ -153,6 +153,9 @@ func (h RequestIngress) HandleRequest(ctx context.Context, in RequestInput) (Req
 	}
 	workspace, err := h.workspaces.GetWorkspace(ctx, in.Workspace)
 	if err != nil {
+		if errors.Is(err, routing.ErrNotFound) {
+			return RequestOutput{}, canonical.BadEndpoint(workspaceNotFoundMessage(in.Workspace))
+		}
 		return RequestOutput{}, canonical.BadEndpoint("workspace could not be resolved")
 	}
 	return h.HandleRequestWithWorkspace(ctx, workspace, in)
@@ -430,6 +433,9 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 	}
 	workspace, err := h.workspaces.GetWorkspace(ctx, in.Workspace)
 	if err != nil {
+		if errors.Is(err, routing.ErrNotFound) {
+			return ListModelsOutput{}, canonical.BadEndpoint(workspaceNotFoundMessage(in.Workspace))
+		}
 		return ListModelsOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
 	out := ListModelsOutput{
@@ -440,4 +446,8 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 		out.Models = append(out.Models, ModelOption{ID: route.Name().String()})
 	}
 	return out, nil
+}
+
+func workspaceNotFoundMessage(slug routing.WorkspaceSlug) string {
+	return fmt.Sprintf("Workspace %q does not exist. Create it in Swobu or check the workspace name in this endpoint.", slug.String())
 }

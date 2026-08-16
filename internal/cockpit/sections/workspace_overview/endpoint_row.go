@@ -2,76 +2,21 @@ package workspace_overview
 
 import (
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/clientconnect"
+	workspace_connect "github.com/swobuforge/swobu/internal/cockpit/features/workspace_connect"
+	cockpitui "github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
-func endpointRowKey(s *SectionView) string { return "endpoint:" + workspaceIdentity(s) }
-
-func endpointAction(s *SectionView) string {
-	if s.CopiedEndpoint.Get() {
-		return "copied"
-	}
-	return "copy ↵"
+func endpointRowKey(s *SectionView) string {
+	return "workspace-connect:" + workspaceIdentity(s) + ":" + s.Model.WorkspaceURL
 }
 
-// EndpointRowComponent mounts the hero endpoint row: two visual lines
-// (compatibility badges + URL) as a single selectable action target.
+// EndpointRowComponent projects the workspace address into the feature that
+// owns Connect discovery, disclosure, copying, and automatic wiring.
 func EndpointRowComponent(s *SectionView) tui.Component {
-	return &endpointRowView{s: s, target: ui.NewActionTarget(endpointRowKey(s), s.copyEndpoint)}
-}
-
-type endpointRowView struct {
-	target *ui.ActionTarget
-	s      *SectionView
-}
-
-func (r *endpointRowView) BindApp(app *tui.App) {
-	r.target.BindApp(app)
-}
-
-func (r *endpointRowView) UnbindApp() {
-	r.target.UnbindApp()
-}
-
-func (r *endpointRowView) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*endpointRowView)
-	if !ok {
-		return
+	target, err := clientconnect.NewTarget(s.Model.Slug, s.Model.WorkspaceURL)
+	if err != nil {
+		return cockpitui.NewSelectableRow(endpointRowKey(s)+":invalid", "endpoint", s.Model.WorkspaceURL, "", nil)
 	}
-	r.s = f.s
+	return workspace_connect.New(target, nil, s.OnNotice)
 }
-
-func (r *endpointRowView) IsFocused() bool {
-	return r.target.IsFocused()
-}
-
-func (r *endpointRowView) KeyMap() tui.KeyMap {
-	return r.target.KeyMap(r.s.copyEndpoint, nil)
-}
-
-func (r *endpointRowView) Render(*tui.App) *tui.Element {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100),
-	)
-	opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.s.copyEndpoint))
-	row := ui.ActionRow(r.target.Marker(), "endpoint", r.s.Model.ClientBaseURL, endpointAction(r.s), opts...)
-	r.target.BindElement(row)
-	root.AddChild(row)
-
-	detail := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
-		tui.WithWidthPercent(100),
-	)
-	detail.AddChild(tui.New(tui.WithWidth(20)))
-	detail.AddChild(tui.New(tui.WithText("OpenAI · Anthropic"), tui.WithFlexGrow(1)))
-	root.AddChild(detail)
-	return root
-}
-
-var (
-	_ tui.Component    = (*endpointRowView)(nil)
-	_ tui.KeyListener  = (*endpointRowView)(nil)
-	_ tui.AppBinder    = (*endpointRowView)(nil)
-	_ tui.PropsUpdater = (*endpointRowView)(nil)
-)

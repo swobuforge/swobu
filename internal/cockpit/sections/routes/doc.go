@@ -5,4 +5,7 @@
 // is expanded. This package does not sort, mutate, register rows upward, or
 // redefine domain routing semantics. A zero-target route omits the inapplicable
 // default row so add target is its next visible and selectable action.
+// Onboarding route creation, rename, and delete remain local; the first target
+// save crosses the existing atomic workspace-seed command and promotes the
+// workspace from Cockpit projection to persisted state.
 package routes

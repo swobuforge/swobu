@@ -1,2 +1,2 @@
   activity
-   14:35:10  gpt                 openai/g…  500  312ms
+     14:35:10  gpt → openai/gpt-4.1       500 312ms
