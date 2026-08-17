@@ -3,6 +3,9 @@ package trafficevidence
 import (
 	"testing"
 	"time"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 // Every terminal-event literal in this file carries the valid terminal-fact set:
@@ -93,6 +96,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 	}}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
+		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		ClientProtocol:      "openai_compat",
 		ClientHandler:       "codex",
 		ClientFamily:        "chat_completions",
@@ -177,11 +181,13 @@ func TestTrafficEvent_PreservesZeroProviderCallAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{
-		RequestID:    requestID,
-		Workspace:    "alpha",
-		RequestPath:  "/responses",
-		ProviderSpec: "openai",
-		Route:        route,
+		RequestID:      requestID,
+		Workspace:      "alpha",
+		RequestPath:    "/responses",
+		ProviderSpec:   "openai",
+		Route:          route,
+		TargetProtocol: protocolkind.Responses,
+		TargetVersion:  routing.TargetVersion(1),
 	}, TerminalOutcome{Result: ResultClassBackendError, StatusCode: 500, DeliveryKind: "exchange_failed"})
 	if err != nil {
 		t.Fatal(err)
@@ -338,6 +344,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 	}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
+		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		Route: route,
 		Mutations: []Mutation{{
 			Stage:         "encode",
@@ -382,6 +389,7 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 	}
 	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
+		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		Route: route,
 		StageReports: []StageReport{
 			{

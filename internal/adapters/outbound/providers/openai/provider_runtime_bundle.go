@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
@@ -40,7 +41,7 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 			return provider.Backend{}, fmt.Errorf("OpenAI responses backend has codec %T, want protocolcodec.Codec", backend.Codec)
 		}
 		standard.CaptureResponsesContinuation = true
-		backend.Codec = standard
+		backend.Codec = responsesCodec{Codec: standard}
 	}
 	return backend, backend.Validate()
 }
@@ -72,6 +73,9 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
+	if !req.CacheAffinity.IsZero() {
+		document.Payload["prompt_cache_key"] = req.CacheAffinity.Key()
+	}
 	if document.MaxTokens != nil {
 		document.MaxCompletionTokens = document.MaxTokens
 		document.MaxTokens = nil
@@ -81,3 +85,21 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 }
 
 var _ provider.Codec = chatCompletionsCodec{}
+
+// responsesCodec adds the exact OpenAI locality field while retaining the
+// standard codec's continuation-aware response decoding.
+type responsesCodec struct{ protocolcodec.Codec }
+
+func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
+	document, changes, err := protocolcodec.LowerResponsesRequest(req)
+	if err != nil {
+		return carrier.Document{}, changes, err
+	}
+	if !req.CacheAffinity.IsZero() {
+		document.Payload["prompt_cache_key"] = req.CacheAffinity.Key()
+	}
+	encoded, err := responses.EncodeProviderRequestDocument(document)
+	return encoded, changes, err
+}
+
+var _ provider.Codec = responsesCodec{}

@@ -11,12 +11,14 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/cacheintent"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 func TestOpenAIRequestMutationPreservesRawJSONIntegers(t *testing.T) {
@@ -44,6 +46,77 @@ func TestNewRuntime_BindsOpenAIProviderID(t *testing.T) {
 	rt := NewRuntime(nil, nil)
 	if rt.ProviderID != profile.ProviderSpecOpenAI {
 		t.Fatalf("provider id = %s, want %s", rt.ProviderID, profile.ProviderSpecOpenAI)
+	}
+}
+
+func TestOpenAIEmitsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol), func(t *testing.T) {
+			target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocol, string(protocol), delivery.BufferedDelivery())
+			target.Model = "model"
+			backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit(" Raw Key "), Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["prompt_cache_key"] != " Raw Key " {
+				t.Fatalf("prompt_cache_key = %#v", payload["prompt_cache_key"])
+			}
+			without, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var zeroPayload map[string]any
+			if err := json.Unmarshal(without.RawBytes(), &zeroPayload); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := zeroPayload["prompt_cache_key"]; exists {
+				t.Fatalf("zero affinity emitted prompt_cache_key: %s", without.RawBytes())
+			}
+		})
+	}
+}
+
+func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol), func(t *testing.T) {
+			target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocol, string(protocol), delivery.BufferedDelivery())
+			target.Model = "model"
+			backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project := func(exchangeID, affinity string, d delivery.Delivery) []byte {
+				document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheAffinity: cacheintent.Explicit(affinity), Delivery: d})
+				if err != nil {
+					t.Fatal(err)
+				}
+				projection, err := providertest.CacheSensitiveProjection(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return projection
+			}
+			first := project("a", "affinity-a", delivery.BufferedDelivery())
+			second := project("b", "affinity-b", delivery.BufferedDelivery())
+			streamed := project("c", "affinity-c", delivery.StreamingDelivery(delivery.FramingSSE))
+			if !bytes.Equal(first, second) || !bytes.Equal(first, streamed) {
+				t.Fatalf("OpenAI cache-sensitive projection changed: %s / %s / %s", first, second, streamed)
+			}
+		})
 	}
 }
 

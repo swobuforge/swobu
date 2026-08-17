@@ -49,6 +49,65 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHistoryFingerprint_IgnoresInvocationLocalMetadata(t *testing.T) {
+	plainRequest := []messagesMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
+	controlledRequest := []messagesMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello","prompt_cache_breakpoint":{"ttl":"5m"}}]`)}}
+	changedRequest := []messagesMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello!"}]`)}}
+
+	plainRequestFingerprint, err := fingerprintMessagesRequest(plainRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledRequestFingerprint, err := fingerprintMessagesRequest(controlledRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedRequestFingerprint, err := fingerprintMessagesRequest(changedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledRequestFingerprint != plainRequestFingerprint {
+		t.Fatal("invocation-local content metadata changed Messages request history identity")
+	}
+	if changedRequestFingerprint == plainRequestFingerprint {
+		t.Fatal("changed Messages text retained request history identity")
+	}
+
+	plainResponse := messagesMessageDTO{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"hi"}]`)}
+	controlledResponse := messagesMessageDTO{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"hi","prompt_cache_breakpoint":{"ttl":"5m"}}]`)}
+	changedResponse := messagesMessageDTO{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"hi!"}]`)}
+	plainResponseFingerprint, err := fingerprintMessagesResponseValue(plainResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledResponseFingerprint, err := fingerprintMessagesResponseValue(controlledResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedResponseFingerprint, err := fingerprintMessagesResponseValue(changedResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledResponseFingerprint != plainResponseFingerprint {
+		t.Fatal("invocation-local content metadata changed Messages response history identity")
+	}
+	if changedResponseFingerprint == plainResponseFingerprint {
+		t.Fatal("changed Messages text retained response history identity")
+	}
+
+	plainHistory, err := historyfingerprint.Advance(nil, plainRequestFingerprint, plainResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledHistory, err := historyfingerprint.Advance(nil, controlledRequestFingerprint, controlledResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledHistory != plainHistory {
+		t.Fatal("invocation-local content metadata changed completed Messages history identity")
+	}
+}
+
 func TestCitationMutationsChangePredecessor(t *testing.T) {
 	base := `{"model":"m","messages":[
 		{"role":"user","content":"question"},

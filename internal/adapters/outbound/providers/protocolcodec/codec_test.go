@@ -17,8 +17,49 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
+
+func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "one"),
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "two"),
+		},
+	})
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
+		t.Run(string(protocol), func(t *testing.T) {
+			codec := Codec{Protocol: protocol}
+			projection := func(exchangeID string, deliveryMode delivery.Delivery) []byte {
+				document, _, err := codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, Delivery: deliveryMode})
+				if err != nil {
+					t.Fatal(err)
+				}
+				value, err := providertest.CacheSensitiveProjection(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return value
+			}
+			first := projection("exchange-a", delivery.BufferedDelivery())
+			second := projection("exchange-b", delivery.BufferedDelivery())
+			streamed := projection("exchange-c", delivery.StreamingDelivery(delivery.FramingSSE))
+			if !bytes.Equal(first, second) || !bytes.Equal(first, streamed) {
+				t.Fatalf("cache-sensitive projection changed: buffered=%s repeated=%s streamed=%s", first, second, streamed)
+			}
+			appended := request.WithItems(append(request.Items(), canonicaltest.Message(t, canonical.MessageRoleUser, "three")))
+			document, _, err := codec.Encode(provider.Request{Canonical: appended, Delivery: delivery.BufferedDelivery()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			appendProjection, err := providertest.CacheSensitiveProjection(document)
+			if err != nil || bytes.Equal(first, appendProjection) || !bytes.Contains(appendProjection, []byte("one")) || !bytes.Contains(appendProjection, []byte("two")) {
+				t.Fatalf("append projection = %s (%v)", appendProjection, err)
+			}
+		})
+	}
+}
 
 func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 	full := canonical.NewCanonicalRequest(canonical.RequestParams{

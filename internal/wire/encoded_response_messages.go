@@ -44,6 +44,11 @@ func (s *EncodedResponseMessages) Next(ctx context.Context) ([]byte, error) {
 			}
 			return nil, err
 		}
+		if event.Kind == canonical.EventUsage {
+			if payload, ok := event.Payload.(canonical.UsagePayload); ok {
+				s.completion.ObserveUsage(payload.Usage)
+			}
+		}
 		messages, err := s.encode(event)
 		if err != nil {
 			s.fail(err)

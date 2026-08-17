@@ -55,6 +55,7 @@ func runExchange(
 			rebasedRequest:     rebased,
 			requestFingerprint: decoded.RequestFingerprint,
 			mcpAccess:          decoded.MCPAccess,
+			explicitAffinity:   decoded.CacheAffinity,
 			workspace:          workspace, timing: timing,
 			requestPath: requestPath,
 		},
@@ -76,9 +77,9 @@ func runExchange(
 		s = tr.nextState
 		switch p := s.phase.(type) {
 		case completedPhase:
-			return terminalRequestOutput(s.input, p.response, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, true)), nil
+			return terminalRequestOutput(s.input, p.response, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, true), terminalReusablePrefix(s)), nil
 		case failedPhase:
-			return terminalRequestOutput(s.input, nil, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, false)), p.problem
+			return terminalRequestOutput(s.input, nil, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, false), terminalReusablePrefix(s)), p.problem
 		}
 		if tr.command == nil {
 			return RequestOutput{}, canonical.InternalError(fmt.Sprintf("exchange invariant: active phase %T produced no command", s.phase))
@@ -212,10 +213,17 @@ func summarizeRoutingEvidence(attempts []providerCallAttempt, candidateCount int
 	return summary
 }
 
-func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, routing terminalRoutingEvidence) RequestOutput {
+func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, routing terminalRoutingEvidence, reusablePrefix trafficevidence.ReusablePrefixEvidence) RequestOutput {
 	var evidence *TrafficEvidenceInput
 	if target.TargetID != "" {
-		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing}
+		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
 	}
 	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response)}
+}
+
+func terminalReusablePrefix(state exchangeState) trafficevidence.ReusablePrefixEvidence {
+	if len(state.providerCallAttempts) > 0 && state.providerCallAttempts[len(state.providerCallAttempts)-1].nativePreviousResponse {
+		return trafficevidence.NativeReusablePrefix()
+	}
+	return state.reusablePrefix
 }

@@ -12,6 +12,9 @@
 // A target's position in a built plan is possible work, not provider I/O.
 // Exchange owns the issued provider-call attempt lifecycle, and one position
 // may produce zero or more calls without changing routing order.
+// Equal-tier target ordering is a deterministic projection of an opaque cache
+// affinity, route name, tier index, and stable target IDs. Configured position
+// inside a tier is normalized away because Tier assigns it no semantics.
 //
 // Route resolution gives exact configured names precedence. Any other
 // non-empty client model token selects the explicitly configured workspace

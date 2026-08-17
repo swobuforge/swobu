@@ -256,21 +256,55 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 }
 
 func normalizeResponsesHistoryContent(source json.RawMessage, stripAnnotations bool) (json.RawMessage, error) {
-	if !stripAnnotations || len(bytes.TrimSpace(source)) == 0 {
-		return normalizeResponsesRawJSON(source)
+	content, err := removeResponsesHistoryInvocationControls(source)
+	if err != nil {
+		return nil, err
 	}
-	var content []responsesOutputTextItemDTO
-	if err := json.Unmarshal(source, &content); err != nil {
-		return normalizeResponsesRawJSON(source)
+	if !stripAnnotations || len(bytes.TrimSpace(content)) == 0 {
+		return normalizeResponsesRawJSON(content)
 	}
-	for index := range content {
-		content[index].Annotations = nil
+	var output []responsesOutputTextItemDTO
+	if err := json.Unmarshal(content, &output); err != nil {
+		return normalizeResponsesRawJSON(content)
 	}
-	raw, err := json.Marshal(content)
+	for index := range output {
+		output[index].Annotations = nil
+	}
+	raw, err := json.Marshal(output)
 	if err != nil {
 		return nil, err
 	}
 	return normalizeResponsesRawJSON(raw)
+}
+
+// removeResponsesHistoryInvocationControls keeps the supported content object
+// grammar explicit: only the known request-scoped breakpoint is non-historical.
+func removeResponsesHistoryInvocationControls(source json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(source)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return append(json.RawMessage(nil), source...), nil
+	}
+	var content []json.RawMessage
+	if err := json.Unmarshal(trimmed, &content); err != nil {
+		return nil, err
+	}
+	for index := range content {
+		part := bytes.TrimSpace(content[index])
+		if len(part) == 0 || part[0] != '{' {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(part, &object); err != nil {
+			return nil, err
+		}
+		delete(object, "prompt_cache_breakpoint")
+		normalized, err := json.Marshal(object)
+		if err != nil {
+			return nil, err
+		}
+		content[index] = normalized
+	}
+	return json.Marshal(content)
 }
 
 func normalizeResponsesHistoryTools(source json.RawMessage) (json.RawMessage, error) {

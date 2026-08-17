@@ -62,6 +62,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 			Request: c.request.Clone(), Response: response.Clone(),
 			HistoryScheme: c.historyScheme, CreatedAt: time.Now().UTC(),
 		}
+		record.ID = response.Response().SwobuID
 		if c.advance != nil && fingerprint != nil {
 			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *fingerprint)
 			if err != nil {
@@ -72,6 +73,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 		}
 		var err error
 		if c.sessionID == "" {
+			record.SessionID = session.ClientSessionID(record.ID)
 			_, err = c.store.StartSession(ctx, c.workspaceSlug, record)
 		} else {
 			record.SessionID = c.sessionID

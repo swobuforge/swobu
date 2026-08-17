@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/cacheintent"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -36,6 +37,9 @@ type exchangeState struct {
 	mcp                     *mcp.Run
 	providerUsage           []canonical.TokenUsage
 	effectiveChanges        []compat.Change
+	cacheAffinity           cacheintent.Affinity
+	reusablePrefix          trafficevidence.ReusablePrefixEvidence
+	previousRequest         *canonical.CanonicalRequest
 	polyfilled              bool
 }
 
@@ -56,6 +60,7 @@ type exchangeInput struct {
 	rebasedRequest     *wire.RebasedRequest
 	requestFingerprint historyfingerprint.Request
 	mcpAccess          mcp.Access
+	explicitAffinity   cacheintent.Affinity
 	workspace          routing.Workspace
 	timing             *trafficevidence.Timing
 	// requestPath is the ingress-owned normalized path, captured before the
@@ -273,12 +278,12 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 	if _, ok := event.(exchangeStarted); !ok {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: starting phase received %T", event)
 	}
-	route, err := s.input.workspace.ResolveRoute(s.input.request.Model())
+	var err error
+	s, err = applyRoutePlan(s, s.swobuResponseID.String())
 	if err != nil {
 		s.phase = failedPhase{problem: canonical.BadRequest(err.Error())}
 		return reducerOutcome{nextState: s}, nil
 	}
-	s.route = newRoutePlan(route.Name(), routing.BuildPlan(s.input.exchangeID, route))
 	if reference, ok, err := session.PreviousSwobuResponseID(s.input.request); err != nil {
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
@@ -349,8 +354,33 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	if found || phase.explicit {
 		s.sessionID = record.SessionID
 		s.expectedHead = record.ID
+		previous := record.Request.Clone()
+		s.previousRequest = &previous
+		if s.input.explicitAffinity.IsZero() {
+			s, err = applyRoutePlan(s, string(record.SessionID))
+			if err != nil {
+				s.phase = failedPhase{problem: canonical.BadRequest(err.Error())}
+				return reducerOutcome{nextState: s}, nil
+			}
+		}
 	}
 	return beginMCPPreparation(s, runner)
+}
+
+// applyRoutePlan makes the effective affinity one reducer-owned fact consumed
+// by both target ordering and every provider attempt.
+func applyRoutePlan(s exchangeState, lineage string) (exchangeState, error) {
+	route, err := s.input.workspace.ResolveRoute(s.input.request.Model())
+	if err != nil {
+		return s, err
+	}
+	affinity := s.input.explicitAffinity
+	if affinity.IsZero() {
+		affinity = cacheintent.Derived(s.input.workspace.Slug().String(), lineage)
+	}
+	s.cacheAffinity = affinity
+	s.route = newRoutePlan(route.Name(), routing.BuildPlan(affinity.Key(), route))
+	return s, nil
 }
 
 func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingProviderPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {

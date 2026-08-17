@@ -47,19 +47,21 @@ type StatusCounters struct {
 }
 
 type RecentTrafficRow struct {
-	RequestID      string                           `json:"request_id"`
-	Workspace      string                           `json:"workspace"`
-	ClientHandler  string                           `json:"client_handler,omitempty"`
-	ClientProtocol string                           `json:"client_protocol,omitempty"`
-	ClientFamily   string                           `json:"client_family,omitempty"`
-	NormalizedOp   string                           `json:"normalized_op,omitempty"`
-	Route          string                           `json:"route"`
-	Result         string                           `json:"result"`
-	StatusCode     int                              `json:"status_code"`
-	AttemptCount   int                              `json:"attempt_count"`
-	ObservedAt     string                           `json:"observed_at,omitempty"`
-	Timing         *RecentTrafficTimingSnapshot     `json:"timing,omitempty"`
-	TokenUsage     *RecentTrafficTokenUsageSnapshot `json:"token_usage,omitempty"`
+	RequestID         string                              `json:"request_id"`
+	Workspace         string                              `json:"workspace"`
+	ClientHandler     string                              `json:"client_handler,omitempty"`
+	ClientProtocol    string                              `json:"client_protocol,omitempty"`
+	ClientFamily      string                              `json:"client_family,omitempty"`
+	NormalizedOp      string                              `json:"normalized_op,omitempty"`
+	Route             string                              `json:"route"`
+	Result            string                              `json:"result"`
+	StatusCode        int                                 `json:"status_code"`
+	AttemptCount      int                                 `json:"attempt_count"`
+	FallbackRecovered bool                                `json:"fallback_recovered"`
+	ObservedAt        string                              `json:"observed_at,omitempty"`
+	Timing            *RecentTrafficTimingSnapshot        `json:"timing,omitempty"`
+	TokenUsage        *RecentTrafficTokenUsageSnapshot    `json:"token_usage,omitempty"`
+	ReusablePrefix    RecentTrafficReusablePrefixSnapshot `json:"reusable_prefix"`
 	// TODO(execution-system): Flattened token fields are preserved for continuity with existing
 	// trafficevidence integration tests and older readers.
 	InputTokens           *int                          `json:"-"`
@@ -72,6 +74,8 @@ type RecentTrafficRow struct {
 	WorkspaceRouteModelID string                        `json:"workspace_route_model,omitempty"`
 	ProviderSpec          string                        `json:"provider_spec,omitempty"`
 	ProviderModel         string                        `json:"provider_model,omitempty"`
+	TargetProtocol        string                        `json:"target_protocol,omitempty"`
+	TargetVersion         uint64                        `json:"target_version,omitempty"`
 	Mutations             []trafficevidence.Mutation    `json:"wire_patch_mutations,omitempty"`
 	ExchangeDiagnostics   []string                      `json:"exchange_diagnostics,omitempty"`
 	StageReports          []trafficevidence.StageReport `json:"exchange_stage_reports,omitempty"`
@@ -95,6 +99,11 @@ type RecentTrafficTokenUsageSnapshot struct {
 	OutputTokens     *int `json:"output_tokens,omitempty"`
 	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
+}
+
+type RecentTrafficReusablePrefixSnapshot struct {
+	State      string `json:"state"`
+	ChangeKind string `json:"change_kind,omitempty"`
 }
 
 type ProjectionInput struct {
@@ -244,15 +253,19 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		Result:                trafficEvent.Result().String(),
 		StatusCode:            trafficEvent.StatusCode(),
 		AttemptCount:          trafficEvent.AttemptCount(),
+		FallbackRecovered:     trafficEvent.FallbackRecovered(),
 		ModelRequested:        trafficEvent.ModelRequested(),
 		ModelResolved:         trafficEvent.ModelResolved(),
 		ModelResolutionMode:   trafficEvent.ModelResolutionMode(),
 		WorkspaceRouteModelID: trafficEvent.WorkspaceRouteModelID(),
 		ProviderSpec:          string(trafficEvent.ProviderSpec()),
 		ProviderModel:         trafficEvent.ProviderModel(),
+		TargetProtocol:        trafficEvent.TargetProtocol().String(),
+		TargetVersion:         uint64(trafficEvent.TargetVersion()),
 		Mutations:             trafficEvent.Mutations(),
 		ExchangeDiagnostics:   trafficEvent.ExchangeDiagnostics(),
 		StageReports:          trafficEvent.StageReports(),
+		ReusablePrefix:        recentTrafficPrefix(trafficEvent.ReusablePrefix()),
 	}
 	if !event.observedAt.IsZero() {
 		row.ObservedAt = event.observedAt.Format("15:04:05")
@@ -288,6 +301,14 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 		row.CacheWriteTokens = usage.CacheWriteTokens
 	}
 	return row
+}
+
+func recentTrafficPrefix(evidence trafficevidence.ReusablePrefixEvidence) RecentTrafficReusablePrefixSnapshot {
+	snapshot := RecentTrafficReusablePrefixSnapshot{State: string(evidence.State())}
+	if kind, ok := evidence.ChangeKind(); ok {
+		snapshot.ChangeKind = string(kind)
+	}
+	return snapshot
 }
 
 func min(left int, right int) int {

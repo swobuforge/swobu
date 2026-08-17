@@ -52,3 +52,31 @@ func TestBuildPlanBalancesFirstCandidateAcrossExchangeIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPlanIgnoresConfigurationOrderWithinTier(t *testing.T) {
+	a, b, c := testTarget(t, "a"), testTarget(t, "b"), testTarget(t, "c")
+	firstTier, _ := NewTier([]Target{a, b, c})
+	secondTier, _ := NewTier([]Target{c, a, b})
+	name, _ := ParseRouteName("chat")
+	firstRoute, _ := NewRoute(name, []Tier{firstTier})
+	secondRoute, _ := NewRoute(name, []Tier{secondTier})
+	first := BuildPlan("affinity", firstRoute)
+	second := BuildPlan("affinity", secondRoute)
+	for index := range first {
+		if first[index].ID() != second[index].ID() {
+			t.Fatalf("plans differ at %d: %s != %s", index, first[index].ID(), second[index].ID())
+		}
+	}
+}
+
+func TestBuildPlanSeparatesRouteNames(t *testing.T) {
+	targets := []Target{testTarget(t, "a"), testTarget(t, "b"), testTarget(t, "c"), testTarget(t, "d")}
+	tier, _ := NewTier(targets)
+	firstName, _ := ParseRouteName("first")
+	secondName, _ := ParseRouteName("second")
+	firstRoute, _ := NewRoute(firstName, []Tier{tier})
+	secondRoute, _ := NewRoute(secondName, []Tier{tier})
+	if reflect.DeepEqual(BuildPlan("affinity", firstRoute), BuildPlan("affinity", secondRoute)) {
+		t.Fatal("different route names unexpectedly produced an identical plan")
+	}
+}

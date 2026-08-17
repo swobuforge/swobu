@@ -61,6 +61,71 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHistoryFingerprint_IgnoresInvocationLocalMetadata(t *testing.T) {
+	plainItems := []responsesHistoryItemDTO{{
+		Type: "message", Role: "user",
+		Content: json.RawMessage(`[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"https://example.test/one.png"}]`),
+	}}
+	controlledItems := []responsesHistoryItemDTO{{
+		Type: "message", Role: "user",
+		Content: json.RawMessage(`[{"type":"input_text","text":"hello","prompt_cache_breakpoint":{"ttl":"5m"}},{"type":"input_image","image_url":"https://example.test/one.png","prompt_cache_breakpoint":{"ttl":"5m"}}]`),
+	}}
+
+	plainRequest, err := fingerprintResponsesRequestValue(plainItems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledRequest, err := fingerprintResponsesRequestValue(controlledItems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledRequest != plainRequest {
+		t.Fatal("invocation-local content metadata changed Responses request history identity")
+	}
+
+	responseItems := []responsesHistoryItemDTO{{Type: "message", Role: "assistant", Content: json.RawMessage(`[{"type":"output_text","text":"hi"}]`)}}
+	responseFingerprint, err := fingerprintResponsesResponseValue(responseItems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainHistory, err := historyfingerprint.Advance(nil, plainRequest, responseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledHistory, err := historyfingerprint.Advance(nil, controlledRequest, responseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledHistory != plainHistory {
+		t.Fatal("invocation-local content metadata changed completed Responses history identity")
+	}
+
+	mutations := map[string][]responsesHistoryItemDTO{
+		"text":        {{Type: "message", Role: "user", Content: json.RawMessage(`[{"type":"input_text","text":"hello!"},{"type":"input_image","image_url":"https://example.test/one.png"}]`)}},
+		"image":       {{Type: "message", Role: "user", Content: json.RawMessage(`[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"https://example.test/two.png"}]`)}},
+		"tool result": {{Type: "function_call_output", CallID: "call_1", Output: json.RawMessage(`"changed"`)}},
+	}
+	toolResultBase, err := fingerprintResponsesRequestValue([]responsesHistoryItemDTO{{Type: "function_call_output", CallID: "call_1", Output: json.RawMessage(`"result"`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, items := range mutations {
+		t.Run(name, func(t *testing.T) {
+			fingerprint, err := fingerprintResponsesRequestValue(items)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := plainRequest
+			if name == "tool result" {
+				base = toolResultBase
+			}
+			if fingerprint == base {
+				t.Fatalf("changed Responses %s retained request history identity", name)
+			}
+		})
+	}
+}
+
 func TestToolSearchOutputHistoryPartitionUsesExecutionOwner(t *testing.T) {
 	client := responsesHistoryItemDTO{Type: "tool_search_output", Execution: "client"}
 	server := responsesHistoryItemDTO{Type: "tool_search_output", Execution: "server"}

@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/cacheintent"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -1346,14 +1347,16 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Request:  canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn one")}}),
 		Response: previousResponse,
 	}
-	if _, err := store.StartSession(context.Background(), "dev", previous); err != nil {
+	started, err := store.StartSession(context.Background(), "dev", previous)
+	if err != nil {
 		t.Fatal(err)
 	}
+	preferred := routing.BuildPlan(cacheintent.Derived("dev", string(started.ID)).Key(), route)[0].ID().String()
 	providerCalls := 0
 	runner := withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 		providerCalls++
-		if target.TargetID == "retry-a" {
-			return nil, canonical.NewBackendError("retry-a", http.StatusServiceUnavailable, "unavailable", "")
+		if target.TargetID == preferred {
+			return nil, canonical.NewBackendError(preferred, http.StatusServiceUnavailable, "unavailable", "")
 		}
 		return bufferedProviderTransport(nil)(context.Background(), target, carrier.Document{})
 	})
@@ -1371,5 +1374,44 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	}
 	if providerCalls != 3 {
 		t.Fatalf("provider calls = %d, want one retry plus fallback", providerCalls)
+	}
+}
+
+func TestApplyRoutePlanUsesLineageOrExplicitAffinityNotExchangeID(t *testing.T) {
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("a")
+	tier, _ := routing.NewTier([]routing.Target{
+		requestpathTarget(t, "a"), requestpathTarget(t, "b"), requestpathTarget(t, "c"), requestpathTarget(t, "d"),
+	})
+	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := exchangeState{input: exchangeInput{exchangeID: "turn-1", request: testCanonicalRequest("a"), workspace: workspace}}
+	first, err := applyRoutePlan(base, "lineage-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.input.exchangeID = "turn-2"
+	second, err := applyRoutePlan(base, "lineage-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first.route.targets, second.route.targets) || first.cacheAffinity != second.cacheAffinity {
+		t.Fatal("exchange ID changed lineage affinity routing")
+	}
+
+	base.input.explicitAffinity = cacheintent.Explicit("client-key")
+	explicitFirst, err := applyRoutePlan(base, "lineage-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitSecond, err := applyRoutePlan(base, "different-lineage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(explicitFirst.route.targets, explicitSecond.route.targets) || explicitFirst.cacheAffinity.Key() != "client-key" {
+		t.Fatal("lineage overrode explicit client affinity")
 	}
 }

@@ -48,7 +48,11 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 			result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
 		}
 	case protocolkind.Responses:
-		result, err = (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
+		var document responses.ProviderRequestDocument
+		document, result.Changes, err = LowerResponsesRequest(req)
+		if err == nil {
+			result.Document, err = responses.EncodeProviderRequestDocument(document)
+		}
 	case protocolkind.Messages:
 		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
 	default:
@@ -56,6 +60,23 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	}
 	changes = append(changes, result.Changes...)
 	return result.Document, changes, err
+}
+
+// LowerResponsesRequest owns the single standard typed lowering sequence used
+// by both the protocol codec and exact-provider decorators.
+func LowerResponsesRequest(req provider.Request) (responses.ProviderRequestDocument, []compat.Change, error) {
+	if err := ValidateEncodeRequest(req); err != nil {
+		return responses.ProviderRequestDocument{}, nil, err
+	}
+	var changes []compat.Change
+	document, err := responses.LowerProviderRequestDocument(
+		responses.EncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames},
+		req.Delivery,
+		&changes,
+		req.ExchangeID,
+		responses.EncodeOptions{},
+	)
+	return document, changes, err
 }
 
 // LowerChatCompletionsRequest owns the single standard typed lowering sequence

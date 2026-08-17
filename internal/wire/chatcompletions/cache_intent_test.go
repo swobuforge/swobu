@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
@@ -51,17 +52,53 @@ func TestEncode_PreservesToolsAndExcludesProviderCacheFields(t *testing.T) {
 	}
 }
 
-func TestDecodeRequest_IgnoresPromptCacheFields(t *testing.T) {
-	codec := testClientRequestDecoder{}
+func TestDecodeRequest_CapturesPromptCacheKeyOutsideCanonicalRequest(t *testing.T) {
 	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "get_weather"), "retrieve weather", canonicaltest.Schema(t, `{"type":"object","properties":{"location":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	projectedName := providertest.ProjectedToolName(t, functionTool)
 	req := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"function","function":{"name":"` + projectedName + `","description":"retrieve weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}],"prompt_cache_key":"repo","prompt_cache_retention":"24h","messages":[{"role":"user","content":"hi"}]}`)
-	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeRequest: %v", err)
+	}
+	got := decoded.Request.Request
+	if decoded.Request.CacheAffinity.Key() != "repo" {
+		t.Fatalf("affinity = %q", decoded.Request.CacheAffinity.Key())
 	}
 	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 || tools[0].Key().Name() != "get_weather" {
 		t.Fatalf("tools = %#v key=%q", tools, tools[0].Key().String())
+	}
+}
+
+func TestDecodeRequest_RejectsEmptyPromptCacheKey(t *testing.T) {
+	req := []byte(`{"model":"gpt-4o-mini","prompt_cache_key":"","messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req}); err == nil {
+		t.Fatal("empty prompt_cache_key was accepted")
+	}
+}
+
+func TestDecodeRequest_OmittedPromptCacheKeyIsZero(t *testing.T) {
+	req := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Request.CacheAffinity.IsZero() {
+		t.Fatalf("affinity = %q", decoded.Request.CacheAffinity.Key())
+	}
+}
+
+func TestPromptCacheKeyDoesNotChangeHistoryFingerprint(t *testing.T) {
+	decode := func(key string) wire.ClientRequestResult {
+		raw := []byte(`{"model":"gpt-4o-mini","prompt_cache_key":"` + key + `","messages":[{"role":"user","content":"hi"}]}`)
+		result, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Request
+	}
+	first, second := decode("first"), decode("second")
+	if first.RequestFingerprint != second.RequestFingerprint {
+		t.Fatal("prompt_cache_key changed Chat history fingerprint")
 	}
 }
