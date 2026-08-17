@@ -1,8 +1,11 @@
 package openai
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
+	"unicode/utf8"
 
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
@@ -14,6 +17,11 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/responses"
+)
+
+const (
+	openAIPromptCacheKeyMaxCharacters = 64
+	openAIPromptCacheKeyHashDomain    = "openai-prompt-cache-key:v1"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
@@ -74,7 +82,7 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 		return carrier.Document{}, changes, err
 	}
 	if !req.CacheAffinity.IsZero() {
-		document.Payload["prompt_cache_key"] = req.CacheAffinity.Key()
+		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheAffinity.Key())
 	}
 	if document.MaxTokens != nil {
 		document.MaxCompletionTokens = document.MaxTokens
@@ -96,10 +104,22 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 		return carrier.Document{}, changes, err
 	}
 	if !req.CacheAffinity.IsZero() {
-		document.Payload["prompt_cache_key"] = req.CacheAffinity.Key()
+		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheAffinity.Key())
 	}
 	encoded, err := responses.EncodeProviderRequestDocument(document)
 	return encoded, changes, err
 }
 
 var _ provider.Codec = responsesCodec{}
+
+// openAIPromptCacheKey keeps portable affinity unconstrained until the OpenAI
+// edge, whose public request contract accepts at most 64 characters. Hashing
+// only oversized values preserves client-owned short keys and gives derived or
+// long explicit affinities one stable, non-revealing provider identity.
+func openAIPromptCacheKey(key string) string {
+	if utf8.RuneCountInString(key) <= openAIPromptCacheKeyMaxCharacters {
+		return key
+	}
+	sum := sha256.Sum256([]byte(openAIPromptCacheKeyHashDomain + "\x00" + key))
+	return hex.EncodeToString(sum[:])
+}

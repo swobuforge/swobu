@@ -87,6 +87,49 @@ func TestOpenAIEmitsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 	}
 }
 
+func TestOpenAIBoundsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+	longKey := cacheintent.Derived("workspace", "lineage").Key()
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol), func(t *testing.T) {
+			target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocol, string(protocol), delivery.BufferedDelivery())
+			target.Model = "model"
+			backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project := func(key string) string {
+				document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit(key), Delivery: delivery.BufferedDelivery()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var payload map[string]any
+				if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+					t.Fatal(err)
+				}
+				projected, _ := payload["prompt_cache_key"].(string)
+				return projected
+			}
+			bounded := project(longKey)
+			if len(bounded) != 64 || bounded == longKey {
+				t.Fatalf("bounded prompt_cache_key = %q (length %d)", bounded, len(bounded))
+			}
+			if repeated := project(longKey); repeated != bounded {
+				t.Fatalf("bounded prompt_cache_key is unstable: %q / %q", bounded, repeated)
+			}
+			if different := project(longKey + "y"); different == bounded {
+				t.Fatalf("different long affinity collapsed to %q", bounded)
+			}
+			unicodeBoundary := strings.Repeat("é", 64)
+			if projected := project(unicodeBoundary); projected != unicodeBoundary {
+				t.Fatalf("64-character key changed: %q", projected)
+			}
+		})
+	}
+}
+
 func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
