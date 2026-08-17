@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -22,7 +22,7 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 	}
 	var changes []compat.Change
 	value, err := func(changeLog *[]compat.Change) (wire.ClientRequestResult, error) {
-		affinity, err := decodeCacheAffinity(dto.PromptCacheKey)
+		locality, err := decodeCacheLocality(dto.PromptCacheKey)
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
@@ -36,14 +36,14 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 		if strings.TrimSpace(dto.PreviousResponseWireID) != "" { // swobu:io-string source=boundary
 			requestFingerprint, err := fingerprintChatCompletionsRequest(dto.Messages[chatCompletionsLeadingContextEnd(dto.Messages):])
 			return wire.ClientRequestResult{
-				Request: request, Delivery: delivery, CacheAffinity: affinity, RequestFingerprint: requestFingerprint,
+				Request: request, Delivery: delivery, CacheLocality: locality, RequestFingerprint: requestFingerprint,
 			}, err
 		}
 		history, err := fingerprintChatCompletionsHistory(dto.Messages)
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
-		result := wire.ClientRequestResult{Request: request, Delivery: delivery, CacheAffinity: affinity, RequestFingerprint: history.request}
+		result := wire.ClientRequestResult{Request: request, Delivery: delivery, CacheLocality: locality, RequestFingerprint: history.request}
 		if history.previous != nil {
 			rebasedDTO := dto
 			rebasedDTO.Messages = history.current
@@ -62,14 +62,14 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 	return wire.ClientDecodeResult{Request: value, Changes: changes}, err
 }
 
-func decodeCacheAffinity(key *string) (cacheintent.Affinity, error) {
+func decodeCacheLocality(key *string) (cachelocality.Key, error) {
 	if key == nil {
-		return cacheintent.Affinity{}, nil
+		return cachelocality.Key{}, nil
 	}
 	if *key == "" {
-		return cacheintent.Affinity{}, canonical.BadRequest("prompt_cache_key must not be empty")
+		return cachelocality.Key{}, canonical.BadRequest("prompt_cache_key must not be empty")
 	}
-	return cacheintent.Explicit(*key), nil
+	return cachelocality.Explicit(*key), nil
 }
 
 func (decoder ClientRequestDecoder) decodeClientRequestWithChanges(doc carrier.Document, changeLog *[]compat.Change, exchangeID string) (canonical.CanonicalRequest, delivery.Delivery, error) {

@@ -61,8 +61,8 @@ func TestDecodeRequest_CapturesPromptCacheKeyOutsideCanonicalRequest(t *testing.
 		t.Fatalf("DecodeRequest: %v", err)
 	}
 	got := decoded.Request.Request
-	if decoded.Request.CacheAffinity.Key() != "repo" {
-		t.Fatalf("affinity = %q", decoded.Request.CacheAffinity.Key())
+	if decoded.Request.CacheLocality.Key() != "repo" {
+		t.Fatalf("cache locality = %q", decoded.Request.CacheLocality.Key())
 	}
 	tools := canonicaltest.Tools(got)
 	if len(tools) != 1 || tools[0].Key().Name() != "get_weather" {
@@ -83,8 +83,8 @@ func TestDecodeRequest_OmittedPromptCacheKeyIsZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decoded.Request.CacheAffinity.IsZero() {
-		t.Fatalf("affinity = %q", decoded.Request.CacheAffinity.Key())
+	if !decoded.Request.CacheLocality.IsZero() {
+		t.Fatalf("cache locality = %q", decoded.Request.CacheLocality.Key())
 	}
 }
 

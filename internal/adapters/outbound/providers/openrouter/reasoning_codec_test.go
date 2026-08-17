@@ -10,7 +10,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -44,7 +44,7 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 	values := map[protocolkind.ProtocolKind]string{}
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
 		backend := openRouterBackendForProtocol(t, request.Model(), protocol)
-		document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit("client-secret"), Delivery: delivery.BufferedDelivery()})
+		document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit("client-secret"), Delivery: delivery.BufferedDelivery()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,13 +56,17 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 		if !strings.HasPrefix(sessionID, "swobu_") || len(sessionID) > 256 || strings.Contains(sessionID, "client-secret") {
 			t.Fatalf("session_id = %q", sessionID)
 		}
+		const want = "swobu_d6deb586a94ed79f6f18772d40e4b3fb9e120991cecb025827e3adc3d0b199ad"
+		if sessionID != want {
+			t.Fatalf("session_id = %q, want %q", sessionID, want)
+		}
 		values[protocol] = sessionID
 	}
 	if values[protocolkind.ChatCompletions] != values[protocolkind.Responses] {
 		t.Fatalf("session ids differ across protocols: %#v", values)
 	}
 	backend := openRouterBackendForProtocol(t, request.Model(), protocolkind.ChatCompletions)
-	different, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit("different"), Delivery: delivery.BufferedDelivery()})
+	different, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit("different"), Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +75,7 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 		t.Fatal(err)
 	}
 	if differentPayload["session_id"] == values[protocolkind.ChatCompletions] {
-		t.Fatal("different affinities produced the same OpenRouter session_id")
+		t.Fatal("different cache localities produced the same OpenRouter session_id")
 	}
 	without, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
@@ -82,7 +86,7 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, exists := zeroPayload["session_id"]; exists {
-		t.Fatalf("zero affinity emitted session_id: %s", without.RawBytes())
+		t.Fatalf("zero cache locality emitted session_id: %s", without.RawBytes())
 	}
 }
 
@@ -92,8 +96,8 @@ func TestOpenRouterCacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) 
 	})
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
 		backend := openRouterBackendForProtocol(t, request.Model(), protocol)
-		project := func(exchangeID, affinity string, d delivery.Delivery) []byte {
-			document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheAffinity: cacheintent.Explicit(affinity), Delivery: d})
+		project := func(exchangeID, locality string, d delivery.Delivery) []byte {
+			document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheLocality: cachelocality.Explicit(locality), Delivery: d})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,9 +107,9 @@ func TestOpenRouterCacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) 
 			}
 			return projection
 		}
-		first := project("a", "affinity-a", delivery.BufferedDelivery())
-		second := project("b", "affinity-b", delivery.BufferedDelivery())
-		streamed := project("c", "affinity-c", delivery.StreamingDelivery(delivery.FramingSSE))
+		first := project("a", "locality-a", delivery.BufferedDelivery())
+		second := project("b", "locality-b", delivery.BufferedDelivery())
+		streamed := project("c", "locality-c", delivery.StreamingDelivery(delivery.FramingSSE))
 		if !bytes.Equal(first, second) || !bytes.Equal(first, streamed) {
 			t.Fatalf("OpenRouter %s cache-sensitive projection changed: %s / %s / %s", protocol, first, second, streamed)
 		}

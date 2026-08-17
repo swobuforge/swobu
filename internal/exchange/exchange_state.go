@@ -8,7 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -37,7 +37,7 @@ type exchangeState struct {
 	mcp                     *mcp.Run
 	providerUsage           []canonical.TokenUsage
 	effectiveChanges        []compat.Change
-	cacheAffinity           cacheintent.Affinity
+	cacheLocality           cachelocality.Key
 	reusablePrefix          trafficevidence.ReusablePrefixEvidence
 	previousRequest         *canonical.CanonicalRequest
 	polyfilled              bool
@@ -52,17 +52,17 @@ type historyAdvance struct {
 }
 
 type exchangeInput struct {
-	exchangeID         string
-	clientHandler      trafficevidence.ClientHandler
-	clientFamily       canonical.ClientFamily
-	clientDelivery     delivery.Delivery
-	request            canonical.CanonicalRequest
-	rebasedRequest     *wire.RebasedRequest
-	requestFingerprint historyfingerprint.Request
-	mcpAccess          mcp.Access
-	explicitAffinity   cacheintent.Affinity
-	workspace          routing.Workspace
-	timing             *trafficevidence.Timing
+	exchangeID            string
+	clientHandler         trafficevidence.ClientHandler
+	clientFamily          canonical.ClientFamily
+	clientDelivery        delivery.Delivery
+	request               canonical.CanonicalRequest
+	rebasedRequest        *wire.RebasedRequest
+	requestFingerprint    historyfingerprint.Request
+	mcpAccess             mcp.Access
+	explicitCacheLocality cachelocality.Key
+	workspace             routing.Workspace
+	timing                *trafficevidence.Timing
 	// requestPath is the ingress-owned normalized path, captured before the
 	// exchange runs so terminal evidence is complete on both success and failure.
 	requestPath canonical.NormalizedPath
@@ -356,7 +356,7 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		s.expectedHead = record.ID
 		previous := record.Request.Clone()
 		s.previousRequest = &previous
-		if s.input.explicitAffinity.IsZero() {
+		if s.input.explicitCacheLocality.IsZero() {
 			s, err = applyRoutePlan(s, string(record.SessionID))
 			if err != nil {
 				s.phase = failedPhase{problem: canonical.BadRequest(err.Error())}
@@ -367,19 +367,20 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	return beginMCPPreparation(s, runner)
 }
 
-// applyRoutePlan makes the effective affinity one reducer-owned fact consumed
-// by both target ordering and every provider attempt.
+// applyRoutePlan makes effective cache locality one reducer-owned fact consumed
+// by target ordering and every provider attempt. It is a stable preference;
+// normal route fallback remains available when the preferred target fails.
 func applyRoutePlan(s exchangeState, lineage string) (exchangeState, error) {
 	route, err := s.input.workspace.ResolveRoute(s.input.request.Model())
 	if err != nil {
 		return s, err
 	}
-	affinity := s.input.explicitAffinity
-	if affinity.IsZero() {
-		affinity = cacheintent.Derived(s.input.workspace.Slug().String(), lineage)
+	locality := s.input.explicitCacheLocality
+	if locality.IsZero() {
+		locality = cachelocality.Derived(s.input.workspace.Slug().String(), lineage)
 	}
-	s.cacheAffinity = affinity
-	s.route = newRoutePlan(route.Name(), routing.BuildPlan(affinity.Key(), route))
+	s.cacheLocality = locality
+	s.route = newRoutePlan(route.Name(), routing.BuildPlan(locality.Key(), route))
 	return s, nil
 }
 
