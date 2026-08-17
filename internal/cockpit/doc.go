@@ -15,6 +15,8 @@
 //   - UI packages import ports, not raw operator clients
 //   - adapters import ports and concrete clients, not UI
 //   - state belongs to the lowest component that owns the full lifecycle
+//   - inactive workspace pages retain their page-owned loaded projection when
+//     the selected workspace model is replaced
 //   - active tab is Cockpit state; focus and text cursor are go-tui state
 //
 // Launch loads the daemon-backed Cockpit read model, enters the go-tui app loop
