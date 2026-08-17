@@ -447,4 +447,11 @@ func loadCodexRolloutForBedrockProbe(t *testing.T, path string) (string, []any) 
 			if err := json.Unmarshal(item.Output, &output); err != nil {
 				t.Fatal(err)
 			}
-			input = append(input, map[string]any{"type": "function_call_output", "call_
+			input = append(input, map[string]any{"type": "function_call_output", "call_id": item.CallID, "output": output})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return instructions.String(), input
+}

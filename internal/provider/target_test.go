@@ -9,9 +9,9 @@ import (
 
 func TestTargetSnapshotExecutionProtocolRejectsSplitBrain(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		kind       protocolkind.ProtocolKind
-		name_      string
+		name        string
+		kind        protocolkind.ProtocolKind
+		name_       string
 		providerDel delivery.Delivery
 	}{
 		{name: "protocol contradicts kind", kind: protocolkind.Messages, name_: "responses", providerDel: delivery.BufferedDelivery()},

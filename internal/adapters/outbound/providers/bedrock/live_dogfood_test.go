@@ -276,4 +276,9 @@ func TestLiveBedrockMantleResponsesReasoningReplayRoundTrip(t *testing.T) {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if trimmed
+		if trimmed := strings.TrimSpace(value); trimmed != "" { // swobu:io-string source=boundary
+			return trimmed
+		}
+	}
+	return ""
+}
