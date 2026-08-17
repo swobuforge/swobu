@@ -7,8 +7,10 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
@@ -26,14 +28,16 @@ func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, 
 		t.Fatalf("NewTimingWithOptional: %v", err)
 	}
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
-		RequestID:     id,
-		Workspace:     "default",
-		ClientHandler: trafficevidence.ClientHandler(clientHandler),
-		ClientFamily:  trafficevidence.ClientFamily(providerSpec),
-		RequestPath:   canonical.NormalizedPath(requestPath),
-		ProviderSpec:  profile.ProviderID(providerSpec),
-		Route:         route,
-		Timing:        timing,
+		RequestID:      id,
+		Workspace:      "default",
+		ClientHandler:  trafficevidence.ClientHandler(clientHandler),
+		ClientFamily:   trafficevidence.ClientFamily(providerSpec),
+		RequestPath:    canonical.NormalizedPath(requestPath),
+		ProviderSpec:   profile.ProviderID(providerSpec),
+		Route:          route,
+		Timing:         timing,
+		TargetProtocol: protocolkind.Responses,
+		TargetVersion:  routing.TargetVersion(1),
 	}, trafficevidence.TerminalOutcome{
 		Result:             result,
 		StatusCode:         statusCode,
@@ -152,6 +156,7 @@ func TestReportReducer_ProjectsTTFBAndSuccessDelivery(t *testing.T) {
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
 		RequestID: id, Workspace: "default", ClientHandler: "Codex/1", RequestPath: "/responses",
 		ProviderSpec: "openai", Route: route, Timing: timing,
+		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 	}, trafficevidence.TerminalOutcome{Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"})
 	if err != nil {
 		t.Fatalf("event: %v", err)

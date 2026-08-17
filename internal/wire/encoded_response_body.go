@@ -53,6 +53,11 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 			}
 			return 0, err
 		}
+		if event.Kind == canonical.EventUsage {
+			if payload, ok := event.Payload.(canonical.UsagePayload); ok {
+				b.completion.ObserveUsage(payload.Usage)
+			}
+		}
 		encoded, err := b.encode(event)
 		if err != nil {
 			b.fail(err)

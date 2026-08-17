@@ -21,6 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/cacheintent"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/mcp"
@@ -68,6 +69,9 @@ type ClientMessageResult struct {
 type ClientRequestResult struct {
 	Request  canonical.CanonicalRequest
 	Delivery delivery.Delivery
+	// CacheAffinity is request-private placement intent. It never enters the
+	// canonical request, history fingerprint, or checkpoint representation.
+	CacheAffinity cacheintent.Affinity
 	// MCPAccess is request-private ingress state consumed by the local MCP
 	// runtime. It never enters provider projection.
 	MCPAccess mcp.Access
@@ -142,6 +146,22 @@ type ResponseCompletionSnapshot struct {
 	ResponseFingerprint *historyfingerprint.Response
 	Changes             []compat.Change
 	Compatibility       compat.Summary
+	Usage               canonical.TokenUsage
+}
+
+// ObserveUsage records the final canonical provider accounting carried through
+// client encoding. Presence bits remain intact; unknown is not converted to
+// reported zero.
+func (c *ResponseCompletion) ObserveUsage(usage canonical.TokenUsage) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.snapshot.State == CompletionFailed {
+		return
+	}
+	c.snapshot.Usage = usage
 }
 
 // ResponseCompletion is the codec-owned write-once completion cell.
@@ -204,6 +224,7 @@ func (c *ResponseCompletion) complete(fingerprint *historyfingerprint.Response, 
 	c.snapshot = ResponseCompletionSnapshot{
 		State: CompletionCompleted, ResponseFingerprint: cloned,
 		Changes: compat.CloneChanges(allChanges), Compatibility: summary,
+		Usage: c.snapshot.Usage,
 	}
 }
 

@@ -63,6 +63,7 @@ func (b *bufferedClientBody) prepare() {
 		b.err = err
 		return
 	}
+	b.completion.ObserveUsage(response.Usage())
 	b.complete(document.ResponseFingerprint, document.Changes)
 	b.reader = bytes.NewReader(document.Document.RawBytes())
 }

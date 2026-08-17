@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"testing"
@@ -8,10 +9,13 @@ import (
 	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/cacheintent"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
 
 func mustProviderRegistry(t *testing.T, client *http.Client, credentials providersruntime.CredentialProvider) ProviderRegistry {
@@ -109,6 +113,56 @@ func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 	}
 }
 
+func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionContext(t *testing.T) {
+	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "one"),
+			canonicaltest.Message(t, canonical.MessageRoleAssistant, "two"),
+		},
+	})
+	for _, manifest := range profile.All() {
+		for _, protocol := range manifest.ProviderProtocols {
+			name := string(manifest.ProviderID) + "/" + protocol.Name
+			t.Run(name, func(t *testing.T) {
+				target := advertisedProtocolTarget(manifest.ProviderID, protocol)
+				backend, err := registry.ResolveBackend(target)
+				if err != nil {
+					t.Fatalf("resolve advertised backend: %v", err)
+				}
+				project := func(exchangeID, affinity string, mode delivery.Delivery) []byte {
+					document, _, err := backend.Codec.Encode(provider.Request{
+						ExchangeID:    exchangeID,
+						Canonical:     request,
+						CacheAffinity: cacheintent.Explicit(affinity),
+						Delivery:      mode,
+					})
+					if err != nil {
+						t.Fatalf("encode advertised backend: %v", err)
+					}
+					projection, err := providertest.CacheSensitiveProjection(document)
+					if err != nil {
+						t.Fatalf("project advertised backend: %v", err)
+					}
+					return projection
+				}
+				first := project("exchange-a", "affinity-a", protocol.Delivery)
+				repeated := project("exchange-b", "affinity-b", protocol.Delivery)
+				if !bytes.Equal(first, repeated) {
+					t.Fatalf("cache-sensitive projection changed: first=%s repeated=%s", first, repeated)
+				}
+				if alternate, ok := alternateAdvertisedDelivery(manifest, protocol); ok {
+					alternateProjection := project("exchange-c", "affinity-c", alternate)
+					if !bytes.Equal(first, alternateProjection) {
+						t.Fatalf("cache-sensitive projection changed across delivery: first=%s alternate=%s", first, alternateProjection)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestAdvertisedProviderProtocolsLeaveDiscoverySupportUnknownWithoutExactTargetEvidence(t *testing.T) {
 	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
 	for _, manifest := range profile.All() {
@@ -138,5 +192,17 @@ func advertisedProtocolTarget(providerID profile.ProviderID, protocol profile.Pr
 		target = provider.NewTargetSnapshot("target", string(providerID), "https://example.test/v1", credentialRef, protocol.Kind, protocol.Name, protocol.Delivery)
 	}
 	target.Model = "model"
+	if providerID == profile.ProviderSpecWorkersAI {
+		target.Model = "@cf/example/model"
+	}
 	return target
+}
+
+func alternateAdvertisedDelivery(manifest profile.Profile, protocol profile.ProviderProtocolSpec) (delivery.Delivery, bool) {
+	for _, candidate := range manifest.ProviderProtocols {
+		if candidate.Kind == protocol.Kind && candidate.Delivery != protocol.Delivery {
+			return candidate.Delivery, true
+		}
+	}
+	return delivery.Delivery{}, false
 }

@@ -18,6 +18,7 @@ type chatCompletionsRequestDTO struct {
 	ReasoningEffort        json.RawMessage             `json:"reasoning_effort,omitempty"`
 	Stream                 json.RawMessage             `json:"stream,omitempty"`
 	StreamOptions          json.RawMessage             `json:"stream_options,omitempty"`
+	PromptCacheKey         *string                     `json:"prompt_cache_key,omitempty"`
 }
 
 type chatCompletionsMessageDTO struct {

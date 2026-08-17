@@ -2,19 +2,28 @@
 
 ![Swobu](./assets/readme/swobu-readme-hero.png)
 
-## Keep the client. Swap the backend.
+## Make AI capacity routable.
 
-Swobu is a local compatibility boundary for Claude Code, Codex, and other AI
-clients. Route across providers without silently losing tools, reasoning, or
-session state.
+[Swobu](https://swobu.com/) is local-first routing infrastructure for AI
+workloads. Pool capacity across providers, accounts, regions, and local
+infrastructure behind stable routes. Swobu resolves each workload across
+eligible targets according to your configured policy.
 
 <video src="https://github.com/user-attachments/assets/ccaf3a78-eda0-4391-a493-d4ba6921fef0" controls muted playsinline width="640"></video>
 
-*One backend lacks a capability the request needs. Swobu skips it and runs the other — the coding session continues.*
+*One route. Many targets. Only eligible capacity runs the workload.*
 
-Point Claude Code, Codex, or another AI client at one local endpoint. Keep provider URLs, credentials, and routing at the boundary — not in the client. Swap the backend without accepting the provider's default boundary.
+Point Claude Code, Codex, or another supported AI client at one local endpoint.
+Keep provider URLs, credentials, target ordering, and fallback at the routing
+boundary—not in every client.
 
-> The client names the route. Swobu selects the target.
+> Pool fragmented AI capacity. Route workloads across it.
+
+Simple gateways aggregate endpoints. Simple failover retries elsewhere. Swobu
+also checks whether a target can represent the workload. It skips an
+incompatible candidate and keeps walking. If no eligible target remains, Swobu
+fails explicitly instead of silently dropping tools, reasoning, streaming, or
+continuation state.
 
 Swobu is beta. Behavior can change between releases.
 

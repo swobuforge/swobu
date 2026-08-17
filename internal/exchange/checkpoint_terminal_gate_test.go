@@ -65,6 +65,9 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 	if record.History != nil {
 		t.Fatalf("optional history fingerprint = %#v, want absent", record.History)
 	}
+	if record.SessionID != session.ClientSessionID(record.ID) {
+		t.Fatalf("genesis session ID = %q, want checkpoint ID %q", record.SessionID, record.ID)
+	}
 }
 
 func TestCheckpointCaptureRejectsNativeHandleForAnotherTarget(t *testing.T) {

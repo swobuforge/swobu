@@ -21,6 +21,7 @@ type responsesRequestDTO struct {
 	Reasoning              *responsesReasoningRequestDTO `json:"reasoning,omitempty"`
 	Include                json.RawMessage               `json:"include,omitempty"`
 	ClientMetadata         map[string]string             `json:"client_metadata,omitempty"`
+	PromptCacheKey         *string                       `json:"prompt_cache_key,omitempty"`
 }
 
 type responsesReasoningRequestDTO struct {

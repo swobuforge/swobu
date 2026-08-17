@@ -65,6 +65,77 @@ func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHistoryFingerprint_IgnoresInvocationLocalMetadata(t *testing.T) {
+	plainRequest := []chatCompletionsMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
+	controlledRequest := []chatCompletionsMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello","prompt_cache_breakpoint":{"ttl":"5m"}}]`)}}
+	changedRequest := []chatCompletionsMessageDTO{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello!"}]`)}}
+
+	plainRequestFingerprint, err := fingerprintChatCompletionsRequest(plainRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledRequestFingerprint, err := fingerprintChatCompletionsRequest(controlledRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedRequestFingerprint, err := fingerprintChatCompletionsRequest(changedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledRequestFingerprint != plainRequestFingerprint {
+		t.Fatal("invocation-local content metadata changed Chat request history identity")
+	}
+	if changedRequestFingerprint == plainRequestFingerprint {
+		t.Fatal("changed Chat text retained request history identity")
+	}
+
+	plainResponse := []chatCompletionsMessageDTO{{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"hi"}]`)}}
+	controlledResponse := []chatCompletionsMessageDTO{{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"hi","prompt_cache_breakpoint":{"ttl":"5m"}}]`)}}
+	plainResponseFingerprint, err := fingerprintChatCompletionsResponseMessages(plainResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledResponseFingerprint, err := fingerprintChatCompletionsResponseMessages(controlledResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledResponseFingerprint != plainResponseFingerprint {
+		t.Fatal("invocation-local content metadata changed Chat response history identity")
+	}
+
+	plainHistory, err := historyfingerprint.Advance(nil, plainRequestFingerprint, plainResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlledHistory, err := historyfingerprint.Advance(nil, controlledRequestFingerprint, controlledResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controlledHistory != plainHistory {
+		t.Fatal("invocation-local content metadata changed completed Chat history identity")
+	}
+
+	stringContent := json.RawMessage(`"hello"`)
+	normalizedString, err := normalizeChatHistoryContent(stringContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(normalizedString) != string(stringContent) {
+		t.Fatalf("normalized string content = %s, want exact %s", normalizedString, stringContent)
+	}
+	changedString, err := fingerprintChatCompletionsRequest([]chatCompletionsMessageDTO{{Role: "user", Content: json.RawMessage(`"hello!"`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseString, err := fingerprintChatCompletionsRequest([]chatCompletionsMessageDTO{{Role: "user", Content: stringContent}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedString == baseString {
+		t.Fatal("changed Chat string content retained request history identity")
+	}
+}
+
 func TestHistoryFingerprintExcludesCurrentLeadingContext(t *testing.T) {
 	first := decodeChatFingerprintRequest(t, `{
 		"model":"m",

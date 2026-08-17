@@ -4,8 +4,28 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
+
+func TestResponseCompletionPreservesCacheUsagePresence(t *testing.T) {
+	cell, complete, _ := NewResponseCompletion()
+	zero := 0
+	write := 7
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{CacheReadTokens: &zero, CacheWriteTokens: &write})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell.ObserveUsage(usage)
+	complete(nil, nil)
+	got := cell.Snapshot().Usage
+	if value, ok := got.CacheReadTokens(); !ok || value != 0 {
+		t.Fatalf("cache read = %d, %t", value, ok)
+	}
+	if value, ok := got.CacheWriteTokens(); !ok || value != 7 {
+		t.Fatalf("cache write = %d, %t", value, ok)
+	}
+}
 
 func TestResponseCompletionIsWriteOnceAndNonBlocking(t *testing.T) {
 	observation, complete, fail := NewResponseCompletion()

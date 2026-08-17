@@ -69,6 +69,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	providerRequest := provider.Request{
 		ExchangeID:    s.input.exchangeID,
+		CacheAffinity: s.cacheAffinity,
 		Canonical:     bindRequestToTarget(attemptRequest, path.target.Model),
 		TargetSupport: targetSupport,
 		Delivery:      path.delivery,

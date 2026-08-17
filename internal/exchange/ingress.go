@@ -130,16 +130,17 @@ type RequestOutput struct {
 // TrafficEvidenceInput is the immutable exchange fact set completed by the
 // inbound delivery owner's concrete DeliveryResult.
 type TrafficEvidenceInput struct {
-	workspace     routing.Workspace
-	routeName     routing.RouteName
-	exchangeID    string
-	clientHandler trafficevidence.ClientHandler
-	clientFamily  canonical.ClientFamily
-	requestPath   canonical.NormalizedPath
-	request       canonical.CanonicalRequest
-	target        provider.TargetSnapshot
-	response      ClientResponse
-	routing       terminalRoutingEvidence
+	workspace      routing.Workspace
+	routeName      routing.RouteName
+	exchangeID     string
+	clientHandler  trafficevidence.ClientHandler
+	clientFamily   canonical.ClientFamily
+	requestPath    canonical.NormalizedPath
+	request        canonical.CanonicalRequest
+	target         provider.TargetSnapshot
+	response       ClientResponse
+	routing        terminalRoutingEvidence
+	reusablePrefix trafficevidence.ReusablePrefixEvidence
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -263,6 +264,12 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.R
 		ProviderSpec:          profile.ProviderID(evidence.target.ProviderSpec),
 		ProviderModel:         evidence.target.Model,
 		ExchangeDiagnostics:   diagnostics,
+		TargetProtocol:        evidence.target.ProtocolKind,
+		TargetVersion:         routing.TargetVersion(evidence.target.TargetVersion),
+		ReusablePrefix:        evidence.reusablePrefix,
+	}
+	if completion := responseCompletion(evidence.response); completion != nil {
+		base.TokenUsage = trafficTokenUsage(completion.Snapshot().Usage)
 	}
 	outcome := trafficevidence.TerminalOutcome{
 		Result:             resultClass,
@@ -273,6 +280,29 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.R
 		FallbackRecovered:  evidence.routing.fallbackRecovered,
 	}
 	return trafficevidence.NewTerminalTrafficEvent(base, outcome)
+}
+
+func trafficTokenUsage(usage canonical.TokenUsage) trafficevidence.TokenUsage {
+	input, hasInput := usage.InputTokens()
+	output, hasOutput := usage.OutputTokens()
+	reasoning, hasReasoning := usage.ReasoningTokens()
+	cacheRead, hasCacheRead := usage.CacheReadTokens()
+	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
+	pointer := func(value int, present bool) *int {
+		if !present {
+			return nil
+		}
+		return &value
+	}
+	converted, err := trafficevidence.NewTokenUsage(trafficevidence.TokenUsageParams{
+		InputTokens: pointer(input, hasInput), OutputTokens: pointer(output, hasOutput),
+		ReasoningTokens: pointer(reasoning, hasReasoning), CacheReadTokens: pointer(cacheRead, hasCacheRead),
+		CacheWriteTokens: pointer(cacheWrite, hasCacheWrite),
+	})
+	if err != nil {
+		return trafficevidence.TokenUsage{}
+	}
+	return converted
 }
 
 func requestOutcomeEvidence(deliveryResult delivery.Result, response ClientResponse) (trafficevidence.ResultClass, int) {

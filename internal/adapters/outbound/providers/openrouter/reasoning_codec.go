@@ -3,6 +3,7 @@ package openrouter
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,6 +44,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
 		return carrier.Document{}, changes, err
 	}
+	applyOpenRouterSession(document.Payload, req)
 	environment, err := canonical.EffectiveTools(req.Canonical)
 	if err != nil {
 		return carrier.Document{}, changes, err
@@ -505,19 +507,7 @@ var _ provider.Codec = reasoningCodec{}
 type responsesCodec struct{ standard protocolcodec.Codec }
 
 func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
-		return carrier.Document{}, nil, err
-	}
-	var changes []compat.Change
-	document, err := func(sink *[]compat.Change) (responses.ProviderRequestDocument, error) {
-		return responses.LowerProviderRequestDocument(
-			responses.EncodeInput{Request: req.Canonical, ToolNames: req.ToolNames},
-			req.Delivery,
-			sink,
-			req.ExchangeID,
-			responses.EncodeOptions{},
-		)
-	}(&changes)
+	document, changes, err := protocolcodec.LowerResponsesRequest(req)
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
@@ -527,6 +517,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 		}
 	}
 	replaceOpenRouterWebSearchChoice(document.ToolChoice)
+	applyOpenRouterSession(document.Payload, req)
 	encoded, err := responses.EncodeProviderRequestDocument(document)
 	return encoded, changes, err
 }
@@ -536,6 +527,14 @@ func (c responsesCodec) Decode(ctx context.Context, req provider.Request, ingres
 }
 
 var _ provider.Codec = responsesCodec{}
+
+func applyOpenRouterSession(payload map[string]any, req provider.Request) {
+	if req.CacheAffinity.IsZero() {
+		return
+	}
+	sum := sha256.Sum256([]byte("openrouter-session:v1\x00" + req.CacheAffinity.Key()))
+	payload["session_id"] = fmt.Sprintf("swobu_%x", sum)
+}
 
 func replaceOpenRouterWebSearchChoice(choice any) {
 	object, ok := choice.(map[string]any)

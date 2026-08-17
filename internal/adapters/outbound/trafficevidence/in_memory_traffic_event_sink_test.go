@@ -3,9 +3,12 @@ package trafficevidence
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 func TestProjectStatus_ReconcilesInflightIntoTerminalRow(t *testing.T) {
@@ -16,6 +19,7 @@ func TestProjectStatus_ReconcilesInflightIntoTerminalRow(t *testing.T) {
 		RequestID: requestID, Workspace: "acme", RequestPath: "/responses",
 		Route: route, ProviderSpec: "openai", ProviderModel: "model-a",
 		WorkspaceRouteModelID: "chatgpt-dmytrii",
+		TargetProtocol:        protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 	}
 	inflight, err := trafficevidence.NewProviderInflightTrafficEvent(base, 1)
 	if err != nil {
@@ -74,13 +78,16 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme", RequestPath: "/responses",
-		RequestID:     requestID,
-		Route:         route,
-		Timing:        timing,
-		TokenUsage:    usage,
-		ClientFamily:  trafficevidence.ClientFamily("responses"),
-		ProviderSpec:  "anthropic",
-		ProviderModel: "claude-sonnet-4-6",
+		RequestID:      requestID,
+		Route:          route,
+		Timing:         timing,
+		TokenUsage:     usage,
+		ReusablePrefix: trafficevidence.PreservedReusablePrefix(),
+		TargetProtocol: protocolkind.Messages,
+		TargetVersion:  routing.TargetVersion(7),
+		ClientFamily:   trafficevidence.ClientFamily("responses"),
+		ProviderSpec:   "anthropic",
+		ProviderModel:  "claude-sonnet-4-6",
 		Mutations: []trafficevidence.Mutation{{
 			Stage:         "encode",
 			PatchID:       "p.encode",
@@ -123,7 +130,11 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if _, ok := row["token_usage"]; !ok {
 		t.Fatalf("row missing token_usage object: %#v", row)
 	}
-	if row["provider_spec"] != "anthropic" || row["provider_model"] != "claude-sonnet-4-6" {
+	prefixRaw, ok := row["reusable_prefix"].(map[string]any)
+	if !ok || prefixRaw["state"] != "preserved" || len(prefixRaw) != 1 {
+		t.Fatalf("row prefix = %#v", row["reusable_prefix"])
+	}
+	if row["provider_spec"] != "anthropic" || row["provider_model"] != "claude-sonnet-4-6" || row["target_protocol"] != "messages" || row["target_version"] != float64(7) {
 		t.Fatalf("row resolved target = %#v/%#v", row["provider_spec"], row["provider_model"])
 	}
 	if _, ok := row["wire_patch_mutations"]; !ok {
@@ -188,6 +199,34 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	for _, forbidden := range []string{"ttfb_millis", "dur_millis", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"} {
 		if _, ok := row[forbidden]; ok {
 			t.Fatalf("row still exposes flattened field %q: %#v", forbidden, row)
+		}
+	}
+}
+
+func TestProjectStatus_PreservesAbsentZeroAndPositiveCacheCounters(t *testing.T) {
+	values := []*int{nil, func() *int { value := 0; return &value }(), func() *int { value := 9; return &value }()}
+	for index, value := range values {
+		store := NewTrafficEventStore(StoreConfig{})
+		requestID, _ := trafficevidence.ParseRequestID(fmt.Sprintf("req_cache_%d", index))
+		route, _ := trafficevidence.NewRoute("target", "model")
+		usage, _ := trafficevidence.NewTokenUsage(trafficevidence.TokenUsageParams{CacheReadTokens: value, CacheWriteTokens: value})
+		event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
+			RequestID: requestID, Workspace: "acme", RequestPath: "/responses", Route: route, ProviderSpec: "openai", TokenUsage: usage,
+			TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
+		}, trafficevidence.TerminalOutcome{Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.Append(context.Background(), event)
+		row := store.ProjectStatus(ProjectionInput{}).RecentTraffic[0]
+		if value == nil {
+			if row.TokenUsage != nil {
+				t.Fatalf("absent counters projected as %#v", row.TokenUsage)
+			}
+			continue
+		}
+		if row.TokenUsage == nil || row.TokenUsage.CacheReadTokens == nil || *row.TokenUsage.CacheReadTokens != *value || row.TokenUsage.CacheWriteTokens == nil || *row.TokenUsage.CacheWriteTokens != *value {
+			t.Fatalf("counter %d projected as %#v", *value, row.TokenUsage)
 		}
 	}
 }

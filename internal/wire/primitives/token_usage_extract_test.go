@@ -49,3 +49,32 @@ func TestExtractTokenUsage_ReturnsUnknownForMissingUsage(t *testing.T) {
 		t.Fatal("reasoning tokens should be unknown")
 	}
 }
+
+func TestExtractTokenUsage_PreservesCacheCounterPresence(t *testing.T) {
+	spec := TokenUsagePathSpec{
+		CacheReadPaths: [][]string{{"usage", "cached"}}, CacheWritePaths: [][]string{{"usage", "written"}},
+	}
+	tests := []struct {
+		name    string
+		raw     string
+		value   int
+		present bool
+	}{
+		{name: "absent", raw: `{"usage":{}}`},
+		{name: "zero", raw: `{"usage":{"cached":0,"written":0}}`, present: true},
+		{name: "positive", raw: `{"usage":{"cached":11,"written":7}}`, value: 11, present: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			usage := ExtractTokenUsage([]byte(test.raw), spec)
+			read, readPresent := usage.CacheReadTokens()
+			write, writePresent := usage.CacheWriteTokens()
+			if readPresent != test.present || writePresent != test.present || read != test.value {
+				t.Fatalf("read/write = (%d,%t)/(%d,%t)", read, readPresent, write, writePresent)
+			}
+			if test.name == "positive" && write != 7 {
+				t.Fatalf("write = %d", write)
+			}
+		})
+	}
+}

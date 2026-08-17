@@ -1,6 +1,7 @@
 package chatcompletions
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -71,7 +72,11 @@ func fingerprintChatCompletionsHistory(messages []chatCompletionsMessageDTO) (ch
 func fingerprintChatCompletionsRequest(messages []chatCompletionsMessageDTO) (historyfingerprint.Request, error) {
 	history := make([]chatCompletionsHistoryMessageDTO, len(messages))
 	for index, message := range messages {
-		history[index] = chatHistoryMessageFromRequest(message)
+		var err error
+		history[index], err = chatHistoryMessageFromRequest(message)
+		if err != nil {
+			return historyfingerprint.Request{}, err
+		}
 	}
 	raw, err := json.Marshal(history)
 	if err != nil {
@@ -99,7 +104,11 @@ func chatCompletionsLeadingContextEnd(messages []chatCompletionsMessageDTO) int 
 func fingerprintChatCompletionsResponseMessages(messages []chatCompletionsMessageDTO) (historyfingerprint.Response, error) {
 	history := make([]chatCompletionsHistoryMessageDTO, len(messages))
 	for index, message := range messages {
-		history[index] = chatHistoryMessageFromRequest(message)
+		var err error
+		history[index], err = chatHistoryMessageFromRequest(message)
+		if err != nil {
+			return historyfingerprint.Response{}, err
+		}
 	}
 	raw, err := json.Marshal(history)
 	if err != nil {
@@ -196,13 +205,48 @@ func (s *chatCompletionsResponseHistoryState) fingerprint() (historyfingerprint.
 	return historyfingerprint.FingerprintResponse(fingerprintScheme, material)
 }
 
-func chatHistoryMessageFromRequest(message chatCompletionsMessageDTO) chatCompletionsHistoryMessageDTO {
+func chatHistoryMessageFromRequest(message chatCompletionsMessageDTO) (chatCompletionsHistoryMessageDTO, error) {
+	content, err := normalizeChatHistoryContent(message.Content)
+	if err != nil {
+		return chatCompletionsHistoryMessageDTO{}, err
+	}
 	return chatCompletionsHistoryMessageDTO{
 		Role:       message.Role,
-		Content:    append(json.RawMessage(nil), message.Content...),
+		Content:    content,
 		ToolCalls:  append([]chatCompletionsToolCallDTO(nil), message.ToolCalls...),
 		ToolCallID: message.ToolCallID,
+	}, nil
+}
+
+// normalizeChatHistoryContent removes only invocation-local controls admitted
+// inside content-part objects. Sibling protocol fields and part order remain
+// client-history identity; scalar content retains its exact representation.
+func normalizeChatHistoryContent(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return append(json.RawMessage(nil), raw...), nil
 	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(trimmed, &parts); err != nil {
+		return nil, err
+	}
+	for index := range parts {
+		part := bytes.TrimSpace(parts[index])
+		if len(part) == 0 || part[0] != '{' {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(part, &object); err != nil {
+			return nil, err
+		}
+		delete(object, "prompt_cache_breakpoint")
+		normalized, err := json.Marshal(object)
+		if err != nil {
+			return nil, err
+		}
+		parts[index] = normalized
+	}
+	return json.Marshal(parts)
 }
 
 // chatCompletionsFingerprintingEncoder marks completion in the same Encode
