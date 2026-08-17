@@ -44,7 +44,7 @@ func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat
 	if err := decorateOpenRouterThinking(&document, req.Canonical.Items()); err != nil {
 		return carrier.Document{}, changes, err
 	}
-	applyOpenRouterSession(document.Payload, req)
+	applyOpenRouterCacheLocality(document.Payload, req)
 	environment, err := canonical.EffectiveTools(req.Canonical)
 	if err != nil {
 		return carrier.Document{}, changes, err
@@ -517,7 +517,7 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 		}
 	}
 	replaceOpenRouterWebSearchChoice(document.ToolChoice)
-	applyOpenRouterSession(document.Payload, req)
+	applyOpenRouterCacheLocality(document.Payload, req)
 	encoded, err := responses.EncodeProviderRequestDocument(document)
 	return encoded, changes, err
 }
@@ -528,11 +528,14 @@ func (c responsesCodec) Decode(ctx context.Context, req provider.Request, ingres
 
 var _ provider.Codec = responsesCodec{}
 
-func applyOpenRouterSession(payload map[string]any, req provider.Request) {
-	if req.CacheAffinity.IsZero() {
+func applyOpenRouterCacheLocality(payload map[string]any, req provider.Request) {
+	if req.CacheLocality.IsZero() {
 		return
 	}
-	sum := sha256.Sum256([]byte("openrouter-session:v1\x00" + req.CacheAffinity.Key()))
+	// OpenRouter calls this provider-side sticky-routing primitive session_id.
+	// Lowering CacheLocality here does not make it a Swobu conversation/session
+	// identity; history and checkpoints remain the continuity authority.
+	sum := sha256.Sum256([]byte("openrouter-session:v1\x00" + req.CacheLocality.Key()))
 	payload["session_id"] = fmt.Sprintf("swobu_%x", sum)
 }
 

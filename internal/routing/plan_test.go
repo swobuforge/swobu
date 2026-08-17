@@ -60,8 +60,8 @@ func TestBuildPlanIgnoresConfigurationOrderWithinTier(t *testing.T) {
 	name, _ := ParseRouteName("chat")
 	firstRoute, _ := NewRoute(name, []Tier{firstTier})
 	secondRoute, _ := NewRoute(name, []Tier{secondTier})
-	first := BuildPlan("affinity", firstRoute)
-	second := BuildPlan("affinity", secondRoute)
+	first := BuildPlan("placement-key", firstRoute)
+	second := BuildPlan("placement-key", secondRoute)
 	for index := range first {
 		if first[index].ID() != second[index].ID() {
 			t.Fatalf("plans differ at %d: %s != %s", index, first[index].ID(), second[index].ID())
@@ -76,7 +76,7 @@ func TestBuildPlanSeparatesRouteNames(t *testing.T) {
 	secondName, _ := ParseRouteName("second")
 	firstRoute, _ := NewRoute(firstName, []Tier{tier})
 	secondRoute, _ := NewRoute(secondName, []Tier{tier})
-	if reflect.DeepEqual(BuildPlan("affinity", firstRoute), BuildPlan("affinity", secondRoute)) {
+	if reflect.DeepEqual(BuildPlan("placement-key", firstRoute), BuildPlan("placement-key", secondRoute)) {
 		t.Fatal("different route names unexpectedly produced an identical plan")
 	}
 }

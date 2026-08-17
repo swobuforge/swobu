@@ -21,7 +21,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/mcp"
@@ -69,9 +69,9 @@ type ClientMessageResult struct {
 type ClientRequestResult struct {
 	Request  canonical.CanonicalRequest
 	Delivery delivery.Delivery
-	// CacheAffinity is request-private placement intent. It never enters the
+	// CacheLocality is request-private cache placement. It never enters the
 	// canonical request, history fingerprint, or checkpoint representation.
-	CacheAffinity cacheintent.Affinity
+	CacheLocality cachelocality.Key
 	// MCPAccess is request-private ingress state consumed by the local MCP
 	// runtime. It never enters provider projection.
 	MCPAccess mcp.Access

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -61,7 +61,7 @@ func TestOpenAIEmitsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit(" Raw Key "), Delivery: delivery.BufferedDelivery()})
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit(" Raw Key "), Delivery: delivery.BufferedDelivery()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestOpenAIEmitsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, exists := zeroPayload["prompt_cache_key"]; exists {
-				t.Fatalf("zero affinity emitted prompt_cache_key: %s", without.RawBytes())
+				t.Fatalf("zero cache locality emitted prompt_cache_key: %s", without.RawBytes())
 			}
 		})
 	}
@@ -91,7 +91,7 @@ func TestOpenAIBoundsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 	})
-	longKey := cacheintent.Derived("workspace", "lineage").Key()
+	longKey := cachelocality.Derived("workspace", "lineage").Key()
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
 		t.Run(string(protocol), func(t *testing.T) {
 			target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocol, string(protocol), delivery.BufferedDelivery())
@@ -101,7 +101,7 @@ func TestOpenAIBoundsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 				t.Fatal(err)
 			}
 			project := func(key string) string {
-				document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheAffinity: cacheintent.Explicit(key), Delivery: delivery.BufferedDelivery()})
+				document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit(key), Delivery: delivery.BufferedDelivery()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -120,7 +120,7 @@ func TestOpenAIBoundsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 				t.Fatalf("bounded prompt_cache_key is unstable: %q / %q", bounded, repeated)
 			}
 			if different := project(longKey + "y"); different == bounded {
-				t.Fatalf("different long affinity collapsed to %q", bounded)
+				t.Fatalf("different long cache locality collapsed to %q", bounded)
 			}
 			unicodeBoundary := strings.Repeat("é", 64)
 			if projected := project(unicodeBoundary); projected != unicodeBoundary {
@@ -142,8 +142,8 @@ func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			project := func(exchangeID, affinity string, d delivery.Delivery) []byte {
-				document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheAffinity: cacheintent.Explicit(affinity), Delivery: d})
+			project := func(exchangeID, locality string, d delivery.Delivery) []byte {
+				document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheLocality: cachelocality.Explicit(locality), Delivery: d})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -153,9 +153,9 @@ func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
 				}
 				return projection
 			}
-			first := project("a", "affinity-a", delivery.BufferedDelivery())
-			second := project("b", "affinity-b", delivery.BufferedDelivery())
-			streamed := project("c", "affinity-c", delivery.StreamingDelivery(delivery.FramingSSE))
+			first := project("a", "locality-a", delivery.BufferedDelivery())
+			second := project("b", "locality-b", delivery.BufferedDelivery())
+			streamed := project("c", "locality-c", delivery.StreamingDelivery(delivery.FramingSSE))
 			if !bytes.Equal(first, second) || !bytes.Equal(first, streamed) {
 				t.Fatalf("OpenAI cache-sensitive projection changed: %s / %s / %s", first, second, streamed)
 			}

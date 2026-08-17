@@ -14,7 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -1351,7 +1351,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preferred := routing.BuildPlan(cacheintent.Derived("dev", string(started.ID)).Key(), route)[0].ID().String()
+	preferred := routing.BuildPlan(cachelocality.Derived("dev", string(started.ID)).Key(), route)[0].ID().String()
 	providerCalls := 0
 	runner := withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 		providerCalls++
@@ -1377,7 +1377,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	}
 }
 
-func TestApplyRoutePlanUsesLineageOrExplicitAffinityNotExchangeID(t *testing.T) {
+func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testing.T) {
 	slug, _ := routing.ParseWorkspaceSlug("dev")
 	routeName, _ := routing.ParseRouteName("a")
 	tier, _ := routing.NewTier([]routing.Target{
@@ -1398,11 +1398,11 @@ func TestApplyRoutePlanUsesLineageOrExplicitAffinityNotExchangeID(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(first.route.targets, second.route.targets) || first.cacheAffinity != second.cacheAffinity {
-		t.Fatal("exchange ID changed lineage affinity routing")
+	if !reflect.DeepEqual(first.route.targets, second.route.targets) || first.cacheLocality != second.cacheLocality {
+		t.Fatal("exchange ID changed lineage cache-locality routing")
 	}
 
-	base.input.explicitAffinity = cacheintent.Explicit("client-key")
+	base.input.explicitCacheLocality = cachelocality.Explicit("client-key")
 	explicitFirst, err := applyRoutePlan(base, "lineage-1")
 	if err != nil {
 		t.Fatal(err)
@@ -1411,7 +1411,7 @@ func TestApplyRoutePlanUsesLineageOrExplicitAffinityNotExchangeID(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(explicitFirst.route.targets, explicitSecond.route.targets) || explicitFirst.cacheAffinity.Key() != "client-key" {
-		t.Fatal("lineage overrode explicit client affinity")
+	if !reflect.DeepEqual(explicitFirst.route.targets, explicitSecond.route.targets) || explicitFirst.cacheLocality.Key() != "client-key" {
+		t.Fatal("lineage overrode explicit client cache locality")
 	}
 }

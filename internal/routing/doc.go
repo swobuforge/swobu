@@ -13,7 +13,8 @@
 // Exchange owns the issued provider-call attempt lifecycle, and one position
 // may produce zero or more calls without changing routing order.
 // Equal-tier target ordering is a deterministic projection of an opaque cache
-// affinity, route name, tier index, and stable target IDs. Configured position
+// placement key, route name, tier index, and stable target IDs. Routing treats
+// that key as opaque; its caller owns cache-locality semantics. Configured position
 // inside a tier is normalized away because Tier assigns it no semantics.
 //
 // Route resolution gives exact configured names precedence. Any other

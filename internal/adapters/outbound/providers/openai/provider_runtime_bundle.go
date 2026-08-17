@@ -81,8 +81,8 @@ func (c chatCompletionsCodec) Encode(req provider.Request) (carrier.Document, []
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	if !req.CacheAffinity.IsZero() {
-		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheAffinity.Key())
+	if !req.CacheLocality.IsZero() {
+		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheLocality.Key())
 	}
 	if document.MaxTokens != nil {
 		document.MaxCompletionTokens = document.MaxTokens
@@ -103,8 +103,8 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	if !req.CacheAffinity.IsZero() {
-		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheAffinity.Key())
+	if !req.CacheLocality.IsZero() {
+		document.Payload["prompt_cache_key"] = openAIPromptCacheKey(req.CacheLocality.Key())
 	}
 	encoded, err := responses.EncodeProviderRequestDocument(document)
 	return encoded, changes, err
@@ -112,10 +112,10 @@ func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat
 
 var _ provider.Codec = responsesCodec{}
 
-// openAIPromptCacheKey keeps portable affinity unconstrained until the OpenAI
+// openAIPromptCacheKey keeps portable cache locality unconstrained until the OpenAI
 // edge, whose public request contract accepts at most 64 characters. Hashing
 // only oversized values preserves client-owned short keys and gives derived or
-// long explicit affinities one stable, non-revealing provider identity.
+// long explicit locality keys one stable, non-revealing provider identity.
 func openAIPromptCacheKey(key string) string {
 	if utf8.RuneCountInString(key) <= openAIPromptCacheKeyMaxCharacters {
 		return key

@@ -9,7 +9,7 @@ import (
 	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -131,11 +131,11 @@ func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionC
 				if err != nil {
 					t.Fatalf("resolve advertised backend: %v", err)
 				}
-				project := func(exchangeID, affinity string, mode delivery.Delivery) []byte {
+				project := func(exchangeID, locality string, mode delivery.Delivery) []byte {
 					document, _, err := backend.Codec.Encode(provider.Request{
 						ExchangeID:    exchangeID,
 						Canonical:     request,
-						CacheAffinity: cacheintent.Explicit(affinity),
+						CacheLocality: cachelocality.Explicit(locality),
 						Delivery:      mode,
 					})
 					if err != nil {
@@ -147,13 +147,13 @@ func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionC
 					}
 					return projection
 				}
-				first := project("exchange-a", "affinity-a", protocol.Delivery)
-				repeated := project("exchange-b", "affinity-b", protocol.Delivery)
+				first := project("exchange-a", "locality-a", protocol.Delivery)
+				repeated := project("exchange-b", "locality-b", protocol.Delivery)
 				if !bytes.Equal(first, repeated) {
 					t.Fatalf("cache-sensitive projection changed: first=%s repeated=%s", first, repeated)
 				}
 				if alternate, ok := alternateAdvertisedDelivery(manifest, protocol); ok {
-					alternateProjection := project("exchange-c", "affinity-c", alternate)
+					alternateProjection := project("exchange-c", "locality-c", alternate)
 					if !bytes.Equal(first, alternateProjection) {
 						t.Fatalf("cache-sensitive projection changed across delivery: first=%s alternate=%s", first, alternateProjection)
 					}

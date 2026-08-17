@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/cacheintent"
+	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -37,9 +37,10 @@ type Request struct {
 	// ExchangeID correlates progressive response events for this invocation. It
 	// is execution context, not part of canonical request semantics.
 	ExchangeID string
-	// CacheAffinity is attempt-scoped cache-locality identity. It is execution
-	// context, not model intent, cache materialization, or persistence policy.
-	CacheAffinity cacheintent.Affinity
+	// CacheLocality is attempt-scoped cache placement. It is neither
+	// conversation identity nor model intent, cache materialization, or
+	// persistence policy.
+	CacheLocality cachelocality.Key
 	Canonical     canonical.CanonicalRequest
 	// TargetSupport is the immutable knowledge snapshot resolved for this exact
 	// attempt. Feature owners decide how Unknown affects their own behavior.
