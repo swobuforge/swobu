@@ -219,10 +219,29 @@ func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel, preserveDraftPa
 	c.ActiveTabIndex.Set(activeTab)
 	c.BodyViewport.Reset()
 	c.WorkspacePages = c.workspacePagesByTab(model)
+	c.preserveInactiveWorkspacePages(previousPages, model)
 	if preserveDraftPages {
 		c.preserveDraftWorkspacePages(previousPages, model)
 	}
 	c.HelpPage = help_page.View(model.Help)
+}
+
+// preserveInactiveWorkspacePages keeps each inactive tab's page-owned loaded
+// data and interaction lifetime. CockpitReadModel carries full workspace data
+// only for the selected tab, so rebuilding inactive pages from tab summaries
+// would falsely project persisted routes as empty.
+func (c *Cockpit) preserveInactiveWorkspacePages(previous map[readmodel.WorkspaceID]*workspace_page.PageView, model readmodel.CockpitReadModel) {
+	if previous == nil {
+		return
+	}
+	for _, tab := range model.Tabs {
+		if tab.Selected || tab.Kind == readmodel.WorkspaceTabHelp {
+			continue
+		}
+		if page := previous[tab.ID]; page != nil {
+			c.WorkspacePages[tab.ID] = page
+		}
+	}
 }
 
 // preserveDraftWorkspacePages carries unsaved [+] workflow state across a

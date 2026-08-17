@@ -245,6 +245,46 @@ func TestCockpit_DraftWorkspaceNameEnterContinuesLocalOnboarding(t *testing.T) {
 	}
 }
 
+func TestCockpit_NamingDraftPreservesExistingWorkspaceRoutes(t *testing.T) {
+	personalRoute := readmodel.RouteReadModel{ID: "personal-route", ModelName: "personal-route", Enabled: true}
+	model := readmodel.CockpitReadModel{
+		Tabs: []readmodel.WorkspaceTabReadModel{
+			{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true},
+			{ID: "+", Kind: readmodel.WorkspaceTabDraft},
+			{ID: "?", Kind: readmodel.WorkspaceTabHelp},
+		},
+		SelectedWorkspaceID: "personal",
+		SelectedWorkspace: readmodel.WorkspaceReadModel{
+			ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting,
+			Routes: []readmodel.RouteReadModel{personalRoute},
+		},
+		ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	commands := &workspaceCreateCommands{}
+	root := NewCockpitWithContext(model, context.Background(), &workspaceCreateQueries{}, commands)
+	h, err := testkit.NewHarnessAt(root, 100, 24)
+	if err != nil {
+		t.Fatalf("NewHarnessAt: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyTab})
+	for _, r := range "demo" {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: r})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if commands.saveCalls != 0 {
+		t.Fatalf("draft naming crossed workspace save port %d times", commands.saveCalls)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyTab, Mod: tui.ModShift})
+
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "[› personal]") || !strings.Contains(frame, "personal-route") {
+		t.Fatalf("existing workspace lost routes after named-draft round trip:\n%s", frame)
+	}
+}
+
 func TestCockpit_WorkspaceNoticeReachesShellUnchanged(t *testing.T) {
 	model := readmodel.CockpitReadModel{
 		Tabs: []readmodel.WorkspaceTabReadModel{
