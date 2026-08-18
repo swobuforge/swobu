@@ -27,6 +27,8 @@ workspaces:
               - {id: workersai, model: '@cf/meta/example', protocol: responses_stream, connection: {workersai: {base_url: https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1, credential: env:CLOUDFLARE_API_TOKEN}}}
               - {id: llm7, model: fast, connection: {llm7: {credential: env:LLM7_API_KEY}}}
               - {id: nvidia, model: publisher/model, connection: {nvidia: {credential: env:NVIDIA_API_KEY}}}
+              - {id: ovhcloud, model: provider-selected-model, connection: {ovhcloud: {credential: env:OVH_AI_ENDPOINTS_ACCESS_TOKEN}}}
+              - {id: modelscope, model: 'ZhipuAI/GLM-5.1:DashScope', connection: {modelscope: {credential: env:MODELSCOPE_TOKEN}}}
               - {id: runpod, model: served-model, protocol: responses_stream, connection: {runpod: {base_url: abc123, credential: env:RUNPOD_API_KEY}}}
               - {id: together, model: zai-org/GLM-5.1, connection: {together: {credential: env:TOGETHER_API_KEY}}}
               - {id: deepinfra, model: deploy_id:private, connection: {deepinfra: {credential: env:DEEPINFRA_TOKEN}}}
@@ -103,6 +105,12 @@ func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "nvidia:") || !strings.Contains(string(raw), "credential: env:NVIDIA_API_KEY") || strings.Contains(string(raw), "base_url: https://integrate.api.nvidia.com/v1") {
 		t.Fatalf("NVIDIA hosted connection or derived protocol persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "ovhcloud:") || !strings.Contains(string(raw), "credential: env:OVH_AI_ENDPOINTS_ACCESS_TOKEN") || strings.Contains(string(raw), "base_url: https://oai.endpoints.kepler.ai.cloud.ovh.net/v1") {
+		t.Fatalf("OVHcloud fixed endpoint or optional credential persistence is wrong:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "modelscope:") || !strings.Contains(string(raw), "model: ZhipuAI/GLM-5.1:DashScope") || !strings.Contains(string(raw), "credential: env:MODELSCOPE_TOKEN") || strings.Contains(string(raw), "base_url: https://api-inference.modelscope.cn/v1") {
+		t.Fatalf("ModelScope opaque model, fixed endpoint, or credential persistence is wrong:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "gemini:") || !strings.Contains(string(raw), "credential: env:GEMINI_API_KEY") {
 		t.Fatalf("Gemini connection persistence is wrong:\n%s", raw)

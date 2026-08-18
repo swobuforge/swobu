@@ -184,7 +184,7 @@ func TestCodexRejectsInvalidInputWithoutChange(t *testing.T) {
 	}
 }
 
-func TestClaudePlanChangesOnlyOwnedSemanticLeaf(t *testing.T) {
+func TestClaudePlanChangesOnlyOwnedSemanticLeaves(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	original := []byte(`{"permissions":{"allow":["Read"]},"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.example"}}`)
@@ -209,8 +209,9 @@ func TestClaudePlanChangesOnlyOwnedSemanticLeaf(t *testing.T) {
 	_ = json.Unmarshal(original, &before)
 	_ = json.Unmarshal(got, &after)
 	before["env"].(map[string]any)["ANTHROPIC_BASE_URL"] = testTarget(t).WorkspaceURL()
+	before["env"].(map[string]any)["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
 	if !deepJSONEqual(before, after) {
-		t.Fatalf("semantic delta exceeded owned leaf: %s", got)
+		t.Fatalf("semantic delta exceeded owned leaves: %s", got)
 	}
 }
 
@@ -233,6 +234,7 @@ func TestClaudePlanPreservesEverySourceByteOutsideOwnedString(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []byte(strings.Replace(string(original), "https://old.example", testTarget(t).WorkspaceURL(), 1))
+	want = []byte(strings.Replace(string(want), " },", `,"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1" },`, 1))
 	if err := service.Apply(plan); err != nil {
 		t.Fatal(err)
 	}
@@ -264,8 +266,10 @@ func TestClaudeEndpointLeafDeterminesApplyOrReplaceGrammar(t *testing.T) {
 		raw           []byte
 		wantOverwrite bool
 	}{
-		{name: "new leaf applies", raw: []byte(`{"env":{"KEEP":"yes"}}`)},
-		{name: "existing leaf replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://old.example"}}`), wantOverwrite: true},
+		{name: "new leaves apply", raw: []byte(`{"env":{"KEEP":"yes"}}`)},
+		{name: "existing endpoint replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://old.example"}}`), wantOverwrite: true},
+		{name: "disabled discovery replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`), wantOverwrite: true},
+		{name: "enabled discovery and endpoint are unchanged", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"}}`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -284,6 +288,36 @@ func TestClaudeEndpointLeafDeterminesApplyOrReplaceGrammar(t *testing.T) {
 	}
 }
 
+func TestClaudeDiscoverySettingUsesExistingReplacementSafeguard(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	original := []byte(`{"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{homeDir: os.UserHomeDir, getenv: func(key string) string {
+		if key == "CLAUDE_CONFIG_DIR" {
+			return dir
+		}
+		return ""
+	}}
+	plan, err := service.Plan(ClientClaude, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.RequiresReplace() || len(plan.Changes) != 1 || plan.Changes[0].Field != "model discovery" {
+		t.Fatalf("plan changes = %#v, want one replacement-gated discovery change", plan.Changes)
+	}
+	if err := service.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	want := []byte(strings.Replace(string(original), `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"`, `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"`, 1))
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Claude discovery patch changed unrelated source bytes:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 func TestClaudeRejectsNonStringOwnedEndpointWithoutChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
@@ -297,6 +331,22 @@ func TestClaudeRejectsNonStringOwnedEndpointWithoutChange(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != string(original) {
 		t.Fatal("incompatible Claude endpoint changed")
+	}
+}
+
+func TestClaudeRejectsNonStringOwnedDiscoverySettingWithoutChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	original := []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://old.example","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":false,"KEEP":"yes"}}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planClaude(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+		t.Fatalf("error = %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != string(original) {
+		t.Fatal("incompatible Claude discovery setting changed")
 	}
 }
 

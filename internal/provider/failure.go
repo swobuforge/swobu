@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -204,6 +207,31 @@ func TransportFailure(ctx context.Context, err error) error {
 		return AttemptMayHaveExecuted(Cancelled(err))
 	}
 	return AttemptMayHaveExecuted(Unavailable(err))
+}
+
+// RetryNotBefore extracts the standard backend retry timing fact without
+// choosing routing or backoff policy. Invalid, negative, expired, and absent
+// hints are ignored.
+func RetryNotBefore(err error, now time.Time) (time.Time, bool) {
+	var backendErr canonical.BackendError
+	if !errors.As(err, &backendErr) {
+		return time.Time{}, false
+	}
+	raw := strings.TrimSpace(backendErr.RetryAfterHeaderValue)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if seconds, parseErr := strconv.ParseUint(raw, 10, 63); parseErr == nil {
+		if seconds > uint64((time.Duration(1<<63-1))/time.Second) {
+			return time.Time{}, false
+		}
+		return now.Add(time.Duration(seconds) * time.Second), true
+	}
+	deadline, parseErr := http.ParseTime(raw)
+	if parseErr != nil || !deadline.After(now) {
+		return time.Time{}, false
+	}
+	return deadline, true
 }
 
 // NormalizeFailure closes the provider cause vocabulary. Execution possibility

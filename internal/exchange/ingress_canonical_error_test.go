@@ -55,6 +55,12 @@ func TestRequestOutcomeFromSwobuError_UsesRecoveryOwnedStatusAndResult(t *testin
 			wantResult: trafficevidence.ResultClassNoCompatibleTarget,
 			wantStatus: http.StatusBadGateway,
 		},
+		{
+			name:       "temporary target availability",
+			code:       canonical.ErrorCodeNoAvailableTarget,
+			wantResult: trafficevidence.ResultClassSwobuError,
+			wantStatus: http.StatusServiceUnavailable,
+		},
 	}
 
 	for _, tc := range cases {

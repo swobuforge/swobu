@@ -1,12 +1,15 @@
 package groq
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -19,6 +22,42 @@ import (
 )
 
 type credentialResolver struct{}
+
+func TestChatReasoningResponseBecomesReadableCanonicalTrace(t *testing.T) {
+	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{"choices":[{"message":{"role":"assistant","reasoning":"think first","content":"answer"},"finish_reason":"stop"}]}`), carrier.Meta{})
+	cleaned, item, err := protocolcodec.ExtractChatReasoningDocument(document, groqChatReasoningExtractor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(cleaned.RawBytes(), []byte(`"reasoning"`)) {
+		t.Fatalf("Groq reasoning leaked into shared Chat decode: %s", cleaned.RawBytes())
+	}
+	reasoning, ok := item.Reasoning()
+	if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "think first" {
+		t.Fatalf("reasoning item = %#v", item)
+	}
+
+	stream := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think \"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"reasoning\":\"now\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"mark\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	body := protocolcodec.NewChatReasoningSSEBody(io.NopCloser(bytes.NewBufferString(stream)), groqChatReasoningExtractor{})
+	cleanedStream, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(cleanedStream, []byte(`"reasoning"`)) || !bytes.Contains(cleanedStream, []byte(`"tool_calls"`)) {
+		t.Fatalf("cleaned stream = %s", cleanedStream)
+	}
+	item, ok = body.Take()
+	if !ok {
+		t.Fatal("streamed Groq reasoning item missing")
+	}
+	reasoning, ok = item.Reasoning()
+	if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "think now" {
+		t.Fatalf("streamed reasoning item = %#v", item)
+	}
+}
 
 func (credentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
 	return "groq-token", nil

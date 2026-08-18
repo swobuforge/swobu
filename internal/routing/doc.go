@@ -12,6 +12,8 @@
 // A target's position in a built plan is possible work, not provider I/O.
 // Exchange owns the issued provider-call attempt lifecycle, and one position
 // may produce zero or more calls without changing routing order.
+// Runtime target availability is ephemeral Exchange state. It cannot enter the
+// routing aggregate or alter deterministic plan construction.
 // Equal-tier target ordering is a deterministic projection of an opaque cache
 // placement key, route name, tier index, and stable target IDs. Routing treats
 // that key as opaque; its caller owns cache-locality semantics. Configured position

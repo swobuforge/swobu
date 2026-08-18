@@ -7,7 +7,10 @@ import (
 
 const ClientClaude ClientID = "claude"
 
-var claudeEndpointPath = keyPath{"env", "ANTHROPIC_BASE_URL"}
+var (
+	claudeEndpointPath  = keyPath{"env", "ANTHROPIC_BASE_URL"}
+	claudeDiscoveryPath = keyPath{"env", "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"}
+)
 
 var claudeAdapter = adapter{
 	id:          ClientClaude,
@@ -49,11 +52,31 @@ func planClaude(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, claudeNoChange(err)
 	}
-	plan, err := planEndpointField(file, jsonEditor{}, claudeEndpointPath, target)
+	editor := jsonEditor{}
+	endpoint, endpointExists, err := editor.String(file.raw, claudeEndpointPath)
 	if err != nil {
 		return plannedMutation{}, claudeNoChange(err)
 	}
-	return plan, nil
+	discovery, discoveryExists, err := editor.String(file.raw, claudeDiscoveryPath)
+	if err != nil {
+		return plannedMutation{}, claudeNoChange(err)
+	}
+	changes := semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())
+	changes = append(changes, semanticChange("model discovery", discovery, discoveryExists, "1")...)
+	plan := Plan{ConfigPath: file.logical, Target: target, Changes: changes}
+	if plan.AlreadyConfigured() {
+		return plannedMutation{plan: plan}, nil
+	}
+	// Both client-owned leaves commit together so replacement approval and
+	// freshness protect an explicitly disabled discovery setting.
+	next, err := setJSONStrings(editor, file.raw,
+		jsonStringChange{path: claudeEndpointPath, value: target.WorkspaceURL()},
+		jsonStringChange{path: claudeDiscoveryPath, value: "1"},
+	)
+	if err != nil {
+		return plannedMutation{}, claudeNoChange(err)
+	}
+	return plannedMutation{plan: plan, apply: func() error { return file.replace(next) }}, nil
 }
 
 func claudeNoChange(err error) error { return fmt.Errorf("Claude Code %v. Nothing changed.", err) }

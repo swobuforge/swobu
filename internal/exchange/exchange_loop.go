@@ -62,6 +62,7 @@ func runExchange(
 		swobuResponseID:  responseID,
 		phase:            startingPhase{},
 		effectiveChanges: compat.CloneChanges(ingressChanges),
+		targetBackoff:    runner.TargetBackoff.snapshot(workspace.Slug().String()),
 	}
 	defer func() {
 		if s.mcp != nil {
@@ -84,10 +85,18 @@ func runExchange(
 		if tr.command == nil {
 			return RequestOutput{}, canonical.InternalError(fmt.Sprintf("exchange invariant: active phase %T produced no command", s.phase))
 		}
-		if _, ok := tr.command.(callProviderCommand); ok {
+		call, providerCall := tr.command.(callProviderCommand)
+		if providerCall {
 			appendProviderInflightEvidence(ctx, runner.TrafficEvidence, s)
 		}
+		var observation targetObservation
+		if providerCall {
+			observation = runner.TargetBackoff.begin(workspace.Slug().String(), call.backend.Target)
+		}
 		current = executeCommand(ctx, tr.command)
+		if providerCall {
+			runner.TargetBackoff.observe(observation, current)
+		}
 	}
 	return RequestOutput{}, canonical.InternalError("exchange transition limit reached")
 }

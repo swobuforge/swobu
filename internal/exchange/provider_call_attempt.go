@@ -31,7 +31,6 @@ type providerCallAttempt struct {
 	target                 provider.TargetSnapshot
 	requestChoice          providerRequestChoice
 	providerRound          int
-	retry                  bool
 	nativePreviousResponse bool
 	requestChanges         []compat.Change
 	status                 providerCallAttemptStatus
@@ -97,11 +96,10 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 	for _, prior := range s.providerCallAttempts {
 		if prior.candidateIndex == selection.candidateIndex &&
 			prior.requestChoice == selection.requestChoice &&
-			prior.providerRound == call.providerRound &&
-			prior.retry == selection.retry {
+			prior.providerRound == call.providerRound {
 			return reducerOutcome{}, fmt.Errorf(
-				"exchange invariant: provider call attempt key was already consumed for candidate %d choice %d round %d retry %t",
-				selection.candidateIndex, selection.requestChoice, call.providerRound, selection.retry,
+				"exchange invariant: provider call operation was already consumed for candidate %d choice %d round %d",
+				selection.candidateIndex, selection.requestChoice, call.providerRound,
 			)
 		}
 	}
@@ -109,7 +107,6 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 	attempt := providerCallAttempt{
 		candidateIndex: selection.candidateIndex, target: call.backend.Target,
 		requestChoice: selection.requestChoice, providerRound: call.providerRound,
-		retry:                  selection.retry,
 		nativePreviousResponse: nativePreviousResponseSent(call.request),
 		requestChanges:         compat.CloneChanges(requestChanges),
 		status:                 providerCallAttemptCalling,

@@ -9,7 +9,8 @@
 // Swobu there and selects the facade model `default`. It must never hide Swobu
 // beneath OpenAI, Anthropic, OpenRouter, or another target-provider identity.
 // Endpoint-only mutation is valid only for an explicit gateway/proxy seam such
-// as Claude Code's ANTHROPIC_BASE_URL. Target provider/model and capability
+// as Claude Code's ANTHROPIC_BASE_URL; the Claude adapter also enables the
+// client's gateway model-discovery request. Target provider/model and capability
 // metadata derived from the selected target remain encapsulated behind the
 // workspace route. A client-facing capability may be declared only when Swobu
 // itself intentionally guarantees it as part of the facade contract, such as

@@ -20,6 +20,7 @@ const (
 	ErrorCodeUnknownTarget        ErrorCode = "UNKNOWN_TARGET"
 	ErrorCodeNotImplemented       ErrorCode = "NOT_IMPLEMENTED"
 	ErrorCodeNoCompatibleTarget   ErrorCode = "NO_COMPATIBLE_TARGET"
+	ErrorCodeNoAvailableTarget    ErrorCode = "NO_AVAILABLE_TARGET"
 )
 
 const (
@@ -33,7 +34,7 @@ const (
 // itself a code; callers gate it separately.
 func ValidErrorCode(c ErrorCode) bool {
 	switch c {
-	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoCompatibleTarget:
+	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoCompatibleTarget, ErrorCodeNoAvailableTarget:
 		return true
 	}
 	return false
@@ -128,6 +129,12 @@ func NotImplemented(message string) Error {
 // unchanged canonical request as unrepresentable.
 func NoCompatibleTarget(message string) Error {
 	return newSwobuError(ErrorCodeNoCompatibleTarget, message)
+}
+
+// NoAvailableTarget reports that runtime suppression prevents the remaining
+// eligible configured targets from establishing a successful selection.
+func NoAvailableTarget(message string) Error {
+	return newSwobuError(ErrorCodeNoAvailableTarget, message)
 }
 
 func UnknownTarget(message string) Error {

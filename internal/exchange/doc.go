@@ -4,7 +4,8 @@
 //   - client ingress orchestration after wire decode;
 //   - explicit checkpoint lookup and exact unique current-head history lookup;
 //   - session Draft preparation, request-scoped MCP opening, and final freeze;
-//   - routing, ordered provider calls, same-target retry, and route failover;
+//   - ordered monotonic candidate execution, cross-exchange exact-target
+//     backoff, semantic same-target request-shape recovery, and route failover;
 //   - provider-inflight traffic evidence after concrete target selection and
 //     immediately before each provider call;
 //   - exact-target selection of concrete OpenAI Responses continuation data;

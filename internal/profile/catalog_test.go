@@ -76,6 +76,12 @@ func TestCatalog_SpecSupport(t *testing.T) {
 			t.Fatalf("%s provider spec should be supported", spec)
 		}
 	}
+	if !SupportsSpec("ovhcloud") {
+		t.Fatal("OVHcloud provider spec should be supported")
+	}
+	if !SupportsSpec("modelscope") {
+		t.Fatal("ModelScope provider spec should be supported")
+	}
 	obsoleteIdentity := "openai_" + "compatible"
 	if SupportsSpec(obsoleteIdentity) {
 		t.Fatal("obsolete custom-endpoint provider identity must fail closed")
@@ -88,8 +94,8 @@ func TestCatalog_SpecSupport(t *testing.T) {
 // durable shape reasons, never recreate this inventory.
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 34 {
-		t.Fatalf("provider profile count = %d, want 34", len(profiles))
+	if len(profiles) != 36 {
+		t.Fatalf("provider profile count = %d, want 36", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -113,7 +119,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		ProviderSpecGMI, ProviderSpecGroq, ProviderSpecFireworks,
 		ProviderSpecOpenRouter, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
-		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow,
+		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope,
 	} {
 		if _, ok := seen[providerID]; !ok {
 			t.Fatalf("provider catalog omits %q", providerID)
@@ -121,7 +127,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 31,
+		routing.ConnectionShapeStandard: 33,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -303,6 +309,47 @@ func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	}
 	if got := ConcreteProviderProtocolsForSpec("fireworks"); !slices.Equal(got, []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}) {
 		t.Fatalf("Fireworks protocols = %#v", got)
+	}
+	ovhcloud, ok := profileFor("ovhcloud")
+	if !ok {
+		t.Fatal("OVHcloud profile missing")
+	}
+	if ovhcloud.ProviderDisplayName != "OVHcloud AI Endpoints" || ovhcloud.Locator != (LocatorSpec{Kind: LocatorFixed, Default: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"}) {
+		t.Fatalf("OVHcloud identity and locator = %#v", ovhcloud)
+	}
+	if ovhcloud.Credential != (CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OVH_AI_ENDPOINTS_ACCESS_TOKEN"}) {
+		t.Fatalf("OVHcloud credential = %#v", ovhcloud.Credential)
+	}
+	if !ovhcloud.VisibleInOperatorUI || ModelDiscoveryModeForSpec("ovhcloud") != ModelDiscoveryModeAdvisory {
+		t.Fatal("OVHcloud must be operator-visible with advisory model discovery")
+	}
+	if RequiresCredential("ovhcloud", DefaultExecuteBaseURL("ovhcloud")) {
+		t.Fatal("OVHcloud access token must be optional")
+	}
+	if got := ConcreteProviderProtocolsForSpec("ovhcloud"); !slices.Equal(got, []string{"chat_completions_stream"}) {
+		t.Fatalf("OVHcloud protocols = %#v", got)
+	}
+	if got, derived := DerivedProtocolForSpec("ovhcloud"); !derived || got != "chat_completions_stream" {
+		t.Fatalf("OVHcloud derived protocol = %q, %v", got, derived)
+	}
+	modelscope, ok := profileFor("modelscope")
+	if !ok {
+		t.Fatal("ModelScope profile missing")
+	}
+	if modelscope.ProviderDisplayName != "ModelScope API-Inference" || modelscope.Locator != (LocatorSpec{Kind: LocatorFixed, Default: "https://api-inference.modelscope.cn/v1"}) {
+		t.Fatalf("ModelScope identity and locator = %#v", modelscope)
+	}
+	if modelscope.Credential != (CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "MODELSCOPE_TOKEN"}) {
+		t.Fatalf("ModelScope credential = %#v", modelscope.Credential)
+	}
+	if !modelscope.VisibleInOperatorUI || ModelDiscoveryModeForSpec("modelscope") != ModelDiscoveryModeAdvisory || !RequiresCredential("modelscope", DefaultExecuteBaseURL("modelscope")) {
+		t.Fatal("ModelScope must be visible, advisory, and credential-required")
+	}
+	if got := ConcreteProviderProtocolsForSpec("modelscope"); !slices.Equal(got, []string{"chat_completions_stream"}) {
+		t.Fatalf("ModelScope protocols = %#v", got)
+	}
+	if got, derived := DerivedProtocolForSpec("modelscope"); !derived || got != "chat_completions_stream" {
+		t.Fatalf("ModelScope derived protocol = %q, %v", got, derived)
 	}
 	if !RequiresCredential("together", DefaultExecuteBaseURL("together")) || DefaultEnvKeyForSpec("together") != "TOGETHER_API_KEY" {
 		t.Fatal("Together AI credential should be required with TOGETHER_API_KEY suggestion")
@@ -501,6 +548,8 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		"baseten":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://inference.baseten.co/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "BASETEN_API_KEY"}, "model"},
 		"hyperbolic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.hyperbolic.xyz/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "HYPERBOLIC_API_KEY"}, "model"},
 		"siliconflow": {LocatorSpec{Kind: LocatorFixed, Default: "https://api.siliconflow.cn/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SILICONFLOW_API_KEY"}, "model"},
+		"ovhcloud":    {LocatorSpec{Kind: LocatorFixed, Default: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OVH_AI_ENDPOINTS_ACCESS_TOKEN"}, "model"},
+		"modelscope":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api-inference.modelscope.cn/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "MODELSCOPE_TOKEN"}, "model"},
 	}
 	for spec, want := range cases {
 		got, ok := LocatorSpecForProvider(spec)

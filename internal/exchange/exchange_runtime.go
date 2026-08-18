@@ -21,6 +21,7 @@ type runtimeBundle struct {
 	Policy          WorkspacePolicy
 	ImageFetcher    provider.ImageFetcher
 	PolicyResolver  WorkspacePolicyResolver
+	TargetBackoff   *targetBackoffLedger
 }
 
 func allocateResponseID(ctx context.Context, exchangeID string, gen ResponseIDGenerator) (canonical.SwobuResponseID, error) {

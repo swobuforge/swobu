@@ -144,7 +144,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 // hasNextRouteCandidate exposes route order only as request-scoped encoding
 // context. It intentionally does not enter the target snapshot or route state.
 func hasNextRouteCandidate(s exchangeState, selection providerCallSelection) bool {
-	_, exists := s.route.at(selection.candidateIndex + 1)
+	_, exists := nextEligibleRouteCandidate(s, selection.candidateIndex+1)
 	return exists
 }
 

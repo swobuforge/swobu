@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -104,6 +105,7 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 			ResponseIDs:     policies.ResponseIDs,
 			ImageFetcher:    policies.ImageFetcher,
 			PolicyResolver:  policyResolver,
+			TargetBackoff:   newTargetBackoffLedger(),
 		},
 	}
 }
@@ -393,6 +395,8 @@ func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusNotImplemented
 	case canonical.ErrorCodeNoCompatibleTarget:
 		return http.StatusBadGateway
+	case canonical.ErrorCodeNoAvailableTarget:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -475,6 +479,7 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 	for _, route := range workspace.Routes() {
 		out.Models = append(out.Models, ModelOption{ID: route.Name().String()})
 	}
+	sort.Slice(out.Models, func(i, j int) bool { return out.Models[i].ID < out.Models[j].ID })
 	return out, nil
 }
 
