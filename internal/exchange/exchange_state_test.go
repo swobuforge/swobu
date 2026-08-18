@@ -287,7 +287,7 @@ func TestReducerSuccessDecodesProviderIngressBeforeTerminalHandoff(t *testing.T)
 	}
 }
 
-func TestReducerRetriesOnceBeforeRouteFailover(t *testing.T) {
+func TestReducerAdvancesWithoutRepeatingUnavailableOperation(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "retry-a"),
@@ -308,21 +308,8 @@ func TestReducerRetriesOnceBeforeRouteFailover(t *testing.T) {
 	if !ok {
 		t.Fatalf("command = %T, want callProviderCommand", tr.command)
 	}
-	if next.candidateIndex != 0 || !next.retry || cmd.backend.Target.TargetID != "retry-a" {
-		t.Fatalf("retry = %#v target=%q", next.providerCallAttempt, cmd.backend.Target.TargetID)
-	}
-	fellBack, err := reduce(context.Background(), tr.nextState, providerCallFailed{
-		attemptID: next.id,
-		failure: mayHaveExecuted(provider.Unavailable(
-			canonical.NewBackendError("retry-a", 503, "still unavailable", ""),
-		)),
-	}, reducerRuntime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	fallback := activeProviderAttempt(t, fellBack.nextState)
-	if fallback.candidateIndex != 1 || fallback.retry || fallback.id != next.id+1 {
-		t.Fatalf("route fallback attempts = %#v", fellBack.nextState.providerCallAttempts)
+	if next.candidateIndex != 1 || cmd.backend.Target.TargetID != "retry-b" || next.id != active.id+1 {
+		t.Fatalf("fallback attempts = %#v target=%q", tr.nextState.providerCallAttempts, cmd.backend.Target.TargetID)
 	}
 }
 
@@ -377,7 +364,7 @@ func TestRejectedBeforeExecutionAdvancesNextCandidateWithoutRetry(t *testing.T) 
 		t.Fatal(err)
 	}
 	fallback := activeProviderAttempt(t, next.nextState)
-	if fallback.candidateIndex != 1 || fallback.retry {
+	if fallback.candidateIndex != 1 {
 		t.Fatalf("fallback = %#v, want next candidate without retry", fallback.providerCallAttempt)
 	}
 }
@@ -399,7 +386,6 @@ func TestWebSearchDoesNotOverrideEligibleRouteFailover(t *testing.T) {
 	s.providerCallAttempts = []providerCallAttempt{{
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
-		retry:          true,
 		status:         providerCallAttemptFailed,
 		failure: &providerCallFailure{
 			Attempt: mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("search-a", 503, "unavailable", ""))),
@@ -466,8 +452,7 @@ func genericBackendRejection(target string) provider.AttemptFailure {
 }
 
 // A first-round backend rejection advances directly to the next route
-// candidate, without the same-target retry reserved for unavailability. This is
-// the ordered-route fallback the candidate count already expresses.
+// candidate. The ordered-route fallback is what candidate count expresses.
 func TestFirstRoundBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
@@ -478,7 +463,6 @@ func TestFirstRoundBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
 		providerRound:  0,
-		retry:          false,
 		status:         providerCallAttemptFailed,
 		failure:        &providerCallFailure{Attempt: genericBackendRejection("reject-a")},
 	}}
@@ -487,12 +471,12 @@ func TestFirstRoundBackendRejectionAdvancesNextCandidateWithoutSameTargetRetry(t
 	if !ok {
 		t.Fatalf("first-round rejection selected nothing")
 	}
-	if selection.candidateIndex != 1 || selection.retry {
+	if selection.candidateIndex != 1 {
 		t.Fatalf("first-round rejection selection = %#v, want next candidate without retry", selection)
 	}
 }
 
-func TestSynchronousCompletionFailureRetriesBeforeRouteFallback(t *testing.T) {
+func TestSynchronousCompletionFailureAdvancesRouteCandidate(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
 		requestpathTarget(t, "decode-unavailable-a"),
@@ -519,8 +503,8 @@ func TestSynchronousCompletionFailureRetriesBeforeRouteFallback(t *testing.T) {
 	second := activeProviderAttempt(t, fellBack.nextState)
 	if recordedFirst.status != providerCallAttemptFailed ||
 		recordedFirst.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred ||
-		second.id != 2 || second.candidateIndex != 0 || !second.retry {
-		t.Fatalf("completion retry attempts = %#v", fellBack.nextState.providerCallAttempts)
+		second.id != 2 || second.candidateIndex != 1 {
+		t.Fatalf("completion fallback attempts = %#v", fellBack.nextState.providerCallAttempts)
 	}
 }
 
@@ -666,8 +650,8 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 	}
 	third := activeProviderAttempt(t, routeFailover.nextState)
 	if len(routeFailover.nextState.providerCallAttempts) != 3 || third.id != 3 ||
-		third.candidateIndex != 0 || !third.retry || third.requestChoice != providerRequestFullHistory {
-		t.Fatalf("full-history operational retry = %#v", routeFailover.nextState.providerCallAttempts)
+		third.candidateIndex != 1 || third.requestChoice != providerRequestPreferred {
+		t.Fatalf("full-history route fallback = %#v", routeFailover.nextState.providerCallAttempts)
 	}
 }
 
@@ -712,7 +696,7 @@ func completedResponseChanges(t *testing.T, outcome reducerOutcome) []compat.Cha
 	return snapshot.Changes
 }
 
-func TestReducerOperationalRetryRetainsNativePreviousResponseOn500(t *testing.T) {
+func TestReducerUnavailableNativePreviousResponseDoesNotRepeatOperation(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -726,10 +710,8 @@ func TestReducerOperationalRetryRetainsNativePreviousResponseOn500(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry := activeProviderAttempt(t, failed.nextState)
-	if retry.requestChoice != providerRequestPreferred || !retry.retry ||
-		!nativePreviousResponseSent(retry.call.request) {
-		t.Fatalf("500 operational retry = %#v", retry.providerCallAttempt)
+	if _, ok := failed.nextState.phase.(failedPhase); !ok {
+		t.Fatalf("phase = %T, want failedPhase without same-operation retry", failed.nextState.phase)
 	}
 	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
 		t.Fatalf("500 emitted previous-response compatibility changes: %#v", failed.nextState.effectiveChanges)
@@ -879,7 +861,6 @@ func TestProviderCallAttemptRejectsConsumedAttemptKey(t *testing.T) {
 		candidateIndex: 0,
 		requestChoice:  providerRequestPreferred,
 		providerRound:  0,
-		retry:          false,
 		status:         providerCallAttemptFailed,
 	}}
 	call := providerCall{
@@ -1372,8 +1353,8 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	if store.getCalls != 1 {
 		t.Fatalf("checkpoint Get calls = %d, want exactly 1 across fallback", store.getCalls)
 	}
-	if providerCalls != 3 {
-		t.Fatalf("provider calls = %d, want one retry plus fallback", providerCalls)
+	if providerCalls != 2 {
+		t.Fatalf("provider calls = %d, want unavailable candidate once plus fallback", providerCalls)
 	}
 }
 

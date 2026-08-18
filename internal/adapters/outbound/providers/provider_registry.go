@@ -20,6 +20,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/kimi"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/llm7"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/mistral"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/modelscope"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/novita"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
@@ -59,6 +60,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		kimi.NewRuntime(client, credentials),
 		llm7.NewRuntime(client, credentials),
 		mistral.NewRuntime(client, credentials),
+		modelscope.NewRuntime(client, credentials),
 		novita.NewRuntime(client, credentials),
 		friendli.NewRuntime(client, credentials),
 		gemini.NewRuntime(client, credentials),
@@ -83,6 +85,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecCustom)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNebius)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNVIDIA)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecOVHCloud)),
 		// Baseten intentionally composes the shared standard runtime in P0; its
 		// managed and exact deployment bases do not require a provider codec.
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecBaseten)),

@@ -41,6 +41,7 @@ type exchangeState struct {
 	reusablePrefix          trafficevidence.ReusablePrefixEvidence
 	previousRequest         *canonical.CanonicalRequest
 	polyfilled              bool
+	targetBackoff           targetBackoffSnapshot
 }
 
 // historyAdvance is the complete optional input for composing the completed
@@ -474,7 +475,6 @@ const (
 type providerCallSelection struct {
 	candidateIndex int
 	requestChoice  providerRequestChoice
-	retry          bool
 }
 
 // advanceProviderExecution is the sole transition that chooses further
@@ -507,7 +507,11 @@ func advanceProviderExecutionFrom(ctx context.Context, s exchangeState, runner r
 			}
 			var incompatible provider.IncompatibleTargetError
 			if errors.As(err, &incompatible) {
-				err = noCompatibleTarget(err)
+				if routeHasSuppressedCandidate(s) {
+					err = noAvailableTarget()
+				} else {
+					err = noCompatibleTarget(err)
+				}
 			}
 		}
 		s.phase = failedPhase{problem: err, target: target}
@@ -516,20 +520,29 @@ func advanceProviderExecutionFrom(ctx context.Context, s exchangeState, runner r
 }
 
 func nextRouteCandidate(s exchangeState, selection providerCallSelection) (providerCallSelection, bool) {
-	next := providerCallSelection{
-		candidateIndex: selection.candidateIndex + 1,
-		requestChoice:  providerRequestPreferred,
+	return nextEligibleRouteCandidate(s, selection.candidateIndex+1)
+}
+
+// nextEligibleRouteCandidate is the sole projection from configured route
+// order to the frozen set of candidates this exchange may attempt.
+func nextEligibleRouteCandidate(s exchangeState, start int) (providerCallSelection, bool) {
+	for index := start; ; index++ {
+		target, ok := s.route.at(index)
+		if !ok {
+			return providerCallSelection{}, false
+		}
+		if s.targetBackoff.active(target) {
+			continue
+		}
+		return providerCallSelection{candidateIndex: index, requestChoice: providerRequestPreferred}, true
 	}
-	_, exists := s.route.at(next.candidateIndex)
-	return next, exists
 }
 
 // selectNextProviderCall is a pure closed choice over route order, prepared
 // canonical forms, and recorded call outcomes.
 func selectNextProviderCall(s exchangeState) (providerCallSelection, bool) {
 	if len(s.providerCallAttempts) == 0 {
-		_, ok := s.route.at(0)
-		return providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred}, ok
+		return nextEligibleRouteCandidate(s, 0)
 	}
 	last := s.providerCallAttempts[len(s.providerCallAttempts)-1]
 	if !last.terminal() || last.status == providerCallAttemptHandoffReady {
@@ -541,23 +554,19 @@ func selectNextProviderCall(s exchangeState) (providerCallSelection, bool) {
 	if !providerRecoveryPermitted(last) {
 		return providerCallSelection{}, false
 	}
-	if providerFailureTransient(last.failure.Attempt.Cause()) && !last.retry {
-		return providerCallSelection{
-			candidateIndex: last.candidateIndex,
-			requestChoice:  last.requestChoice,
-			retry:          true,
-		}, true
-	}
 	if providerFailureAdvancesCandidate(last.failure.Attempt.Cause()) {
-		nextIndex := last.candidateIndex + 1
-		_, ok := s.route.at(nextIndex)
-		return providerCallSelection{candidateIndex: nextIndex, requestChoice: providerRequestPreferred}, ok
+		return nextEligibleRouteCandidate(s, last.candidateIndex+1)
 	}
 	return providerCallSelection{}, false
 }
 
 func terminateProviderExecution(s exchangeState) reducerOutcome {
 	if len(s.providerCallAttempts) == 0 {
+		if len(s.route.targets) > 0 {
+			s.evaluatedCandidateCount = len(s.route.targets)
+			s.phase = failedPhase{problem: noAvailableTarget()}
+			return reducerOutcome{nextState: s}
+		}
 		s.phase = failedPhase{problem: canonical.BadEndpoint("no viable provider candidate")}
 		return reducerOutcome{nextState: s}
 	}
@@ -565,10 +574,27 @@ func terminateProviderExecution(s exchangeState) reducerOutcome {
 	problem := last.failure.Attempt.Cause()
 	var incompatible provider.IncompatibleTargetError
 	if errors.As(problem, &incompatible) {
-		problem = noCompatibleTarget(problem)
+		if routeHasSuppressedCandidate(s) {
+			problem = noAvailableTarget()
+		} else {
+			problem = noCompatibleTarget(problem)
+		}
 	}
 	s.phase = failedPhase{problem: problem, target: last.target}
 	return reducerOutcome{nextState: s}
+}
+
+func routeHasSuppressedCandidate(s exchangeState) bool {
+	for _, target := range s.route.targets {
+		if s.targetBackoff.active(target) {
+			return true
+		}
+	}
+	return false
+}
+
+func noAvailableTarget() canonical.Error {
+	return canonical.NoAvailableTarget("no currently available configured target can serve the request")
 }
 
 func noCompatibleTarget(lastRejection error) canonical.Error {
@@ -632,15 +658,11 @@ func providerRecoveryPermitted(attempt providerCallAttempt) bool {
 	}
 }
 
-func providerFailureTransient(err error) bool {
-	var unavailable provider.UnavailableError
-	return errors.As(err, &unavailable)
-}
-
 func providerFailureAdvancesCandidate(err error) bool {
 	var incompatible provider.IncompatibleTargetError
 	var rejected provider.RejectedError
-	return providerFailureTransient(err) ||
+	var unavailable provider.UnavailableError
+	return errors.As(err, &unavailable) ||
 		errors.As(err, &incompatible) ||
 		errors.As(err, &rejected)
 }

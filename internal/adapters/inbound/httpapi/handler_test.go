@@ -356,6 +356,45 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	}
 }
 
+func TestHandler_ServesDefaultThenLexicalModelsWithoutSchemaExpansion(t *testing.T) {
+	handler := newTestHandler(&modelsCapableHandler{modelsOut: exchange.ListModelsOutput{
+		DefaultModelID: "chat",
+		Models:         []exchange.ModelOption{{ID: "chat"}, {ID: "claude-fast"}},
+	}})
+	var previous string
+	for attempt := 0; attempt < 3; attempt++ {
+		req := httptest.NewRequest(http.MethodGet, "/c/alpha/v1/models?limit=1000", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+		var body struct {
+			Object string           `json:"object"`
+			Data   []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		wantIDs := []string{"default", "chat", "claude-fast"}
+		if body.Object != "list" || len(body.Data) != len(wantIDs) {
+			t.Fatalf("response = %#v, want list with %d entries", body, len(wantIDs))
+		}
+		for index, entry := range body.Data {
+			if entry["id"] != wantIDs[index] || entry["name"] != wantIDs[index] {
+				t.Fatalf("entry %d = %#v, want id/name %q", index, entry, wantIDs[index])
+			}
+			if len(entry) != 5 {
+				t.Fatalf("entry %d expanded schema: %#v", index, entry)
+			}
+		}
+		if previous != "" && rec.Body.String() != previous {
+			t.Fatalf("response changed between calls:\nfirst: %s\nnext: %s", previous, rec.Body.String())
+		}
+		previous = rec.Body.String()
+	}
+}
+
 func TestHandler_MissingWorkspaceRequestsAndModelsReturnSlugSpecificBadEndpoint(t *testing.T) {
 	missing := canonical.BadEndpoint(`Workspace "default" does not exist. Create it in Swobu or check the workspace name in this endpoint.`)
 	for _, tc := range []struct {

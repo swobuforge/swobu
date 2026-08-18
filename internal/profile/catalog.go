@@ -58,6 +58,12 @@ var (
 	providerProtocolsNVIDIA = []ProviderProtocolSpec{
 		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
 	}
+	providerProtocolsOVHCloud = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
+	providerProtocolsModelScope = []ProviderProtocolSpec{
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
 	providerProtocolsRunPod = []ProviderProtocolSpec{
 		bufferedProtocol("responses", protocolkind.Responses),
 		streamingProtocol("responses_stream", protocolkind.Responses),
@@ -345,6 +351,30 @@ func catalog() []Profile {
 			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "NVIDIA_API_KEY"},
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsNVIDIA),
+		},
+		{
+			ProviderID:          ProviderSpecOVHCloud,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "OVHcloud AI Endpoints",
+			SetupHint:           "optional access token",
+			SetupKeywords:       []string{"OVHcloud", "OVH", "AI Endpoints", "free", "anonymous", "OpenAI", "function calling", "Claude Code"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OVH_AI_ENDPOINTS_ACCESS_TOKEN"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsOVHCloud),
+		},
+		{
+			ProviderID:          ProviderSpecModelScope,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "ModelScope API-Inference",
+			SetupHint:           "ModelScope token",
+			SetupKeywords:       []string{"ModelScope", "API-Inference", "Alibaba", "free", "coding", "reasoning", "Qwen", "GLM", "DeepSeek", "OpenAI"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://api-inference.modelscope.cn/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "MODELSCOPE_TOKEN"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsModelScope),
 		},
 		{
 			ProviderID:          ProviderSpecRunPod,

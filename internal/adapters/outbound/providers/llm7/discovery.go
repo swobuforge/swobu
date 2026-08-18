@@ -1,6 +1,7 @@
 package llm7
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/httpedge"
+	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -56,16 +58,30 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	if resp.StatusCode >= http.StatusBadRequest {
 		return provider.TargetProbeResult{}, httpedge.ReadBackendHTTPError(resp, target.TargetID)
 	}
-	var records []struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
+	var payload json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return provider.TargetProbeResult{}, canonical.InternalError("LLM7 catalog response could not be decoded")
+	}
+	modelIDs, err := modelcatalogopenai.DecodeModelIDs(bytes.NewReader(payload))
+	if err != nil || modelIDs == nil {
+		// Historical LLM7 deployments returned a provider-specific top-level
+		// array. Retain that exact public contract while the current documented
+		// OpenAI list envelope remains the canonical decoding path.
+		var records []struct {
+			ID string `json:"id"`
+		}
+		if arrayErr := json.Unmarshal(payload, &records); arrayErr != nil || records == nil {
+			return provider.TargetProbeResult{}, canonical.InternalError("LLM7 catalog response could not be decoded")
+		}
+		modelIDs = make([]string, 0, len(records))
+		for _, record := range records {
+			modelIDs = append(modelIDs, record.ID)
+		}
 	}
 	ids := []string{"default", "fast", "pro"}
 	seen := map[string]struct{}{"default": {}, "fast": {}, "pro": {}}
-	for _, record := range records {
-		id := strings.TrimSpace(record.ID)
+	for _, modelID := range modelIDs {
+		id := strings.TrimSpace(modelID)
 		if id == "" {
 			continue
 		}

@@ -56,6 +56,11 @@ func TestRecoveryOwnedSwobuErrors_AreCanonicalAndActionable(t *testing.T) {
 			code: ErrorCodeNoCompatibleTarget,
 		},
 		{
+			name: "configured targets temporarily unavailable",
+			err:  NoAvailableTarget("no currently available configured target can serve the request"),
+			code: ErrorCodeNoAvailableTarget,
+		},
+		{
 			name: "caller controlled operation",
 			err: ClientUnsupportedOperation(
 				"models endpoint does not support POST",

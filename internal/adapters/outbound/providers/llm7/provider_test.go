@@ -143,6 +143,21 @@ func TestDiscoveryConfiguredCredentialUsesBearer(t *testing.T) {
 	}
 }
 
+func TestDiscoveryDecodesObservedOpenAIStyleEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer llm7-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"DeepSeek-V4-Flash-0731","tools_calling":true,"tier":"turbo"}]}`))
+	}))
+	defer server.Close()
+
+	result, err := NewRuntime(server.Client(), credentialResolver{}).Discovery.ProbeTarget(context.Background(), llm7Target(server.URL+"/v1", "env:LLM7_API_KEY", "default"))
+	if err != nil || len(result.Options) != 4 || result.Options[3].Name != "DeepSeek-V4-Flash-0731" {
+		t.Fatalf("deployments/error = %#v / %v", result.Options, err)
+	}
+}
+
 func TestSelectorRemainsExactAfterConcreteResponseModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {

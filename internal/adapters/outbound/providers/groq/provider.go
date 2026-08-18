@@ -94,7 +94,7 @@ func (c chatCodec) Encode(req provider.Request) (carrier.Document, []compat.Chan
 }
 
 func (c chatCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return c.standard.Decode(ctx, req, ingress)
+	return protocolcodec.DecodeChatWithReasoningCarrier(ctx, c.standard, req, ingress, groqChatReasoningExtractor{})
 }
 
 // responsesCodec preserves shared Responses grammar while making Groq's

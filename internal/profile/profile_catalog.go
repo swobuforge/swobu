@@ -91,6 +91,8 @@ const (
 	ProviderSpecBaseten     ProviderID = "baseten"
 	ProviderSpecHyperbolic  ProviderID = "hyperbolic"
 	ProviderSpecSiliconFlow ProviderID = "siliconflow"
+	ProviderSpecOVHCloud    ProviderID = "ovhcloud"
+	ProviderSpecModelScope  ProviderID = "modelscope"
 )
 
 type LocatorKind uint8

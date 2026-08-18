@@ -243,6 +243,8 @@ func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 		"stepfun":    {"chat_completions_stream", StandardConnection("stepfun", "https://api.stepfun.com/step_plan/v1", "env:STEP_API_KEY"), routing.Provider("stepfun")},
 		"friendli":   {"messages_stream", StandardConnection("friendli", "https://friendli-gateway.example/v1", ""), routing.Provider("friendli")},
 		"llm7":       {"", StandardConnection("llm7", "", ""), routing.Provider("llm7")},
+		"ovhcloud":   {"", StandardConnection("ovhcloud", "", ""), routing.Provider("ovhcloud")},
+		"modelscope": {"", StandardConnection("modelscope", "", "env:MODELSCOPE_TOKEN"), routing.Provider("modelscope")},
 		"runpod":     {"responses", StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), routing.Provider("runpod")},
 		"nebius":     {"responses", StandardConnection("nebius", "", "env:NEBIUS_API_KEY"), routing.Provider("nebius")},
 		"gmi":        {"messages", StandardConnection("gmi", "", "env:GMI_API_KEY"), routing.Provider("gmi")},
