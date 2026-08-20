@@ -181,17 +181,63 @@ func defaultPlacementForRoute(route readmodel.RouteReadModel) readmodel.Placemen
 }
 
 func placementOptions(route readmodel.RouteReadModel, mode targetConfigMode, editedTargetID readmodel.TargetID) []readmodel.PlacementOptionReadModel {
-	opts := make([]readmodel.PlacementOptionReadModel, 0, len(route.Tiers)+1)
+	if mode == targetConfigModeEdit {
+		route = routeWithoutTarget(route, editedTargetID)
+	}
+	opts := []readmodel.PlacementOptionReadModel{{Label: "primary", Kind: readmodel.PlacementFallback}}
 	for tierIndex, tier := range route.Tiers {
 		for _, target := range tier.Targets {
-			if mode == targetConfigModeEdit && target.ID == editedTargetID {
-				continue
-			}
 			opts = append(opts, readmodel.PlacementOptionReadModel{Label: "balance with " + fmt.Sprintf("step %d", tierIndex+1), PeerTargetID: target.ID, Kind: readmodel.PlacementBalance})
 			break
 		}
+		if len(tier.Targets) > 0 {
+			opts = append(opts, readmodel.PlacementOptionReadModel{Label: fmt.Sprintf("fallback %d", tierIndex+1), PeerTargetID: tier.Targets[0].ID, Kind: readmodel.PlacementFallback})
+		}
 	}
-	return append(opts, defaultPlacementForRoute(route))
+	return opts
+}
+
+// routeWithoutTarget is the topology placement choices actually transform.
+// Removing the edited target first also collapses a vacated singleton tier, so
+// labels and predecessor anchors describe the route that will exist on save.
+func routeWithoutTarget(route readmodel.RouteReadModel, id readmodel.TargetID) readmodel.RouteReadModel {
+	out := route
+	out.Tiers = make([]readmodel.TierReadModel, 0, len(route.Tiers))
+	for _, tier := range route.Tiers {
+		targets := make([]readmodel.TargetReadModel, 0, len(tier.Targets))
+		for _, target := range tier.Targets {
+			if target.ID != id {
+				targets = append(targets, target)
+			}
+		}
+		if len(targets) > 0 {
+			out.Tiers = append(out.Tiers, readmodel.TierReadModel{Targets: targets})
+		}
+	}
+	return out
+}
+
+func currentPlacementForTarget(route readmodel.RouteReadModel, id readmodel.TargetID) readmodel.PlacementOptionReadModel {
+	for tierIndex, tier := range route.Tiers {
+		for _, target := range tier.Targets {
+			if target.ID != id {
+				continue
+			}
+			if len(tier.Targets) > 1 {
+				for _, peer := range tier.Targets {
+					if peer.ID != id {
+						return readmodel.PlacementOptionReadModel{Label: fmt.Sprintf("balance with step %d", tierIndex+1), PeerTargetID: peer.ID, Kind: readmodel.PlacementBalance}
+					}
+				}
+			}
+			if tierIndex == 0 {
+				return readmodel.PlacementOptionReadModel{Label: "primary", Kind: readmodel.PlacementFallback}
+			}
+			previous := route.Tiers[tierIndex-1]
+			return readmodel.PlacementOptionReadModel{Label: fmt.Sprintf("fallback %d", tierIndex), PeerTargetID: previous.Targets[0].ID, Kind: readmodel.PlacementFallback}
+		}
+	}
+	return defaultPlacementForRoute(route)
 }
 
 func placementOptionID(opt readmodel.PlacementOptionReadModel) string {

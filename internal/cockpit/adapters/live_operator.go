@@ -20,6 +20,7 @@ import (
 type operatorClient interface {
 	ListWorkspaces(context.Context) ([]workspaceapi.WorkspaceSummary, error)
 	GetWorkspace(context.Context, string) (workspaceapi.Workspace, error)
+	GetRoute(context.Context, string, string) (workspaceapi.RouteSpec, error)
 	CreateWorkspace(context.Context, workspaceapi.CreateWorkspace) (workspaceapi.Workspace, error)
 	RenameWorkspace(context.Context, string, string) (workspaceapi.Workspace, error)
 	DeleteWorkspace(context.Context, string) error
@@ -27,9 +28,7 @@ type operatorClient interface {
 	RenameRoute(context.Context, workspaceapi.RenameRoute) (workspaceapi.Workspace, error)
 	SetDefaultRoute(context.Context, workspaceapi.SetDefaultRoute) (workspaceapi.Workspace, error)
 	DeleteRoute(context.Context, workspaceapi.DeleteRoute) (workspaceapi.Workspace, error)
-	CreateTarget(context.Context, workspaceapi.CreateTarget) (workspaceapi.Workspace, error)
-	UpdateTargetSettings(context.Context, workspaceapi.UpdateTargetSettings) (workspaceapi.Workspace, error)
-	DeleteTarget(context.Context, workspaceapi.DeleteTarget) (workspaceapi.Workspace, error)
+	ReplaceRoute(context.Context, workspaceapi.ReplaceRoute) (workspaceapi.Workspace, error)
 	Status(context.Context, string) (operatorclient.StatusProjection, error)
 	DaemonVersion(context.Context) (string, error)
 	StartAuthSession(context.Context, string, string, string, string, string, string) (operatorclient.AuthSessionStartResult, error)
@@ -105,9 +104,9 @@ func (a *LiveOperatorAdapter) DeleteWorkspace(ctx context.Context, request ports
 	}
 	return adapterFailure("delete workspace", err)
 }
-func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveRouteRequest) (ports.RouteMutationResult, error) {
 	if request.RouteID == "" {
-		return readmodel.RouteReadModel{}, ErrUnsupportedCommand
+		return ports.RouteMutationResult{}, ErrUnsupportedCommand
 	}
 	workspaceID := string(request.WorkspaceID)
 	routeID := string(request.RouteID)
@@ -120,31 +119,39 @@ func (a *LiveOperatorAdapter) SaveRoute(ctx context.Context, request ports.SaveR
 	if name == routeID {
 		workspace, err = a.client.GetWorkspace(ctx, workspaceID)
 		if err != nil {
-			return readmodel.RouteReadModel{}, adapterFailure("load route", err)
+			return ports.RouteMutationResult{}, adapterFailure("load route", err)
 		}
 	} else {
 		workspace, err = a.client.RenameRoute(ctx, workspaceapi.RenameRoute{Workspace: workspaceID, Route: routeID, NewName: name})
 		if err != nil {
-			return readmodel.RouteReadModel{}, adapterFailure("rename route", err)
+			return ports.RouteMutationResult{}, adapterFailure("rename route", err)
 		}
 	}
 	if request.Default {
 		workspace, err = a.client.SetDefaultRoute(ctx, workspaceapi.SetDefaultRoute{Workspace: workspaceID, Route: name})
 		if err != nil {
-			return readmodel.RouteReadModel{}, adapterFailure("set default route", err)
+			return ports.RouteMutationResult{}, adapterFailure("set default route", err)
 		}
 	}
 	for _, route := range workspace.Routes {
 		if route.Name == name {
-			return routeFromWorkspaceRoute(workspace.DefaultRoute, route)
+			projected, projectionErr := routeFromWorkspaceRoute(workspace.DefaultRoute, route)
+			if projectionErr != nil {
+				return ports.RouteMutationResult{}, projectionErr
+			}
+			workspaceModel, projectionErr := a.workspaceFromView(ctx, workspace)
+			if projectionErr != nil {
+				return ports.RouteMutationResult{}, projectionErr
+			}
+			return ports.RouteMutationResult{Route: projected, Workspace: workspaceModel}, nil
 		}
 	}
-	return readmodel.RouteReadModel{}, errors.New("committed route missing")
+	return ports.RouteMutationResult{}, errors.New("committed route missing")
 }
-func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.DeleteRouteRequest) error {
+func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.DeleteRouteRequest) (ports.RouteMutationResult, error) {
 	workspace, err := a.client.GetWorkspace(ctx, string(request.WorkspaceID))
 	if err != nil {
-		return adapterFailure("load route", err)
+		return ports.RouteMutationResult{}, adapterFailure("load route", err)
 	}
 	replacement := ""
 	if workspace.DefaultRoute == string(request.RouteID) {
@@ -155,11 +162,15 @@ func (a *LiveOperatorAdapter) DeleteRoute(ctx context.Context, request ports.Del
 			}
 		}
 	}
-	_, err = a.client.DeleteRoute(ctx, workspaceapi.DeleteRoute{Workspace: string(request.WorkspaceID), Route: string(request.RouteID), Replacement: replacement})
+	workspace, err = a.client.DeleteRoute(ctx, workspaceapi.DeleteRoute{Workspace: string(request.WorkspaceID), Route: string(request.RouteID), Replacement: replacement})
 	if err != nil {
-		return adapterFailure("delete route", err)
+		return ports.RouteMutationResult{}, adapterFailure("delete route", err)
 	}
-	return nil
+	workspaceModel, err := a.workspaceFromView(ctx, workspace)
+	if err != nil {
+		return ports.RouteMutationResult{}, err
+	}
+	return ports.RouteMutationResult{Workspace: workspaceModel}, nil
 }
 func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
 	workspaceID := strings.TrimSpace(string(request.WorkspaceID))
@@ -195,10 +206,21 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 		}
 		if !routeExists {
 			workspace, err = a.client.CreateRoute(ctx, workspaceapi.CreateRoute{Workspace: workspaceID, Name: routeID, Target: target})
-		} else if request.TargetID == "" {
-			workspace, err = a.client.CreateTarget(ctx, workspaceapi.CreateTarget{Workspace: workspaceID, Route: routeID, Target: target, Placement: placementFromReadModel(request.Placement)})
 		} else {
-			workspace, err = a.client.UpdateTargetSettings(ctx, workspaceapi.UpdateTargetSettings{Workspace: workspaceID, Route: routeID, TargetID: targetID, Target: workspaceapi.TargetSettingsDraft{Model: target.Model, Protocol: target.Protocol, Connection: target.Connection}})
+			currentSpec, getErr := a.client.GetRoute(ctx, workspaceID, routeID)
+			if getErr != nil {
+				return ports.SaveTargetResult{}, adapterFailure("load editable route", getErr)
+			}
+			desired, buildErr := routeSpecWithTarget(currentSpec, target, request.Placement)
+			if buildErr != nil {
+				return ports.SaveTargetResult{}, buildErr
+			}
+			committed, replaceErr := a.client.ReplaceRoute(ctx, workspaceapi.ReplaceRoute{Workspace: workspaceID, Route: routeID, Spec: desired})
+			if replaceErr != nil {
+				err = replaceErr
+			} else {
+				workspace = committed
+			}
 		}
 	}
 	if err != nil {
@@ -223,18 +245,32 @@ func (a *LiveOperatorAdapter) SaveTarget(ctx context.Context, request ports.Save
 	}
 	return ports.SaveTargetResult{}, errors.New("committed route missing from workspace response")
 }
-func (a *LiveOperatorAdapter) DeleteTarget(ctx context.Context, request ports.DeleteTargetRequest) (readmodel.RouteReadModel, error) {
-	workspace, err := a.client.DeleteTarget(ctx, workspaceapi.DeleteTarget{Workspace: string(request.WorkspaceID), Route: string(request.RouteID), TargetID: string(request.TargetID)})
+func (a *LiveOperatorAdapter) ApplyRouteDraft(ctx context.Context, request ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error) {
+	workspaceID, routeID := string(request.WorkspaceID), string(request.Route.ID)
+	current, err := a.client.GetRoute(ctx, workspaceID, routeID)
 	if err != nil {
-		return readmodel.RouteReadModel{}, adapterFailure("delete target", err)
+		return ports.RouteMutationResult{}, adapterFailure("load editable route", err)
 	}
-	for _, route := range workspace.Routes {
-		if route.Name == string(request.RouteID) {
-			return routeFromWorkspaceRoute(workspace.DefaultRoute, route)
+	desired, err := routeSpecForTopology(current, request.Route)
+	if err != nil {
+		return ports.RouteMutationResult{}, err
+	}
+	committed, err := a.client.ReplaceRoute(ctx, workspaceapi.ReplaceRoute{Workspace: workspaceID, Route: routeID, Spec: desired})
+	if err != nil {
+		return ports.RouteMutationResult{}, adapterFailure("apply route draft", err)
+	}
+	projected, err := a.workspaceFromView(ctx, committed)
+	if err != nil {
+		return ports.RouteMutationResult{}, err
+	}
+	for _, route := range projected.Routes {
+		if route.ID == readmodel.RouteID(routeID) {
+			return ports.RouteMutationResult{Route: route, Workspace: projected}, nil
 		}
 	}
-	return readmodel.RouteReadModel{}, errors.New("committed route missing from workspace response")
+	return ports.RouteMutationResult{}, errors.New("committed route missing")
 }
+
 func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req ports.StorePastedCredentialRequest) (ports.StorePastedCredentialResult, error) {
 	ref, err := a.client.StorePastedCredential(ctx, req.ProviderSpec, req.Name, req.Secret)
 	if err != nil {

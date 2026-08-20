@@ -19,6 +19,42 @@ type workspaceCreateCommands struct {
 	deleteCalls int
 }
 
+func TestCockpit_PersistedWorkspaceSwitchUsesRegistryProjection(t *testing.T) {
+	workspaceA := readmodel.WorkspaceReadModel{ID: "a", Slug: "a", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "route-a", ModelName: "route-a"}}}
+	workspaceB := readmodel.WorkspaceReadModel{ID: "b", Slug: "b", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "route-b", ModelName: "route-b"}}}
+	root := NewCockpit(readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "a", Slug: "a", Kind: readmodel.WorkspaceTabExisting, Selected: true}, {ID: "b", Slug: "b", Kind: readmodel.WorkspaceTabExisting}, {ID: "?", Kind: readmodel.WorkspaceTabHelp}},
+		SelectedWorkspaceID: "a", SelectedWorkspace: workspaceA,
+		Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"a": workspaceA, "b": workspaceB},
+	})
+	if got := root.activeModel().SelectedWorkspace.Routes[0].ModelName; got != "route-a" {
+		t.Fatalf("initial workspace route = %q", got)
+	}
+	root.ActiveTabIndex.Set(1)
+	if got := root.activeModel().SelectedWorkspace.Routes[0].ModelName; got != "route-b" {
+		t.Fatalf("switched workspace route = %q, want route-b", got)
+	}
+	root.ActiveTabIndex.Set(0)
+	if got := root.activeModel().SelectedWorkspace.Routes[0].ModelName; got != "route-a" {
+		t.Fatalf("returned workspace route = %q, want route-a", got)
+	}
+}
+
+func TestCockpit_CommittedWorkspaceSurvivesSwitchAndRemount(t *testing.T) {
+	a := readmodel.WorkspaceReadModel{ID: "a", Slug: "a", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "old", ModelName: "old"}}}
+	b := readmodel.WorkspaceReadModel{ID: "b", Slug: "b", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "b-route", ModelName: "b-route"}}}
+	root := NewCockpit(readmodel.CockpitReadModel{Tabs: []readmodel.WorkspaceTabReadModel{{ID: "a", Slug: "a", Kind: readmodel.WorkspaceTabExisting, Selected: true}, {ID: "b", Slug: "b", Kind: readmodel.WorkspaceTabExisting}}, SelectedWorkspaceID: "a", SelectedWorkspace: a, Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"a": a, "b": b}})
+	committed := a
+	committed.Routes = []readmodel.RouteReadModel{{ID: "new", ModelName: "committed"}}
+	root.currentWorkspacePage().OnWorkspaceCommitted(committed)
+	root.replaceModel(root.activeModel(), false)
+	root.ActiveTabIndex.Set(1)
+	root.ActiveTabIndex.Set(0)
+	if got := root.currentWorkspacePage().RoutesSection.State.Routes[0].ModelName; got != "committed" {
+		t.Fatalf("returned route = %q, want committed", got)
+	}
+}
+
 func TestCockpit_DiscardNamedDraftIsLocal(t *testing.T) {
 	model := readmodel.CockpitReadModel{
 		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "+", Slug: "buildweek", Kind: readmodel.WorkspaceTabDraft, Selected: true}, {ID: "?", Kind: readmodel.WorkspaceTabHelp}},
@@ -180,6 +216,34 @@ func TestRemoveDeletedWorkspacePreservesFreshBootstrapProjection(t *testing.T) {
 	}
 	if len(got.SelectedWorkspace.ProviderOptions) != 1 || got.SelectedWorkspace.ProviderOptions[0].ProviderSpec != "openai" {
 		t.Fatalf("fresh bootstrap provider options = %#v", got.SelectedWorkspace.ProviderOptions)
+	}
+}
+
+func TestReplaceWorkspaceIdentityRekeysRegistryAndTab(t *testing.T) {
+	old := readmodel.WorkspaceReadModel{ID: "foo", Slug: "foo", State: readmodel.WorkspaceExisting}
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "foo", Slug: "foo", Kind: readmodel.WorkspaceTabExisting, Selected: true}, {ID: "+", Kind: readmodel.WorkspaceTabDraft}},
+		SelectedWorkspaceID: "foo", SelectedWorkspace: old, Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"foo": old},
+	}
+	newWorkspace := readmodel.WorkspaceReadModel{ID: "bar", Slug: "bar", State: readmodel.WorkspaceExisting}
+	got := replaceWorkspaceIdentity(model, "foo", newWorkspace)
+	if _, ok := got.Workspaces["foo"]; ok {
+		t.Fatal("old workspace identity remains in registry")
+	}
+	if got.Workspaces["bar"].Slug != "bar" || got.Tabs[0].ID != "bar" || got.Tabs[0].Slug != "bar" {
+		t.Fatalf("rename identity was not atomically rekeyed: %#v", got)
+	}
+}
+
+func TestRemoveWorkspaceClearsRegistry(t *testing.T) {
+	workspace := readmodel.WorkspaceReadModel{ID: "foo", Slug: "foo", State: readmodel.WorkspaceExisting}
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "foo", Slug: "foo", Kind: readmodel.WorkspaceTabExisting, Selected: true}, {ID: "+", Kind: readmodel.WorkspaceTabDraft}},
+		SelectedWorkspaceID: "foo", SelectedWorkspace: workspace, Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"foo": workspace},
+	}
+	got := removeWorkspaceFromModel(model, "foo")
+	if _, ok := got.Workspaces["foo"]; ok {
+		t.Fatal("deleted workspace remains in registry")
 	}
 }
 

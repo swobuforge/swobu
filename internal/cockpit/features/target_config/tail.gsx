@@ -179,7 +179,10 @@ func PlacementPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 	return picker
 }
 func canChangePlacement(w *TargetConfig) bool {
-	return w.mode == targetConfigModeCreate && w.Route.TargetCount() > 0
+	if w.mode == targetConfigModeEdit {
+		return routeWithoutTarget(w.Route, w.Target.ID).TargetCount() > 0
+	}
+	return w.Route.TargetCount() > 0
 }
 
 func TargetConfigHeader(w *TargetConfig) *ui.SelectableRow {
@@ -270,10 +273,8 @@ templ (t *targetTail) Render() {
 			@BedrockEndpointRow(t.root)
 		}
 
-		if t.root.mode != targetConfigModeEdit {
-			if canChangePlacement(t.root) {
-				@PlacementSelect(t.root)
-			}
+		if canChangePlacement(t.root) {
+			@PlacementSelect(t.root)
 		}
 
 		if t.root.mode == targetConfigModeEdit {

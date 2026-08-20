@@ -80,3 +80,20 @@ func TestBuildPlanSeparatesRouteNames(t *testing.T) {
 		t.Fatal("different route names unexpectedly produced an identical plan")
 	}
 }
+
+func TestCapturedPlanIsUnaffectedByLaterRouteReplacement(t *testing.T) {
+	current := routeWithTargets(t, []string{"a"}, []string{"b"}, []string{"c"})
+	captured := BuildPlan("exchange", current)
+	desired := specTopology(current, []string{"c"}, []string{"a"}, []string{"b"})
+	next, err := ApplyRouteSpec(current, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{captured[0].ID().String(), captured[1].ID().String(), captured[2].ID().String()}; !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+		t.Fatalf("captured plan changed = %#v", got)
+	}
+	fresh := BuildPlan("exchange", next)
+	if got := []string{fresh[0].ID().String(), fresh[1].ID().String(), fresh[2].ID().String()}; !reflect.DeepEqual(got, []string{"c", "a", "b"}) {
+		t.Fatalf("fresh plan = %#v", got)
+	}
+}

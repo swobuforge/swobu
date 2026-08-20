@@ -24,7 +24,7 @@ type credentialResolver struct{ calls int }
 
 func (r *credentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
 	r.calls++
-	return "modelscope-token", nil
+	return "ms-token", nil
 }
 
 func TestReasoningContentBecomesReadableTraceWithoutReplayState(t *testing.T) {
@@ -83,7 +83,7 @@ func TestMalformedReasoningContentFailsAtProviderDecoder(t *testing.T) {
 func TestRuntimeUsesBearerStandardChatAndPreservesOpaqueCatalogIDs(t *testing.T) {
 	resolver := &credentialResolver{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer modelscope-token" {
+		if r.Header.Get("Authorization") != "Bearer ms-token" {
 			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
 		}
 		switch r.URL.Path {

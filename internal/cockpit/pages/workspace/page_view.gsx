@@ -16,6 +16,7 @@ type PageView struct {
 	RoutesSection   *routessection.SectionView
 	ActivitySection *activitysection.SectionView
 	OnWorkspaceSaved       func(readmodel.WorkspaceReadModel)
+	OnWorkspaceCommitted   func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted     func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded   func()
 	OnNotice               func(readmodel.Notice)
@@ -45,6 +46,7 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 		page.RoutesSection.TargetConfigs.Commands.Credentials = credentialCommands
 	}
 	page.OverviewSection.OnWorkspaceSaved = page.workspaceSaved
+	page.RoutesSection.OnWorkspaceCommitted = page.workspaceCommitted
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
 	page.OverviewSection.OnWorkspaceDiscarded = page.workspaceDiscarded
 	page.OverviewSection.OnNotice = page.publishNotice
@@ -92,6 +94,13 @@ func (v *PageView) workspacePersisted(workspace readmodel.WorkspaceReadModel) {
 		v.OnWorkspaceSaved(workspace)
 	}
 }
+
+func (v *PageView) workspaceCommitted(workspace readmodel.WorkspaceReadModel) {
+	if v.OnWorkspaceCommitted != nil {
+		v.OnWorkspaceCommitted(workspace)
+	}
+}
+
 
 func (v *PageView) KeyMap() tui.KeyMap {
 	return tui.KeyMap{

@@ -440,13 +440,15 @@ func (b *openRouterSSEReadCloser) transform(chunk map[string]json.RawMessage) er
 		}
 		var text string
 		if rawText, ok := delta["reasoning"]; ok && json.Unmarshal(rawText, &text) == nil {
-			b.mu.Lock()
-			if b.done {
+			if text != "" {
+				b.mu.Lock()
+				if b.done {
+					b.mu.Unlock()
+					return canonical.InternalError("OpenRouter streamed reasoning arrived after answer output")
+				}
+				b.flat.WriteString(text)
 				b.mu.Unlock()
-				return canonical.InternalError("OpenRouter streamed reasoning arrived after answer output")
 			}
-			b.flat.WriteString(text)
-			b.mu.Unlock()
 		}
 		delete(delta, "reasoning_details")
 		delete(delta, "reasoning")

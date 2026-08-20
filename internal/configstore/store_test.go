@@ -111,10 +111,11 @@ func TestFailedUpdateTargetPersistenceLeavesSnapshotAndDiskUnchanged(t *testing.
 	_, err = store.Update(context.Background(), func(config routing.Config) (routing.Config, error) {
 		slug, _ := routing.ParseWorkspaceSlug("dev")
 		route, _ := routing.ParseRouteName("chat")
-		id, _ := routing.ParseTargetID("dev")
-		return config.UpdateTargetSettings(slug, route, id, routing.TargetSettings{
-			Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection(),
-		})
+		workspace, _ := config.Workspace(slug)
+		current, _ := workspace.Route(route)
+		spec := current.Spec()
+		spec.Tiers[0].Targets[0].Settings = routing.TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection()}
+		return config.ApplyRouteSpec(slug, route, spec)
 	})
 	if err == nil {
 		t.Fatal("Update unexpectedly succeeded")
@@ -128,8 +129,59 @@ func TestFailedUpdateTargetPersistenceLeavesSnapshotAndDiskUnchanged(t *testing.
 		t.Fatal(err)
 	}
 	if string(afterDisk) != string(beforeDisk) {
-		t.Fatal("disk changed after failed UpdateTargetSettings persistence")
+		t.Fatal("disk changed after failed route replacement persistence")
 	}
+}
+
+func TestTargetVersionSurvivesStoreRestartAndAdvancesOnce(t *testing.T) {
+	store, path := openTestStore(t)
+	if _, err := store.Update(context.Background(), addWorkspace(t, "dev")); err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	name, _ := routing.ParseRouteName("chat")
+	if _, err := store.Update(context.Background(), func(config routing.Config) (routing.Config, error) {
+		workspace, _ := config.Workspace(slug)
+		route, _ := workspace.Route(name)
+		spec := route.Spec()
+		spec.Tiers[0].Targets[0].Settings.Model, _ = routing.ParseUpstreamModel("changed")
+		return config.ApplyRouteSpec(slug, name, spec)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := storedTargetVersion(t, store.Config(), "dev", "chat", "dev")
+	if before != 2 {
+		t.Fatalf("version before restart = %d, want 2", before)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if after := storedTargetVersion(t, reopened.Config(), "dev", "chat", "dev"); after != before {
+		t.Fatalf("version after restart = %d, want %d", after, before)
+	}
+}
+
+func storedTargetVersion(t *testing.T, config routing.Config, rawSlug, rawRoute, rawID string) routing.TargetVersion {
+	t.Helper()
+	slug, _ := routing.ParseWorkspaceSlug(rawSlug)
+	routeName, _ := routing.ParseRouteName(rawRoute)
+	id, _ := routing.ParseTargetID(rawID)
+	workspace, _ := config.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	for _, tier := range route.Tiers() {
+		for _, target := range tier.Targets() {
+			if target.ID() == id {
+				return target.Version()
+			}
+		}
+	}
+	t.Fatalf("target %q missing", rawID)
+	return 0
 }
 
 func storedTargetModel(t *testing.T, config routing.Config, rawSlug, rawRoute, rawID string) string {

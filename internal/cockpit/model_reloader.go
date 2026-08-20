@@ -85,11 +85,12 @@ func (r *ModelReloader) refreshContext() (context.Context, context.CancelFunc) {
 // Naming retains the [+] draft identity; the first-target result carries an
 // authoritative persisted workspace and promotes it to a normal tab.
 func (r *ModelReloader) localSaveProjection(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
+	oldID := current.SelectedWorkspaceID
 	merged := mergeWorkspaceProjection(current.SelectedWorkspace, saved)
 	if !merged.IsOnboarding() && merged.WorkspaceURL == "" {
 		merged.WorkspaceURL = derivedWorkspaceURL(current, merged.Slug)
 	}
-	return selectWorkspace(updateWorkspaceInModel(current, merged), saved.ID)
+	return selectWorkspace(replaceWorkspaceIdentity(current, oldID, merged), saved.ID)
 }
 
 func derivedWorkspaceURL(current readmodel.CockpitReadModel, slug string) string {

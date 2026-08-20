@@ -1,0 +1,49 @@
+# Demo workspace built only from exact provider/model pairs with successful
+# credentialed live E2E evidence. See README.md for dated proof and exclusions.
+schema_version: 1
+workspaces:
+  free-demo:
+    default_route: free
+    routes:
+      free:
+        tiers:
+          - targets:
+              - id: nvidia-free
+                model: nvidia/nemotron-mini-4b-instruct
+                connection:
+                  nvidia:
+                    credential: env:NVIDIA_API_KEY
+              - id: workers-ai-free
+                model: "@cf/google/gemma-4-26b-a4b-it"
+                protocol: chat_completions_stream
+                connection:
+                  workersai:
+                    base_url: https://api.cloudflare.com/client/v4/accounts/REPLACE_WITH_ACCOUNT_ID/ai/v1
+                    credential: env:CLOUDFLARE_API_TOKEN
+              - id: openrouter-free
+                model: openrouter/free
+                protocol: chat_completions_stream
+                connection:
+                  openrouter:
+                    credential: env:OPENROUTER_API_KEY
+              - id: groq-free
+                model: openai/gpt-oss-20b
+                protocol: chat_completions_stream
+                connection:
+                  groq:
+                    credential: env:GROQ_API_KEY
+              - id: mistral-free
+                model: ministral-3b-2512
+                connection:
+                  mistral:
+                    credential: env:MISTRAL_API_KEY
+              - id: llm7-free
+                model: default
+                connection:
+                  llm7:
+                    credential: env:LLM7_API_KEY
+              - id: cerebras-free-credit
+                model: gemma-4-31b
+                connection:
+                  cerebras:
+                    credential: env:CEREBRAS_API_KEY

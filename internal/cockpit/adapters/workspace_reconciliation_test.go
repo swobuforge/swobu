@@ -13,19 +13,21 @@ import (
 
 type workspaceClientStub struct {
 	operatorClient
-	summaries        []workspaceapi.WorkspaceSummary
-	listCalls        int
-	getResponses     []workspaceapi.Workspace
-	getErrors        []error
-	getCalls         int
-	createResponse   workspaceapi.Workspace
-	echoCreateTarget bool
-	created          workspaceapi.CreateWorkspace
-	createCalls      int
-	deleteErr        error
-	deleteCalls      int
-	updateResponse   workspaceapi.Workspace
-	updated          workspaceapi.UpdateTargetSettings
+	summaries         []workspaceapi.WorkspaceSummary
+	listCalls         int
+	getResponses      []workspaceapi.Workspace
+	getErrors         []error
+	getCalls          int
+	createResponse    workspaceapi.Workspace
+	echoCreatedTarget bool
+	created           workspaceapi.CreateWorkspace
+	createCalls       int
+	deleteErr         error
+	deleteCalls       int
+	replaceResponse   workspaceapi.Workspace
+	replaced          workspaceapi.ReplaceRoute
+	routeResponse     workspaceapi.RouteSpec
+	getRouteCalls     int
 }
 
 func (s *workspaceClientStub) ListWorkspaces(context.Context) ([]workspaceapi.WorkspaceSummary, error) {
@@ -51,7 +53,7 @@ func (s *workspaceClientStub) GetWorkspace(context.Context, string) (workspaceap
 func (s *workspaceClientStub) CreateWorkspace(_ context.Context, cmd workspaceapi.CreateWorkspace) (workspaceapi.Workspace, error) {
 	s.createCalls++
 	s.created = cmd
-	if s.echoCreateTarget && len(s.createResponse.Routes) > 0 && len(s.createResponse.Routes[0].Tiers) > 0 && len(s.createResponse.Routes[0].Tiers[0].Targets) > 0 {
+	if s.echoCreatedTarget && len(s.createResponse.Routes) > 0 && len(s.createResponse.Routes[0].Tiers) > 0 && len(s.createResponse.Routes[0].Tiers[0].Targets) > 0 {
 		s.createResponse.Slug = cmd.Slug
 		s.createResponse.DefaultRoute = cmd.InitialRoute
 		s.createResponse.Routes[0].Name = cmd.InitialRoute
@@ -68,9 +70,14 @@ func (s *workspaceClientStub) DeleteWorkspace(context.Context, string) error {
 	return s.deleteErr
 }
 
-func (s *workspaceClientStub) UpdateTargetSettings(_ context.Context, cmd workspaceapi.UpdateTargetSettings) (workspaceapi.Workspace, error) {
-	s.updated = cmd
-	return s.updateResponse, nil
+func (s *workspaceClientStub) ReplaceRoute(_ context.Context, cmd workspaceapi.ReplaceRoute) (workspaceapi.Workspace, error) {
+	s.replaced = cmd
+	return s.replaceResponse, nil
+}
+
+func (s *workspaceClientStub) GetRoute(context.Context, string, string) (workspaceapi.RouteSpec, error) {
+	s.getRouteCalls++
+	return s.routeResponse, nil
 }
 
 func (s *workspaceClientStub) Status(context.Context, string) (operatorclient.StatusProjection, error) {
@@ -79,8 +86,18 @@ func (s *workspaceClientStub) Status(context.Context, string) (operatorclient.St
 
 func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 	before := workspaceView("old-model", "env:OLD")
-	after := workspaceView("server-normalized-model", "env:COMMITTED")
-	stub := &workspaceClientStub{getResponses: []workspaceapi.Workspace{before}, updateResponse: after}
+	stub := &workspaceClientStub{
+		getResponses: []workspaceapi.Workspace{before},
+		routeResponse: workspaceapi.RouteSpec{Tiers: []workspaceapi.TierSpec{{Targets: []workspaceapi.TargetDraft{{
+			ID: "a", Model: "old-model", Protocol: "responses", Connection: workspaceapi.StandardConnection("openai", "", "env:OLD"),
+		}}}}},
+		replaceResponse: workspaceapi.Workspace{Slug: "dev", DefaultRoute: "chat", Routes: []workspaceapi.Route{{
+			Name: "chat",
+			Tiers: []workspaceapi.Tier{{Targets: []workspaceapi.Target{{
+				ID: "a", Model: "server-normalized-model", Protocol: "responses", Provider: "openai", Connection: workspaceapi.StandardConnection("openai", "", "env:COMMITTED"),
+			}}}},
+		}}},
+	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
 	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
 	connection, err := routing.NewStandardConnection(provider, "", "env:CLIENT")
@@ -95,7 +112,7 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 		ModelID:     "client-model",
 		Protocol:    "responses",
 		Connection:  connection,
-		Placement:   readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementBalance, PeerTargetID: "a"},
+		Placement:   readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementFallback},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +120,36 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 	if result.Target.Model != "server-normalized-model" || result.Target.CredentialRef != "env:COMMITTED" {
 		t.Fatalf("result target = %#v; want authoritative response", result.Target)
 	}
-	if stub.updated.TargetID != "a" || stub.updated.Target.Model != "client-model" {
-		t.Fatalf("update command = %#v", stub.updated)
+	if stub.replaced.Route != "chat" || stub.replaced.Spec.Tiers[0].Targets[0].ID != "a" || stub.replaced.Spec.Tiers[0].Targets[0].Model != "client-model" {
+		t.Fatalf("route replacement = %#v", stub.replaced)
+	}
+	if stub.getRouteCalls != 1 {
+		t.Fatalf("editable route reads = %d, want canonical GetRoute once", stub.getRouteCalls)
+	}
+}
+
+func TestSaveTargetPreservesOmittedDerivedProtocolFromCanonicalRouteSpec(t *testing.T) {
+	workspace := workspaceapi.Workspace{Slug: "dev", DefaultRoute: "chat", Routes: []workspaceapi.Route{{Name: "chat"}}}
+	chatGPT := workspaceapi.TargetDraft{ID: "chatgpt", Model: "gpt-5", Connection: workspaceapi.StandardConnection("chatgpt", "", "secretfile:chatgpt/default")}
+	stub := &workspaceClientStub{
+		getResponses:    []workspaceapi.Workspace{workspace},
+		routeResponse:   workspaceapi.RouteSpec{Tiers: []workspaceapi.TierSpec{{Targets: []workspaceapi.TargetDraft{chatGPT}}}},
+		replaceResponse: workspaceapi.Workspace{Slug: "dev", DefaultRoute: "chat", Routes: []workspaceapi.Route{{Name: "chat", Tiers: []workspaceapi.Tier{{Targets: []workspaceapi.Target{{ID: chatGPT.ID, Model: chatGPT.Model, Connection: chatGPT.Connection}}}}}}},
+	}
+	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
+	connection, err := chatGPT.Connection.RoutingConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
+		WorkspaceID: "dev", RouteID: "chat", TargetID: "chatgpt", ModelID: "gpt-5", Connection: connection,
+		Placement: readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementFallback},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.replaced.Spec.Tiers[0].Targets[0].Protocol; got != "" {
+		t.Fatalf("derived protocol in Cockpit PUT = %q, want omitted", got)
 	}
 }
 
@@ -169,9 +214,9 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 	committed := workspaceView("gpt-4.1", "env:OPENAI_API_KEY")
 	committed.Slug = "buildweek"
 	stub := &workspaceClientStub{
-		getErrors:        []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
-		createResponse:   committed,
-		echoCreateTarget: true,
+		getErrors:         []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
+		createResponse:    committed,
+		echoCreatedTarget: true,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
 	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
@@ -196,9 +241,9 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 func TestSaveFirstTargetAtomicallyPersistsConventionalDefault(t *testing.T) {
 	committed := workspaceWithSlug("default")
 	stub := &workspaceClientStub{
-		getErrors:        []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
-		createResponse:   committed,
-		echoCreateTarget: true,
+		getErrors:         []error{&operatorclient.ResponseError{StatusCode: 404, Code: "NOT_FOUND"}},
+		createResponse:    committed,
+		echoCreatedTarget: true,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:9000"}
 	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })

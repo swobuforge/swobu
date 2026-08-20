@@ -24,11 +24,9 @@ func NewWorkspaceControlHandler(service workspaces.Service) *http.ServeMux {
 	mux.HandleFunc("POST /_swobu/workspaces/{workspace}/default-route", h.setDefaultRoute)
 	mux.HandleFunc("POST /_swobu/workspaces/{workspace}/routes", h.createRoute)
 	mux.HandleFunc("DELETE /_swobu/workspaces/{workspace}/routes/{route}", h.deleteRoute)
+	mux.HandleFunc("GET /_swobu/workspaces/{workspace}/routes/{route}", h.getRoute)
+	mux.HandleFunc("PUT /_swobu/workspaces/{workspace}/routes/{route}", h.replaceRoute)
 	mux.HandleFunc("POST /_swobu/workspaces/{workspace}/routes/{route}/rename", h.renameRoute)
-	mux.HandleFunc("POST /_swobu/workspaces/{workspace}/routes/{route}/targets", h.createTarget)
-	mux.HandleFunc("PUT /_swobu/workspaces/{workspace}/routes/{route}/targets/{target}", h.updateTargetSettings)
-	mux.HandleFunc("DELETE /_swobu/workspaces/{workspace}/routes/{route}/targets/{target}", h.deleteTarget)
-	mux.HandleFunc("POST /_swobu/workspaces/{workspace}/routes/{route}/targets/{target}/credential", h.setCredential)
 	return mux
 }
 
@@ -112,6 +110,30 @@ func (h workspaceControlHandlers) deleteRoute(w http.ResponseWriter, r *http.Req
 	h.writeWorkspace(w, value, err)
 }
 
+func (h workspaceControlHandlers) getRoute(w http.ResponseWriter, r *http.Request) {
+	value, err := h.service.GetRoute(r.Context(), r.PathValue("workspace"), r.PathValue("route"))
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	writeWorkspaceJSON(w, http.StatusOK, value)
+}
+
+func (h workspaceControlHandlers) replaceRoute(w http.ResponseWriter, r *http.Request) {
+	var spec workspaces.RouteSpec
+	if !decodeWorkspaceJSON(w, r, &spec) {
+		return
+	}
+	value, err := h.service.ReplaceRoute(r.Context(), workspaces.ReplaceRoute{
+		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), Spec: spec,
+	})
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	writeWorkspaceJSON(w, http.StatusOK, value)
+}
+
 func (h workspaceControlHandlers) renameRoute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		NewName string `json:"new_name"`
@@ -121,53 +143,6 @@ func (h workspaceControlHandlers) renameRoute(w http.ResponseWriter, r *http.Req
 	}
 	value, err := h.service.RenameRoute(r.Context(), workspaces.RenameRoute{
 		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), NewName: body.NewName,
-	})
-	h.writeWorkspace(w, value, err)
-}
-
-func (h workspaceControlHandlers) createTarget(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Target    workspaces.TargetDraft `json:"target"`
-		Placement workspaces.Placement   `json:"placement"`
-	}
-	if !decodeWorkspaceJSON(w, r, &body) {
-		return
-	}
-	value, err := h.service.CreateTarget(r.Context(), workspaces.CreateTarget{
-		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), Target: body.Target, Placement: body.Placement,
-	})
-	h.writeWorkspace(w, value, err)
-}
-
-func (h workspaceControlHandlers) updateTargetSettings(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Target workspaces.TargetSettingsDraft `json:"target"`
-	}
-	if !decodeWorkspaceJSON(w, r, &body) {
-		return
-	}
-	value, err := h.service.UpdateTargetSettings(r.Context(), workspaces.UpdateTargetSettings{
-		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), TargetID: r.PathValue("target"), Target: body.Target,
-	})
-	h.writeWorkspace(w, value, err)
-}
-
-func (h workspaceControlHandlers) deleteTarget(w http.ResponseWriter, r *http.Request) {
-	value, err := h.service.DeleteTarget(r.Context(), workspaces.DeleteTarget{
-		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), TargetID: r.PathValue("target"),
-	})
-	h.writeWorkspace(w, value, err)
-}
-
-func (h workspaceControlHandlers) setCredential(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Credential string `json:"credential"`
-	}
-	if !decodeWorkspaceJSON(w, r, &body) {
-		return
-	}
-	value, err := h.service.SetCredential(r.Context(), workspaces.SetCredential{
-		Workspace: r.PathValue("workspace"), Route: r.PathValue("route"), TargetID: r.PathValue("target"), Credential: body.Credential,
 	})
 	h.writeWorkspace(w, value, err)
 }

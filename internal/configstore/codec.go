@@ -20,8 +20,9 @@ type documentDTO struct {
 	Workspaces    map[string]workspaceDTO `yaml:"workspaces"`
 }
 type workspaceDTO struct {
-	DefaultRoute string              `yaml:"default_route"`
-	Routes       map[string]routeDTO `yaml:"routes"`
+	DefaultRoute      string              `yaml:"default_route"`
+	TargetGenerations map[string]uint64   `yaml:"target_generations,omitempty"`
+	Routes            map[string]routeDTO `yaml:"routes"`
 }
 type routeDTO struct {
 	Tiers []tierDTO `yaml:"tiers"`
@@ -31,6 +32,7 @@ type tierDTO struct {
 }
 type targetDTO struct {
 	ID         string        `yaml:"id"`
+	Version    *uint64       `yaml:"version,omitempty"`
 	Model      string        `yaml:"model"`
 	Protocol   string        `yaml:"protocol,omitempty"`
 	Connection connectionDTO `yaml:"connection"`
@@ -328,7 +330,18 @@ func decode(raw []byte) (routing.Config, error) {
 			}
 			routes = append(routes, route)
 		}
-		workspace, err := routing.NewWorkspace(slug, defaultRoute, routes)
+		generations := make(map[routing.TargetID]routing.TargetVersion, len(encodedWorkspace.TargetGenerations))
+		for rawID, rawVersion := range encodedWorkspace.TargetGenerations {
+			id, err := routing.ParseTargetID(rawID)
+			if err != nil {
+				return routing.Config{}, prefixPath(err, "workspaces."+rawSlug+".target_generations."+rawID)
+			}
+			if rawVersion == 0 {
+				return routing.Config{}, fmt.Errorf("workspaces.%s.target_generations.%s: generation must be greater than zero", rawSlug, rawID)
+			}
+			generations[id] = routing.TargetVersion(rawVersion)
+		}
+		workspace, err := routing.RestoreWorkspace(slug, defaultRoute, routes, generations)
 		if err != nil {
 			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug)
 		}
@@ -342,12 +355,26 @@ func decodeTarget(dto targetDTO) (routing.Target, error) {
 	if err != nil {
 		return routing.Target{}, err
 	}
-	return routing.FinalizeTarget(routing.TargetDraft{
+	target, err := routing.FinalizeTarget(routing.TargetDraft{
 		ID:         dto.ID,
 		Model:      dto.Model,
 		Protocol:   dto.Protocol,
 		Connection: connection,
 	}, profile.RoutingConstructionFacts())
+	if err != nil {
+		return routing.Target{}, err
+	}
+	version := routing.TargetVersion(1)
+	if dto.Version == nil {
+		// Schema v1 predates durable target versions. Reading an absent value as
+		// the initial revision is the one-way migration; every subsequent write
+		// emits the explicit daemon-owned value.
+	} else if *dto.Version == 0 {
+		return routing.Target{}, fmt.Errorf("target.version: must be greater than zero")
+	} else {
+		version = routing.TargetVersion(*dto.Version)
+	}
+	return routing.RestoreTarget(target.ID(), version, target.Model(), target.Protocol(), target.Connection())
 }
 
 func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
@@ -357,7 +384,10 @@ func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
 func encode(config routing.Config) ([]byte, error) {
 	dto := documentDTO{SchemaVersion: routing.SchemaVersion, Workspaces: map[string]workspaceDTO{}}
 	for _, workspace := range config.Workspaces() {
-		encodedWorkspace := workspaceDTO{DefaultRoute: workspace.DefaultRoute().String(), Routes: map[string]routeDTO{}}
+		encodedWorkspace := workspaceDTO{DefaultRoute: workspace.DefaultRoute().String(), TargetGenerations: map[string]uint64{}, Routes: map[string]routeDTO{}}
+		for id, version := range workspace.TargetGenerations() {
+			encodedWorkspace.TargetGenerations[id.String()] = uint64(version)
+		}
 		for _, route := range workspace.Routes() {
 			encodedRoute := routeDTO{Tiers: make([]tierDTO, 0, len(route.Tiers()))}
 			for _, tier := range route.Tiers() {
@@ -390,7 +420,8 @@ func encode(config routing.Config) ([]byte, error) {
 }
 
 func encodeTarget(target routing.Target) (targetDTO, error) {
-	dto := targetDTO{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String()}
+	version := uint64(target.Version())
+	dto := targetDTO{ID: target.ID().String(), Version: &version, Model: target.Model().String(), Protocol: target.Protocol().String()}
 	if _, derived := profile.DerivedProtocolForSpec(string(target.Provider())); derived {
 		dto.Protocol = ""
 	}
