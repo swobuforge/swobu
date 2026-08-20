@@ -42,6 +42,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	model = ensureWorkspaceRegistry(model)
 	activeTab := selectedTabIndex(model.Tabs)
 	cockpit := &Cockpit{
 		Model:           model,
@@ -169,26 +170,20 @@ func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
 
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
 	active := c.activeModel()
-	previousPage := c.currentWorkspacePage()
 	wasOnboarding := active.SelectedWorkspace.IsOnboarding()
 	model, notice := c.Reloader.RefreshAfterSave(active, saved)
 	c.Notice.Set(notice)
 	c.replaceModel(model, !wasOnboarding)
-	if previousPage != nil && !wasOnboarding {
-		if freshPage := c.WorkspacePages[saved.ID]; freshPage != nil && freshPage != previousPage {
-			if previousPage.OverviewSection != nil && freshPage.OverviewSection != nil {
-				previousPage.OverviewSection.UpdateProps(freshPage.OverviewSection)
-			}
-			if previousPage.RoutesSection != nil && freshPage.RoutesSection != nil {
-				previousPage.RoutesSection.UpdateProps(freshPage.RoutesSection)
-			}
-			c.WorkspacePages[saved.ID] = previousPage
-		}
-	}
+}
+
+func (c *Cockpit) refreshWorkspaceProjection(workspace readmodel.WorkspaceReadModel) {
+	model := c.activeModel()
+	model = updateWorkspaceInModel(model, workspace)
+	c.Model = model
 }
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
-	model, notice := c.Reloader.RefreshAfterDelete(c.Model, deleted)
+	model, notice := c.Reloader.RefreshAfterDelete(c.activeModel(), deleted)
 	c.Notice.Set(notice)
 	c.replaceModel(model, true)
 }
@@ -219,29 +214,12 @@ func (c *Cockpit) replaceModel(model readmodel.CockpitReadModel, preserveDraftPa
 	c.ActiveTabIndex.Set(activeTab)
 	c.BodyViewport.Reset()
 	c.WorkspacePages = c.workspacePagesByTab(model)
-	c.preserveInactiveWorkspacePages(previousPages, model)
+	// Persisted workspace pages are rebuilt from the authoritative registry.
+	// Only draft pages retain local authoring state across refreshes.
 	if preserveDraftPages {
 		c.preserveDraftWorkspacePages(previousPages, model)
 	}
 	c.HelpPage = help_page.View(model.Help)
-}
-
-// preserveInactiveWorkspacePages keeps each inactive tab's page-owned loaded
-// data and interaction lifetime. CockpitReadModel carries full workspace data
-// only for the selected tab, so rebuilding inactive pages from tab summaries
-// would falsely project persisted routes as empty.
-func (c *Cockpit) preserveInactiveWorkspacePages(previous map[readmodel.WorkspaceID]*workspace_page.PageView, model readmodel.CockpitReadModel) {
-	if previous == nil {
-		return
-	}
-	for _, tab := range model.Tabs {
-		if tab.Selected || tab.Kind == readmodel.WorkspaceTabHelp {
-			continue
-		}
-		if page := previous[tab.ID]; page != nil {
-			c.WorkspacePages[tab.ID] = page
-		}
-	}
 }
 
 // preserveDraftWorkspacePages carries unsaved [+] workflow state across a
@@ -387,6 +365,7 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 		targetCredentialCommandsPort(c.WorkspacePorts),
 	)
 	page.OnWorkspaceSaved = c.refreshAfterWorkspaceSave
+	page.OnWorkspaceCommitted = c.refreshWorkspaceProjection
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
 	page.OnWorkspaceDiscarded = c.discardWorkspaceDraft
 	page.OnNotice = c.publishNotice

@@ -62,6 +62,16 @@ func (c Config) CreateRoute(slug WorkspaceSlug, name RouteName, first Target) (C
 		if _, exists := workspace.routes[name]; exists {
 			return Workspace{}, fmt.Errorf("%w: route %q already exists", ErrConflict, name.String())
 		}
+		if highest := workspace.generations[first.id]; highest > 0 {
+			if highest == ^TargetVersion(0) {
+				return Workspace{}, pathError("target.version", "target version exhausted")
+			}
+			var err error
+			first, err = RestoreTarget(first.id, highest+1, first.model, first.protocol, first.connection)
+			if err != nil {
+				return Workspace{}, err
+			}
+		}
 		tier, err := NewTier([]Target{first})
 		if err != nil {
 			return Workspace{}, err
@@ -71,7 +81,8 @@ func (c Config) CreateRoute(slug WorkspaceSlug, name RouteName, first Target) (C
 			return Workspace{}, err
 		}
 		workspace.routes[name] = route
-		return NewWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes())
+		workspace.generations[first.id] = first.version
+		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
 	})
 }
 
@@ -90,7 +101,7 @@ func (c Config) RenameRoute(slug WorkspaceSlug, from, to RouteName) (Config, err
 		if workspace.defaultRoute == from {
 			workspace.defaultRoute = to
 		}
-		return NewWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes())
+		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
 	})
 }
 
@@ -100,7 +111,7 @@ func (c Config) SetDefaultRoute(slug WorkspaceSlug, name RouteName) (Config, err
 			return Workspace{}, fmt.Errorf("%w: route %q", ErrNotFound, name.String())
 		}
 		workspace.defaultRoute = name
-		return NewWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes())
+		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
 	})
 }
 
@@ -125,31 +136,7 @@ func (c Config) DeleteRoute(slug WorkspaceSlug, name RouteName, replacement *Rou
 			workspace.defaultRoute = *replacement
 		}
 		delete(workspace.routes, name)
-		return NewWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes())
-	})
-}
-
-// CreateTarget balances with an existing target when balanceWith is non-nil.
-// A nil balanceWith appends a new singleton final fallback tier.
-func (c Config) CreateTarget(slug WorkspaceSlug, routeName RouteName, target Target, balanceWith *TargetID) (Config, error) {
-	return c.editRoute(slug, routeName, func(route Route) (Route, error) {
-		if _, _, ok := route.target(target.id); ok {
-			return Route{}, fmt.Errorf("%w: target %q already exists", ErrConflict, target.id.String())
-		}
-		if balanceWith != nil {
-			tierIndex, _, ok := route.target(*balanceWith)
-			if !ok {
-				return Route{}, fmt.Errorf("%w: balance target %q", ErrNotFound, balanceWith.String())
-			}
-			route.tiers[tierIndex].targets = append(route.tiers[tierIndex].targets, target)
-		} else {
-			tier, err := NewTier([]Target{target})
-			if err != nil {
-				return Route{}, err
-			}
-			route.tiers = append(route.tiers, tier)
-		}
-		return NewRoute(route.name, route.tiers)
+		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
 	})
 }
 
@@ -166,73 +153,6 @@ func (s TargetSettings) Equal(other TargetSettings) bool {
 	return s.Model == other.Model && s.Protocol == other.Protocol && connectionsEqual(s.Connection, other.Connection)
 }
 
-// UpdateTargetSettings replaces editable settings in place and cannot alter
-// the target's tier or any balanced peer.
-func (c Config) UpdateTargetSettings(slug WorkspaceSlug, routeName RouteName, id TargetID, settings TargetSettings) (Config, error) {
-	return c.editRoute(slug, routeName, func(route Route) (Route, error) {
-		return replaceTargetSettings(route, id, settings)
-	})
-}
-
-// replaceTargetSettings is the authoritative generation seam. TargetVersion
-// identifies the complete effective backend configuration: provider,
-// protocol, endpoint, credential reference, model/deployment, and
-// provider-specific request options. Transport and codec options are pure
-// derivatives of TargetSettings and have no independent mutation path.
-func replaceTargetSettings(route Route, id TargetID, settings TargetSettings) (Route, error) {
-	sourceTier, sourceIndex, ok := route.target(id)
-	if !ok {
-		return Route{}, fmt.Errorf("%w: target %q", ErrNotFound, id.String())
-	}
-	current := route.tiers[sourceTier].targets[sourceIndex]
-	currentSettings := TargetSettings{Model: current.model, Protocol: current.protocol, Connection: current.connection}
-	if currentSettings.Equal(settings) {
-		return NewRoute(route.name, route.tiers)
-	}
-	replacement, err := NewTarget(id, settings.Model, settings.Protocol, settings.Connection)
-	if err != nil {
-		return Route{}, err
-	}
-	replacement.version = current.version + 1
-	if replacement.version == 0 {
-		return Route{}, pathError("target.version", "target version exhausted")
-	}
-	route.tiers[sourceTier].targets[sourceIndex] = replacement
-	return NewRoute(route.name, route.tiers)
-}
-
-func (c Config) DeleteTarget(slug WorkspaceSlug, routeName RouteName, id TargetID) (Config, error) {
-	return c.editRoute(slug, routeName, func(route Route) (Route, error) {
-		total := 0
-		for _, tier := range route.tiers {
-			total += len(tier.targets)
-		}
-		if total == 1 {
-			return Route{}, fmt.Errorf("%w: delete the route instead", ErrLastTarget)
-		}
-		tierIndex, targetIndex, ok := route.target(id)
-		if !ok {
-			return Route{}, fmt.Errorf("%w: target %q", ErrNotFound, id.String())
-		}
-		route.tiers[tierIndex].targets = append(route.tiers[tierIndex].targets[:targetIndex], route.tiers[tierIndex].targets[targetIndex+1:]...)
-		if len(route.tiers[tierIndex].targets) == 0 {
-			route.tiers = append(route.tiers[:tierIndex], route.tiers[tierIndex+1:]...)
-		}
-		return NewRoute(route.name, route.tiers)
-	})
-}
-
-func (r Route) target(id TargetID) (int, int, bool) {
-	for tierIndex := range r.tiers {
-		for targetIndex := range r.tiers[tierIndex].targets {
-			if r.tiers[tierIndex].targets[targetIndex].id == id {
-				return tierIndex, targetIndex, true
-			}
-		}
-	}
-	return 0, 0, false
-}
-
 func (c Config) editRoute(slug WorkspaceSlug, routeName RouteName, edit func(Route) (Route, error)) (Config, error) {
 	return c.editWorkspace(slug, func(workspace Workspace) (Workspace, error) {
 		route, ok := workspace.routes[routeName]
@@ -244,7 +164,7 @@ func (c Config) editRoute(slug WorkspaceSlug, routeName RouteName, edit func(Rou
 			return Workspace{}, err
 		}
 		workspace.routes[routeName] = nextRoute
-		return NewWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes())
+		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
 	})
 }
 

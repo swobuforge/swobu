@@ -470,6 +470,30 @@ func TestOpenRouterStreamingDoesNotFinalizeOnEmptyContentBeforeReasoning(t *test
 	t.Fatal("stream dropped reasoning after an empty content delta")
 }
 
+func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"role":"assistant","reasoning":"trace","reasoning_details":[{"type":"reasoning.text","text":"trace"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":null},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+
+	transformed, err := io.ReadAll(newOpenRouterSSEBody(io.NopCloser(strings.NewReader(raw))))
+	if err != nil {
+		t.Fatalf("transform terminal null reasoning: %v", err)
+	}
+	if bytes.Contains(transformed, []byte(`"reasoning"`)) {
+		t.Fatalf("terminal null reasoning leaked after transform: %s", transformed)
+	}
+	if !bytes.Contains(transformed, []byte(`"content":"answer"`)) || !bytes.Contains(transformed, []byte(`"finish_reason":"stop"`)) {
+		t.Fatalf("terminal stream lost answer or finish: %s", transformed)
+	}
+}
+
 func openRouterReasoningItem(t *testing.T, summary string) canonical.CanonicalItem {
 	t.Helper()
 	raw, err := json.Marshal([]map[string]string{{"type": "reasoning.summary", "summary": summary}})

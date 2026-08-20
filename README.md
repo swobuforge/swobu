@@ -1,5 +1,7 @@
 # Swobu
 
+Demo workspace: [credential-proven free provider route](examples/free-provider-route/README.md).
+
 ![Swobu](./assets/readme/swobu-readme-hero.png)
 
 ## Make AI capacity routable.

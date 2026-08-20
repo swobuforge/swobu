@@ -44,7 +44,7 @@ type TargetConfigCommands struct {
 // routes section that mounted the target config.
 type TargetConfigCallbacks struct {
 	OnCreated         func(ports.SaveTargetResult)
-	OnSaved           func(readmodel.RouteReadModel)
+	OnSaved           func(ports.SaveTargetResult)
 	OnDeleteConfirmed func(readmodel.RouteID, readmodel.TargetID) error
 	OnAddClose        func(readmodel.RouteID)
 	OnEditClose       func(readmodel.TargetID)
@@ -119,16 +119,27 @@ func (h *TargetConfigMounts) Edit(route readmodel.RouteReadModel, target readmod
 	return wf
 }
 
-func (h *TargetConfigMounts) MoveRoute(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
+// RekeyRoute preserves every transient target editor owned by a route while
+// the persisted route identity changes.
+func (h *TargetConfigMounts) RekeyRoute(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
 	h.ensureMaps()
-	previousKey := h.addKey(previousID)
-	wf := h.components[previousKey]
-	if wf == nil {
-		return
+	if wf := h.components[h.addKey(previousID)]; wf != nil {
+		delete(h.components, h.addKey(previousID))
+		h.components[h.addKey(route.ID)] = wf
+		h.refreshAddConfig(wf, route)
 	}
-	delete(h.components, previousKey)
-	h.components[h.addKey(route.ID)] = wf
-	h.refreshAddConfig(wf, route)
+	for key, wf := range h.components {
+		if key.Mode != TargetConfigEdit || key.RouteID != previousID {
+			continue
+		}
+		delete(h.components, key)
+		key.RouteID = route.ID
+		h.components[key] = wf
+		// Rekey only; do not refresh the target snapshot, which would overwrite
+		// operator-entered draft fields before the new aggregate is mounted.
+		wf.WorkspaceID = h.WorkspaceID
+		wf.Route = route
+	}
 }
 
 func (h *TargetConfigMounts) RefreshAdd(route readmodel.RouteReadModel) {
@@ -215,13 +226,14 @@ func (h *TargetConfigMounts) MountKey(route readmodel.RouteReadModel, targetID r
 }
 
 func (h *TargetConfigMounts) newAdd(route readmodel.RouteReadModel) *target_config.TargetConfig {
-	wf := target_config.NewTargetConfig(
+	var wf *target_config.TargetConfig
+	wf = target_config.NewTargetConfig(
 		h.WorkspaceID,
 		route,
 		h.saveTarget,
 		func() {
 			if h.Callbacks.OnAddClose != nil {
-				h.Callbacks.OnAddClose(route.ID)
+				h.Callbacks.OnAddClose(wf.Route.ID)
 			}
 		},
 	)
@@ -235,14 +247,15 @@ func (h *TargetConfigMounts) newAdd(route readmodel.RouteReadModel) *target_conf
 }
 
 func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target readmodel.TargetReadModel) *target_config.TargetConfig {
-	wf := target_config.NewEditTargetConfig(
+	var wf *target_config.TargetConfig
+	wf = target_config.NewEditTargetConfig(
 		h.WorkspaceID,
 		route,
 		target,
 		h.saveTarget,
 		func() {
 			if h.Callbacks.OnEditClose != nil {
-				h.Callbacks.OnEditClose(target.ID)
+				h.Callbacks.OnEditClose(wf.Target.ID)
 			}
 		},
 	)
@@ -254,12 +267,12 @@ func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target read
 	}
 	wf.OnSaved = func(result ports.SaveTargetResult) {
 		if h.Callbacks.OnSaved != nil {
-			h.Callbacks.OnSaved(result.Route)
+			h.Callbacks.OnSaved(result)
 		}
 	}
 	wf.OnDeleteConfirmed = func() error {
 		if h.Callbacks.OnDeleteConfirmed != nil {
-			return h.Callbacks.OnDeleteConfirmed(route.ID, target.ID)
+			return h.Callbacks.OnDeleteConfirmed(wf.Route.ID, wf.Target.ID)
 		}
 		return nil
 	}

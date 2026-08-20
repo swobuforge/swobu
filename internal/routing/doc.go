@@ -25,12 +25,15 @@
 // keeping provider inference and runtime alias creation out of routing. Missing
 // or blank tokens, and unmatched tokens in a workspace without a default, fail.
 //
-// Each target has one durable ID and one process-local monotonic version. Its
+// Each target has one durable ID and one daemon-owned durable monotonic version. Its
 // protocol records the provider whose catalog admitted it and must match the
 // typed connection provider. Effective setting equality compares durable
 // fields explicitly. Target settings and credential-reference saves advance
 // the version; session resolution uses it to reject native handles captured
-// before a target save. Version is intentionally process-local.
+// before a target save. A workspace retains the highest committed generation
+// even while an ID is absent, so delete/re-add cannot revive stale native state.
+// Operator route specifications never carry the version; materialized
+// persistence restores active versions and generation history across restarts.
 //
 // A standard connection persists the provider, effective locator, and optional
 // credential. Provider-specific locator shorthand is normalized before this

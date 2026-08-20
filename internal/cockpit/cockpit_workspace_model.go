@@ -2,6 +2,18 @@ package cockpit
 
 import "github.com/swobuforge/swobu/internal/cockpit/readmodel"
 
+func ensureWorkspaceRegistry(model readmodel.CockpitReadModel) readmodel.CockpitReadModel {
+	if model.Workspaces == nil {
+		model.Workspaces = make(map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel)
+	}
+	if model.SelectedWorkspace.ID != "" && model.SelectedWorkspace.IsPersisted() {
+		if _, ok := model.Workspaces[model.SelectedWorkspace.ID]; !ok {
+			model.Workspaces[model.SelectedWorkspace.ID] = model.SelectedWorkspace
+		}
+	}
+	return model
+}
+
 func workspaceForTab(model readmodel.CockpitReadModel, tab readmodel.WorkspaceTabReadModel) readmodel.WorkspaceReadModel {
 	if tab.Kind == readmodel.WorkspaceTabBootstrap {
 		workspace := readmodel.NewConventionalFirstWorkspace(
@@ -23,6 +35,9 @@ func workspaceForTab(model readmodel.CockpitReadModel, tab readmodel.WorkspaceTa
 			draft = mergeWorkspaceProjection(model.SelectedWorkspace, draft)
 		}
 		return draft
+	}
+	if workspace, ok := model.Workspaces[tab.ID]; ok {
+		return workspace
 	}
 	if tab.ID == model.SelectedWorkspaceID {
 		return model.SelectedWorkspace
@@ -49,6 +64,27 @@ func selectWorkspace(model readmodel.CockpitReadModel, id readmodel.WorkspaceID)
 }
 
 func updateWorkspaceInModel(model readmodel.CockpitReadModel, workspace readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
+	return replaceWorkspaceIdentity(model, "", workspace)
+}
+
+// replaceWorkspaceIdentity atomically replaces a persisted workspace key and
+// its tab projection. oldID is explicit for rename/degraded refresh paths;
+// an empty value means an ordinary projection update.
+func replaceWorkspaceIdentity(model readmodel.CockpitReadModel, oldID readmodel.WorkspaceID, workspace readmodel.WorkspaceReadModel) readmodel.CockpitReadModel {
+	if model.Workspaces == nil {
+		model.Workspaces = make(map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel)
+	}
+	model.Workspaces[workspace.ID] = workspace
+	if old := oldID; old != "" && old != workspace.ID && workspace.IsPersisted() {
+		delete(model.Workspaces, old)
+		for i := range model.Tabs {
+			if model.Tabs[i].ID == old && model.Tabs[i].Kind == readmodel.WorkspaceTabExisting {
+				model.Tabs[i].ID = workspace.ID
+				model.Tabs[i].Slug = workspace.Slug
+				break
+			}
+		}
+	}
 	replaced := false
 	for i := range model.Tabs {
 		if model.Tabs[i].ID != workspace.ID {
@@ -88,6 +124,7 @@ func insertDraftBeforeHelp(tabs []readmodel.WorkspaceTabReadModel) []readmodel.W
 }
 
 func removeWorkspaceFromModel(model readmodel.CockpitReadModel, deleted readmodel.WorkspaceID) readmodel.CockpitReadModel {
+	delete(model.Workspaces, deleted)
 	projectionSource := model.SelectedWorkspace
 	tabs := make([]readmodel.WorkspaceTabReadModel, 0, len(model.Tabs))
 	for _, tab := range model.Tabs {

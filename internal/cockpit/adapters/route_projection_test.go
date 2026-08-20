@@ -143,13 +143,41 @@ func TestTargetFromSaveRequestPreservesProviderKeyAcrossAdapters(t *testing.T) {
 	}
 }
 
-func TestPlacementFromReadModelHasOnlyOptionalBalanceTarget(t *testing.T) {
-	fallback := placementFromReadModel(readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementFallback})
-	if fallback.BalanceWith != nil {
-		t.Fatalf("fallback placement = %#v", fallback)
+func TestRouteSpecWithTargetCoversAddMoveEditAndTierCleanup(t *testing.T) {
+	connection := workspaceapi.StandardConnection("openai", "", "env:KEY")
+	route := workspaceapi.RouteSpec{Tiers: []workspaceapi.TierSpec{
+		{Targets: []workspaceapi.TargetDraft{{ID: "a", Model: "a", Protocol: "responses", Connection: connection}, {ID: "b", Model: "b", Protocol: "responses", Connection: connection}}},
+		{Targets: []workspaceapi.TargetDraft{{ID: "c", Model: "c", Protocol: "responses", Connection: connection}}},
+	}}
+	changed := workspaceapi.TargetDraft{ID: "c", Model: "changed", Protocol: "responses", Connection: connection}
+	balanced, err := routeSpecWithTarget(route, changed, readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementBalance, PeerTargetID: "a"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	balance := placementFromReadModel(readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementBalance, PeerTargetID: "a"})
-	if balance.BalanceWith == nil || *balance.BalanceWith != "a" {
-		t.Fatalf("balance placement = %#v", balance)
+	if len(balanced.Tiers) != 1 || len(balanced.Tiers[0].Targets) != 3 || balanced.Tiers[0].Targets[2].Model != "changed" {
+		t.Fatalf("balanced move/edit = %#v", balanced)
+	}
+	fallback, err := routeSpecWithTarget(route, workspaceapi.TargetDraft{ID: "d", Model: "d", Protocol: "responses", Connection: connection}, readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementFallback, PeerTargetID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fallback.Tiers) != 3 || fallback.Tiers[2].Targets[0].ID != "d" {
+		t.Fatalf("fallback add = %#v", fallback)
+	}
+}
+
+func TestRouteSpecForTopologyExpressesDeletionAndPromotionAsDesiredStructure(t *testing.T) {
+	connection := workspaceapi.StandardConnection("openai", "", "env:KEY")
+	route := workspaceapi.RouteSpec{Tiers: []workspaceapi.TierSpec{
+		{Targets: []workspaceapi.TargetDraft{{ID: "a", Model: "a", Protocol: "responses", Connection: connection}}},
+		{Targets: []workspaceapi.TargetDraft{{ID: "b", Model: "b", Protocol: "responses", Connection: connection}}},
+	}}
+	desired := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{{ID: "b"}}}}}
+	spec, err := routeSpecForTopology(route, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Tiers) != 1 || len(spec.Tiers[0].Targets) != 1 || spec.Tiers[0].Targets[0].ID != "b" {
+		t.Fatalf("desired topology = %#v", spec)
 	}
 }

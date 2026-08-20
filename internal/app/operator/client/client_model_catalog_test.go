@@ -118,14 +118,7 @@ func TestClientWorkspaceCommandDecodesFlatCommandError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.Client(), server.URL)
-	_, err := c.CreateTarget(context.Background(), workspaceapi.CreateTarget{
-		Workspace: "personal",
-		Route:     "chatgpt-rodion",
-		Target: workspaceapi.TargetDraft{
-			Model:      "gpt-5.6-sol",
-			Connection: workspaceapi.StandardConnection("chatgpt", "", "secretfile:chatgpt/team/sess_x"),
-		},
-	})
+	_, err := c.ReplaceRoute(context.Background(), workspaceapi.ReplaceRoute{Workspace: "personal", Route: "chatgpt-rodion", Spec: workspaceapi.RouteSpec{}})
 	if err == nil {
 		t.Fatal("expected error for flat CommandError 400")
 	}

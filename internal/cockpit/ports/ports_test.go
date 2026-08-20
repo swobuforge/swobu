@@ -27,20 +27,20 @@ func (fakeWorkspacePorts) DeleteWorkspace(context.Context, DeleteWorkspaceReques
 
 type fakeRoutePorts struct{}
 
-func (fakeRoutePorts) SaveRoute(context.Context, SaveRouteRequest) (readmodel.RouteReadModel, error) {
-	return readmodel.RouteReadModel{}, nil
+func (fakeRoutePorts) SaveRoute(context.Context, SaveRouteRequest) (RouteMutationResult, error) {
+	return RouteMutationResult{}, nil
 }
 
-func (fakeRoutePorts) DeleteRoute(context.Context, DeleteRouteRequest) error {
-	return nil
+func (fakeRoutePorts) DeleteRoute(context.Context, DeleteRouteRequest) (RouteMutationResult, error) {
+	return RouteMutationResult{}, nil
 }
 
 func (fakeRoutePorts) SaveTarget(context.Context, SaveTargetRequest) (SaveTargetResult, error) {
 	return SaveTargetResult{}, nil
 }
 
-func (fakeRoutePorts) DeleteTarget(context.Context, DeleteTargetRequest) (readmodel.RouteReadModel, error) {
-	return readmodel.RouteReadModel{}, nil
+func (fakeRoutePorts) ApplyRouteDraft(context.Context, ApplyRouteDraftRequest) (RouteMutationResult, error) {
+	return RouteMutationResult{}, nil
 }
 
 type fakeActivityQueries struct{}

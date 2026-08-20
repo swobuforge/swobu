@@ -104,10 +104,80 @@ func newTargetID() (string, error) {
 	raw[8] = raw[8]&0x3f | 0x80
 	return fmt.Sprintf("tgt_%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
 }
-func placementFromReadModel(p readmodel.PlacementOptionReadModel) workspaceapi.Placement {
-	if p.Kind == readmodel.PlacementBalance && p.PeerTargetID != "" {
-		id := string(p.PeerTargetID)
-		return workspaceapi.Placement{BalanceWith: &id}
+func routeSpecWithTarget(spec workspaceapi.RouteSpec, target workspaceapi.TargetDraft, placement readmodel.PlacementOptionReadModel) (workspaceapi.RouteSpec, error) {
+	spec, _ = removeTargetFromSpec(spec, target.ID)
+	if placement.Kind == readmodel.PlacementBalance {
+		for i := range spec.Tiers {
+			for _, peer := range spec.Tiers[i].Targets {
+				if peer.ID == string(placement.PeerTargetID) {
+					spec.Tiers[i].Targets = append(spec.Tiers[i].Targets, target)
+					return spec, nil
+				}
+			}
+		}
+		return workspaceapi.RouteSpec{}, fmt.Errorf("routing peer %q is missing", placement.PeerTargetID)
 	}
-	return workspaceapi.Placement{}
+	insertAt := 0
+	if placement.PeerTargetID != "" {
+		insertAt = -1
+		for i, tier := range spec.Tiers {
+			for _, peer := range tier.Targets {
+				if peer.ID == string(placement.PeerTargetID) {
+					insertAt = i + 1
+					break
+				}
+			}
+		}
+		if insertAt < 0 {
+			return workspaceapi.RouteSpec{}, fmt.Errorf("routing predecessor %q is missing", placement.PeerTargetID)
+		}
+	}
+	tier := workspaceapi.TierSpec{Targets: []workspaceapi.TargetDraft{target}}
+	spec.Tiers = append(spec.Tiers, workspaceapi.TierSpec{})
+	copy(spec.Tiers[insertAt+1:], spec.Tiers[insertAt:])
+	spec.Tiers[insertAt] = tier
+	return spec, nil
+}
+
+func routeSpecForTopology(current workspaceapi.RouteSpec, desired readmodel.RouteReadModel) (workspaceapi.RouteSpec, error) {
+	byID := map[string]workspaceapi.TargetDraft{}
+	for _, tier := range current.Tiers {
+		for _, target := range tier.Targets {
+			byID[target.ID] = target
+		}
+	}
+	spec := workspaceapi.RouteSpec{Tiers: make([]workspaceapi.TierSpec, len(desired.Tiers))}
+	for tierIndex, tier := range desired.Tiers {
+		for _, target := range tier.Targets {
+			draft, ok := byID[string(target.ID)]
+			if !ok {
+				return workspaceapi.RouteSpec{}, fmt.Errorf("target %q is missing", target.ID)
+			}
+			spec.Tiers[tierIndex].Targets = append(spec.Tiers[tierIndex].Targets, draft)
+		}
+	}
+	if len(spec.Tiers) == 0 {
+		return workspaceapi.RouteSpec{}, errors.New("delete the route instead")
+	}
+	return spec, nil
+}
+
+func removeTargetFromSpec(spec workspaceapi.RouteSpec, targetID string) (workspaceapi.RouteSpec, bool) {
+	found := false
+	tiers := make([]workspaceapi.TierSpec, 0, len(spec.Tiers))
+	for _, tier := range spec.Tiers {
+		targets := make([]workspaceapi.TargetDraft, 0, len(tier.Targets))
+		for _, target := range tier.Targets {
+			if target.ID == targetID {
+				found = true
+				continue
+			}
+			targets = append(targets, target)
+		}
+		if len(targets) > 0 {
+			tiers = append(tiers, workspaceapi.TierSpec{Targets: targets})
+		}
+	}
+	spec.Tiers = tiers
+	return spec, found
 }

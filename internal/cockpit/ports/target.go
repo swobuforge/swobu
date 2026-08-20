@@ -23,10 +23,3 @@ type SaveTargetResult struct {
 	Route     readmodel.RouteReadModel
 	Workspace readmodel.WorkspaceReadModel
 }
-
-// DeleteTargetRequest names the target to remove from a route.
-type DeleteTargetRequest struct {
-	WorkspaceID readmodel.WorkspaceID
-	RouteID     readmodel.RouteID
-	TargetID    readmodel.TargetID
-}

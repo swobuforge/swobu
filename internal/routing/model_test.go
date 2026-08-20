@@ -72,6 +72,71 @@ func TestConfigAllowsTargetIDsToRepeatAcrossWorkspaces(t *testing.T) {
 	}
 }
 
+func TestRestoreWorkspaceRejectsActiveGenerationLedgerMismatch(t *testing.T) {
+	slug, _ := ParseWorkspaceSlug("dev")
+	name, _ := ParseRouteName("chat")
+	target := testTarget(t, "same")
+	tier, _ := NewTier([]Target{target})
+	route, _ := NewRoute(name, []Tier{tier})
+	for _, version := range []TargetVersion{2, 3} {
+		if _, err := RestoreWorkspace(slug, name, []Route{route}, map[TargetID]TargetVersion{target.id: version}); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("ledger version %d error = %v, want mismatch rejection", version, err)
+		}
+	}
+}
+
+func TestTargetGenerationHistorySurvivesRouteDeletionAndWorkspaceRename(t *testing.T) {
+	slug, _ := ParseWorkspaceSlug("dev")
+	renamed, _ := ParseWorkspaceSlug("renamed")
+	firstName, _ := ParseRouteName("first")
+	secondName, _ := ParseRouteName("second")
+	x := testTarget(t, "x")
+	keep := testTarget(t, "keep")
+	firstTier, _ := NewTier([]Target{x})
+	secondTier, _ := NewTier([]Target{keep})
+	first, _ := NewRoute(firstName, []Tier{firstTier})
+	second, _ := NewRoute(secondName, []Tier{secondTier})
+	workspace, _ := NewWorkspace(slug, secondName, []Route{first, second})
+	config, _ := NewConfig([]Workspace{workspace})
+
+	withoutRoute, err := config.DeleteRoute(slug, firstName, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamedConfig, err := withoutRoute.RenameWorkspace(slug, renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := renamedConfig.CreateRoute(renamed, firstName, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ = recreated.Workspace(renamed)
+	route, _ := workspace.Route(firstName)
+	if got := route.Tiers()[0].Targets()[0].Version(); got != 2 {
+		t.Fatalf("recreated route target generation = %d, want 2", got)
+	}
+}
+
+func TestDeletingWorkspaceDeletesItsTargetIdentityNamespace(t *testing.T) {
+	config := testConfig(t, testTarget(t, "x"))
+	slug, _ := ParseWorkspaceSlug("dev")
+	routeName, _ := ParseRouteName("chat")
+	deleted, err := config.DeleteWorkspace(slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := deleted.CreateWorkspace(WorkspaceSeed{Slug: slug, Route: routeName, Target: testTarget(t, "x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := recreated.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	if got := route.Tiers()[0].Targets()[0].Version(); got != initialTargetVersion {
+		t.Fatalf("new workspace target generation = %d, want %d", got, initialTargetVersion)
+	}
+}
+
 func TestWorkspaceRejectsDuplicateTargetIDsAcrossRoutes(t *testing.T) {
 	slug, _ := ParseWorkspaceSlug("dev")
 	firstName, _ := ParseRouteName("one")
@@ -206,17 +271,17 @@ func TestConfigCloneOwnsNestedTargetStorage(t *testing.T) {
 	clone := original.Clone()
 	slug, _ := ParseWorkspaceSlug("dev")
 	routeName, _ := ParseRouteName("chat")
-	id, _ := ParseTargetID("a")
 	replacement := testTarget(t, "replacement")
-
-	if _, err := clone.UpdateTargetSettings(slug, routeName, id, TargetSettings{
-		Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection(),
-	}); err != nil {
+	workspace, _ := clone.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	spec := route.Spec()
+	spec.Tiers[0].Targets[0].Settings = TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection()}
+	if _, err := clone.ApplyRouteSpec(slug, routeName, spec); err != nil {
 		t.Fatal(err)
 	}
 
-	workspace, _ := original.Workspace(slug)
-	route, _ := workspace.Route(routeName)
+	workspace, _ = original.Workspace(slug)
+	route, _ = workspace.Route(routeName)
 	if got := route.Tiers()[0].Targets()[0].Model().String(); got != "upstream-a" {
 		t.Fatalf("original model = %q after editing clone, want upstream-a", got)
 	}

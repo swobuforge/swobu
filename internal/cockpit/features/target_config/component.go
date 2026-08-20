@@ -133,7 +133,7 @@ func NewEditTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.Rout
 	w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
 	seedEndpointFromTarget(w, target)
 	w.SelectedModel.Set(selectedModelSeedFromTarget(target))
-	w.Placement.Set(defaultPlacementForRoute(route))
+	w.Placement.Set(currentPlacementForTarget(route, target.ID))
 	if w.Draft.Get().ProviderSpec != "" {
 		w.refreshSetup()
 	}
@@ -256,7 +256,7 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 		w.Draft.Set(TargetDraftFromReadModel(route.ID, target))
 		seedEndpointFromTarget(w, target)
 		w.SelectedModel.Set(selectedModelSeedFromTarget(target))
-		w.Placement.Set(defaultPlacementForRoute(route))
+		w.Placement.Set(currentPlacementForTarget(route, target.ID))
 		if w.Draft.Get().ProviderSpec != "" {
 			w.refreshSetup()
 		}

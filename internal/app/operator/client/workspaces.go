@@ -59,24 +59,14 @@ func (c *Client) DeleteRoute(ctx context.Context, cmd workspaceapi.DeleteRoute) 
 	err := c.workspaceRequest(ctx, http.MethodDelete, routePath(cmd.Workspace, cmd.Route), body, http.StatusOK, &out)
 	return out, err
 }
-func (c *Client) CreateTarget(ctx context.Context, cmd workspaceapi.CreateTarget) (workspaceapi.Workspace, error) {
-	var out workspaceapi.Workspace
-	err := c.workspaceRequest(ctx, http.MethodPost, routePath(cmd.Workspace, cmd.Route)+"/targets", map[string]any{"target": cmd.Target, "placement": cmd.Placement}, http.StatusOK, &out)
+func (c *Client) GetRoute(ctx context.Context, workspace, route string) (workspaceapi.RouteSpec, error) {
+	var out workspaceapi.RouteSpec
+	err := c.workspaceRequest(ctx, http.MethodGet, routePath(workspace, route), nil, http.StatusOK, &out)
 	return out, err
 }
-func (c *Client) UpdateTargetSettings(ctx context.Context, cmd workspaceapi.UpdateTargetSettings) (workspaceapi.Workspace, error) {
+func (c *Client) ReplaceRoute(ctx context.Context, cmd workspaceapi.ReplaceRoute) (workspaceapi.Workspace, error) {
 	var out workspaceapi.Workspace
-	err := c.workspaceRequest(ctx, http.MethodPut, targetPath(cmd.Workspace, cmd.Route, cmd.TargetID), map[string]any{"target": cmd.Target}, http.StatusOK, &out)
-	return out, err
-}
-func (c *Client) DeleteTarget(ctx context.Context, cmd workspaceapi.DeleteTarget) (workspaceapi.Workspace, error) {
-	var out workspaceapi.Workspace
-	err := c.workspaceRequest(ctx, http.MethodDelete, targetPath(cmd.Workspace, cmd.Route, cmd.TargetID), nil, http.StatusOK, &out)
-	return out, err
-}
-func (c *Client) SetCredential(ctx context.Context, cmd workspaceapi.SetCredential) (workspaceapi.Workspace, error) {
-	var out workspaceapi.Workspace
-	err := c.workspaceRequest(ctx, http.MethodPost, targetPath(cmd.Workspace, cmd.Route, cmd.TargetID)+"/credential", map[string]string{"credential": cmd.Credential}, http.StatusOK, &out)
+	err := c.workspaceRequest(ctx, http.MethodPut, routePath(cmd.Workspace, cmd.Route), cmd.Spec, http.StatusOK, &out)
 	return out, err
 }
 
@@ -85,9 +75,6 @@ func workspacePath(slug string) string {
 }
 func routePath(slug, route string) string {
 	return workspacePath(slug) + "/routes/" + url.PathEscape(strings.TrimSpace(route))
-}
-func targetPath(slug, route, id string) string {
-	return routePath(slug, route) + "/targets/" + url.PathEscape(strings.TrimSpace(id))
 }
 func (c *Client) workspaceRequest(ctx context.Context, method, path string, body any, want int, out any) error {
 	var encoded []byte

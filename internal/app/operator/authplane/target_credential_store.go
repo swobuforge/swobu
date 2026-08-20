@@ -27,7 +27,7 @@ func (s TargetCredentialStore) SetCredential(ctx context.Context, subject Creden
 	if strings.TrimSpace(subject.Workspace) == "" || strings.TrimSpace(subject.Route) == "" || strings.TrimSpace(subject.TargetID) == "" {
 		return "", fmt.Errorf("workspace, route, and target ID are required")
 	}
-	_, err := s.workspaces.SetCredential(ctx, workspaces.SetCredential{Workspace: subject.Workspace, Route: subject.Route, TargetID: subject.TargetID, Credential: credentialRef})
+	_, err := s.workspaces.ApplyCredentialReference(ctx, workspaces.ApplyCredentialReference{Workspace: subject.Workspace, Route: subject.Route, TargetID: subject.TargetID, Credential: credentialRef})
 	if err != nil {
 		return "", err
 	}

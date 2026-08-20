@@ -45,22 +45,13 @@ type SetDefaultRoute struct {
 	Route     string `json:"route"`
 }
 type DeleteRoute struct{ Workspace, Route, Replacement string }
-type CreateTarget struct {
+type ReplaceRoute struct {
 	Workspace, Route string
-	Target           TargetDraft `json:"target"`
-	Placement        Placement   `json:"placement"`
+	Spec             RouteSpec
 }
-type UpdateTargetSettings struct {
-	Workspace, Route, TargetID string
-	Target                     TargetSettingsDraft `json:"target"`
-}
-type DeleteTarget struct{ Workspace, Route, TargetID string }
-type SetCredential struct {
+type ApplyCredentialReference struct {
 	Workspace, Route, TargetID string
 	Credential                 string `json:"credential"`
-}
-type Placement struct {
-	BalanceWith *string `json:"balance_with,omitempty"`
 }
 
 // ErrorCode classifies the action a command client can take after failure.
@@ -204,50 +195,62 @@ func (s Service) DeleteRoute(ctx context.Context, cmd DeleteRoute) (Workspace, e
 	}
 	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.DeleteRoute(slug, name, replacement) })
 }
-func (s Service) CreateTarget(ctx context.Context, cmd CreateTarget) (Workspace, error) {
-	slug, name, target, e := parseRouteTarget(cmd.Workspace, cmd.Route, cmd.Target)
-	if e != nil {
-		return Workspace{}, commandError(e)
+func (s Service) GetRoute(_ context.Context, rawWorkspace, rawRoute string) (RouteSpec, error) {
+	if s.store == nil {
+		return RouteSpec{}, CommandError{Unavailable, "store unavailable"}
 	}
-	balanceWith, e := parseBalanceWith(cmd.Placement)
-	if e != nil {
-		return Workspace{}, commandError(e)
+	slug, err := routing.ParseWorkspaceSlug(rawWorkspace)
+	if err != nil {
+		return RouteSpec{}, commandError(err)
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.CreateTarget(slug, name, target, balanceWith) })
+	name, err := routing.ParseRouteName(rawRoute)
+	if err != nil {
+		return RouteSpec{}, commandError(err)
+	}
+	workspace, ok := s.store.Config().Workspace(slug)
+	if !ok {
+		return RouteSpec{}, CommandError{NotFound, "workspace not found"}
+	}
+	route, ok := workspace.Route(name)
+	if !ok {
+		return RouteSpec{}, CommandError{NotFound, "route not found"}
+	}
+	return projectRouteSpec(route), nil
 }
-func (s Service) UpdateTargetSettings(ctx context.Context, cmd UpdateTargetSettings) (Workspace, error) {
-	slug, e := routing.ParseWorkspaceSlug(cmd.Workspace)
-	if e != nil {
-		return Workspace{}, commandError(e)
+
+func (s Service) ReplaceRoute(ctx context.Context, cmd ReplaceRoute) (Workspace, error) {
+	slug, err := routing.ParseWorkspaceSlug(cmd.Workspace)
+	if err != nil {
+		return Workspace{}, commandError(err)
 	}
-	name, e := routing.ParseRouteName(cmd.Route)
-	if e != nil {
-		return Workspace{}, commandError(e)
+	name, err := routing.ParseRouteName(cmd.Route)
+	if err != nil {
+		return Workspace{}, commandError(err)
 	}
-	target, e := cmd.Target.routingTarget(cmd.TargetID)
-	if e != nil {
-		return Workspace{}, commandError(e)
+	desired, err := cmd.Spec.routingSpec()
+	if err != nil {
+		return Workspace{}, commandError(err)
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) {
-		return c.UpdateTargetSettings(slug, name, target.ID(), routing.TargetSettings{Model: target.Model(), Protocol: target.Protocol(), Connection: target.Connection()})
+	if s.store == nil {
+		return Workspace{}, CommandError{Unavailable, "store unavailable"}
+	}
+	next, err := s.store.Update(ctx, func(config routing.Config) (routing.Config, error) {
+		return config.ApplyRouteSpec(slug, name, desired)
 	})
+	if err != nil {
+		return Workspace{}, commandError(err)
+	}
+	workspace, ok := next.Workspace(slug)
+	if !ok {
+		return Workspace{}, CommandError{Internal, "committed workspace missing"}
+	}
+	return projectWorkspace(workspace), nil
 }
-func (s Service) DeleteTarget(ctx context.Context, cmd DeleteTarget) (Workspace, error) {
-	slug, e := routing.ParseWorkspaceSlug(cmd.Workspace)
-	if e != nil {
-		return Workspace{}, commandError(e)
-	}
-	name, e := routing.ParseRouteName(cmd.Route)
-	if e != nil {
-		return Workspace{}, commandError(e)
-	}
-	id, e := routing.ParseTargetID(cmd.TargetID)
-	if e != nil {
-		return Workspace{}, commandError(e)
-	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.DeleteTarget(slug, name, id) })
-}
-func (s Service) SetCredential(ctx context.Context, cmd SetCredential) (Workspace, error) {
+
+// ApplyCredentialReference is the credential subsystem's narrow bridge into
+// route reconciliation. Secret material is stored before this call; only its
+// reference enters the desired route.
+func (s Service) ApplyCredentialReference(ctx context.Context, cmd ApplyCredentialReference) (Workspace, error) {
 	slug, e := routing.ParseWorkspaceSlug(cmd.Workspace)
 	if e != nil {
 		return Workspace{}, commandError(e)
@@ -261,7 +264,7 @@ func (s Service) SetCredential(ctx context.Context, cmd SetCredential) (Workspac
 		return Workspace{}, commandError(e)
 	}
 	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) {
-		return revalidateCredentialUpdate(c, slug, name, id, cmd.Credential)
+		return reconcileCredentialReference(c, slug, name, id, cmd.Credential)
 	})
 }
 
@@ -269,7 +272,7 @@ func (s Service) SetCredential(ctx context.Context, cmd SetCredential) (Workspac
 // replacement connection back through profile construction facts. Routing
 // intentionally has no profile dependency, so the public application command
 // owns this return to the catalog-validation boundary.
-func revalidateCredentialUpdate(config routing.Config, slug routing.WorkspaceSlug, routeName routing.RouteName, id routing.TargetID, credential string) (routing.Config, error) {
+func reconcileCredentialReference(config routing.Config, slug routing.WorkspaceSlug, routeName routing.RouteName, id routing.TargetID, credential string) (routing.Config, error) {
 	workspace, ok := config.Workspace(slug)
 	if !ok {
 		return routing.Config{}, fmt.Errorf("%w: workspace %q", routing.ErrNotFound, slug.String())
@@ -278,18 +281,19 @@ func revalidateCredentialUpdate(config routing.Config, slug routing.WorkspaceSlu
 	if !ok {
 		return routing.Config{}, fmt.Errorf("%w: route %q", routing.ErrNotFound, routeName.String())
 	}
-	for _, tier := range route.Tiers() {
-		for _, target := range tier.Targets() {
-			if target.ID() != id {
+	spec := route.Spec()
+	for tierIndex := range spec.Tiers {
+		for targetIndex := range spec.Tiers[tierIndex].Targets {
+			target := &spec.Tiers[tierIndex].Targets[targetIndex]
+			if target.ID != id {
 				continue
 			}
-			connection, err := connectionWithCredential(target.Connection(), credential)
+			connection, err := connectionWithCredential(target.Settings.Connection, credential)
 			if err != nil {
 				return routing.Config{}, err
 			}
-			return config.UpdateTargetSettings(slug, routeName, id, routing.TargetSettings{
-				Model: target.Model(), Protocol: target.Protocol(), Connection: connection,
-			})
+			target.Settings.Connection = connection
+			return config.ApplyRouteSpec(slug, routeName, spec)
 		}
 	}
 	return routing.Config{}, fmt.Errorf("%w: target %q", routing.ErrNotFound, id.String())
@@ -342,16 +346,6 @@ func parseRouteTarget(rawSlug, rawRoute string, target TargetDraft) (routing.Wor
 	}
 	value, e := target.routingTarget()
 	return slug, name, value, e
-}
-func parseBalanceWith(p Placement) (*routing.TargetID, error) {
-	if p.BalanceWith == nil {
-		return nil, nil
-	}
-	id, err := routing.ParseTargetID(*p.BalanceWith)
-	if err != nil {
-		return nil, err
-	}
-	return &id, nil
 }
 func commandErrorOrNil(err error) error {
 	if err == nil {

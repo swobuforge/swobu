@@ -13,13 +13,13 @@ func TestNamedDraftRouteMutationsStayLocal(t *testing.T) {
 	section := Section(model, nil)
 	section.State.Routes = []readmodel.RouteReadModel{{ID: "chat", ModelName: "chat", Enabled: true}}
 	var saveCalls, deleteCalls int
-	section.SaveRoute = func(context.Context, ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+	section.SaveRoute = func(context.Context, ports.SaveRouteRequest) (ports.RouteMutationResult, error) {
 		saveCalls++
-		return readmodel.RouteReadModel{}, nil
+		return ports.RouteMutationResult{}, nil
 	}
-	section.DeleteRoute = func(context.Context, ports.DeleteRouteRequest) error {
+	section.DeleteRoute = func(context.Context, ports.DeleteRouteRequest) (ports.RouteMutationResult, error) {
 		deleteCalls++
-		return nil
+		return ports.RouteMutationResult{}, nil
 	}
 
 	section.submitRouteName("chat", "assistant")
@@ -39,13 +39,13 @@ func TestConventionalFirstRouteMutationsStayLocal(t *testing.T) {
 	section := Section(model, nil)
 	section.State.Routes = []readmodel.RouteReadModel{{ID: "chat", ModelName: "chat", Enabled: true}}
 	var saveCalls, deleteCalls int
-	section.SaveRoute = func(context.Context, ports.SaveRouteRequest) (readmodel.RouteReadModel, error) {
+	section.SaveRoute = func(context.Context, ports.SaveRouteRequest) (ports.RouteMutationResult, error) {
 		saveCalls++
-		return readmodel.RouteReadModel{}, nil
+		return ports.RouteMutationResult{}, nil
 	}
-	section.DeleteRoute = func(context.Context, ports.DeleteRouteRequest) error {
+	section.DeleteRoute = func(context.Context, ports.DeleteRouteRequest) (ports.RouteMutationResult, error) {
 		deleteCalls++
-		return nil
+		return ports.RouteMutationResult{}, nil
 	}
 
 	section.submitRouteName("chat", "coding")

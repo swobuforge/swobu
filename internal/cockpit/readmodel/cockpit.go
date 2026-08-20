@@ -9,9 +9,13 @@ type CockpitReadModel struct {
 	Tabs                []WorkspaceTabReadModel
 	SelectedWorkspaceID WorkspaceID
 	SelectedWorkspace   WorkspaceReadModel
-	Help                HelpReadModel
-	HeaderRight         string
-	ActivePage          CockpitPage
+	// Workspaces carries the daemon-backed body projection for every existing
+	// workspace tab. Keeping these projections together prevents tab switching
+	// from manufacturing an empty route list for an inactive workspace.
+	Workspaces  map[WorkspaceID]WorkspaceReadModel
+	Help        HelpReadModel
+	HeaderRight string
+	ActivePage  CockpitPage
 }
 
 // CockpitPage selects the top-level page rendered by the shell.

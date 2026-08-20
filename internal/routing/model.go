@@ -64,8 +64,6 @@ func (id TargetID) String() string { return id.value }
 // change affecting request encoding, transport, provider identity, native
 // state ownership, model/deployment, credentials, codec options, or
 // provider-specific request options creates a new version.
-//
-// Persistent session checkpoints are unsupported while TargetVersion is process-local.
 type TargetVersion uint64
 
 const initialTargetVersion TargetVersion = 1
@@ -180,15 +178,40 @@ type Workspace struct {
 	slug         WorkspaceSlug
 	defaultRoute RouteName
 	routes       map[RouteName]Route
+	generations  map[TargetID]TargetVersion
 }
 
 func NewWorkspace(slug WorkspaceSlug, defaultRoute RouteName, routes []Route) (Workspace, error) {
-	workspace := Workspace{slug: slug, defaultRoute: defaultRoute, routes: make(map[RouteName]Route, len(routes))}
+	return newWorkspace(slug, defaultRoute, routes, nil)
+}
+
+// RestoreWorkspace constructs a materialized workspace with its durable target
+// generation history. Operator-authored state cannot supply this ledger.
+func RestoreWorkspace(slug WorkspaceSlug, defaultRoute RouteName, routes []Route, generations map[TargetID]TargetVersion) (Workspace, error) {
+	return newWorkspace(slug, defaultRoute, routes, generations)
+}
+
+func newWorkspace(slug WorkspaceSlug, defaultRoute RouteName, routes []Route, generations map[TargetID]TargetVersion) (Workspace, error) {
+	workspace := Workspace{slug: slug, defaultRoute: defaultRoute, routes: make(map[RouteName]Route, len(routes)), generations: make(map[TargetID]TargetVersion)}
+	for id, version := range generations {
+		if id.value == "" || version == 0 {
+			return Workspace{}, pathError("workspace.target_generations", "target ID and generation must be valid")
+		}
+		workspace.generations[id] = version
+	}
 	for _, route := range routes {
 		if _, exists := workspace.routes[route.name]; exists {
 			return Workspace{}, pathError("workspace.routes."+route.name.String(), "duplicate route")
 		}
 		workspace.routes[route.name] = route.clone()
+		for _, tier := range route.tiers {
+			for _, target := range tier.targets {
+				if previous, exists := workspace.generations[target.id]; exists && previous != target.version {
+					return Workspace{}, pathError("workspace.target_generations."+target.id.String(), "must equal the active target version")
+				}
+				workspace.generations[target.id] = target.version
+			}
+		}
 	}
 	if err := workspace.validate(); err != nil {
 		return Workspace{}, err
@@ -242,6 +265,16 @@ func (w Workspace) Routes() []Route {
 	return out
 }
 
+// TargetGenerations returns the highest committed generation for every target
+// ID ever used in this workspace, including currently absent targets.
+func (w Workspace) TargetGenerations() map[TargetID]TargetVersion {
+	out := make(map[TargetID]TargetVersion, len(w.generations))
+	for id, version := range w.generations {
+		out[id] = version
+	}
+	return out
+}
+
 func (w Workspace) ResolveRoute(requested string) (Route, error) {
 	if strings.TrimSpace(requested) == "" { // swobu:io-string source=boundary
 		return Route{}, ErrEmptyRequestedRoute
@@ -259,7 +292,7 @@ func (w Workspace) ResolveRoute(requested string) (Route, error) {
 }
 
 func (w Workspace) clone() Workspace {
-	out := Workspace{slug: w.slug, defaultRoute: w.defaultRoute, routes: make(map[RouteName]Route, len(w.routes))}
+	out := Workspace{slug: w.slug, defaultRoute: w.defaultRoute, routes: make(map[RouteName]Route, len(w.routes)), generations: w.TargetGenerations()}
 	for name, route := range w.routes {
 		out.routes[name] = route.clone()
 	}
@@ -358,6 +391,17 @@ type Target struct {
 
 func NewTarget(id TargetID, model UpstreamModel, protocol Protocol, connection Connection) (Target, error) {
 	target := Target{id: id, version: initialTargetVersion, model: model, protocol: protocol, connection: connection}
+	if err := target.validate(); err != nil {
+		return Target{}, err
+	}
+	return target, nil
+}
+
+// RestoreTarget constructs a materialized target from trusted daemon
+// persistence. Operator-authored specifications use NewTarget and can never
+// choose a version.
+func RestoreTarget(id TargetID, version TargetVersion, model UpstreamModel, protocol Protocol, connection Connection) (Target, error) {
+	target := Target{id: id, version: version, model: model, protocol: protocol, connection: connection}
 	if err := target.validate(); err != nil {
 		return Target{}, err
 	}

@@ -29,6 +29,16 @@ type Route struct {
 	Name  string `json:"name"`
 	Tiers []Tier `json:"tiers"`
 }
+
+// RouteSpec is the complete editable state accepted and returned by the route
+// resource. Route identity comes from the request path and daemon-owned target
+// versions never cross this boundary.
+type RouteSpec struct {
+	Tiers []TierSpec `json:"tiers"`
+}
+type TierSpec struct {
+	Targets []TargetDraft `json:"targets"`
+}
 type Tier struct {
 	Targets []Target `json:"targets"`
 }
@@ -44,14 +54,6 @@ type Target struct {
 // from the one populated provider-keyed connection document.
 type TargetDraft struct {
 	ID         string     `json:"id"`
-	Model      string     `json:"model"`
-	Protocol   string     `json:"protocol"`
-	Connection Connection `json:"connection"`
-}
-
-// TargetSettingsDraft is update-command input; the request path is the only
-// stable target identity source.
-type TargetSettingsDraft struct {
 	Model      string     `json:"model"`
 	Protocol   string     `json:"protocol"`
 	Connection Connection `json:"connection"`
@@ -319,6 +321,39 @@ func projectTarget(target routing.Target) Target {
 	return out
 }
 
+func projectRouteSpec(route routing.Route) RouteSpec {
+	out := RouteSpec{Tiers: make([]TierSpec, len(route.Tiers()))}
+	for tierIndex, tier := range route.Tiers() {
+		for _, target := range tier.Targets() {
+			projected := projectTarget(target)
+			if _, derived := profile.DerivedProtocolForSpec(projected.Provider); derived {
+				projected.Protocol = ""
+			}
+			out.Tiers[tierIndex].Targets = append(out.Tiers[tierIndex].Targets, TargetDraft{
+				ID: projected.ID, Model: projected.Model, Protocol: projected.Protocol, Connection: projected.Connection,
+			})
+		}
+	}
+	return out
+}
+
+func (s RouteSpec) routingSpec() (routing.RouteSpec, error) {
+	out := routing.RouteSpec{Tiers: make([]routing.TierSpec, len(s.Tiers))}
+	for tierIndex, tier := range s.Tiers {
+		out.Tiers[tierIndex].Targets = make([]routing.TargetSpec, len(tier.Targets))
+		for targetIndex, draft := range tier.Targets {
+			target, err := draft.routingTarget()
+			if err != nil {
+				return routing.RouteSpec{}, fmt.Errorf("tiers[%d].targets[%d]: %w", tierIndex, targetIndex, err)
+			}
+			out.Tiers[tierIndex].Targets[targetIndex] = routing.TargetSpec{
+				ID: target.ID(), Settings: routing.TargetSettings{Model: target.Model(), Protocol: target.Protocol(), Connection: target.Connection()},
+			}
+		}
+	}
+	return out, nil
+}
+
 // ConnectionFromRouting is the shared routing-to-operator transport codec used
 // by both target persistence and target probing.
 func ConnectionFromRouting(connection routing.Connection) Connection {
@@ -331,10 +366,6 @@ func ConnectionFromRouting(connection routing.Connection) Connection {
 
 func (t TargetDraft) routingTarget() (routing.Target, error) {
 	return finalizeTargetDraft(t.ID, t.Model, t.Protocol, t.Connection)
-}
-
-func (t TargetSettingsDraft) routingTarget(id string) (routing.Target, error) {
-	return finalizeTargetDraft(id, t.Model, t.Protocol, t.Connection)
 }
 
 func finalizeTargetDraft(id, model, protocol string, connection Connection) (routing.Target, error) {

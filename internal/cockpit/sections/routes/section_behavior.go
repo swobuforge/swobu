@@ -13,8 +13,8 @@ import (
 )
 
 // port function aliases keep route mutation behind the section boundary.
-type SaveRouteFunc func(context.Context, ports.SaveRouteRequest) (readmodel.RouteReadModel, error)
-type DeleteRouteFunc func(context.Context, ports.DeleteRouteRequest) error
+type SaveRouteFunc func(context.Context, ports.SaveRouteRequest) (ports.RouteMutationResult, error)
+type DeleteRouteFunc func(context.Context, ports.DeleteRouteRequest) (ports.RouteMutationResult, error)
 
 // SectionView owns the mutable route section workflow and renders the route
 // list. RouteSectionState stays data-only; the section owns all behavior.
@@ -31,8 +31,9 @@ type SectionView struct {
 	addRouteFocusPending bool
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
-	DeleteTarget         func(context.Context, ports.DeleteTargetRequest) (readmodel.RouteReadModel, error)
+	ApplyRouteDraft      func(context.Context, ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error)
 	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
+	OnWorkspaceCommitted func(readmodel.WorkspaceReadModel)
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *SectionView {
@@ -47,7 +48,7 @@ func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *
 	if commands != nil {
 		section.SaveRoute = commands.SaveRoute
 		section.DeleteRoute = commands.DeleteRoute
-		section.DeleteTarget = commands.DeleteTarget
+		section.ApplyRouteDraft = commands.ApplyRouteDraft
 		section.TargetConfigs.Commands.SaveTarget = commands.SaveTarget
 	}
 	return section
@@ -91,8 +92,9 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.Model = f.Model
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
-	s.DeleteTarget = f.DeleteTarget
+	s.ApplyRouteDraft = f.ApplyRouteDraft
 	s.OnWorkspacePersisted = f.OnWorkspacePersisted
+	s.OnWorkspaceCommitted = f.OnWorkspaceCommitted
 	if s.State == nil {
 		s.State = f.State
 	} else if f.State != nil {
@@ -150,14 +152,14 @@ func (s *SectionView) configureTargetConfigMounts() {
 	}
 	s.TargetConfigs.WorkspaceID = s.Model.RoutingWorkspaceID()
 	s.TargetConfigs.Callbacks.OnCreated = func(result ports.SaveTargetResult) {
-		s.applyRouteUpsert(result.Route)
+		s.applyCommittedWorkspace(result.Workspace)
 		s.State.AddTargetRoute.Set("")
 		if s.Model.IsOnboarding() && result.Workspace.ID != "" && s.OnWorkspacePersisted != nil {
 			s.OnWorkspacePersisted(result.Workspace)
 		}
 	}
-	s.TargetConfigs.Callbacks.OnSaved = func(route readmodel.RouteReadModel) {
-		s.applyRouteUpsert(route)
+	s.TargetConfigs.Callbacks.OnSaved = func(result ports.SaveTargetResult) {
+		s.applyCommittedWorkspace(result.Workspace)
 		s.State.OpenTarget.Set("")
 	}
 	s.TargetConfigs.Callbacks.OnDeleteConfirmed = func(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
@@ -238,7 +240,7 @@ func (s *SectionView) createDraftRoute(name string) {
 func (s *SectionView) saveRoute(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
 	s.applyRouteSaved(previousID, route)
 	if route.ID != previousID {
-		s.TargetConfigs.MoveRoute(previousID, route)
+		s.TargetConfigs.RekeyRoute(previousID, route)
 		if s.State.AddTargetRoute.Get() == previousID {
 			s.State.AddTargetRoute.Set(route.ID)
 		}
@@ -294,21 +296,47 @@ func (s *SectionView) refreshTargetConfigs() {
 }
 
 func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID readmodel.TargetID) error {
-	if s.DeleteTarget == nil {
+	if s.ApplyRouteDraft == nil {
 		return errTargetDeleteNotWired
 	}
-	committed, err := s.DeleteTarget(context.Background(), ports.DeleteTargetRequest{
-		WorkspaceID: s.Model.RoutingWorkspaceID(),
-		RouteID:     routeID,
-		TargetID:    targetID,
-	})
+	route, ok := s.routeWithoutTarget(routeID, targetID)
+	if !ok {
+		return fmt.Errorf("target %q is missing", targetID)
+	}
+	committed, err := s.ApplyRouteDraft(context.Background(), ports.ApplyRouteDraftRequest{WorkspaceID: s.Model.RoutingWorkspaceID(), Route: route})
 	if err != nil {
 		return err
 	}
-	s.applyRouteUpsert(committed)
+	s.applyCommittedWorkspace(committed.Workspace)
 	s.State.OpenTarget.Set("")
 	s.State.DeleteConfirmTarget.Set("")
 	return nil
+}
+
+func (s *SectionView) routeWithoutTarget(routeID readmodel.RouteID, targetID readmodel.TargetID) (readmodel.RouteReadModel, bool) {
+	for _, route := range s.State.Routes {
+		if route.ID != routeID {
+			continue
+		}
+		found := false
+		tiers := make([]readmodel.TierReadModel, 0, len(route.Tiers))
+		for _, tier := range route.Tiers {
+			targets := make([]readmodel.TargetReadModel, 0, len(tier.Targets))
+			for _, target := range tier.Targets {
+				if target.ID == targetID {
+					found = true
+					continue
+				}
+				targets = append(targets, target)
+			}
+			if len(targets) > 0 {
+				tiers = append(tiers, readmodel.TierReadModel{Targets: targets})
+			}
+		}
+		route.Tiers = tiers
+		return route, found
+	}
+	return readmodel.RouteReadModel{}, false
 }
 
 func (s *SectionView) confirmDeleteTarget(targetID readmodel.TargetID) {
@@ -361,6 +389,26 @@ func (s *SectionView) applyRouteUpsert(route readmodel.RouteReadModel) {
 		return
 	}
 	s.State.Routes = append(s.State.Routes, route)
+	return
+}
+
+func (s *SectionView) applyCommittedWorkspace(workspace readmodel.WorkspaceReadModel) {
+	s.commitWorkspace(workspace)
+}
+
+func (s *SectionView) commitWorkspace(workspace readmodel.WorkspaceReadModel) {
+	if s.Model.IsOnboarding() {
+		return
+	}
+	if workspace.ID == "" {
+		return
+	}
+	s.Model = workspace
+	s.State.Routes = append([]readmodel.RouteReadModel(nil), workspace.Routes...)
+	s.refreshTargetConfigs()
+	if s.OnWorkspaceCommitted != nil {
+		s.OnWorkspaceCommitted(workspace)
+	}
 }
 
 func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
@@ -388,6 +436,8 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 	if s.SaveRoute == nil {
 		return
 	}
+	expanded := s.State.ExpandedRoute.Get() == routeID
+	addTarget := s.State.AddTargetRoute.Get() == routeID
 	saved, err := s.SaveRoute(context.Background(), ports.SaveRouteRequest{
 		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
@@ -397,7 +447,24 @@ func (s *SectionView) submitRouteName(routeID readmodel.RouteID, name string) {
 	if err != nil {
 		return
 	}
-	s.saveRoute(routeID, saved)
+	newRouteID := saved.Route.ID
+	if newRouteID == "" {
+		newRouteID = readmodel.RouteID(name)
+	}
+	if newRouteID != routeID {
+		// Rekey the ephemeral child before authoritative refresh can garbage-collect
+		// mounts whose old route identity is absent from the committed workspace.
+		s.TargetConfigs.RekeyRoute(routeID, saved.Route)
+	}
+	s.applyCommittedWorkspace(saved.Workspace)
+	if newRouteID != routeID {
+		if expanded {
+			s.State.ExpandedRoute.Set(newRouteID)
+		}
+		if addTarget {
+			s.State.AddTargetRoute.Set(newRouteID)
+		}
+	}
 }
 
 func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
@@ -424,8 +491,7 @@ func (s *SectionView) setRouteDefault(routeID readmodel.RouteID) {
 	if err != nil {
 		return
 	}
-	saved.Default = true
-	s.saveRoute(routeID, saved)
+	s.applyCommittedWorkspace(saved.Workspace)
 }
 
 func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) error {
@@ -436,14 +502,37 @@ func (s *SectionView) confirmDeleteRoute(routeID readmodel.RouteID) error {
 	if s.DeleteRoute == nil {
 		return nil
 	}
-	if err := s.DeleteRoute(context.Background(), ports.DeleteRouteRequest{
+	deletedIdx := s.routeIndex(routeID)
+	result, err := s.DeleteRoute(context.Background(), ports.DeleteRouteRequest{
 		WorkspaceID: s.Model.RoutingWorkspaceID(),
 		RouteID:     routeID,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	s.deleteRoute(routeID)
+	s.applyCommittedWorkspace(result.Workspace)
+	s.finishRouteDeleteInteraction(routeID, deletedIdx)
 	return nil
+}
+
+func (s *SectionView) routeIndex(routeID readmodel.RouteID) int {
+	for i, route := range s.State.Routes {
+		if route.ID == routeID {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *SectionView) finishRouteDeleteInteraction(routeID readmodel.RouteID, deletedIdx int) {
+	if deletedIdx >= 0 {
+		s.requestRouteDeleteFocus(deletedIdx)
+	}
+	s.State.ExpandedRoute.Set("")
+	s.State.OpenTarget.Set("")
+	s.State.AddTargetRoute.Set("")
+	s.State.DeleteConfirmTarget.Set("")
+	s.TargetConfigs.DeleteRoute(routeID)
 }
 
 func contractRowValue(route readmodel.RouteReadModel) string {
@@ -576,20 +665,15 @@ func (s *SectionView) applyRouteSaved(previousID readmodel.RouteID, route readmo
 
 func (s *SectionView) applyRouteDeleted(routeID readmodel.RouteID) {
 	deletedIdx := -1
-	deletedDefault := false
 	next := make([]readmodel.RouteReadModel, 0, len(s.State.Routes))
 	for i, route := range s.State.Routes {
 		if route.ID == routeID {
 			deletedIdx = i
-			deletedDefault = route.Default
 			continue
 		}
 		next = append(next, route)
 	}
 	s.State.Routes = next
-	if deletedDefault {
-		s.ensureDefaultAfterDeletion()
-	}
 	if deletedIdx >= 0 {
 		s.requestRouteDeleteFocus(deletedIdx)
 	}

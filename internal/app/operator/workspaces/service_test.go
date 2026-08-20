@@ -226,6 +226,115 @@ func TestNewServiceRejectsNilStore(t *testing.T) {
 	}
 }
 
+func TestRouteSpecRoundTripIsSemanticNoOpAndPreservesEveryVersion(t *testing.T) {
+	service, store, _ := testService(t)
+	ctx := context.Background()
+	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+		t.Fatal(err)
+	}
+	before := routeVersions(t, store.Config(), "dev", "chat")
+	spec, err := service.GetRoute(ctx, "dev", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	after := routeVersions(t, store.Config(), "dev", "chat")
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("versions after exact round trip = %#v, want %#v", after, before)
+	}
+}
+
+func TestDerivedProtocolRouteSpecRoundTripOmitsDaemonDerivedField(t *testing.T) {
+	service, store, _ := testService(t)
+	ctx := context.Background()
+	target := TargetDraft{ID: "chatgpt", Model: "gpt-5", Connection: StandardConnection("chatgpt", "", "secretfile:chatgpt/default")}
+	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	before := routeVersions(t, store.Config(), "dev", "chat")
+	spec, err := service.GetRoute(ctx, "dev", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := spec.Tiers[0].Targets[0].Protocol; got != "" {
+		t.Fatalf("editable derived protocol = %q, want omitted", got)
+	}
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	if after := routeVersions(t, store.Config(), "dev", "chat"); !reflect.DeepEqual(after, before) {
+		t.Fatalf("versions after derived round trip = %#v, want %#v", after, before)
+	}
+}
+
+func TestRouteReplacementIsLastValidWriteWinsForStaleSpecifications(t *testing.T) {
+	service, _, _ := testService(t)
+	ctx := context.Background()
+	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := service.GetRoute(ctx, "dev", "chat")
+	stale, _ := service.GetRoute(ctx, "dev", "chat")
+	first.Tiers[0].Targets[0].Model = "first-writer"
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: first}); err != nil {
+		t.Fatal(err)
+	}
+	stale.Tiers[0].Targets[0].Model = "last-writer"
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: stale}); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := service.GetRoute(ctx, "dev", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := committed.Tiers[0].Targets[0].Model; got != "last-writer" {
+		t.Fatalf("committed stale-write model = %q, want last-writer", got)
+	}
+}
+
+func TestReplaceRouteRejectsOneInvalidTargetWithoutPublishingOtherChanges(t *testing.T) {
+	service, store, path := testService(t)
+	ctx := context.Background()
+	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+		t.Fatal(err)
+	}
+	beforeDisk, _ := os.ReadFile(path)
+	before := routeVersions(t, store.Config(), "dev", "chat")
+	spec, _ := service.GetRoute(ctx, "dev", "chat")
+	spec.Tiers[0].Targets[0].Model = "changed"
+	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{{ID: "broken", Model: "", Protocol: "responses", Connection: StandardConnection("openai", "", "env:KEY")}}})
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err == nil {
+		t.Fatal("ReplaceRoute unexpectedly succeeded")
+	}
+	afterDisk, _ := os.ReadFile(path)
+	if string(afterDisk) != string(beforeDisk) || !reflect.DeepEqual(routeVersions(t, store.Config(), "dev", "chat"), before) {
+		t.Fatal("invalid desired route changed disk or published snapshot")
+	}
+}
+
+func routeVersions(t *testing.T, config routing.Config, rawWorkspace, rawRoute string) map[string]routing.TargetVersion {
+	t.Helper()
+	slug, _ := routing.ParseWorkspaceSlug(rawWorkspace)
+	name, _ := routing.ParseRouteName(rawRoute)
+	workspace, ok := config.Workspace(slug)
+	if !ok {
+		t.Fatal("workspace missing")
+	}
+	route, ok := workspace.Route(name)
+	if !ok {
+		t.Fatal("route missing")
+	}
+	out := map[string]routing.TargetVersion{}
+	for _, tier := range route.Tiers() {
+		for _, target := range tier.Targets() {
+			out[target.ID().String()] = target.Version()
+		}
+	}
+	return out
+}
+
 func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
 	for name, test := range map[string]struct {
 		protocol   string
@@ -349,7 +458,7 @@ func mustKimiConnection(t *testing.T) routing.Connection {
 	return connection
 }
 
-func TestServiceSemanticCommandsReturnCommittedHierarchy(t *testing.T) {
+func TestServiceRouteReplacementReturnsCommittedHierarchy(t *testing.T) {
 	service, _, _ := testService(t)
 	ctx := context.Background()
 	workspace, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")})
@@ -359,27 +468,32 @@ func TestServiceSemanticCommandsReturnCommittedHierarchy(t *testing.T) {
 	if workspace.DefaultRoute != "chat" || len(workspace.Routes) != 1 || len(workspace.Routes[0].Tiers) != 1 {
 		t.Fatalf("workspace = %#v", workspace)
 	}
-	workspace, err = service.CreateTarget(ctx, CreateTarget{Workspace: "dev", Route: "chat", Target: openAITarget("b")})
+	spec, _ := service.GetRoute(ctx, "dev", "chat")
+	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{openAITarget("b")}})
+	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Routes[0].Tiers) != 2 {
-		t.Fatalf("tiers = %#v", workspace.Routes[0].Tiers)
+	committed, _ := service.GetRoute(ctx, "dev", "chat")
+	if len(committed.Tiers) != 2 {
+		t.Fatalf("tiers = %#v", committed.Tiers)
 	}
-	balanceWith := "b"
-	workspace, err = service.CreateTarget(ctx, CreateTarget{Workspace: "dev", Route: "chat", Target: openAITarget("c"), Placement: Placement{BalanceWith: &balanceWith}})
+	committed.Tiers[1].Targets = append(committed.Tiers[1].Targets, openAITarget("c"))
+	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Routes[0].Tiers) != 2 || len(workspace.Routes[0].Tiers[1].Targets) != 2 {
-		t.Fatalf("balanced tiers = %#v", workspace.Routes[0].Tiers)
+	if len(committed.Tiers) != 2 || len(committed.Tiers[1].Targets) != 2 {
+		t.Fatalf("balanced tiers = %#v", committed.Tiers)
 	}
-	workspace, err = service.DeleteTarget(ctx, DeleteTarget{Workspace: "dev", Route: "chat", TargetID: "a"})
+	committed.Tiers = committed.Tiers[1:]
+	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Routes[0].Tiers) != 1 || workspace.Routes[0].Tiers[0].Targets[0].ID != "b" {
-		t.Fatalf("promoted tiers = %#v", workspace.Routes[0].Tiers)
+	committed, _ = service.GetRoute(ctx, "dev", "chat")
+	if len(committed.Tiers) != 1 || committed.Tiers[0].Targets[0].ID != "b" {
+		t.Fatalf("promoted tiers = %#v", committed.Tiers)
 	}
 }
 
@@ -390,7 +504,7 @@ func TestServiceSetCredentialPreservesTargetFactsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := service.SetCredential(ctx, SetCredential{Workspace: "dev", Route: "chat", TargetID: "a", Credential: "env:ROTATED"})
+	workspace, err := service.ApplyCredentialReference(ctx, ApplyCredentialReference{Workspace: "dev", Route: "chat", TargetID: "a", Credential: "env:ROTATED"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,10 +566,10 @@ func TestServiceSetCredentialRevalidatesProfileConnectionContract(t *testing.T) 
 				t.Fatalf("create workspace: %v", err)
 			}
 
-			_, err := service.SetCredential(ctx, SetCredential{Workspace: "dev", Route: "chat", TargetID: test.target.ID, Credential: test.value})
+			_, err := service.ApplyCredentialReference(ctx, ApplyCredentialReference{Workspace: "dev", Route: "chat", TargetID: test.target.ID, Credential: test.value})
 			var command CommandError
 			if !errors.As(err, &command) || command.Code != InvalidArgument || !strings.Contains(command.Message, test.want) {
-				t.Fatalf("SetCredential error = %#v, want INVALID_ARGUMENT containing %q", err, test.want)
+				t.Fatalf("ApplyCredentialReference error = %#v, want INVALID_ARGUMENT containing %q", err, test.want)
 			}
 		})
 	}
@@ -467,10 +581,13 @@ func TestServiceDeletePrimaryPromotesFallbackAcrossRestart(t *testing.T) {
 	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("primary")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateTarget(ctx, CreateTarget{Workspace: "dev", Route: "chat", Target: openAITarget("fallback")}); err != nil {
+	spec, _ := service.GetRoute(ctx, "dev", "chat")
+	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{openAITarget("fallback")}})
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.DeleteTarget(ctx, DeleteTarget{Workspace: "dev", Route: "chat", TargetID: "primary"}); err != nil {
+	spec.Tiers = spec.Tiers[1:]
+	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -511,13 +628,13 @@ func mustRoute(t *testing.T, raw string) routing.RouteName {
 	return value
 }
 
-func TestServiceMapsLastTargetConflict(t *testing.T) {
+func TestServiceMapsEmptyDesiredRouteAsInvalidArgument(t *testing.T) {
 	service, _, _ := testService(t)
 	ctx := context.Background()
 	_, _ = service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")})
-	_, err := service.DeleteTarget(ctx, DeleteTarget{Workspace: "dev", Route: "chat", TargetID: "a"})
+	_, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: RouteSpec{}})
 	var command CommandError
-	if !errors.As(err, &command) || command.Code != Conflict {
+	if !errors.As(err, &command) || command.Code != InvalidArgument {
 		t.Fatalf("error = %#v", err)
 	}
 }

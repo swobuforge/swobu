@@ -2,13 +2,81 @@ package configstore
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
+
+func TestCredentialProvenFreeProviderExampleStaysWithinLiveEvidence(t *testing.T) {
+	raw, err := os.ReadFile("../../examples/free-provider-route/swobu.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := decode(raw)
+	if err != nil {
+		t.Fatalf("decode free-provider example: %v", err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("free-demo")
+	workspace, ok := config.Workspace(slug)
+	if !ok {
+		t.Fatal("free-demo workspace is missing")
+	}
+	if got := workspace.DefaultRoute().String(); got != "free" {
+		t.Fatalf("default route = %q, want free", got)
+	}
+	routeName, _ := routing.ParseRouteName("free")
+	route, ok := workspace.Route(routeName)
+	if !ok {
+		t.Fatal("free route is missing")
+	}
+
+	want := []struct {
+		provider   string
+		model      string
+		credential string
+	}{
+		{provider: "nvidia", model: "nvidia/nemotron-mini-4b-instruct", credential: "env:NVIDIA_API_KEY"},
+		{provider: "workersai", model: "@cf/google/gemma-4-26b-a4b-it", credential: "env:CLOUDFLARE_API_TOKEN"},
+		{provider: "openrouter", model: "openrouter/free", credential: "env:OPENROUTER_API_KEY"},
+		{provider: "groq", model: "openai/gpt-oss-20b", credential: "env:GROQ_API_KEY"},
+		{provider: "mistral", model: "ministral-3b-2512", credential: "env:MISTRAL_API_KEY"},
+		{provider: "llm7", model: "default", credential: "env:LLM7_API_KEY"},
+		{provider: "cerebras", model: "gemma-4-31b", credential: "env:CEREBRAS_API_KEY"},
+	}
+	tiers := route.Tiers()
+	if len(tiers) != 1 {
+		t.Fatalf("tier count = %d, want 1", len(tiers))
+	}
+	targets := tiers[0].Targets()
+	if len(targets) != len(want) {
+		t.Fatalf("target count = %d, want %d", len(targets), len(want))
+	}
+	for index, expected := range want {
+		target := targets[index]
+		if provider := string(target.Provider()); provider != expected.provider {
+			t.Fatalf("target %d provider = %q, want %q", index+1, provider, expected.provider)
+		}
+		if model := target.Model().String(); model != expected.model {
+			t.Fatalf("target %d model = %q, want %q", index+1, model, expected.model)
+		}
+		connection, ok := target.Connection().(routing.StandardConnection)
+		if !ok {
+			t.Fatalf("target %d connection = %T, want routing.StandardConnection", index+1, target.Connection())
+		}
+		if credential := connection.Credential().String(); credential != expected.credential {
+			t.Fatalf("target %d credential = %q, want %q", index+1, credential, expected.credential)
+		}
+		if string(target.Provider()) == "gemini" {
+			t.Fatalf("target %d contains excluded Gemini provider", index+1)
+		}
+	}
+}
 
 const allVariantsYAML = `schema_version: 1
 workspaces:
@@ -354,6 +422,121 @@ func TestCodecAcceptsEmptyInstallation(t *testing.T) {
 	config, err := decode([]byte("schema_version: 1\nworkspaces: {}\n"))
 	if err != nil || config.WorkspaceCount() != 0 {
 		t.Fatalf("config = %#v, error = %v", config, err)
+	}
+}
+
+const versionedTargetYAML = `schema_version: 1
+workspaces:
+  dev:
+    default_route: chat
+    routes:
+      chat:
+        tiers:
+          - targets:
+              - id: x
+                model: gpt-5
+                protocol: responses
+                connection: {openai: {credential: env:OPENAI_API_KEY}}
+              - id: keep
+                model: gpt-5
+                protocol: responses
+                connection: {openai: {credential: env:OPENAI_API_KEY}}
+`
+
+func TestCodecDistinguishesLegacyOmittedTargetVersionFromExplicitZero(t *testing.T) {
+	config, err := decode([]byte(versionedTargetYAML))
+	if err != nil {
+		t.Fatalf("decode legacy omitted version: %v", err)
+	}
+	raw, err := encode(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(regexp.MustCompile(`(?m)^\s+version: 1$`).FindAll(raw, -1)) != 2 {
+		t.Fatalf("one-way migration did not emit both target versions:\n%s", raw)
+	}
+
+	explicitZero := strings.Replace(versionedTargetYAML, "id: x\n", "id: x\n                version: 0\n", 1)
+	if _, err := decode([]byte(explicitZero)); err == nil || !strings.Contains(err.Error(), "version") || !strings.Contains(err.Error(), "greater than zero") {
+		t.Fatalf("explicit-zero decode error = %v, want strict rejection", err)
+	}
+}
+
+func TestCodecRestoresPositiveTargetVersionAndRequiresMatchingLedger(t *testing.T) {
+	versioned := strings.Replace(versionedTargetYAML, "id: x\n", "id: x\n                version: 7\n", 1)
+	config, err := decode([]byte(versioned))
+	if err != nil {
+		t.Fatalf("decode positive version: %v", err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	workspace, _ := config.Workspace(slug)
+	id, _ := routing.ParseTargetID("x")
+	if got := workspace.TargetGenerations()[id]; got != 7 {
+		t.Fatalf("restored generation = %d, want 7", got)
+	}
+
+	for _, generation := range []uint64{6, 8} {
+		withLedger := strings.Replace(versioned, "    routes:\n", "    target_generations: {x: "+fmt.Sprint(generation)+"}\n    routes:\n", 1)
+		if _, err := decode([]byte(withLedger)); err == nil || !strings.Contains(err.Error(), "must equal the active target version") {
+			t.Fatalf("mismatched ledger %d error = %v", generation, err)
+		}
+	}
+}
+
+func TestCodecRejectsInvalidGenerationLedgerEntries(t *testing.T) {
+	for name, ledger := range map[string]string{
+		"zero":       "{x: 0}",
+		"invalid ID": "{'bad/id': 1}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := strings.Replace(versionedTargetYAML, "    routes:\n", "    target_generations: "+ledger+"\n    routes:\n", 1)
+			if _, err := decode([]byte(raw)); err == nil {
+				t.Fatal("invalid generation ledger unexpectedly decoded")
+			}
+		})
+	}
+}
+
+func TestCodecPersistsAbsentTargetGenerationAcrossRestart(t *testing.T) {
+	config, err := decode([]byte(versionedTargetYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("chat")
+	workspace, _ := config.Workspace(slug)
+	route, _ := workspace.Route(routeName)
+	original := route.Spec()
+	keepOnly := routing.RouteSpec{Tiers: []routing.TierSpec{{Targets: []routing.TargetSpec{original.Tiers[0].Targets[1]}}}}
+	withoutX, err := config.ApplyRouteSpec(slug, routeName, keepOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encode(withoutX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "x: 1") {
+		t.Fatalf("tombstoned generation missing from persistence:\n%s", raw)
+	}
+	restarted, err := decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readd := keepOnly
+	readd.Tiers = append(readd.Tiers, routing.TierSpec{Targets: []routing.TargetSpec{original.Tiers[0].Targets[0]}})
+	next, err := restarted.ApplyRouteSpec(slug, routeName, readd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ = next.Workspace(slug)
+	route, _ = workspace.Route(routeName)
+	for _, tier := range route.Tiers() {
+		for _, target := range tier.Targets() {
+			if target.ID().String() == "x" && target.Version() != 2 {
+				t.Fatalf("re-added generation after restart = %d, want 2", target.Version())
+			}
+		}
 	}
 }
 
