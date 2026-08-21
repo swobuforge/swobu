@@ -1,51 +1,143 @@
 package workspace_connect
 
 import (
-	"net/url"
 	"os"
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/clientconnect"
-	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	cockpitui "github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type connectOperations interface {
-	Discover(clientconnect.Target) []clientconnect.Client
-	Plan(clientconnect.ClientID, clientconnect.Target) (clientconnect.Plan, error)
-	Apply(clientconnect.Plan) error
+	Discover(target clientconnect.Target) []clientconnect.Client
+	Plan(clientID clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error)
+	Apply(plan clientconnect.Plan) error
 }
 
-// Disclosure owns the complete endpoint/client/API interaction lifecycle.
+type childKind int
+
+const (
+	childNone childKind = iota
+	childPlan
+	childManual
+)
+
+type childScope struct {
+	kind childKind
+	plan clientconnect.Plan
+}
+
+func (c childScope) isManual() bool {
+	return c.kind == childManual
+}
+
+func (c childScope) hasPlan(id clientconnect.ClientID) bool {
+	return c.kind == childPlan && c.plan.ClientID == id
+}
+
+type copyFeedback struct {
+	key    string
+	result cockpitui.CopyResult
+}
+
 type Disclosure struct {
 	Target       clientconnect.Target
 	Ops          connectOperations
 	Clients      *tui.State[[]clientconnect.Client]
 	EndpointOpen *tui.State[bool]
-	Plan         *tui.State[clientconnect.Plan]
+	Child        *tui.State[childScope]
+	Feedback     *tui.State[copyFeedback]
 	Error        *tui.State[string]
-	OnNotice     func(readmodel.Notice)
 }
 
-// New constructs a disclosure. Discovery runs only when the operator opens it.
-func New(target clientconnect.Target, ops connectOperations, onNotice func(readmodel.Notice)) *Disclosure {
+func New(target clientconnect.Target, ops connectOperations) *Disclosure {
 	if ops == nil {
 		ops = clientconnect.NewService()
 	}
 	return &Disclosure{
-		Target: target, Ops: ops,
-		Clients: tui.NewState([]clientconnect.Client(nil)), EndpointOpen: tui.NewState(false),
-		Plan: tui.NewState(clientconnect.Plan{}), Error: tui.NewState(""),
-		OnNotice: onNotice,
+		Target:       target,
+		Ops:          ops,
+		Clients:      tui.NewState([]clientconnect.Client(nil)),
+		EndpointOpen: tui.NewState(false),
+		Child:        tui.NewState(childScope{}),
+		Feedback:     tui.NewState(copyFeedback{}),
+		Error:        tui.NewState(""),
 	}
+}
+
+func (d *Disclosure) BindApp(app *tui.App) {
+	if d.Clients != nil {
+		d.Clients.BindApp(app)
+	}
+	if d.EndpointOpen != nil {
+		d.EndpointOpen.BindApp(app)
+	}
+	if d.Child != nil {
+		d.Child.BindApp(app)
+	}
+	if d.Feedback != nil {
+		d.Feedback.BindApp(app)
+	}
+	if d.Error != nil {
+		d.Error.BindApp(app)
+	}
+}
+
+func (d *Disclosure) UnbindApp() {}
+
+func (d *Disclosure) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*Disclosure)
+	if !ok {
+		return
+	}
+	d.Target = f.Target
+	d.Ops = f.Ops
+}
+
+func (d *Disclosure) KeyMap() tui.KeyMap {
+	return tui.KeyMap{
+		tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) {
+			if d.EndpointOpen.Get() {
+				d.Back()
+			}
+		}),
+	}
+}
+
+func (d *Disclosure) Back() bool {
+	if d.Child.Get().kind != childNone {
+		d.closeChildScope()
+		return true
+	}
+	if d.EndpointOpen.Get() {
+		d.closeChildren()
+		d.EndpointOpen.Set(false)
+		return true
+	}
+	return false
+}
+
+func (d *Disclosure) rowEscape(row *cockpitui.SelectableRow) *cockpitui.SelectableRow {
+	row.OnEscape = func() {
+		d.Back()
+	}
+	row.UpdateProps(row)
+	return row
 }
 
 func (d *Disclosure) endpointAction() string {
 	if d.EndpointOpen.Get() {
-		return "close ↵"
+		return "close \u21b5"
 	}
-	return "connect ↵"
+	return "clients \u21b5"
+}
+
+func (d *Disclosure) clientAction(client clientconnect.Client) string {
+	if client.Configured {
+		return "configured"
+	}
+	return "configure \u21b5"
 }
 
 func (d *Disclosure) toggleEndpoint() {
@@ -58,113 +150,84 @@ func (d *Disclosure) toggleEndpoint() {
 	d.EndpointOpen.Set(opening)
 }
 
-func (d *Disclosure) closeChildren() {
-	d.Plan.Set(clientconnect.Plan{})
+func (d *Disclosure) closeChildScope() {
+	d.Child.Set(childScope{})
+	d.Feedback.Set(copyFeedback{})
 	d.Error.Set("")
 }
 
-func (d *Disclosure) Back() bool {
-	if d.Plan.Get().ClientID != "" {
-		d.Plan.Set(clientconnect.Plan{})
-		d.Error.Set("")
-		return true
-	}
-	if d.EndpointOpen.Get() {
-		d.closeChildren()
-		d.EndpointOpen.Set(false)
-		return true
-	}
-	return false
-}
-
-// KeyMap makes the entered disclosure the nearest Escape owner regardless of
-// which descendant row currently holds selection.
-func (d *Disclosure) KeyMap() tui.KeyMap {
-	if !d.EndpointOpen.Get() {
-		return nil
-	}
-	return tui.KeyMap{tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) { d.Back() })}
-}
-
-func (d *Disclosure) clientAction(client clientconnect.Client) string {
-	if client.Configured {
-		return "configured"
-	}
-	if d.Plan.Get().ClientID == client.ID {
-		return "close ↵"
-	}
-	return "configure ↵"
-}
-
-func (d *Disclosure) rowEscape(row *cockpitui.SelectableRow) *cockpitui.SelectableRow {
-	row.OnEscape = func() { d.Back() }
-	return row
+func (d *Disclosure) closeChildren() {
+	d.closeChildScope()
 }
 
 func (d *Disclosure) chooseClient(client clientconnect.Client) {
 	if client.Configured {
 		return
 	}
-	if d.Plan.Get().ClientID == client.ID {
-		d.Plan.Set(clientconnect.Plan{})
-		d.Error.Set("")
-		return
-	}
 	plan, err := d.Ops.Plan(client.ID, d.Target)
 	if err != nil {
 		d.Error.Set(err.Error())
-		d.Plan.Set(clientconnect.Plan{})
+		d.Child.Set(childScope{})
 		return
 	}
 	d.Error.Set("")
-	d.Plan.Set(plan)
+	d.Feedback.Set(copyFeedback{})
+	d.Child.Set(childScope{kind: childPlan, plan: plan})
+}
+
+func (d *Disclosure) openManualSetup() {
+	d.Feedback.Set(copyFeedback{})
+	d.Error.Set("")
+	d.Child.Set(childScope{kind: childManual})
 }
 
 func (d *Disclosure) applyPlan() {
-	plan := d.Plan.Get()
-	if plan.ClientID == "" {
+	child := d.Child.Get()
+	if child.kind != childPlan || child.plan.ClientID == "" {
 		return
 	}
-	if err := d.Ops.Apply(plan); err != nil {
+	if err := d.Ops.Apply(child.plan); err != nil {
 		d.Error.Set(err.Error())
 		return
 	}
-	clients := append([]clientconnect.Client(nil), d.Clients.Get()...)
-	for i := range clients {
-		if clients[i].ID == plan.ClientID {
-			clients[i].Configured = true
-		}
-	}
-	d.Clients.Set(clients)
-	d.Plan.Set(clientconnect.Plan{})
+	d.Clients.Set(d.Ops.Discover(d.Target))
+	d.closeChildScope()
+}
+
+func (d *Disclosure) copyItem(key, value string) {
+	result := cockpitui.CopyToClipboard(value)
+	d.Feedback.Set(copyFeedback{key: key, result: result})
 	d.Error.Set("")
-}
-
-func (d *Disclosure) copyWorkspaceURL() {
-	result := cockpitui.CopyToClipboard(d.Target.WorkspaceURL())
-	d.publishNotice(copyNotice("Workspace", result))
-}
-
-func copyNotice(label string, result cockpitui.CopyResult) readmodel.Notice {
-	switch result.Status {
-	case cockpitui.CopyOK:
-		return readmodel.Notice{Kind: readmodel.NoticeInfo, Message: label + " URL copied."}
-	case cockpitui.CopySavedFile:
-		return readmodel.Notice{Kind: readmodel.NoticeWarning, Message: label + " URL saved to " + result.Path + "."}
-	default:
-		return readmodel.Notice{Kind: readmodel.NoticeError, Message: label + " URL could not be copied or saved."}
+	if result.Status == cockpitui.CopyFailed {
+		d.Error.Set("copy failed \u00b7 run swobu doctor --copy")
 	}
 }
 
-func (d *Disclosure) publishNotice(notice readmodel.Notice) {
-	if d.OnNotice != nil {
-		d.OnNotice(notice)
+func (d *Disclosure) copyAction(key string) string {
+	fb := d.Feedback.Get()
+	if fb.key != key {
+		return "copy \u21b5"
+	}
+	switch fb.result.Status {
+	case cockpitui.CopyOK:
+		return "copied"
+	case cockpitui.CopySavedFile:
+		return "saved"
+	default:
+		return "copy failed"
 	}
 }
 
 func shortLocus(path string) string {
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home+string(os.PathSeparator)) {
-		return "~" + strings.TrimPrefix(path, home)
+	home, err := os.UserHomeDir()
+	if err == nil {
+		if path == home {
+			return "~"
+		}
+		prefix := home + string(os.PathSeparator)
+		if strings.HasPrefix(path, prefix) {
+			return "~" + string(os.PathSeparator) + strings.TrimPrefix(path, prefix)
+		}
 	}
 	return path
 }
@@ -172,32 +235,27 @@ func shortLocus(path string) string {
 func displayChange(target clientconnect.Target, change clientconnect.Change) string {
 	after := shortWorkspaceValue(target, change.After)
 	if !change.BeforeExists {
-		return "→ " + after
+		return "\u2192 " + after
 	}
-	return shortWorkspaceValue(target, change.Before) + " → " + after
+	return shortWorkspaceValue(target, change.Before) + " \u2192 " + after
 }
 
-func shortWorkspaceValue(target clientconnect.Target, value string) string {
-	workspace, workspaceErr := url.Parse(target.WorkspaceURL())
-	parsed, err := url.Parse(value)
-	if workspaceErr != nil || err != nil || !parsed.IsAbs() ||
-		!strings.EqualFold(parsed.Scheme, workspace.Scheme) || !strings.EqualFold(parsed.Host, workspace.Host) {
-		return value
+func shortWorkspaceValue(target clientconnect.Target, raw string) string {
+	if target.WorkspaceURL() == "" {
+		return raw
 	}
-	return parsed.EscapedPath()
-}
-
-func (d *Disclosure) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*Disclosure)
-	if !ok {
-		return
+	prefix := target.WorkspaceURL()
+	if strings.HasPrefix(raw, prefix) {
+		suffix := strings.TrimPrefix(raw, prefix)
+		return "/c/" + target.WorkspaceSlug() + suffix
 	}
-	d.Target = f.Target
-	d.Ops = f.Ops
-	d.OnNotice = f.OnNotice
+	return raw
 }
 
 var (
+	_ tui.Component    = (*Disclosure)(nil)
 	_ tui.PropsUpdater = (*Disclosure)(nil)
 	_ tui.KeyListener  = (*Disclosure)(nil)
+	_ tui.AppBinder    = (*Disclosure)(nil)
+	_ tui.AppUnbinder  = (*Disclosure)(nil)
 )

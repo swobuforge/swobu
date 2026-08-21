@@ -18,5 +18,5 @@ func EndpointRowComponent(s *SectionView) tui.Component {
 	if err != nil {
 		return cockpitui.NewSelectableRow(endpointRowKey(s)+":invalid", "endpoint", s.Model.WorkspaceURL, "", nil)
 	}
-	return workspace_connect.New(target, nil, s.OnNotice)
+	return workspace_connect.New(target, nil)
 }

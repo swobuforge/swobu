@@ -75,7 +75,7 @@ func TestSection_ConventionalFirstWorkspaceShowsConnectEndpoint(t *testing.T) {
 	defer h.Close()
 
 	frame := h.FrameTrimmed()
-	for _, want := range []string{"workspace", "endpoint", "http://127.0.0.1:7926/c/default", "connect ↵", "OpenAI · Anthropic"} {
+	for _, want := range []string{"workspace", "endpoint", "http://127.0.0.1:7926/c/default", "clients ↵", "OpenAI · Anthropic"} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("bootstrap overview missing %q:\n%s", want, frame)
 		}
