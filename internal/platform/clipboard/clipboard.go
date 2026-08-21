@@ -16,6 +16,11 @@ var (
 )
 
 func initClipboard() {
+	defer func() {
+		if r := recover(); r != nil {
+			initResult = fmt.Errorf("clipboard init panicked: %v", r)
+		}
+	}()
 	initResult = gclip.Init()
 }
 
@@ -28,11 +33,19 @@ func initialized() bool {
 // On success it returns true and a nil error.
 // On failure it returns false and the error (caller may fall back).
 func TryWriteText(text string) (ok bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+			err = fmt.Errorf("clipboard write panicked: %v", r)
+		}
+	}()
 	if !initialized() {
 		return false, fmt.Errorf("clipboard write: init failed: %w", initResult)
 	}
 	ch := gclip.Write(gclip.FmtText, []byte(text))
-	<-ch // wait for completion
+	if ch == nil {
+		return false, fmt.Errorf("clipboard write: write returned nil channel")
+	}
 	return true, nil
 }
 

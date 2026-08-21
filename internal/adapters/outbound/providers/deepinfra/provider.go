@@ -13,12 +13,10 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 const failFastCarrierMarker = "deepinfra.fail_fast"
@@ -42,36 +40,22 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	if target.ProtocolKind != protocolkind.ChatCompletions {
 		return provider.Backend{}, fmt.Errorf("DeepInfra backend protocol %q is not Chat Completions", target.ProtocolKind)
 	}
-	standard, ok := backend.Codec.(protocolcodec.Codec)
-	if !ok {
-		return provider.Backend{}, fmt.Errorf("DeepInfra Chat backend has codec %T, want protocolcodec.Codec", backend.Codec)
+	backend.Codec = protocolcodec.Codec{
+		Protocol: protocolkind.ChatCompletions,
+		ChatDialect: protocolcodec.ChatDialect{
+			DecorateAttempt: func(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+				if !ctx.HasNextRouteCandidate {
+					return protocolcodec.AttemptDecoration{}, nil
+				}
+				return protocolcodec.AttemptDecoration{
+					Fields: map[string]any{"fail_fast": true},
+					Meta:   carrier.Meta{Opaque: map[string]string{failFastCarrierMarker: "true"}},
+				}, nil
+			},
+		},
 	}
-	backend.Codec = failFastCodec{standard: standard}
 	backend.Transport = overloadTransport{standard: backend.Transport}
 	return backend, backend.Validate()
-}
-
-// failFastCodec adds DeepInfra's queue-avoidance switch after shared typed
-// Chat lowering and before its one JSON serialization boundary.
-type failFastCodec struct{ standard protocolcodec.Codec }
-
-func (c failFastCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
-	if err != nil {
-		return carrier.Document{}, changes, err
-	}
-	if req.EncodeContext.HasNextRouteCandidate {
-		document.Payload["fail_fast"] = true
-	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	if err == nil && req.EncodeContext.HasNextRouteCandidate {
-		encoded.Meta.Opaque = map[string]string{failFastCarrierMarker: "true"}
-	}
-	return encoded, changes, err
-}
-
-func (c failFastCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return c.standard.Decode(ctx, req, ingress)
 }
 
 // overloadTransport can make the narrow, documented execution claim only when
@@ -178,6 +162,5 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	return provider.TargetProbeResult{Options: deployments}, nil
 }
 
-var _ provider.Codec = failFastCodec{}
 var _ provider.Transport = overloadTransport{}
 var _ providersruntime.Discovery = discovery{}

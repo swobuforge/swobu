@@ -71,12 +71,12 @@ func TestRuntimeAdmitsOnlyGroqChatAndResponses(t *testing.T) {
 			t.Fatalf("%s: %v", kind, err)
 		}
 		if kind == protocolkind.ChatCompletions {
-			if _, ok := backend.Codec.(chatCodec); !ok {
+			if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.ResponseReasoning == nil {
 				t.Fatalf("Chat codec = %T", backend.Codec)
 			}
 		}
 		if kind == protocolkind.Responses {
-			if _, ok := backend.Codec.(responsesCodec); !ok {
+			if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.Protocol != protocolkind.Responses {
 				t.Fatalf("Responses codec = %T", backend.Codec)
 			}
 		}
@@ -144,7 +144,11 @@ func TestChatReasoningAndFlexUseOnlyEstablishedAttemptFacts(t *testing.T) {
 		Model: canonical.Specify("unclassified-model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		Controls: controls, Reasoning: reasoning,
 	})
-	codec := chatCodec{}
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(groqTarget("https://api.groq.com/openai/v1", protocolkind.ChatCompletions))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		name     string
 		next     bool
@@ -154,7 +158,7 @@ func TestChatReasoningAndFlexUseOnlyEstablishedAttemptFacts(t *testing.T) {
 		{name: "terminal candidate", next: false, wantTier: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			document, _, err := codec.Encode(provider.Request{
+			document, _, err := backend.Codec.Encode(provider.Request{
 				Canonical: request, Delivery: delivery.BufferedDelivery(), EncodeContext: provider.EncodeContext{HasNextRouteCandidate: test.next},
 			})
 			if err != nil {
@@ -182,10 +186,15 @@ func TestChatReasoningAndFlexUseOnlyEstablishedAttemptFacts(t *testing.T) {
 }
 
 func TestChatLeavesUnspecifiedGroqFieldsAbsent(t *testing.T) {
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(groqTarget("https://api.groq.com/openai/v1", protocolkind.ChatCompletions))
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("any-model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 	})
-	document, _, err := (chatCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +206,11 @@ func TestChatLeavesUnspecifiedGroqFieldsAbsent(t *testing.T) {
 }
 
 func TestChatOmitsUnsupportedOrdinalWithoutModelInference(t *testing.T) {
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(groqTarget("https://api.groq.com/openai/v1", protocolkind.ChatCompletions))
+	if err != nil {
+		t.Fatal(err)
+	}
 	maximum := canonical.InferenceEffortMax
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &maximum})
 	if err != nil {
@@ -205,7 +219,7 @@ func TestChatOmitsUnsupportedOrdinalWithoutModelInference(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("any-model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}, Controls: controls,
 	})
-	document, changes, err := (chatCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

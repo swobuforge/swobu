@@ -32,8 +32,8 @@ func TestRuntimeUsesDerivedChatCompletionsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := backend.Codec.(failFastCodec); !ok {
-		t.Fatalf("codec = %T, want DeepInfra fail-fast codec", backend.Codec)
+	if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.DecorateAttempt == nil {
+		t.Fatalf("codec = %T, want DeepInfra protocolcodec with DecorateAttempt", backend.Codec)
 	}
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.Responses, protocolkind.Messages} {
 		invalid := target.Clone()
@@ -77,7 +77,10 @@ func TestFailFastFollowsTransientRouteContext(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("deploy_id:private"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 	})
-	codec := failFastCodec{standard: protocolCodec()}
+	backend, err := NewRuntime(nil, credentialResolver{}).BackendResolver.ResolveBackend(deepInfraTarget("https://api.deepinfra.com/v1/openai"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name string
 		next bool
@@ -87,7 +90,7 @@ func TestFailFastFollowsTransientRouteContext(t *testing.T) {
 		{name: "terminal target", next: false, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc, _, err := codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), EncodeContext: provider.EncodeContext{HasNextRouteCandidate: tc.next}})
+			doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), EncodeContext: provider.EncodeContext{HasNextRouteCandidate: tc.next}})
 			if err != nil {
 				t.Fatal(err)
 			}

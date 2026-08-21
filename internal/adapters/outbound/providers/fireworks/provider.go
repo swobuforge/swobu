@@ -45,7 +45,7 @@ func (r responsesBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 	}
 	// Fireworks documents reusable Responses IDs only when response storage is
 	// permitted. Codec decoding applies that request-local eligibility rule.
-	codec.CaptureResponsesContinuation = true
+	codec.ResponsesDialect.CaptureResponsesContinuation = true
 	backend.Codec = codec
 	return backend, backend.Validate()
 }

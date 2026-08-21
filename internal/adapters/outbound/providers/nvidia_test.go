@@ -92,7 +92,7 @@ func TestNVIDIAHostedUsesGenericCatalogAndUnmodifiedStreamingChat(t *testing.T) 
 		t.Fatal(err)
 	}
 	codec, ok := backend.Codec.(protocolcodec.Codec)
-	if !ok || codec.Protocol != protocolkind.ChatCompletions || codec.CaptureResponsesContinuation {
+	if !ok || codec.Protocol != protocolkind.ChatCompletions || codec.ResponsesDialect.CaptureResponsesContinuation {
 		t.Fatalf("NVIDIA codec = %#v", backend.Codec)
 	}
 	request := canonicaltest.LargeIntegerRequest(t, model)

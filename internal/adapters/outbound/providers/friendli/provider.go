@@ -2,12 +2,12 @@ package friendli
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -41,11 +41,20 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	if err != nil || target.ProtocolKind != protocolkind.ChatCompletions {
 		return backend, err
 	}
-	standard, ok := backend.Codec.(protocolcodec.Codec)
-	if !ok {
-		return provider.Backend{}, fmt.Errorf("Friendli Chat backend has codec %T, want protocolcodec.Codec", backend.Codec)
+	backend.Codec = protocolcodec.Codec{
+		Protocol: protocolkind.ChatCompletions,
+		ChatDialect: protocolcodec.ChatDialect{
+			LowerReasoning: func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+				fields := make(map[string]any)
+				if disclosure, set := req.Reasoning().DisclosureField().Get(); set && disclosure == canonical.ReasoningDisclosureNone {
+					fields["parse_reasoning"] = true
+					fields["include_reasoning"] = false
+				}
+				return fields, nil
+			},
+			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return friendliChatReasoningExtractor{} },
+		},
 	}
-	backend.Codec = reasoningCodec{standard: standard}
 	return backend, backend.Validate()
 }
 

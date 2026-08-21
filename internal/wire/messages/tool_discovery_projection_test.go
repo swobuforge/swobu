@@ -26,7 +26,7 @@ func TestMessagesRejectsLiveDiscoveryCapabilityForRouteFallback(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "find an appropriate tool"),
 		},
 	})
-	_, err = LowerProviderRequestDocument(request, nil, delivery.BufferedDelivery(), nil, "exchange")
+	_, err = CompileProviderRequestDocument(request, nil, delivery.BufferedDelivery(), nil, "exchange", CompileOptions{})
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want target incompatibility", err, err)

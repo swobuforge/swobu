@@ -10,14 +10,12 @@ import (
 	"testing"
 
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
@@ -50,25 +48,26 @@ func TestAzureChatCompletionsUsesExactLegacyTokenFieldPolicy(t *testing.T) {
 }
 
 func TestContinueEmptyStopListIsOmittedFromAzureChatCompletionsProviderRequest(t *testing.T) {
-	clientDocument := carrier.NewDocument(
-		protocolkind.ChatCompletions,
-		"application/json",
-		nil,
-		[]byte(`{"model":"gpt-5-nano","messages":[{"role":"user","content":"Complete this code"}],"temperature":1,"stop":[]}`),
-		carrier.Meta{},
-	)
-	decoded, err := (chatcompletions.ClientRequestDecoder{}).DecodeClientRequest(clientDocument)
+	temp := float64(1)
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		Temperature:   &temp,
+		StopSequences: []string{},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := decoded.Request.Request
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5-nano"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "Complete this code")},
+		Controls: controls,
+	})
 	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: decoded.Request.Delivery})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

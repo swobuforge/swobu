@@ -55,12 +55,33 @@ func TestDeferredWebSearchRoundTripsNatively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), "exchange")
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
+		if tool.Kind() != canonical.ToolKindWebSearch {
+			return nil, false, nil, nil
+		}
+		return []ProviderRequestTool{{
+			Type:           "web_search_20260209",
+			Name:           canonical.WebSearchToolKey().Name(),
+			AllowedCallers: []string{"direct"},
+		}}, true, nil, nil
+	}
+	doc, err := CompileProviderRequestDocument(
+		decoded.Request.Request,
+		testAttemptToolNames(decoded.Request.Request),
+		delivery.BufferedDelivery(),
+		nil,
+		"exchange",
+		CompileOptions{LowerTool: rule},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(result.Document.RawBytes()), `"type":"web_search_20260209"`) || !strings.Contains(string(result.Document.RawBytes()), `"defer_loading":true`) {
-		t.Fatalf("deferred web search did not round trip: %s", result.Document.RawBytes())
+	result, err := EncodeProviderRequestDocument(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(result.RawBytes()), `"type":"web_search_20260209"`) || !strings.Contains(string(result.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("deferred web search did not round trip: %s", result.RawBytes())
 	}
 }
 

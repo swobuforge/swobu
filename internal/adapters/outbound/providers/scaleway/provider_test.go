@@ -34,12 +34,12 @@ func TestRuntimeAdmitsOnlyScalewayChatAndResponses(t *testing.T) {
 			t.Fatalf("%s: %v", kind, err)
 		}
 		if kind == protocolkind.ChatCompletions {
-			if _, ok := backend.Codec.(reasoningCodec); !ok {
+			if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.ResponseReasoning == nil {
 				t.Fatalf("Chat codec = %T", backend.Codec)
 			}
 		}
 		if kind == protocolkind.Responses {
-			if _, ok := backend.Codec.(responsesCodec); !ok {
+			if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || !codec.ResponsesDialect.PrependInstructionsToInput {
 				t.Fatalf("Responses codec = %T", backend.Codec)
 			}
 		}
@@ -96,13 +96,18 @@ func TestTransportAndDiscoveryUseEffectiveEndpointWithOptionalBearer(t *testing.
 }
 
 func TestResponsesRehomesInstructionsAndOmitsOnlyStoreFalse(t *testing.T) {
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(scalewayTarget("https://api.scaleway.ai/v1", "env:SCW_SECRET_KEY", protocolkind.Responses))
+	if err != nil {
+		t.Fatal(err)
+	}
 	storeFalse := canonical.Specify(false)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("glm-5.2"),
 		Items: []canonical.CanonicalItem{canonicaltest.MustInstruction(canonical.MessageRoleSystem, "be precise"), canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		Store: storeFalse,
 	})
-	document, _, err := (responsesCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +140,7 @@ func TestResponsesRehomesInstructionsAndOmitsOnlyStoreFalse(t *testing.T) {
 
 	storeTrue := canonical.Specify(true)
 	trueRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("glm-5.2"), Items: request.Items(), Store: storeTrue})
-	document, _, err = (responsesCodec{}).Encode(provider.Request{Canonical: trueRequest, Delivery: delivery.BufferedDelivery()})
+	document, _, err = backend.Codec.Encode(provider.Request{Canonical: trueRequest, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +183,11 @@ func TestReasoningCodecPreservesReadableFieldsWithoutOpaqueState(t *testing.T) {
 }
 
 func TestChatKeepsStandardReasoningEffort(t *testing.T) {
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(scalewayTarget("https://api.scaleway.ai/v1", "env:SCW_SECRET_KEY", protocolkind.ChatCompletions))
+	if err != nil {
+		t.Fatal(err)
+	}
 	effort := canonical.InferenceEffortHigh
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
 	if err != nil {
@@ -188,7 +198,7 @@ func TestChatKeepsStandardReasoningEffort(t *testing.T) {
 		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 		Controls: controls,
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

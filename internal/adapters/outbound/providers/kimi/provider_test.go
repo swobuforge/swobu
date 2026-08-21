@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -19,8 +20,8 @@ func TestRuntimeUsesSharedKimiPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := backend.Codec.(reasoningCodec); !ok {
-		t.Fatalf("codec = %T, want Kimi reasoning codec", backend.Codec)
+	if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.ResponseReasoning == nil {
+		t.Fatalf("codec = %T, want Kimi reasoning dialect codec", backend.Codec)
 	}
 	if bundle.Discovery == nil {
 		t.Fatal("shared model discovery is missing")

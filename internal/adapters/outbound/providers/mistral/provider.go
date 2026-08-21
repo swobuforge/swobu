@@ -55,10 +55,13 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	if target.ProtocolKind != protocolkind.ChatCompletions {
 		return provider.Backend{}, fmt.Errorf("Mistral backend protocol %q is not Chat Completions", target.ProtocolKind)
 	}
-	standard, ok := backend.Codec.(protocolcodec.Codec)
-	if !ok {
-		return provider.Backend{}, fmt.Errorf("Mistral Chat backend has codec %T, want protocolcodec.Codec", backend.Codec)
+	backend.Codec = protocolcodec.Codec{
+		Protocol: protocolkind.ChatCompletions,
+		ChatDialect: protocolcodec.ChatDialect{
+			LowerReasoning:    applyMistralReasoning,
+			LowerMessage:      applyMistralMessage,
+			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return mistralChatReasoningExtractor{} },
+		},
 	}
-	backend.Codec = reasoningCodec{standard: standard}
 	return backend, backend.Validate()
 }

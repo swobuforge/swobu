@@ -35,8 +35,8 @@ func TestRuntimeUsesDerivedChatCompletionsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := backend.Codec.(reasoningCodec); !ok {
-		t.Fatalf("codec = %T, want Together reasoning codec", backend.Codec)
+	if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.ResponseReasoning == nil {
+		t.Fatalf("codec = %T, want Together reasoning dialect codec", backend.Codec)
 	}
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.Responses, protocolkind.Messages} {
 		invalid := target.Clone()
@@ -158,6 +158,13 @@ func TestDiscoveryUsesPartialCatalogWithoutInventingACombinedFailureType(t *test
 }
 
 func TestReasoningCodecProjectsTogetherDialectWithoutPreservedThinking(t *testing.T) {
+	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
+	target := togetherTarget("https://api.together.ai/v1")
+	backend, err := bundle.BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	effort := canonical.InferenceEffortHigh
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
 	if err != nil {
@@ -168,7 +175,7 @@ func TestReasoningCodecProjectsTogetherDialectWithoutPreservedThinking(t *testin
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("future-model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls, Reasoning: automatic})
-	document, changes, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +197,7 @@ func TestReasoningCodecProjectsTogetherDialectWithoutPreservedThinking(t *testin
 		t.Fatal(err)
 	}
 	disabledRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("future-model"), Reasoning: disabledReasoning})
-	document, _, err = (reasoningCodec{}).Encode(provider.Request{Canonical: disabledRequest, Delivery: delivery.BufferedDelivery()})
+	document, _, err = backend.Codec.Encode(provider.Request{Canonical: disabledRequest, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

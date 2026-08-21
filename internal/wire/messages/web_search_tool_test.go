@@ -40,8 +40,22 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	}
 }
 
-func TestEncodeMessagesWebSearchUsesProtocolDefault(t *testing.T) {
-	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "")
+func TestEncodeMessagesWebSearch_GenericRejectsAndRuleLowers(t *testing.T) {
+	_, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("expected generic encodeMessagesTools to reject web search")
+	}
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
+		if tool.Kind() != canonical.ToolKindWebSearch {
+			return nil, false, nil, nil
+		}
+		return []ProviderRequestTool{{
+			Type:           "web_search_20260209",
+			Name:           canonical.WebSearchToolKey().Name(),
+			AllowedCallers: []string{"direct"},
+		}}, true, nil, nil
+	}
+	tools, _, err := compileMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "", rule)
 	if err != nil {
 		t.Fatal(err)
 	}

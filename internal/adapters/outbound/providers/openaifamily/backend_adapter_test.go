@@ -18,7 +18,6 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 func newPolicyTarget(providerID profile.ProviderID, baseURL, credential string, kind protocolkind.ProtocolKind, providerProtocol string) provider.TargetSnapshot {
@@ -102,12 +101,9 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(document.RawBytes()), `"web_search_options":{}`) {
-				t.Fatalf("%s target did not inherit protocol web search: %s", tc.name, document.RawBytes())
+			_, _, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+			if encodeErr == nil {
+				t.Fatalf("%s target unexpectedly inherited protocol web search", tc.name)
 			}
 		})
 	}
@@ -205,25 +201,32 @@ func TestOpenAIFamilyKernelUsesStandardChatReasoningEffort(t *testing.T) {
 }
 
 func TestClineReasoningExcludeIsOmittedFromCustomOpenAICompatibleProviderRequest(t *testing.T) {
-	clientDocument := carrier.NewDocument(
-		protocolkind.ChatCompletions,
-		"application/json",
-		nil,
-		[]byte(`{"model":"zai-org/GLM-5.1","messages":[{"role":"user","content":"Hello"}],"temperature":0.25,"reasoning":{"exclude":true}}`),
-		carrier.Meta{},
-	)
-	decoded, err := (chatcompletions.ClientRequestDecoder{}).DecodeClientRequest(clientDocument)
+	temp := 0.25
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		Temperature: &temp,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := decoded.Request.Request
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Disclosure: canonical.Specify(canonical.ReasoningDisclosureNone),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     canonical.Specify("zai-org/GLM-5.1"),
+		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "Hello")},
+		Controls:  controls,
+		Reasoning: reasoning,
+	})
 	target := newPolicyTarget(profile.ProviderSpecCustom, "https://api.friendli.ai/serverless/v1", "env:FRIENDLI_TOKEN", protocolkind.ChatCompletions, "chat_completions")
 	target.Model = request.Model()
 	backend, err := NewExecutor(nil, nil, StandardBearerPolicy(profile.ProviderSpecCustom)).ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: decoded.Request.Delivery})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

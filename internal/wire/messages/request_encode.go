@@ -3,6 +3,7 @@ package messages
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -15,13 +16,11 @@ import (
 )
 
 const (
-	defaultMessagesMaxTokens         = 256
-	directWebSearchToolType          = "web_search_20260209"
-	directWebSearchAllowedCallerType = "direct"
-	toolSearchRegexType              = "tool_search_tool_regex_20251119"
-	toolSearchRegexName              = "tool_search_tool_regex"
-	toolSearchNaturalLanguageType    = "tool_search_tool_bm25_20251119"
-	toolSearchNaturalLanguageName    = "tool_search_tool_bm25"
+	defaultMessagesMaxTokens      = 256
+	toolSearchRegexType           = "tool_search_tool_regex_20251119"
+	toolSearchRegexName           = "tool_search_tool_regex"
+	toolSearchNaturalLanguageType = "tool_search_tool_bm25_20251119"
+	toolSearchNaturalLanguageName = "tool_search_tool_bm25"
 )
 
 type messageBody struct {
@@ -54,6 +53,25 @@ func (c contentID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(contentIDAlias(c))
 }
 
+// ToolLoweringContext identifies one declaration during ordered lowering.
+type ToolLoweringContext struct {
+	Ordinal uint32
+	Names   wire.ToolNames
+}
+
+// ToolLoweringRule replaces one semantic occurrence with zero or more target fragments.
+type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (fragments []ProviderRequestTool, handled bool, changes []compat.Change, err error)
+
+// ToolPolicyLoweringRule resolves target policy after tool lowering.
+type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
+
+// CompileOptions contains proven target-dialect extension points for Messages.
+type CompileOptions struct {
+	LowerTool            ToolLoweringRule
+	LowerToolPolicy      ToolPolicyLoweringRule
+	OmitAdaptiveThinking bool
+}
+
 // ProviderRequestDocument is the standard Messages lowering before any
 // exact-provider typed dialect adaptation.
 type ProviderRequestDocument struct {
@@ -62,16 +80,16 @@ type ProviderRequestDocument struct {
 }
 
 func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := LowerProviderRequestDocument(req, names, d, changeLog, exchangeID)
+	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{})
 	if err != nil {
 		return carrier.Document{}, err
 	}
 	return EncodeProviderRequestDocument(document)
 }
 
-// LowerProviderRequestDocument produces a typed Messages document without
-// crossing the JSON boundary.
-func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
+// CompileProviderRequestDocument lowers one exact target dialect before the
+// single serialization boundary.
+func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options CompileOptions) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -133,14 +151,14 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		payload["system"] = loweredInstructions.Text
 	}
 	deferred := messagesDeferredToolKeys(items)
-	wireTools, err := encodeMessagesTools(tools, deferred, names, changeLog, exchangeID)
+	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning()); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if err := encodeMessagesReasoning(payload, req.Reasoning()); err != nil {
+	if err := encodeMessagesReasoning(payload, req.Reasoning(), options.OmitAdaptiveThinking, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat())
@@ -166,11 +184,27 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeMessagesToolChoice(policy, tools, names, changeLog, exchangeID)
+	var choice any
+	if options.LowerToolPolicy != nil {
+		var handled bool
+		var policyChanges []compat.Change
+		choice, handled, policyChanges, err = options.LowerToolPolicy(policy, loweredTools, names)
+		if changeLog != nil {
+			*changeLog = append(*changeLog, policyChanges...)
+		}
+		if err != nil {
+			return ProviderRequestDocument{}, err
+		}
+		if !handled {
+			choice, err = encodeMessagesToolChoice(policy, loweredTools, names, changeLog, exchangeID)
+		}
+	} else {
+		choice, err = encodeMessagesToolChoice(policy, loweredTools, names, changeLog, exchangeID)
+	}
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), len(tools) > 0)
+	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), loweredTools.TotalFragments() > 0)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -500,61 +534,98 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 }
 
 func encodeMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+	typed, _, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, nil)
+	return typed, err
+}
+
+func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, wire.LoweredToolSet{}, nil
 	}
 	for _, tool := range tools {
 		if decl, ok := tool.Function(); ok {
 			if strict, specified := decl.Strict().Get(); specified && strict {
 				if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsSchemaStrict, compat.Omission); err != nil {
-					return nil, err
+					return nil, wire.LoweredToolSet{}, err
 				}
 				break
 			}
 		}
 	}
 	out := make([]ProviderRequestTool, 0, len(tools))
-	for _, tool := range tools {
+	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
+	for ordinal, tool := range tools {
+		if rule != nil {
+			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
+			if changeLog != nil {
+				*changeLog = append(*changeLog, changes...)
+			}
+			if err != nil {
+				return nil, wire.LoweredToolSet{}, err
+			}
+			if handled {
+				for _, fragment := range fragments {
+					_, fragment.DeferLoading = deferred[tool.Key()]
+					out = append(out, fragment)
+				}
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+					Key:           tool.Key(),
+					Kind:          tool.Kind(),
+					FragmentCount: len(fragments),
+				})
+				continue
+			}
+		}
 		if decl, ok := tool.Function(); ok {
 			wireTool, err := encodeMessagesFunctionTool(tool, decl, names)
 			if err != nil {
-				return nil, err
+				return nil, wire.LoweredToolSet{}, err
 			}
 			_, wireTool.DeferLoading = deferred[tool.Key()]
 			out = append(out, wireTool)
-			continue
-		}
-		if tool.Kind() == canonical.ToolKindWebSearch {
-			wireTool := ProviderRequestTool{
-				Type:           directWebSearchToolType,
-				Name:           canonical.WebSearchToolKey().Name(),
-				AllowedCallers: []string{directWebSearchAllowedCallerType},
-			}
-			_, wireTool.DeferLoading = deferred[tool.Key()]
-			out = append(out, wireTool)
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+				Key:           tool.Key(),
+				Kind:          tool.Kind(),
+				FragmentCount: 1,
+			})
 			continue
 		}
 		if discovery, ok := tool.Discovery(); ok {
 			if discovery.Executor() == canonical.DiscoveryExecutorClient {
 				schema, err := messagesToolSchema(discovery.InputSchema())
 				if err != nil {
-					return nil, err
+					return nil, wire.LoweredToolSet{}, err
 				}
 				name, err := wire.EncodeToolName(names, tool.Key())
 				if err != nil {
-					return nil, err
+					return nil, wire.LoweredToolSet{}, err
 				}
-				out = append(out, ProviderRequestTool{Name: name, Description: discovery.Description(), InputSchema: schema})
+				wireTool := ProviderRequestTool{Name: name, Description: discovery.Description(), InputSchema: schema}
+				out = append(out, wireTool)
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+					Key:           tool.Key(),
+					Kind:          tool.Kind(),
+					FragmentCount: 1,
+				})
 				continue
 			}
 			typeName, name, err := messagesProviderDiscoveryTool(discovery)
 			if err != nil {
-				return nil, err
+				return nil, wire.LoweredToolSet{}, err
 			}
-			out = append(out, ProviderRequestTool{Type: typeName, Name: name})
+			wireTool := ProviderRequestTool{Type: typeName, Name: name}
+			out = append(out, wireTool)
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+				Key:           tool.Key(),
+				Kind:          tool.Kind(),
+				FragmentCount: 1,
+			})
 			continue
 		}
-		return nil, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages cannot represent this canonical tool declaration")
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages target does not support canonical hosted web search")
+		}
+		return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages cannot represent this canonical tool declaration")
 	}
 	if len(out) > 0 && len(deferred) > 0 {
 		allDeferred := true
@@ -565,10 +636,10 @@ func encodeMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonic
 			}
 		}
 		if allDeferred {
-			return nil, provider.IncompatibleCapability(canonical.RequestToolsVisibility, canonical.Occurrence{}, "Messages requires at least one non-deferred tool")
+			return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsVisibility, canonical.Occurrence{}, "Messages requires at least one non-deferred tool")
 		}
 	}
-	return out, nil
+	return out, lowered, nil
 }
 
 func messagesDeferredToolKeys(items []canonical.CanonicalItem) map[canonical.ToolKey]struct{} {
@@ -678,4 +749,26 @@ func messagesToolSchemaFromWire(raw json.RawMessage) (canonical.ToolSchema, erro
 		return canonical.ToolSchema{}, canonical.BadRequest("messages request tool declaration input_schema is invalid")
 	}
 	return canonical.NewToolSchemaObject(object), nil
+}
+
+var reservedMessagesSemanticFields = map[string]struct{}{
+	"model": {}, "messages": {}, "system": {}, "tools": {}, "tool_choice": {},
+	"stream": {}, "temperature": {}, "top_p": {}, "top_k": {}, "max_tokens": {},
+	"stop_sequences": {}, "thinking": {}, "output_config": {}, "metadata": {},
+}
+
+// ApplyAttemptDecoration mutates the Messages request payload with non-semantic
+// provider attempt decoration fields, rejecting collisions with standard Messages semantics.
+func ApplyAttemptDecoration(payload map[string]any, fields map[string]any) error {
+	for k, v := range fields {
+		trimmed := strings.ToLower(strings.TrimSpace(k))
+		if _, exists := payload[k]; exists {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		if _, reserved := reservedMessagesSemanticFields[trimmed]; reserved {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		payload[k] = v
+	}
+	return nil
 }

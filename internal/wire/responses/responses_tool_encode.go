@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -25,35 +26,76 @@ type ProviderRequestTool struct {
 	DeferLoading *bool                 `json:"defer_loading,omitempty"`
 }
 
+// ToolLoweringContext identifies one declaration during ordered lowering.
+type ToolLoweringContext struct {
+	Ordinal uint32
+	Names   wire.ToolNames
+}
+
+// ToolLoweringRule replaces one semantic occurrence with zero or more target fragments.
+type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (fragments []ProviderRequestTool, handled bool, changes []compat.Change, err error)
+
+// ToolPolicyLoweringRule resolves target policy after tool lowering.
+type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
+
 func encodeResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+	typed, _, err := compileResponsesTools(tools, visibility, names, changeLog, exchangeID, nil)
+	return typed, err
+}
+
+func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, wire.LoweredToolSet{}, nil
 	}
 	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
 		return responsesFlatToolIdentity(tool, names)
 	})
 	if err != nil {
-		return nil, err
+		return nil, wire.LoweredToolSet{}, err
 	}
 	if flattened.RemovedNamespaces > 0 {
 		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
-			return nil, err
+			return nil, wire.LoweredToolSet{}, err
 		}
 	}
 	tools = flattened.Declarations
 	out := make([]ProviderRequestTool, 0, len(tools))
-	for _, tool := range tools {
+	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
+	for ordinal, tool := range tools {
+		if rule != nil {
+			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
+			if changeLog != nil {
+				*changeLog = append(*changeLog, changes...)
+			}
+			if err != nil {
+				return nil, wire.LoweredToolSet{}, err
+			}
+			if handled {
+				out = append(out, fragments...)
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+					Key:           tool.Key(),
+					Kind:          tool.Kind(),
+					FragmentCount: len(fragments),
+				})
+				continue
+			}
+		}
 		wireTool, err := encodeResponsesTool(tool, names)
 		if err != nil {
-			return nil, err
+			return nil, wire.LoweredToolSet{}, err
 		}
 		if visibility.Deferred(tool.Key()) {
 			deferred := true
 			wireTool.DeferLoading = &deferred
 		}
 		out = append(out, wireTool)
+		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+			Key:           tool.Key(),
+			Kind:          tool.Kind(),
+			FragmentCount: 1,
+		})
 	}
-	return out, nil
+	return out, lowered, nil
 }
 
 func responsesFlatToolIdentity(tool canonical.ToolDeclaration, names wire.ToolNames) (string, error) {
@@ -79,7 +121,7 @@ func encodeResponsesTool(tool canonical.ToolDeclaration, names wire.ToolNames) (
 		return encodeResponsesCustomTool(tool, decl, names)
 	}
 	if tool.Kind() == canonical.ToolKindWebSearch {
-		return ProviderRequestTool{Type: canonical.ToolTypeWebSearch}, nil
+		return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses target does not support canonical hosted web search")
 	}
 	if discovery, ok := tool.Discovery(); ok {
 		parameters, err := responsesToolParametersFromSchema(discovery.InputSchema())
@@ -216,47 +258,85 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 	return json.RawMessage(raw), nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	if err := policy.ValidateForTools(tools); err != nil {
+func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+	if err := policy.Validate(); err != nil {
 		return nil, err
+	}
+	if lowered.Len() == 0 {
+		switch policy.Mode {
+		case canonical.ToolPolicyRequired:
+			return nil, canonical.BadRequest("response request tool_choice required requires at least one tool")
+		case canonical.ToolPolicySpecific:
+			return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
+		default:
+			return nil, nil
+		}
+	}
+	if lowered.TotalFragments() == 0 {
+		switch policy.Mode {
+		case canonical.ToolPolicyRequired:
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "target lowering produced no tool declarations to satisfy required tool policy")
+		case canonical.ToolPolicySpecific:
+			specific, ok := policy.SpecificID()
+			if !ok {
+				return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
+			}
+			record, ok := lowered.FindSource(specific)
+			if !ok {
+				return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
+			}
+			if record.FragmentCount == 0 {
+				return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
+			}
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering cannot satisfy specific tool choice for tool %q", specific))
+		default:
+			return nil, nil
+		}
 	}
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
-		if len(tools) == 0 {
-			return nil, nil
-		}
 		return "none", nil
 	case canonical.ToolPolicyAuto:
 		return "auto", nil
 	case canonical.ToolPolicyRequired:
-		if len(tools) == 0 {
-			return nil, canonical.BadRequest("response request tool_choice required requires at least one tool")
-		}
 		return "required", nil
 	case canonical.ToolPolicySpecific:
 		specific, ok := policy.SpecificID()
 		if !ok {
 			return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
 		}
-		specificType := string(specific.Kind())
-		decl, resolvedType, err := canonical.ResolveToolDeclarationByKey(tools, specific, specificType)
-		if err != nil {
-			return nil, err
+		record, ok := lowered.FindSource(specific)
+		if !ok {
+			return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
 		}
-		if resolvedType == canonical.ToolTypeWebSearch {
-			return map[string]any{"type": canonical.ToolTypeWebSearch}, nil
+		if record.FragmentCount == 0 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
 		}
-		name, err := responsesToolWireName(decl, names)
-		if err != nil {
-			return nil, err
+		if record.FragmentCount > 1 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "1->N lowered tool requires explicit provider tool policy lowering rule for specific selection")
 		}
-		if resolvedType == "" {
-			resolvedType = "function"
+		switch record.Kind {
+		case canonical.ToolKindFunction:
+			name, err := wire.EncodeToolName(names, record.Key)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"type": "function",
+				"name": strings.TrimSpace(name),
+			}, nil
+		case canonical.ToolKindCustom:
+			name, err := wire.EncodeToolName(names, record.Key)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"type": "custom",
+				"name": strings.TrimSpace(name),
+			}, nil
+		default:
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("Responses cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
 		}
-		return map[string]any{
-			"type": resolvedType,
-			"name": name,
-		}, nil
 	default:
 		return nil, canonical.BadRequest("response request tool_choice is invalid")
 	}

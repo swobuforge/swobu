@@ -3,7 +3,9 @@
 // deterministic flat tool names, and the client-history fingerprint for this
 // family. Provider dialects, endpoint selection, and routing stay outside.
 //
-// Unknown additive list occurrences erase locally and preserve sibling order.
+// Standard lowering is strict for provider-hosted WebSearch: only an exact
+// target dialect may replace that occurrence. Unknown additive list
+// occurrences erase locally and preserve sibling order.
 // Closed request contracts, ambiguous projected tool names, invalid residual
 // responses, and contradictory stream identity fail at their owning boundary.
 // Buffered and streamed delivery must converge on the same surviving canonical

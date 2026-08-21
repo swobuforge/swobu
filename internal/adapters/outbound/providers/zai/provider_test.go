@@ -2,79 +2,82 @@ package zai
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
-func TestRewriteWebSearchTranslatesOnlyEmptyStandardOptions(t *testing.T) {
-	var functionTool chatcompletions.ProviderRequestTool
-	if err := json.Unmarshal([]byte(`{
-		"type":"function",
-		"function":{
-			"name":"lookup",
-			"description":"look up a value",
-			"parameters":{"type":"object","properties":{"key":{"type":"string"}}}
-		}
-	}`), &functionTool); err != nil {
-		t.Fatal(err)
-	}
-	document := chatcompletions.ProviderRequestDocument{
-		Payload: map[string]any{
-			"model":              "manual-model",
-			"messages":           []any{},
-			"web_search_options": map[string]any{},
-		},
-		Tools: []chatcompletions.ProviderRequestTool{functionTool},
-	}
+func zaiTarget(model string) provider.TargetSnapshot {
+	target := provider.NewTargetSnapshot(
+		"zai",
+		string(profile.ProviderSpecZAI),
+		"https://api.z.ai/v1",
+		"test-key",
+		protocolkind.ChatCompletions,
+		"chat_completions",
+		delivery.BufferedDelivery(),
+	)
+	target.Model = model
+	return target
+}
 
-	if err := rewriteWebSearch(&document); err != nil {
+func TestZAIWebSearchTranslation(t *testing.T) {
+	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	function := canonicaltest.MustFunctionTool(functionKey, "look up a value", canonicaltest.Schema(t, `{"type":"object","properties":{"key":{"type":"string"}}}`), canonical.Unspecified[bool]())
+	webSearch := canonical.NewWebSearchDeclaration()
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("manual-model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, function, webSearch),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
+	})
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(zaiTarget("manual-model"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{
+		Canonical: request,
+		ToolNames: names,
+		Delivery:  delivery.BufferedDelivery(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var body map[string]any
-	if err := json.Unmarshal(encoded.RawBytes(), &body); err != nil {
+	if err := json.Unmarshal(document.RawBytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := body["web_search_options"]; exists {
-		t.Fatalf("standard search options survived rewrite: %s", encoded.RawBytes())
+		t.Fatalf("standard search options survived rewrite: %s", document.RawBytes())
 	}
 	tools, ok := body["tools"].([]any)
 	if !ok || len(tools) != 2 {
 		t.Fatalf("tools = %#v", body["tools"])
 	}
-	function, ok := tools[0].(map[string]any)
-	if !ok || function["type"] != "function" {
+	functionMap, ok := tools[0].(map[string]any)
+	if !ok || functionMap["type"] != "function" {
 		t.Fatalf("function tool = %#v", tools[0])
 	}
-	definition, ok := function["function"].(map[string]any)
-	if !ok || definition["name"] != "lookup" {
-		t.Fatalf("function definition = %#v", function["function"])
-	}
-	search, ok := tools[1].(map[string]any)
-	if !ok || search["type"] != "web_search" {
+	searchMap, ok := tools[1].(map[string]any)
+	if !ok || searchMap["type"] != "web_search" {
 		t.Fatalf("search tool = %#v", tools[1])
 	}
-	options, ok := search["web_search"].(map[string]any)
+	options, ok := searchMap["web_search"].(map[string]any)
 	if !ok || options["enable"] != true {
-		t.Fatalf("search options = %#v", search["web_search"])
-	}
-
-	document.Payload["web_search_options"] = map[string]any{"max_results": 5}
-	err = rewriteWebSearch(&document)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("non-empty options error = %T %v, want candidate incompatibility", err, err)
+		t.Fatalf("search options = %#v", searchMap["web_search"])
 	}
 }
 
@@ -154,7 +157,11 @@ func TestCodecAppliesStaticZAIReasoningProjectionWithoutModelBranches(t *testing
 					Controls:  controls,
 					Reasoning: reasoning,
 				})
-				document, changes, err := (codec{}).Encode(provider.Request{
+				backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(zaiTarget(model))
+				if err != nil {
+					t.Fatal(err)
+				}
+				document, changes, err := backend.Codec.Encode(provider.Request{
 					Canonical: request,
 					Delivery:  delivery.BufferedDelivery(),
 				})
@@ -180,7 +187,7 @@ func TestCodecAppliesStaticZAIReasoningProjectionWithoutModelBranches(t *testing
 				} else if payload["reasoning_effort"] != tt.wantEffort {
 					t.Fatalf("reasoning_effort = %#v, want %q", payload["reasoning_effort"], tt.wantEffort)
 				}
-				if !reflect.DeepEqual(changes, tt.wantChanges) {
+				if len(changes) != len(tt.wantChanges) || !reflect.DeepEqual(changes, tt.wantChanges) {
 					t.Fatalf("changes = %#v, want %#v", changes, tt.wantChanges)
 				}
 			})

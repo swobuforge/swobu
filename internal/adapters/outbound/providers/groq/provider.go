@@ -16,7 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 const serviceTierAutoMarker = "groq.service_tier_auto"
@@ -37,77 +36,61 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	if err != nil {
 		return provider.Backend{}, err
 	}
-	standard, ok := backend.Codec.(protocolcodec.Codec)
-	if !ok {
-		return provider.Backend{}, fmt.Errorf("Groq backend has codec %T, want protocolcodec.Codec", backend.Codec)
-	}
 	switch target.ProtocolKind {
 	case protocolkind.ChatCompletions:
-		backend.Codec = chatCodec{standard: standard}
+		backend.Codec = protocolcodec.Codec{
+			Protocol: protocolkind.ChatCompletions,
+			ChatDialect: protocolcodec.ChatDialect{
+				LowerTool:         protocolcodec.ChatHostedSearchTool(nil, "browser_search"),
+				LowerToolPolicy:   protocolcodec.ChatHostedSearchToolPolicy("browser_search"),
+				LowerReasoning:    applyGroqReasoning,
+				DecorateAttempt:   decorateGroqAttempt,
+				ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return groqChatReasoningExtractor{} },
+			},
+		}
 		backend.Transport = capacityTransport{standard: backend.Transport}
 	case protocolkind.Responses:
 		// The zero-value standard codec does not capture provider response IDs,
-		// while this wrapper rejects an accidental native-continuation input.
-		// Together they force Exchange to materialize canonical full history.
-		backend.Codec = responsesCodec{standard: standard}
+		// forcing Exchange to materialize canonical full history.
+		backend.Codec = protocolcodec.Codec{
+			Protocol: protocolkind.Responses,
+		}
 	default:
 		return provider.Backend{}, fmt.Errorf("Groq backend protocol %q is unsupported", target.ProtocolKind)
 	}
 	return backend, backend.Validate()
 }
 
-// chatCodec adds only Groq's provider-wide Chat request carriers after shared
-// typed lowering. Model-specific fields, including reasoning_format, never
-// enter this adapter because catalog identity is not capability authority.
-type chatCodec struct{ standard protocolcodec.Codec }
-
-func (c chatCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	if err := protocolcodec.ValidateEncodeRequest(req); err != nil {
-		return carrier.Document{}, nil, err
-	}
-	var changes []compat.Change
-	document, err := chatcompletions.LowerProviderRequestDocument(req.Canonical, req.ToolNames, req.Delivery, &changes, req.ExchangeID)
-	if err != nil {
-		return carrier.Document{}, changes, err
-	}
-	if effort, specified := req.Canonical.Controls().Effort.Get(); specified {
+func applyGroqReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+	controls := req.Controls()
+	reasoning := req.Reasoning()
+	fields := make(map[string]any)
+	if effort, specified := controls.Effort.Get(); specified {
 		switch effort {
 		case canonical.InferenceEffortLow, canonical.InferenceEffortMedium, canonical.InferenceEffortHigh:
-			document.Payload["reasoning_effort"] = string(effort)
+			fields["reasoning_effort"] = string(effort)
 		default:
 			// Groq documents only these three provider-wide ordinal spellings.
 			// Do not guess a model-family conversion for the remaining canonicals.
-			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
+			}
 		}
 	}
-	if disclosure, specified := req.Canonical.Reasoning().DisclosureField().Get(); specified && disclosure == canonical.ReasoningDisclosureNone {
-		document.Payload["include_reasoning"] = false
+	if disclosure, specified := reasoning.DisclosureField().Get(); specified && disclosure == canonical.ReasoningDisclosureNone {
+		fields["include_reasoning"] = false
 	}
-	if req.EncodeContext.HasNextRouteCandidate {
-		document.Payload["service_tier"] = "auto"
-	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	if err == nil && req.EncodeContext.HasNextRouteCandidate {
-		encoded.Meta.Opaque = map[string]string{serviceTierAutoMarker: "true"}
-	}
-	return encoded, changes, err
+	return fields, nil
 }
 
-func (c chatCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return protocolcodec.DecodeChatWithReasoningCarrier(ctx, c.standard, req, ingress, groqChatReasoningExtractor{})
-}
-
-// responsesCodec preserves shared Responses grammar while making Groq's
-// documented stateless multi-turn rule structural at the adapter edge.
-type responsesCodec struct{ standard protocolcodec.Codec }
-
-func (c responsesCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	req.PreviousHistory = nil
-	return c.standard.Encode(req)
-}
-
-func (c responsesCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return c.standard.Decode(ctx, req, ingress)
+func decorateGroqAttempt(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+	if !ctx.HasNextRouteCandidate {
+		return protocolcodec.AttemptDecoration{}, nil
+	}
+	return protocolcodec.AttemptDecoration{
+		Fields: map[string]any{"service_tier": "auto"},
+		Meta:   carrier.Meta{Opaque: map[string]string{serviceTierAutoMarker: "true"}},
+	}, nil
 }
 
 // capacityTransport establishes a pre-execution fact only for Groq's exact
@@ -153,6 +136,4 @@ func attemptCause(err error) error {
 	return err
 }
 
-var _ provider.Codec = chatCodec{}
-var _ provider.Codec = responsesCodec{}
 var _ provider.Transport = capacityTransport{}

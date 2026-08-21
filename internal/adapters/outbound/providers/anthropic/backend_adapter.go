@@ -64,8 +64,14 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		return provider.Backend{}, err
 	}
 	backend := provider.Backend{
-		Target:    target.Clone(),
-		Codec:     protocolcodec.Codec{Protocol: protocolkind.Messages},
+		Target: target.Clone(),
+		Codec: protocolcodec.Codec{
+			Protocol: protocolkind.Messages,
+			MessagesDialect: protocolcodec.MessagesDialect{
+				LowerTool:       protocolcodec.MessagesHostedSearchTool("web_search_20260209", "direct"),
+				LowerToolPolicy: protocolcodec.MessagesHostedSearchToolPolicy("web_search_20260209"),
+			},
+		},
 		Transport: provider.BindTransport(target, e.Send),
 	}
 	if err := backend.Validate(); err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -30,8 +31,9 @@ func TestRuntimeComposesAllSharedProtocolsAndMessagesRefinement(t *testing.T) {
 			t.Fatalf("%s: %v", kind, err)
 		}
 		if kind == protocolkind.Messages {
-			if _, ok := backend.Codec.(messagesCodec); !ok {
-				t.Fatalf("Messages codec = %T", backend.Codec)
+			codec, ok := backend.Codec.(protocolcodec.Codec)
+			if !ok || !codec.MessagesDialect.OmitAdaptiveThinking {
+				t.Fatalf("Messages codec = %#v", backend.Codec)
 			}
 		}
 	}
@@ -131,8 +133,15 @@ func TestMessagesThinkingOnlyOmitsDocumentedUnsupportedForms(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model-name-does-not-matter"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}, Reasoning: reasoning})
-			document, changes, err := (messagesCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			bundle := NewRuntime(http.DefaultClient, credentialResolver{})
+			request := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: canonical.Specify("model-name-does-not-matter"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}, Reasoning: reasoning,
+			})
+			backend, err := bundle.BackendResolver.ResolveBackend(sambaNovaTarget("https://api.sambanova.ai/v1", protocolkind.Messages))
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 			if err != nil {
 				t.Fatal(err)
 			}

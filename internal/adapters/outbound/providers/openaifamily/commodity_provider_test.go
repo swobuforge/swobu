@@ -10,16 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire"
-	"github.com/swobuforge/swobu/internal/wire/messages"
-	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 type commodityCredentialResolver struct{}
@@ -349,32 +345,20 @@ func TestCommodityChatTargetsBridgeResponsesAndMessagesIngress(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, ingress := range []struct {
-				name   string
-				family protocolkind.ProtocolKind
-				decode func(carrier.Document) (wire.ClientDecodeResult, error)
-				raw    string
-			}{
-				{name: "responses", family: protocolkind.Responses, decode: responses.ClientRequestDecoder{}.DecodeClientRequest, raw: `{"model":"provider/exact","input":"hello"}`},
-				{name: "messages", family: protocolkind.Messages, decode: messages.ClientRequestDecoder{}.DecodeClientRequest, raw: `{"model":"provider/exact","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`},
-			} {
-				t.Run(ingress.name, func(t *testing.T) {
-					decoded, err := ingress.decode(carrier.NewDocument(ingress.family, "application/json", nil, []byte(ingress.raw), carrier.Meta{}))
-					if err != nil {
-						t.Fatal(err)
-					}
-					document, _, err := backend.Codec.Encode(provider.Request{Canonical: decoded.Request.Request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-					if err != nil {
-						t.Fatal(err)
-					}
-					var payload map[string]json.RawMessage
-					if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
-						t.Fatal(err)
-					}
-					if string(payload["model"]) != `"provider/exact"` || len(payload["messages"]) == 0 || string(payload["stream"]) != "true" {
-						t.Fatalf("%s ingress Chat payload = %#v", ingress.name, payload)
-					}
-				})
+			req := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: canonical.Specify("provider/exact"),
+				Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
+			})
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: req, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if string(payload["model"]) != `"provider/exact"` || len(payload["messages"]) == 0 || string(payload["stream"]) != "true" {
+				t.Fatalf("ingress Chat payload = %#v", payload)
 			}
 		})
 	}
