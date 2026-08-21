@@ -19,6 +19,18 @@ type EncodeOptions struct {
 	Instructions string
 }
 
+// CompileOptions contains the occurrence-local target rules used while the
+// shared Responses compiler still owns traversal and dependent policy order.
+type CompileOptions struct {
+	LowerTool                  ToolLoweringRule
+	LowerToolPolicy            ToolPolicyLoweringRule
+	PrependInstructionsToInput bool
+	OmitInclude                bool
+	OmitStoreFalse             bool
+	ForceArrayInput            bool
+	DefaultStore               *bool
+}
+
 type inputMessageItem struct {
 	Type    string `json:"type"`
 	Status  string `json:"status,omitempty"`
@@ -68,16 +80,16 @@ type ProviderRequestDocument struct {
 
 // swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithChanges(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	document, err := LowerProviderRequestDocument(input, d, changeLog, exchangeID, options)
+	document, err := CompileProviderRequestDocument(input, d, changeLog, exchangeID, options, CompileOptions{})
 	if err != nil {
 		return carrier.Document{}, err
 	}
 	return EncodeProviderRequestDocument(document)
 }
 
-// LowerProviderRequestDocument produces a typed Responses document without
-// crossing the JSON boundary.
-func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions) (ProviderRequestDocument, error) {
+// CompileProviderRequestDocument lowers one exact target dialect before the
+// single serialization boundary.
+func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions, compile CompileOptions) (ProviderRequestDocument, error) {
 	req := input.Request
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
@@ -117,41 +129,13 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	policy, err := req.EffectiveToolPolicy()
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
-		return responsesFlatToolIdentity(tool, input.ToolNames)
-	})
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	choiceTools := flatTools.Declarations
-	choice, err := encodeToolChoice(policy, choiceTools, input.ToolNames, changeLog, exchangeID)
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
 
-	payload := map[string]any{"model": req.Model()}
 	preludeItems := prelude.Items()
-	loweredInstructions := flattenInstructionsForResponses(preludeItems)
-	logResponsesEncodeShape(req, tools, loweredInstructions.Text, payloadInput, choice, policy, d)
-	if changeLog != nil {
-		*changeLog = append(*changeLog, loweredInstructions.Changes...)
-	}
-	if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" {
-		payload["instructions"] = instructions
-	}
-	var store *bool
-	if storeValue, specified := req.Store(); specified {
-		store = &storeValue
-	}
 	requestVisibility, err := responsesToolVisibilityAt(preludeItems)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, err := encodeResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID)
+	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -165,10 +149,69 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if toolsSpecified && wireTools == nil {
 		wireTools = []ProviderRequestTool{}
 	}
-	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
+
+	policy, err := req.EffectiveToolPolicy()
+	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && len(tools) > 0 {
+	var choice any
+	if compile.LowerToolPolicy != nil {
+		var handled bool
+		var changes []compat.Change
+		choice, handled, changes, err = compile.LowerToolPolicy(policy, loweredTools, input.ToolNames)
+		if changeLog != nil {
+			*changeLog = append(*changeLog, changes...)
+		}
+		if err != nil {
+			return ProviderRequestDocument{}, err
+		}
+		if !handled {
+			choice, err = encodeToolChoice(policy, loweredTools, input.ToolNames, changeLog, exchangeID)
+		}
+	} else {
+		choice, err = encodeToolChoice(policy, loweredTools, input.ToolNames, changeLog, exchangeID)
+	}
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+
+	payload := map[string]any{"model": req.Model()}
+	loweredInstructions := flattenInstructionsForResponses(preludeItems)
+	logResponsesEncodeShape(req, tools, loweredInstructions.Text, payloadInput, choice, policy, d)
+	if changeLog != nil {
+		*changeLog = append(*changeLog, loweredInstructions.Changes...)
+	}
+	if compile.PrependInstructionsToInput {
+		if text := loweredInstructions.Text; text != "" {
+			payloadInput, err = prependResponsesInstruction(payloadInput, text)
+			if err != nil {
+				return ProviderRequestDocument{}, err
+			}
+		}
+	} else {
+		if instructions := mergedResponsesInstructions(loweredInstructions.Text, options.Instructions); instructions != "" {
+			payload["instructions"] = instructions
+		}
+	}
+	if compile.ForceArrayInput {
+		if inputStr, ok := payloadInput.(string); ok {
+			payloadInput = []any{map[string]any{"type": "message", "role": "user", "content": inputStr}}
+		}
+	}
+	var store *bool
+	if storeValue, specified := req.Store(); specified {
+		store = &storeValue
+	}
+	if compile.OmitStoreFalse && store != nil && !*store {
+		store = nil
+	}
+	if store == nil && compile.DefaultStore != nil {
+		store = compile.DefaultStore
+	}
+	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0); err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && loweredTools.TotalFragments() > 0 {
 		payload["parallel_tool_calls"] = true
 	}
 	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
@@ -177,9 +220,11 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	// Request encrypted reasoning state required to preserve official Responses
-	// reasoning continuity when Swobu manages conversation history manually.
-	payload["include"] = []string{"reasoning.encrypted_content"}
+	if !compile.OmitInclude {
+		// Request encrypted reasoning state required to preserve official Responses
+		// reasoning continuity when Swobu manages conversation history manually.
+		payload["include"] = []string{"reasoning.encrypted_content"}
+	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return ProviderRequestDocument{}, err
 	} else if text != nil {
@@ -202,6 +247,23 @@ func LowerProviderRequestDocument(input EncodeInput, d delivery.Delivery, change
 		ToolChoice:     choice,
 		Store:          store,
 	}, nil
+}
+
+func prependResponsesInstruction(input any, instructions string) ([]any, error) {
+	instruction := map[string]any{
+		"type": "message", "role": "system",
+		"content": []map[string]string{{"type": "input_text", "text": instructions}},
+	}
+	switch value := input.(type) {
+	case string:
+		return []any{instruction, map[string]any{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": value}}}}, nil
+	case []any:
+		return append([]any{instruction}, value...), nil
+	case nil:
+		return []any{instruction}, nil
+	default:
+		return nil, canonical.InternalError("Responses input has an unsupported typed shape")
+	}
 }
 
 func responsesToolVisibilityAt(items []canonical.CanonicalItem) (canonical.ToolVisibilityRefinements, error) {
@@ -790,4 +852,28 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLo
 		out = append(out, wireImage)
 	}
 	return out, nil
+}
+
+var reservedResponsesSemanticFields = map[string]struct{}{
+	"model": {}, "input": {}, "instructions": {}, "tools": {}, "tool_choice": {},
+	"parallel_tool_calls": {}, "stream": {}, "temperature": {}, "top_p": {},
+	"max_output_tokens": {}, "stop": {}, "response_format": {}, "text": {},
+	"output_format": {}, "include": {}, "store": {}, "previous_response_id": {},
+	"reasoning_effort": {}, "reasoning": {}, "conversation": {}, "metadata": {}, "user": {},
+}
+
+// ApplyAttemptDecoration mutates the Responses request payload with non-semantic
+// provider attempt decoration fields, rejecting collisions with standard Responses semantics.
+func ApplyAttemptDecoration(payload map[string]any, fields map[string]any) error {
+	for k, v := range fields {
+		trimmed := strings.ToLower(strings.TrimSpace(k))
+		if _, exists := payload[k]; exists {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		if _, reserved := reservedResponsesSemanticFields[trimmed]; reserved {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		payload[k] = v
+	}
+	return nil
 }

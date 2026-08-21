@@ -17,7 +17,8 @@ func TestProviderPackages_DoNotImportProtocolFamilyPackagesDirectly(t *testing.T
 		`"github.com/swobuforge/swobu/internal/wire/responses"`,
 	}
 	allowedPathSnippets := []string{
-		string(filepath.Separator) + "internal" + string(filepath.Separator) + "adapters" + string(filepath.Separator) + "wire" + string(filepath.Separator),
+		"protocolcodec/",
+		"/protocolcodec/",
 	}
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -25,12 +26,12 @@ func TestProviderPackages_DoNotImportProtocolFamilyPackagesDirectly(t *testing.T
 			return err
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+			if path != "." && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		if !strings.HasSuffix(path, ".go") || filepath.Base(path) == "import_boundary_invariant_test.go" {
 			return nil
 		}
 		for _, allowed := range allowedPathSnippets {

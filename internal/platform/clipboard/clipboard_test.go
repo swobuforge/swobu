@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteTempFileFallback_CreatesFileWithContent(t *testing.T) {
@@ -53,5 +54,20 @@ func TestWriteTempFileFallback_CreatesDirIfMissing(t *testing.T) {
 	}
 	if string(content) != "nested data" {
 		t.Fatalf("content = %q, want nested data", string(content))
+	}
+}
+
+func TestTryWriteText_CompletesPromptly(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = TryWriteText("swobu-test-clipboard-content")
+	}()
+
+	select {
+	case <-done:
+		// success: completed without hanging
+	case <-time.After(1 * time.Second):
+		t.Fatal("TryWriteText hung / did not return promptly")
 	}
 }

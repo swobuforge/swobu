@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
@@ -234,7 +235,11 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			names := toolChoiceNames(t, tc.tools)
-			got, err := encodeToolChoice(tc.policy, tc.tools, names, nil, "")
+			var lowered wire.LoweredToolSet
+			if len(tc.tools) > 0 {
+				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
+			}
+			got, err := encodeToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {
 				t.Fatalf("encodeToolChoice returned error: %v", err)
 			}
@@ -246,7 +251,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 func TestEncodeToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, nil, "")
+	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wire.LoweredToolSet{}, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeToolChoice to reject required without tools")
 	}

@@ -6,18 +6,19 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
+	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
@@ -78,7 +79,7 @@ func TestEncodeSelectsFullChatHistoryAndNativeResponsesDelta(t *testing.T) {
 		t.Fatalf("chat codec did not preserve full history: %s", raw)
 	}
 
-	responses, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+	responses, _, err := (Codec{Protocol: protocolkind.Responses, ResponsesDialect: ResponsesDialect{CaptureResponsesContinuation: true}}).Encode(provider.Request{
 		Canonical: full, Delivery: delivery.BufferedDelivery(),
 		PreviousHistory: &provider.PreviousHistory{Response: canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: "provider_previous", TargetID: "target", TargetVersion: 1}}, OmitStart: 0, OmitEnd: 2},
 	})
@@ -126,12 +127,10 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	document, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(document.RawBytes()), `"web_search_options":{}`) {
-		t.Fatalf("protocol default missing from %s", document.RawBytes())
+	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
 	}
 }
 
@@ -210,23 +209,10 @@ func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}
-	typed, typedDecisions, err := LowerChatCompletionsRequest(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fromTyped, err := chatcompletions.EncodeProviderRequestDocument(typed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fromCodec, codecDecisions, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(fromTyped.RawBytes(), fromCodec.RawBytes()) {
-		t.Fatalf("shared typed lowering = %s, codec = %s", fromTyped.RawBytes(), fromCodec.RawBytes())
-	}
-	if !reflect.DeepEqual(typedDecisions, codecDecisions) {
-		t.Fatalf("shared changes = %#v, codec changes = %#v", typedDecisions, codecDecisions)
+	_, _, err := CompileChatRequest(request, ChatDialect{})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
 	}
 }
 
@@ -307,7 +293,7 @@ func TestResponsesContinuationCaptureRequiresPersistenceEligibleRequest(t *testi
 					Store: test.requestStore,
 				}),
 			}
-			codec := Codec{Protocol: protocolkind.Responses, CaptureResponsesContinuation: true}
+			codec := Codec{Protocol: protocolkind.Responses, ResponsesDialect: ResponsesDialect{CaptureResponsesContinuation: true}}
 			buffered := `{"id":"resp_store","model":"model","status":"completed","output":[]` + test.responseStore + `}`
 			var ingress provider.Ingress = provider.DocumentIngress{Document: carrier.NewDocument(
 				protocolkind.Responses,
@@ -379,3 +365,142 @@ func (b *blockingReadCloser) Close() error {
 	}
 	return nil
 }
+
+func TestCompileChatRequest_ToolPolicyLoweringRule(t *testing.T) {
+	webSearch := canonical.NewWebSearchDeclaration()
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearch})
+	searchKey := webSearch.Key()
+	request := provider.Request{
+		ExchangeID: "exchange-policy-lowering",
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model:      canonical.Specify("model"),
+			ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),
+			Items: []canonical.CanonicalItem{
+				canonicaltest.ToolDeclarations(t, set.Declarations()...),
+				canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+			},
+		}),
+		Delivery: delivery.BufferedDelivery(),
+	}
+
+	// 1. Without LowerToolPolicy, specific tool choice on semantic tool must fail with IncompatibleTargetError
+	dialectWithoutPolicy := ChatDialect{
+		LowerTool: func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
+			if tool.Kind() == canonical.ToolKindWebSearch {
+				return []any{map[string]any{"type": "browser_search"}}, true, nil, nil
+			}
+			return nil, false, nil, nil
+		},
+	}
+	_, _, err := CompileChatRequest(request, dialectWithoutPolicy)
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("without LowerToolPolicy error = %T %v, want IncompatibleTargetError", err, err)
+	}
+
+	// 2. With LowerToolPolicy, provider produces target-aware tool choice
+	dialectWithPolicy := ChatDialect{
+		LowerTool: dialectWithoutPolicy.LowerTool,
+		LowerToolPolicy: func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (any, bool, []compat.Change, error) {
+			if policy.Mode == canonical.ToolPolicySpecific {
+				return map[string]any{"type": "browser_search"}, true, nil, nil
+			}
+			return nil, false, nil, nil
+		},
+	}
+	doc, _, err := CompileChatRequest(request, dialectWithPolicy)
+	if err != nil {
+		t.Fatalf("with LowerToolPolicy failed: %v", err)
+	}
+	encoded, err := chatcompletions.EncodeProviderRequestDocument(doc)
+	if err != nil {
+		t.Fatalf("encode document failed: %v", err)
+	}
+	raw := string(encoded.RawBytes())
+	if !strings.Contains(raw, `"tool_choice":{"type":"browser_search"}`) {
+		t.Fatalf("wire document missing lowered tool_choice: %s", raw)
+	}
+}
+
+func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
+	request := provider.Request{
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"),
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		}),
+		Delivery: delivery.BufferedDelivery(),
+	}
+
+	chatReserved := []string{
+		"model", "messages", "tools", "tool_choice", "parallel_tool_calls",
+		"functions", "function_call", "stream", "stream_options",
+		"temperature", "top_p", "max_tokens", "max_completion_tokens",
+		"stop", "response_format", "reasoning_effort", "reasoning",
+		"thinking", "include_reasoning", "n", "presence_penalty",
+		"frequency_penalty", "seed", "user", "logprobs", "top_logprobs",
+		"logit_bias", "modalities",
+	}
+
+	for _, field := range chatReserved {
+		t.Run("Chat_"+field, func(t *testing.T) {
+			codec := Codec{
+				Protocol: protocolkind.ChatCompletions,
+				ChatDialect: ChatDialect{
+					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
+					},
+				},
+			}
+			if _, _, err := codec.Encode(request); err == nil {
+				t.Fatalf("expected error when Chat DecorateAttempt mutates reserved semantic field %q", field)
+			}
+		})
+	}
+
+	responsesReserved := []string{
+		"model", "input", "instructions", "tools", "tool_choice",
+		"parallel_tool_calls", "stream", "temperature", "top_p",
+		"max_output_tokens", "stop", "response_format", "text",
+		"output_format", "include", "store", "previous_response_id",
+		"reasoning_effort", "reasoning", "conversation", "metadata", "user",
+	}
+
+	for _, field := range responsesReserved {
+		t.Run("Responses_"+field, func(t *testing.T) {
+			codec := Codec{
+				Protocol: protocolkind.Responses,
+				ResponsesDialect: ResponsesDialect{
+					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
+					},
+				},
+			}
+			if _, _, err := codec.Encode(request); err == nil {
+				t.Fatalf("expected error when Responses DecorateAttempt mutates reserved semantic field %q", field)
+			}
+		})
+	}
+
+	messagesReserved := []string{
+		"model", "messages", "system", "tools", "tool_choice",
+		"stream", "temperature", "top_p", "top_k", "max_tokens",
+		"stop_sequences", "thinking", "output_config", "metadata",
+	}
+
+	for _, field := range messagesReserved {
+		t.Run("Messages_"+field, func(t *testing.T) {
+			codec := Codec{
+				Protocol: protocolkind.Messages,
+				MessagesDialect: MessagesDialect{
+					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
+					},
+				},
+			}
+			if _, _, err := codec.Encode(request); err == nil {
+				t.Fatalf("expected error when Messages DecorateAttempt mutates reserved semantic field %q", field)
+			}
+		})
+	}
+}
+

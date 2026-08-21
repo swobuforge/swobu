@@ -2,9 +2,11 @@ package chatcompletions
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -82,23 +84,81 @@ func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
 		{name: "streaming", delivery: delivery.StreamingDelivery(delivery.FramingSSE)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			document, err := EncodeCarrier(req, tc.delivery)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var body struct {
-				Tools            []map[string]any `json:"tools"`
-				WebSearchOptions *map[string]any  `json:"web_search_options"`
-			}
-			if err := json.Unmarshal(document.RawBytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if len(body.Tools) != 0 {
-				t.Fatalf("tools = %#v, want hosted search outside the tools union", body.Tools)
-			}
-			if body.WebSearchOptions == nil || len(*body.WebSearchOptions) != 0 {
-				t.Fatalf("web_search_options = %#v, want explicit empty options", body.WebSearchOptions)
+			_, err := EncodeCarrier(req, tc.delivery)
+			var incompatible provider.IncompatibleTargetError
+			if !errors.As(err, &incompatible) {
+				t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
 			}
 		})
 	}
 }
+
+func TestApplyAttemptDecoration_RejectsReservedSemanticKeys(t *testing.T) {
+	reserved := []string{"model", "messages", "tools", "tool_choice", "stream", "temperature", "top_p", "max_tokens", "max_completion_tokens", "stop", "response_format"}
+	for _, key := range reserved {
+		t.Run(key, func(t *testing.T) {
+			payload := map[string]any{"model": "test"}
+			err := ApplyAttemptDecoration(payload, map[string]any{key: "forbidden"})
+			if err == nil {
+				t.Fatalf("expected error when decorating reserved key %q", key)
+			}
+		})
+	}
+
+	payload := map[string]any{"model": "test"}
+	if err := ApplyAttemptDecoration(payload, map[string]any{"service_tier": "auto", "route_tag": "blue"}); err != nil {
+		t.Fatalf("unexpected error decorating non-semantic keys: %v", err)
+	}
+	if payload["service_tier"] != "auto" || payload["route_tag"] != "blue" {
+		t.Fatalf("decoration not applied: %#v", payload)
+	}
+}
+
+func TestCompileProviderRequestDocument_RejectsReasoningMutatingNonReasoningFields(t *testing.T) {
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+
+	forbiddenNonReasoning := []string{
+		"model", "messages", "tools", "tool_choice", "parallel_tool_calls",
+		"functions", "function_call", "stream", "stream_options",
+		"temperature", "top_p", "max_tokens", "max_completion_tokens",
+		"stop", "response_format", "n", "presence_penalty",
+		"frequency_penalty", "seed", "user", "logprobs", "top_logprobs",
+		"logit_bias", "modalities",
+	}
+
+	for _, field := range forbiddenNonReasoning {
+		t.Run("Forbids_"+field, func(t *testing.T) {
+			badReasoning := func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+				return map[string]any{field: "override"}, nil
+			}
+			_, err := CompileProviderRequestDocument(req, nil, delivery.BufferedDelivery(), nil, "", CompileOptions{
+				LowerReasoning: badReasoning,
+			})
+			if err == nil {
+				t.Fatalf("expected error when LowerReasoning mutates non-reasoning field %q", field)
+			}
+		})
+	}
+
+	// Known reasoning fields and unknown provider-private reasoning carriers are permitted.
+	allowedReasoning := func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+		return map[string]any{
+			"reasoning_effort":         "high",
+			"thinking":                 map[string]any{"type": "enabled", "budget_tokens": 1024},
+			"custom_provider_carrier":  "provider_specific_value",
+		}, nil
+	}
+	doc, err := CompileProviderRequestDocument(req, nil, delivery.BufferedDelivery(), nil, "", CompileOptions{
+		LowerReasoning: allowedReasoning,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error with valid reasoning fields: %v", err)
+	}
+	if doc.Payload["reasoning_effort"] != "high" || doc.Payload["custom_provider_carrier"] != "provider_specific_value" {
+		t.Fatalf("allowed reasoning fields not set in payload: %#v", doc.Payload)
+	}
+}
+

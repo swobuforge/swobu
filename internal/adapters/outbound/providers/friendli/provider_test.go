@@ -36,8 +36,9 @@ func TestRuntimeComposesSharedProtocolsAndManualDiscovery(t *testing.T) {
 			t.Fatalf("resolve %s: %v", kind, err)
 		}
 		if kind == protocolkind.ChatCompletions {
-			if _, ok := backend.Codec.(reasoningCodec); !ok {
-				t.Fatalf("Chat codec = %T, want Friendli reasoning codec", backend.Codec)
+			codec, ok := backend.Codec.(protocolcodec.Codec)
+			if !ok || codec.ChatDialect.ResponseReasoning == nil {
+				t.Fatalf("Chat codec = %T, want Friendli reasoning dialect codec", backend.Codec)
 			}
 		}
 	}
@@ -86,13 +87,21 @@ func TestTransportUsesExactEndpointAndOptionalBearerCredential(t *testing.T) {
 }
 
 func TestReasoningCodecProjectsOnlyCanonicalDisclosureAndForwardsSharedFields(t *testing.T) {
+	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
+	target := provider.NewTargetSnapshot("friendli", "friendli", "https://friendli-gateway.example/v1", "", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := bundle.BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	disclosure := canonical.ReasoningDisclosureNone
 	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Disclosure: canonical.Specify(disclosure)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}, Reasoning: reasoning})
-	doc, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +111,7 @@ func TestReasoningCodecProjectsOnlyCanonicalDisclosureAndForwardsSharedFields(t 
 	}
 
 	ordinary := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}})
-	doc, _, err = (reasoningCodec{}).Encode(provider.Request{Canonical: ordinary, Delivery: delivery.BufferedDelivery()})
+	doc, _, err = backend.Codec.Encode(provider.Request{Canonical: ordinary, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

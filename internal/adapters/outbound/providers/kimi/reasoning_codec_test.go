@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -42,7 +43,14 @@ func TestKimiCodecReplaysOpaqueThinkingAndQuantizesEffort(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("kimi-k3"), Items: []canonical.CanonicalItem{message(t, canonical.MessageRoleUser, "question"), reasoning, message(t, canonical.MessageRoleAssistant, "answer")}, Controls: controls, Reasoning: reasoningControls,
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	bundle := NewRuntime(nil, nil)
+	target := provider.NewTargetSnapshot("kimi", string(profile.ProviderSpecKimi), "https://api.moonshot.ai/v1", "env:MOONSHOT_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "kimi-k3"
+	backend, err := bundle.BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +120,14 @@ func TestKimiDoesNotSerializeForeignProviderChatOpaqueThinking(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("kimi-k3"), Items: []canonical.CanonicalItem{reasoning, message(t, canonical.MessageRoleAssistant, "answer")}})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	bundle := NewRuntime(nil, nil)
+	target := provider.NewTargetSnapshot("kimi", string(profile.ProviderSpecKimi), "https://api.moonshot.ai/v1", "env:MOONSHOT_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "kimi-k3"
+	backend, err := bundle.BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

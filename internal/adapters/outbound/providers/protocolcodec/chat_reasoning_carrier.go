@@ -217,7 +217,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 		if err != nil {
 			return provider.DecodedResponse{}, err
 		}
-		decoded, err := standard.Decode(ctx, request, provider.DocumentIngress{Document: cleaned})
+		decoded, err := standard.decodeBase(ctx, request, provider.DocumentIngress{Document: cleaned})
 		if err != nil || item.Kind() == "" {
 			return decoded, err
 		}
@@ -227,7 +227,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 		body := NewChatReasoningSSEBody(value.Stream.Body, extractor)
 		cleaned := value.Stream
 		cleaned.Body = body
-		decoded, err := standard.Decode(ctx, request, provider.StreamIngress{Stream: cleaned})
+		decoded, err := standard.decodeBase(ctx, request, provider.StreamIngress{Stream: cleaned})
 		if err != nil {
 			_ = body.Close()
 			return decoded, err

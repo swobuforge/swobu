@@ -6,11 +6,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
-	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // TestStandardBearerPolicyAdmitsFutureProviderWithoutNewPolicyType is the
@@ -75,7 +76,9 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		StandardBearerPolicy(profile.ProviderSpecKimi),
 		StandardBearerPolicy(profile.ProviderSpecNebius),
 	} {
-		respResult, err := chatcompletions.ProviderDocumentDecoder{}.DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, carrier.Document{Family: protocolkind.ChatCompletions, Media: "application/json", Header: http.Header{}, Raw: raw}, "test_profile_decode")
+		doc := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", http.Header{}, raw, carrier.Meta{})
+		codec := protocolcodec.Codec{Protocol: protocolkind.ChatCompletions}
+		respResult, err := codec.Decode(context.Background(), provider.Request{ExchangeID: "test_profile_decode"}, provider.DocumentIngress{Document: doc})
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}

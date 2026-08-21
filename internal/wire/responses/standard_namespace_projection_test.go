@@ -30,12 +30,13 @@ func TestFlatResponsesFlattensNamespaceInsteadOfDroppingCallableChildren(t *test
 	child := topLevelTools[0]
 	namespace, _ := child.Namespace()
 	wireName, _ := names.WireName(namespace.Tools()[0].Key())
-	document, err := LowerProviderRequestDocument(
+	document, err := CompileProviderRequestDocument(
 		EncodeInput{Request: request, ToolNames: names},
 		delivery.BufferedDelivery(),
 		nil,
 		"exchange",
 		EncodeOptions{},
+		CompileOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +56,8 @@ func TestCodex0147EmptyNamespaceWithCustomExecLowersBeforeResponsesDispatch(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := LowerProviderRequestDocument(
-		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), nil, "codex-37380", EncodeOptions{},
+	document, err := CompileProviderRequestDocument(
+		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), nil, "codex-37380", EncodeOptions{}, CompileOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -82,12 +83,13 @@ func TestOfficialResponsesLoweringKeepsDuplicateNamespaceLeavesDistinct(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := LowerProviderRequestDocument(
+	document, err := CompileProviderRequestDocument(
 		EncodeInput{Request: request, ToolNames: names},
 		delivery.BufferedDelivery(),
 		nil,
 		"exchange",
 		EncodeOptions{},
+		CompileOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -134,9 +136,9 @@ func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndNativeVisibility(t *
 	}
 	wireName, _ := names.WireName(child.Key())
 	var changes []compat.Change
-	document, err := LowerProviderRequestDocument(
+	document, err := CompileProviderRequestDocument(
 		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), &changes, "exchange",
-		EncodeOptions{},
+		EncodeOptions{}, CompileOptions{},
 	)
 	if err != nil {
 		t.Fatal(err)

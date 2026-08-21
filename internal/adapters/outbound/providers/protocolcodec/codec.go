@@ -1,6 +1,7 @@
-// Package protocolcodec composes reusable wire-family grammar, including
-// narrow Chat response carrier composition, into exact provider codecs. It
-// owns no provider routing or transport behavior.
+// Package protocolcodec is the provider-facing target-aware compiler facade.
+// It composes reusable wire-family grammar with narrow occurrence-local
+// dialect rules, resolves dependent tool policy after lowering, and leaves one
+// completed document for serialization. It owns no routing or transport.
 package protocolcodec
 
 import (
@@ -21,87 +22,171 @@ import (
 
 // Codec lowers canonical semantics through one standard protocol family.
 type Codec struct {
-	Protocol protocolkind.ProtocolKind
-	// CaptureResponsesContinuation is positive exact-provider authority to turn
-	// a provider response ID into reusable previous_response_id continuation.
-	// The zero value keeps generic Responses stateless and self-contained.
-	CaptureResponsesContinuation bool
+	Protocol         protocolkind.ProtocolKind
+	ChatDialect      ChatDialect
+	ResponsesDialect ResponsesDialect
+	MessagesDialect  MessagesDialect
 }
 
 // Encode implements provider.Codec.
 func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	var changes []compat.Change
 	var err error
+	if c.Protocol == protocolkind.Responses && c.ResponsesDialect.RequireStreamingSSE {
+		if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {
+			return carrier.Document{}, nil, provider.NewIncompatibleTarget("Responses target requires SSE streaming delivery")
+		}
+	}
 	if c.Protocol != protocolkind.ChatCompletions {
 		err = ValidateEncodeRequest(req)
 	}
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
-	input := wire.ProviderEncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames}
+
+	var decoration AttemptDecoration
 	var result wire.ProviderEncodeResult
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		var document chatcompletions.ProviderRequestDocument
-		document, result.Changes, err = LowerChatCompletionsRequest(req)
+		document, result.Changes, err = CompileChatRequest(req, c.ChatDialect)
 		if err == nil {
-			result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
+			if c.ChatDialect.DecorateAttempt != nil {
+				decoration, err = c.ChatDialect.DecorateAttempt(attemptContextFromRequest(req))
+				if err == nil && len(decoration.Fields) > 0 {
+					err = chatcompletions.ApplyAttemptDecoration(document.Payload, decoration.Fields)
+				}
+			}
+			if err == nil {
+				result.Document, err = chatcompletions.EncodeProviderRequestDocument(document)
+			}
 		}
 	case protocolkind.Responses:
 		var document responses.ProviderRequestDocument
-		document, result.Changes, err = LowerResponsesRequest(req)
+		reqForLowering := req
+		if !c.ResponsesDialect.CaptureResponsesContinuation {
+			reqForLowering.PreviousHistory = nil
+		}
+		document, result.Changes, err = CompileResponsesRequest(reqForLowering, c.ResponsesDialect)
 		if err == nil {
-			result.Document, err = responses.EncodeProviderRequestDocument(document)
+			if c.ResponsesDialect.DecorateAttempt != nil {
+				decoration, err = c.ResponsesDialect.DecorateAttempt(attemptContextFromRequest(req))
+				if err == nil && len(decoration.Fields) > 0 {
+					err = responses.ApplyAttemptDecoration(document.Payload, decoration.Fields)
+				}
+			}
+			if err == nil {
+				result.Document, err = responses.EncodeProviderRequestDocument(document)
+			}
 		}
 	case protocolkind.Messages:
-		result, err = (messages.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, "")
+		var document messages.ProviderRequestDocument
+		document, result.Changes, err = CompileMessagesRequest(req, c.MessagesDialect)
+		if err == nil {
+			if c.MessagesDialect.DecorateAttempt != nil {
+				decoration, err = c.MessagesDialect.DecorateAttempt(attemptContextFromRequest(req))
+				if err == nil && len(decoration.Fields) > 0 {
+					err = messages.ApplyAttemptDecoration(document.Payload, decoration.Fields)
+				}
+			}
+			if err == nil {
+				result.Document, err = messages.EncodeProviderRequestDocument(document)
+			}
+		}
 	default:
 		return carrier.Document{}, changes, provider.NewIncompatibleTarget("selected provider protocol has no request codec")
+	}
+	if err != nil {
+		return carrier.Document{}, changes, err
+	}
+	if len(decoration.Meta.Opaque) > 0 {
+		if result.Document.Meta.Opaque == nil {
+			result.Document.Meta.Opaque = make(map[string]string)
+		}
+		for k, v := range decoration.Meta.Opaque {
+			result.Document.Meta.Opaque[k] = v
+		}
 	}
 	changes = append(changes, result.Changes...)
 	return result.Document, changes, err
 }
 
-// LowerResponsesRequest owns the single standard typed lowering sequence used
+func attemptContextFromRequest(req provider.Request) AttemptContext {
+	return AttemptContext{
+		CacheLocality:         req.CacheLocality,
+		HasNextRouteCandidate: req.EncodeContext.HasNextRouteCandidate,
+	}
+}
+
+// CompileResponsesRequest owns the single standard typed lowering sequence used
 // by both the protocol codec and exact-provider decorators.
-func LowerResponsesRequest(req provider.Request) (responses.ProviderRequestDocument, []compat.Change, error) {
+func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (responses.ProviderRequestDocument, []compat.Change, error) {
 	if err := ValidateEncodeRequest(req); err != nil {
 		return responses.ProviderRequestDocument{}, nil, err
 	}
 	var changes []compat.Change
-	document, err := responses.LowerProviderRequestDocument(
+	document, err := responses.CompileProviderRequestDocument(
 		responses.EncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames},
 		req.Delivery,
 		&changes,
 		req.ExchangeID,
 		responses.EncodeOptions{},
+		responses.CompileOptions{
+			LowerTool:                  dialect.LowerTool,
+			LowerToolPolicy:            dialect.LowerToolPolicy,
+			PrependInstructionsToInput: dialect.PrependInstructionsToInput,
+			OmitInclude:                dialect.OmitInclude,
+			OmitStoreFalse:             dialect.OmitStoreFalse,
+			ForceArrayInput:            dialect.ForceArrayInput,
+			DefaultStore:               dialect.DefaultStore,
+		},
 	)
 	return document, changes, err
 }
 
-// LowerChatCompletionsRequest owns the single standard typed lowering sequence
+// CompileChatRequest owns the single standard typed lowering sequence
 // used by both the protocol codec and exact-provider decorators.
-func LowerChatCompletionsRequest(req provider.Request) (chatcompletions.ProviderRequestDocument, []compat.Change, error) {
+func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompletions.ProviderRequestDocument, []compat.Change, error) {
 	if err := ValidateEncodeRequest(req); err != nil {
 		return chatcompletions.ProviderRequestDocument{}, nil, err
 	}
 	var changes []compat.Change
-	document, err := func(sink *[]compat.Change) (chatcompletions.ProviderRequestDocument, error) {
-		document, err := chatcompletions.LowerProviderRequestDocument(
-			req.Canonical,
-			req.ToolNames,
-			req.Delivery,
-			sink,
-			req.ExchangeID,
-		)
-		if err != nil {
-			return chatcompletions.ProviderRequestDocument{}, err
-		}
-		if err := chatcompletions.ApplyStandardProviderRequestReasoning(&document, req.Canonical, sink, req.ExchangeID); err != nil {
-			return chatcompletions.ProviderRequestDocument{}, err
-		}
-		return document, nil
-	}(&changes)
+	document, err := chatcompletions.CompileProviderRequestDocument(
+		req.Canonical,
+		req.ToolNames,
+		req.Delivery,
+		&changes,
+		req.ExchangeID,
+		chatcompletions.CompileOptions{
+			LowerTool:              dialect.LowerTool,
+			LowerToolPolicy:        dialect.LowerToolPolicy,
+			LowerReasoning:         dialect.LowerReasoning,
+			LowerMessage:           dialect.LowerMessage,
+			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
+		},
+	)
+	return document, changes, err
+}
+
+// CompileMessagesRequest owns the single standard typed lowering sequence used
+// by both the protocol codec and exact-provider decorators.
+func CompileMessagesRequest(req provider.Request, dialect MessagesDialect) (messages.ProviderRequestDocument, []compat.Change, error) {
+	if err := ValidateEncodeRequest(req); err != nil {
+		return messages.ProviderRequestDocument{}, nil, err
+	}
+	var changes []compat.Change
+	document, err := messages.CompileProviderRequestDocument(
+		req.Canonical,
+		req.ToolNames,
+		req.Delivery,
+		&changes,
+		req.ExchangeID,
+		messages.CompileOptions{
+			LowerTool:            dialect.LowerTool,
+			LowerToolPolicy:      dialect.LowerToolPolicy,
+			OmitAdaptiveThinking: dialect.OmitAdaptiveThinking,
+		},
+	)
 	return document, changes, err
 }
 
@@ -119,6 +204,17 @@ func ValidateEncodeRequest(req provider.Request) error {
 
 // Decode implements provider.Codec.
 func (c Codec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	if c.Protocol == protocolkind.ChatCompletions {
+		if c.ChatDialect.ResponseReasoning != nil {
+			if extractor := c.ChatDialect.ResponseReasoning(); extractor != nil {
+				return DecodeChatWithReasoningCarrier(ctx, c, request, ingress, extractor)
+			}
+		}
+	}
+	return c.decodeBase(ctx, request, ingress)
+}
+
+func (c Codec) decodeBase(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
 	var result wire.ProviderDecodeResult
 	var err error
 	switch in := ingress.(type) {
@@ -142,7 +238,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
 	case protocolkind.Responses:
-		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
+		continuationEligible := c.ResponsesDialect.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
 		return (responses.ProviderDocumentDecoder{}).DecodeProviderDocumentWithCapture(ctx, request.Canonical, request.ToolNames, doc, exchangeID, continuationEligible)
 	case protocolkind.Messages:
 		return (messages.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
@@ -157,7 +253,7 @@ func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request)
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, request.ToolNames, stream, exchangeID)
 	case protocolkind.Responses:
-		continuationEligible := c.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
+		continuationEligible := c.ResponsesDialect.CaptureResponsesContinuation && request.Canonical.PersistenceEligible()
 		return (responses.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithCapture(request.Canonical, request.ToolNames, stream, exchangeID, continuationEligible)
 	case protocolkind.Messages:
 		return (messages.ProviderEnvelopeDecoder{}).DecodeProviderEnvelope(request.Canonical, request.ToolNames, stream, exchangeID)

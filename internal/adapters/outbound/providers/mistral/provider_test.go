@@ -86,7 +86,7 @@ func TestRuntimeUsesSharedChatPathBearerAuthAndOptionalSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := backend.Codec.(reasoningCodec); !ok {
+	if codec, ok := backend.Codec.(protocolcodec.Codec); !ok || codec.ChatDialect.ResponseReasoning == nil {
 		t.Fatalf("codec = %T, want Mistral reasoning codec", backend.Codec)
 	}
 	request := canonicaltest.LargeIntegerRequest(t, target.Model)
@@ -215,7 +215,12 @@ func TestMistralReplayPrependsThinkChunkToTextAndToolCallTurns(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer"),
 		},
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: textRequest, Delivery: delivery.BufferedDelivery()})
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(mistralTarget("https://api.mistral.ai/v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: textRequest, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +241,7 @@ func TestMistralReplayPrependsThinkChunkToTextAndToolCallTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err = (reasoningCodec{}).Encode(provider.Request{Canonical: toolRequest, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+	document, _, err = backend.Codec.Encode(provider.Request{Canonical: toolRequest, ToolNames: names, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +249,11 @@ func TestMistralReplayPrependsThinkChunkToTextAndToolCallTurns(t *testing.T) {
 }
 
 func TestMistralReplayRejectsDuplicateAndIgnoresForeignOpaqueState(t *testing.T) {
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(mistralTarget("https://api.mistral.ai/v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	duplicate := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("mistral-model"),
 		Items: []canonical.CanonicalItem{
@@ -252,7 +262,7 @@ func TestMistralReplayRejectsDuplicateAndIgnoresForeignOpaqueState(t *testing.T)
 			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer"),
 		},
 	})
-	if _, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: duplicate, Delivery: delivery.BufferedDelivery()}); err == nil {
+	if _, _, err := backend.Codec.Encode(provider.Request{Canonical: duplicate, Delivery: delivery.BufferedDelivery()}); err == nil {
 		t.Fatal("duplicate Mistral replay state must fail")
 	}
 
@@ -263,7 +273,7 @@ func TestMistralReplayRejectsDuplicateAndIgnoresForeignOpaqueState(t *testing.T)
 			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer"),
 		},
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: foreign, Delivery: delivery.BufferedDelivery()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: foreign, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +314,12 @@ func TestMistralEffortProjectionIncludesBoundedMaxApproximation(t *testing.T) {
 
 func assertMistralEffort(t *testing.T, request canonical.CanonicalRequest, want string, wantApprox bool) {
 	t.Helper()
-	document, changes, err := (reasoningCodec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	bundle := NewRuntime(nil, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(mistralTarget("https://api.mistral.ai/v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}

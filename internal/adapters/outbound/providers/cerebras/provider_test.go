@@ -150,7 +150,12 @@ func TestReasoningReplaysOnTextAndToolCallAssistantMessages(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer"),
 		},
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: textRequest, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(cerebrasTarget("https://api.cerebras.ai/v1", "model"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: textRequest, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +175,7 @@ func TestReasoningReplaysOnTextAndToolCallAssistantMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err = (reasoningCodec{}).Encode(provider.Request{Canonical: toolRequest, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	document, _, err = backend.Codec.Encode(provider.Request{Canonical: toolRequest, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,11 +183,16 @@ func TestReasoningReplaysOnTextAndToolCallAssistantMessages(t *testing.T) {
 }
 
 func TestReplayIgnoresForeignScopeAndRejectsDuplicateCerebrasState(t *testing.T) {
+	bundle := NewRuntime(http.DefaultClient, credentialResolver{})
+	backend, err := bundle.BackendResolver.ResolveBackend(cerebrasTarget("https://api.cerebras.ai/v1", "model"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	foreign := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{cerebrasReasoning(t, "foreign-chat", "foreign"), canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer")},
 	})
-	document, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: foreign, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: foreign, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +207,7 @@ func TestReplayIgnoresForeignScopeAndRejectsDuplicateCerebrasState(t *testing.T)
 			canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer"),
 		},
 	})
-	if _, _, err := (reasoningCodec{}).Encode(provider.Request{Canonical: duplicate, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}); err == nil {
+	if _, _, err := backend.Codec.Encode(provider.Request{Canonical: duplicate, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}); err == nil {
 		t.Fatal("duplicate Cerebras replay state must fail")
 	}
 }

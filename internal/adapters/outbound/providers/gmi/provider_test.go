@@ -32,6 +32,12 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 			t.Fatal(err)
 		}
 		doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+		if kind == protocolkind.ChatCompletions || kind == protocolkind.Messages {
+			if err == nil {
+				t.Fatalf("GMI %s unexpectedly inherited hosted search", kind)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

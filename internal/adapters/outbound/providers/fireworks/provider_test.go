@@ -35,7 +35,7 @@ func TestRuntimeCapturesResponsesContinuationAndPreservesOtherProtocols(t *testi
 			if !ok {
 				t.Fatalf("codec = %T, want protocolcodec.Codec", backend.Codec)
 			}
-			if got, want := codec.CaptureResponsesContinuation, kind == protocolkind.Responses; got != want {
+			if got, want := codec.ResponsesDialect.CaptureResponsesContinuation, kind == protocolkind.Responses; got != want {
 				t.Fatalf("CaptureResponsesContinuation = %t, want %t", got, want)
 			}
 		})

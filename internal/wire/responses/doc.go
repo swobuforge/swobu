@@ -3,7 +3,9 @@
 // projection, stream reduction, and the client-history fingerprint. Canonical
 // remains the only portable graph; this package retains no parallel transcript.
 //
-// Unknown additive occurrences erase locally and preserve sibling order.
+// Standard lowering is strict for provider-hosted WebSearch: only an exact
+// target dialect may replace that occurrence. Unknown additive occurrences
+// erase locally and preserve sibling order.
 // Missing discriminators, closed-contract violations, invalid residual
 // containers, and contradictory lifecycle or identity fail at their owning
 // boundary. Buffered and streamed delivery must converge on the same completed

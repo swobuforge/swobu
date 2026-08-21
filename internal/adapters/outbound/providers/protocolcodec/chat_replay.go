@@ -1,6 +1,9 @@
 package protocolcodec
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
@@ -36,4 +39,31 @@ func ProviderChatReplayForMessage(message chatcompletions.ProviderRequestMessage
 		return nil, false, nil
 	}
 	return replay, true, nil
+}
+
+// ChatOpaqueReplayStringMessageRule decorates the assistant message with a string
+// reasoning field extracted from matching opaque thinking in canonical history.
+func ChatOpaqueReplayStringMessageRule(scope canonical.ProviderChatReplayScope, fieldName string) chatcompletions.MessageLoweringRule {
+	return func(msg *chatcompletions.ProviderRequestMessage, items []canonical.CanonicalItem) error {
+		raw, ok, err := ProviderChatReplayForMessage(*msg, items, scope)
+		if err != nil || !ok {
+			return err
+		}
+		return msg.SetExtra(fieldName, string(raw))
+	}
+}
+
+// ChatOpaqueReplayJSONMessageRule decorates the assistant message with a raw JSON
+// reasoning field extracted from matching opaque thinking in canonical history.
+func ChatOpaqueReplayJSONMessageRule(scope canonical.ProviderChatReplayScope, fieldName string) chatcompletions.MessageLoweringRule {
+	return func(msg *chatcompletions.ProviderRequestMessage, items []canonical.CanonicalItem) error {
+		raw, ok, err := ProviderChatReplayForMessage(*msg, items, scope)
+		if err != nil || !ok {
+			return err
+		}
+		if !json.Valid(raw) {
+			return canonical.InternalError(fmt.Sprintf("checkpoint contains invalid %s JSON", scope))
+		}
+		return msg.SetExtra(fieldName, json.RawMessage(append([]byte(nil), raw...)))
+	}
 }

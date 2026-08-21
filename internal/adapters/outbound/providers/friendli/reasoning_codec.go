@@ -1,41 +1,11 @@
 package friendli
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
-	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
-
-// reasoningCodec owns Friendli's documented Chat reasoning spelling around the
-// shared codec. Readable reasoning remains just that: this provider never
-// claims `reasoning_content` is opaque continuation state.
-type reasoningCodec struct{ standard protocolcodec.Codec }
-
-func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
-	if err != nil {
-		return carrier.Document{}, changes, err
-	}
-	if disclosure, set := req.Canonical.Reasoning().DisclosureField().Get(); set && disclosure == canonical.ReasoningDisclosureNone {
-		// Friendli needs parsing enabled before it can independently suppress the
-		// readable trace. This branch is canonical-state driven; an unadmitted
-		// client extension can never reach it.
-		document.Payload["parse_reasoning"] = true
-		document.Payload["include_reasoning"] = false
-	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, changes, err
-}
-
-func (c reasoningCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return protocolcodec.DecodeChatWithReasoningCarrier(ctx, c.standard, req, ingress, friendliChatReasoningExtractor{})
-}
 
 // friendliChatReasoningExtractor owns Friendli's documented response member;
 // its readable trace never becomes opaque continuation state.
@@ -74,5 +44,4 @@ func (friendliChatReasoningExtractor) NewChatReasoningItem(content string) (cano
 	return canonical.NewReasoningItem([]canonical.ReasoningPart{part}, canonical.OpaqueThinking{})
 }
 
-var _ provider.Codec = reasoningCodec{}
 var _ protocolcodec.ChatReasoningExtractor = friendliChatReasoningExtractor{}

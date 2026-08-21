@@ -89,21 +89,49 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 }
 
 func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
+	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil)
+	return typed, err
+}
+
+func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
-		return nil, nil
+		return nil, nil, wire.LoweredToolSet{}, nil
 	}
-	out := make([]ProviderRequestTool, 0, len(tools))
-	for _, tool := range tools {
-		if tool.Kind() == canonical.ToolKindWebSearch {
-			continue
+	typed := make([]ProviderRequestTool, 0, len(tools))
+	out := make([]any, 0, len(tools))
+	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
+	for ordinal, tool := range tools {
+		if rule != nil {
+			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
+			if changeLog != nil {
+				*changeLog = append(*changeLog, changes...)
+			}
+			if err != nil {
+				return nil, nil, wire.LoweredToolSet{}, err
+			}
+			if handled {
+				out = append(out, fragments...)
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+					Key:           tool.Key(),
+					Kind:          tool.Kind(),
+					FragmentCount: len(fragments),
+				})
+				continue
+			}
 		}
 		wireTool, err := encodeChatCompletionsTool(tool, names)
 		if err != nil {
-			return nil, err
+			return nil, nil, wire.LoweredToolSet{}, err
 		}
+		typed = append(typed, wireTool)
 		out = append(out, wireTool)
+		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
+			Key:           tool.Key(),
+			Kind:          tool.Kind(),
+			FragmentCount: 1,
+		})
 	}
-	return out, nil
+	return typed, out, lowered, nil
 }
 
 func encodeChatCompletionsTool(tool canonical.ToolDeclaration, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -126,24 +154,26 @@ func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, de
 	}
 	name = strings.TrimSpace(name) // swobu:io-string source=boundary
 	if name == "" {
-		return ProviderRequestTool{}, canonical.BadRequest("chat completions request tool declarations require a name")
+		return ProviderRequestTool{}, canonical.BadRequest("chat completions request function tools require a name")
 	}
-	parameters, err := chatCompletionsToolParametersFromSchema(decl.InputSchema())
-	if err != nil {
-		return ProviderRequestTool{}, err
-	}
-	wire := ProviderRequestTool{
+	wireTool := ProviderRequestTool{
 		Type: "function",
 		Function: &chatCompletionsToolDefinitionFunctionDTO{
 			Name:        name,
 			Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
-			Parameters:  parameters,
 		},
 	}
-	if strict, ok := decl.Strict().Get(); ok {
-		wire.Function.Strict = cloneBoolPointer(&strict)
+	if strict, specified := decl.Strict().Get(); specified {
+		wireTool.Function.Strict = &strict
 	}
-	return wire, nil
+	if !decl.InputSchema().IsEmpty() {
+		parameters, err := chatCompletionsToolParametersFromSchema(decl.InputSchema())
+		if err != nil {
+			return ProviderRequestTool{}, err
+		}
+		wireTool.Function.Parameters = parameters
+	}
+	return wireTool, nil
 }
 
 func encodeChatCompletionsCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -298,11 +328,11 @@ func cloneBoolPointer(ptr *bool) *bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
-func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
-	if len(tools) == 0 {
+	if lowered.Len() == 0 {
 		switch policy.Mode {
 		case canonical.ToolPolicyRequired:
 			return nil, canonical.BadRequest("chat completions request tool_choice required requires at least one tool")
@@ -311,6 +341,27 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 		default:
 			// Empty tool surfaces are inert here. Omit the backend-visible
 			// field rather than emitting a no-op choice some backends reject.
+			return nil, nil
+		}
+	}
+	if lowered.TotalFragments() == 0 {
+		switch policy.Mode {
+		case canonical.ToolPolicyRequired:
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "target lowering produced no tool declarations to satisfy required tool policy")
+		case canonical.ToolPolicySpecific:
+			specific, ok := policy.SpecificID()
+			if !ok {
+				return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
+			}
+			record, ok := lowered.FindSource(specific)
+			if !ok {
+				return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
+			}
+			if record.FragmentCount == 0 {
+				return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
+			}
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering cannot satisfy specific tool choice for tool %q", specific))
+		default:
 			return nil, nil
 		}
 	}
@@ -326,36 +377,41 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, tools []canoni
 		if !ok {
 			return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
 		}
-		specificType := string(specific.Kind())
-		decl, resolvedType, err := canonical.ResolveToolDeclarationByKey(tools, specific, specificType)
-		if err != nil {
-			return nil, err
+		record, ok := lowered.FindSource(specific)
+		if !ok {
+			return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
 		}
-		name, err := wire.EncodeToolName(names, decl.Key())
-		if err != nil {
-			return nil, err
+		if record.FragmentCount == 0 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
 		}
-		switch resolvedType {
-		case canonical.ToolTypeFunction:
+		if record.FragmentCount > 1 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "1->N lowered tool requires explicit provider tool policy lowering rule for specific selection")
+		}
+		switch record.Kind {
+		case canonical.ToolKindFunction:
+			name, err := wire.EncodeToolName(names, record.Key)
+			if err != nil {
+				return nil, err
+			}
 			return map[string]any{
 				"type": "function",
 				"function": map[string]any{
-					"name": name,
+					"name": strings.TrimSpace(name),
 				},
 			}, nil
-		case canonical.ToolTypeCustom:
+		case canonical.ToolKindCustom:
+			name, err := wire.EncodeToolName(names, record.Key)
+			if err != nil {
+				return nil, err
+			}
 			return map[string]any{
 				"type": "custom",
 				"custom": map[string]any{
-					"name": name,
+					"name": strings.TrimSpace(name),
 				},
 			}, nil
-		case canonical.ToolTypeWebSearch:
-			return map[string]any{
-				"type": canonical.ToolTypeWebSearch,
-			}, nil
 		default:
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "Chat Completions cannot represent this canonical specific tool choice")
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("Chat Completions cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

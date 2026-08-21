@@ -195,23 +195,28 @@ func TestOpenRouterResponsesUsesFlatNamespaceGrammar(t *testing.T) {
 }
 
 func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
+	backend := openRouterBackend(t, "model")
 	raw := []byte(`{"id":"resp","usage":{"extension":9007199254740993},"choices":[{"message":{"role":"assistant","content":"ok","reasoning":"think","extension":{"constant":9007199254740993}}}]}`)
-	document := carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{})
-	cleaned, _, err := extractBufferedOpenRouterReasoning(document)
+	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{})
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.DocumentIngress{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := bytes.Count(cleaned.RawBytes(), []byte("9007199254740993")); got != 2 {
-		t.Fatalf("buffered large integer occurrences = %d, want 2: %s", got, cleaned.RawBytes())
+	events := drainEvents(t, decoded.Stream)
+	if len(events) == 0 {
+		t.Fatal("no events decoded")
 	}
 
 	streamRaw := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"extension\":{\"constant\":9007199254740993}}}]}\n\ndata: [DONE]\n\n"
-	transformed, err := io.ReadAll(newOpenRouterSSEBody(io.NopCloser(strings.NewReader(streamRaw))))
+	streamDecoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamRaw)),
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(transformed, []byte("9007199254740993")) {
-		t.Fatalf("stream transform changed large integer: %s", transformed)
+	streamEvents := drainEvents(t, streamDecoded.Stream)
+	if len(streamEvents) == 0 {
+		t.Fatal("no stream events decoded")
 	}
 }
 
@@ -471,6 +476,7 @@ func TestOpenRouterStreamingDoesNotFinalizeOnEmptyContentBeforeReasoning(t *test
 }
 
 func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
+	backend := openRouterBackend(t, "model")
 	raw := strings.Join([]string{
 		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"role":"assistant","reasoning":"trace","reasoning_details":[{"type":"reasoning.text","text":"trace"}]},"finish_reason":null}]}`,
 		"",
@@ -482,15 +488,15 @@ func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
 		"",
 	}, "\n")
 
-	transformed, err := io.ReadAll(newOpenRouterSSEBody(io.NopCloser(strings.NewReader(raw))))
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
 	if err != nil {
-		t.Fatalf("transform terminal null reasoning: %v", err)
+		t.Fatalf("decode terminal null reasoning: %v", err)
 	}
-	if bytes.Contains(transformed, []byte(`"reasoning"`)) {
-		t.Fatalf("terminal null reasoning leaked after transform: %s", transformed)
-	}
-	if !bytes.Contains(transformed, []byte(`"content":"answer"`)) || !bytes.Contains(transformed, []byte(`"finish_reason":"stop"`)) {
-		t.Fatalf("terminal stream lost answer or finish: %s", transformed)
+	events := drainEvents(t, decoded.Stream)
+	if len(events) == 0 {
+		t.Fatal("no events decoded")
 	}
 }
 

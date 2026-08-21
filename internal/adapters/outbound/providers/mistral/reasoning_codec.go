@@ -1,41 +1,37 @@
 package mistral
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	"github.com/swobuforge/swobu/internal/wire/reasoningprojection"
 )
 
 // ChatReplayScope owns Mistral's exact Chat ThinkChunk replay state.
 const ChatReplayScope canonical.ProviderChatReplayScope = "mistral-chat"
 
-type reasoningCodec struct{ standard protocolcodec.Codec }
-
-func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
-	if err != nil {
-		return carrier.Document{}, changes, err
+func applyMistralReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+	value, present, changes := reasoningprojection.ProjectOrdinalReasoning(req.Reasoning(), req.Controls().Effort)
+	if changeLog != nil {
+		*changeLog = append(*changeLog, changes...)
 	}
-	if effort, ok := document.Payload["reasoning_effort"].(string); ok && effort == string(canonical.InferenceEffortMax) {
-		document.Payload["reasoning_effort"] = string(canonical.InferenceEffortXHigh)
-		changes = compat.AppendUnique(changes, compat.NewApproximation(
-			canonical.RequestControlsEffort,
-			canonical.RequestControlsEffort,
-			canonical.Occurrence{},
-		))
+	if !present {
+		return nil, nil
 	}
-	if err := decorateThinking(&document, req.Canonical.Items()); err != nil {
-		return carrier.Document{}, changes, err
+	if value == string(canonical.InferenceEffortMax) {
+		value = string(canonical.InferenceEffortXHigh)
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(
+				canonical.RequestControlsEffort,
+				canonical.RequestControlsEffort,
+				canonical.Occurrence{},
+			))
+		}
 	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, changes, err
+	return map[string]any{"reasoning_effort": value}, nil
 }
 
 type mistralThinkingText struct {
@@ -53,28 +49,24 @@ type mistralTextChunk struct {
 	Text string `json:"text"`
 }
 
-func decorateThinking(document *chatcompletions.ProviderRequestDocument, items []canonical.CanonicalItem) error {
-	for index := range document.Messages {
-		message := &document.Messages[index]
-		raw, ok, err := protocolcodec.ProviderChatReplayForMessage(*message, items, ChatReplayScope)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		chunks := []any{mistralThinkingChunk{
-			Type:     "thinking",
-			Thinking: []mistralThinkingText{{Type: "text", Text: string(raw)}},
-		}}
-		visible, err := mistralVisibleChunks(message.Content)
-		if err != nil {
-			return err
-		}
-		chunks = append(chunks, visible...)
-		message.Content = chunks
+func applyMistralMessage(message *protocolcodec.ChatProviderRequestMessage, items []canonical.CanonicalItem) error {
+	raw, ok, err := protocolcodec.ProviderChatReplayForMessage(*message, items, ChatReplayScope)
+	if err != nil {
+		return err
 	}
-	document.Payload["messages"] = document.Messages
+	if !ok {
+		return nil
+	}
+	chunks := []any{mistralThinkingChunk{
+		Type:     "thinking",
+		Thinking: []mistralThinkingText{{Type: "text", Text: string(raw)}},
+	}}
+	visible, err := mistralVisibleChunks(message.Content)
+	if err != nil {
+		return err
+	}
+	chunks = append(chunks, visible...)
+	message.Content = chunks
 	return nil
 }
 
@@ -104,10 +96,6 @@ func mistralVisibleChunks(content any) ([]any, error) {
 	default:
 		return nil, canonical.InternalError(fmt.Sprintf("Mistral assistant replay content has unsupported type %T", content))
 	}
-}
-
-func (c reasoningCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	return protocolcodec.DecodeChatWithReasoningCarrier(ctx, c.standard, req, ingress, mistralChatReasoningExtractor{})
 }
 
 // mistralChatReasoningExtractor normalizes only the documented thinking/text
@@ -231,5 +219,4 @@ func (mistralChatReasoningExtractor) NewChatReasoningItem(content string) (canon
 	return canonical.NewReasoningItem([]canonical.ReasoningPart{part}, opaque)
 }
 
-var _ provider.Codec = reasoningCodec{}
 var _ protocolcodec.ChatReasoningExtractor = mistralChatReasoningExtractor{}

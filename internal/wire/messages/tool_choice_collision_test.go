@@ -28,7 +28,7 @@ func TestMessagesRejectsSpecificChoiceAmbiguousAcrossFunctionAndBuiltin(t *testi
 		t.Fatal(err)
 	}
 
-	_, err = LowerProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "")
+	_, err = CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "", CompileOptions{})
 	var incompatible provider.IncompatibleTargetError
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)

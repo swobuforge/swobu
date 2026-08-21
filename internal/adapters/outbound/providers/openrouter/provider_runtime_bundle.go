@@ -25,18 +25,30 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 	if err != nil {
 		return provider.Backend{}, err
 	}
-	if target.ProtocolKind == protocolkind.ChatCompletions {
-		standard, ok := backend.Codec.(protocolcodec.Codec)
-		if !ok {
-			return provider.Backend{}, fmt.Errorf("OpenRouter chat completions backend has codec %T, want protocolcodec.Codec", backend.Codec)
+	switch target.ProtocolKind {
+	case protocolkind.ChatCompletions:
+		backend.Codec = protocolcodec.Codec{
+			Protocol: protocolkind.ChatCompletions,
+			ChatDialect: protocolcodec.ChatDialect{
+				LowerTool:            protocolcodec.ChatHostedSearchTool(nil, "openrouter:web_search"),
+				LowerToolPolicy:      protocolcodec.ChatHostedSearchToolPolicy("openrouter:web_search"),
+				LowerReasoning:       applyOpenRouterReasoning,
+				LowerMessage:         protocolcodec.ChatOpaqueReplayJSONMessageRule(ChatReplayScope, "reasoning_details"),
+				DecorateAttempt:   decorateOpenRouterAttempt,
+				ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return &openRouterReasoningExtractor{} },
+			},
 		}
-		backend.Codec = reasoningCodec{standard: standard}
-	} else if target.ProtocolKind == protocolkind.Responses {
-		standard, ok := backend.Codec.(protocolcodec.Codec)
-		if !ok {
-			return provider.Backend{}, fmt.Errorf("OpenRouter responses backend has codec %T, want protocolcodec.Codec", backend.Codec)
+	case protocolkind.Responses:
+		backend.Codec = protocolcodec.Codec{
+			Protocol: protocolkind.Responses,
+			ResponsesDialect: protocolcodec.ResponsesDialect{
+				LowerTool:       protocolcodec.ResponsesHostedSearchTool("openrouter:web_search"),
+				LowerToolPolicy: protocolcodec.ResponsesHostedSearchToolPolicy("openrouter:web_search"),
+				DecorateAttempt: decorateOpenRouterAttempt,
+			},
 		}
-		backend.Codec = responsesCodec{standard: standard}
+	default:
+		return provider.Backend{}, fmt.Errorf("OpenRouter backend protocol %q is unsupported", target.ProtocolKind)
 	}
 	return backend, backend.Validate()
 }

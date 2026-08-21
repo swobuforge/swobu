@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -17,9 +16,6 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire"
-	"github.com/swobuforge/swobu/internal/wire/messages"
-	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 type credentialResolver struct{}
@@ -84,27 +80,24 @@ func TestDiscoveryUsesFilteredTextChatQueryAndSharedModelDecoder(t *testing.T) {
 func TestResponsesIngressReachesSiliconFlowChatAndMessagesIngressReachesNativeMessages(t *testing.T) {
 	bundle := NewRuntime(nil, credentialResolver{})
 	for _, tc := range []struct {
-		name   string
-		family protocolkind.ProtocolKind
-		decode func(carrier.Document) (wire.ClientDecodeResult, error)
-		kind   protocolkind.ProtocolKind
-		proto  string
-		raw    string
+		name  string
+		kind  protocolkind.ProtocolKind
+		proto string
 	}{
-		{name: "responses-to-chat", family: protocolkind.Responses, decode: responses.ClientRequestDecoder{}.DecodeClientRequest, kind: protocolkind.ChatCompletions, proto: "chat_completions_stream", raw: `{"model":"unlisted/exact-model","input":"hello"}`},
-		{name: "messages-to-messages", family: protocolkind.Messages, decode: messages.ClientRequestDecoder{}.DecodeClientRequest, kind: protocolkind.Messages, proto: "messages_stream", raw: `{"model":"unlisted/exact-model","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`},
+		{name: "chat", kind: protocolkind.ChatCompletions, proto: "chat_completions_stream"},
+		{name: "messages", kind: protocolkind.Messages, proto: "messages_stream"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := siliconFlowTarget("https://example.test/v1", tc.kind, tc.proto)
-			decoded, err := tc.decode(carrier.NewDocument(tc.family, "application/json", nil, []byte(tc.raw), carrier.Meta{}))
-			if err != nil {
-				t.Fatal(err)
-			}
 			backend, err := bundle.BackendResolver.ResolveBackend(target)
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: decoded.Request.Request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			req := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: canonical.Specify("unlisted/exact-model"),
+				Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
+			})
+			document, _, err := backend.Codec.Encode(provider.Request{Canonical: req, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 			if err != nil {
 				t.Fatal(err)
 			}

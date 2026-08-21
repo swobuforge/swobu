@@ -2,6 +2,7 @@ package chatcompletions
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -13,6 +14,17 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
+var reservedMessageFields = map[string]struct{}{
+	"role":          {},
+	"content":       {},
+	"tool_calls":    {},
+	"tool_call_id":  {},
+	"name":          {},
+	"function_call": {},
+	"refusal":       {},
+	"audio":         {},
+}
+
 // ProviderRequestMessage is one lowered Chat Completions message. SourceStart
 // and SourceEnd retain the canonical association for provider dialect fields
 // and are never serialized.
@@ -21,8 +33,48 @@ type ProviderRequestMessage struct {
 	Content     any            `json:"content,omitempty"`
 	ToolCalls   []toolCallBody `json:"tool_calls,omitempty"`
 	ToolCallID  string         `json:"tool_call_id,omitempty"`
+	Extra       map[string]any `json:"-"`
 	SourceStart int            `json:"-"`
 	SourceEnd   int            `json:"-"`
+}
+
+func (m *ProviderRequestMessage) SetExtra(key string, val any) error {
+	trimmed := strings.ToLower(strings.TrimSpace(key))
+	if _, reserved := reservedMessageFields[trimmed]; reserved {
+		return fmt.Errorf("message extra field %q collides with standard message semantic", key)
+	}
+	if m.Extra == nil {
+		m.Extra = make(map[string]any)
+	}
+	m.Extra[key] = val
+	return nil
+}
+
+func (m ProviderRequestMessage) MarshalJSON() ([]byte, error) {
+	type wireAlias ProviderRequestMessage
+	if len(m.Extra) == 0 {
+		return json.Marshal(wireAlias(m))
+	}
+	base, err := json.Marshal(wireAlias(m))
+	if err != nil {
+		return nil, err
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(base, &merged); err != nil {
+		return nil, err
+	}
+	for k, v := range m.Extra {
+		trimmed := strings.ToLower(strings.TrimSpace(k))
+		if _, reserved := reservedMessageFields[trimmed]; reserved {
+			return nil, fmt.Errorf("message extra field %q collides with standard message semantic", k)
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		merged[k] = raw
+	}
+	return json.Marshal(merged)
 }
 
 // ProviderRequestDocument is the standard Chat Completions lowering before
@@ -35,6 +87,38 @@ type ProviderRequestDocument struct {
 	MaxTokens           *int
 	MaxCompletionTokens *int
 	providerTools       any
+}
+
+// ToolLoweringContext identifies one declaration at its canonical occurrence.
+// A target rule can replace that occurrence but cannot inspect or repair the
+// completed output slice.
+type ToolLoweringContext struct {
+	Ordinal uint32
+	Names   wire.ToolNames
+}
+
+// ToolLoweringRule returns target fragments for one canonical declaration.
+// handled=false delegates to the standard Chat Completions lowering.
+type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (fragments []any, handled bool, changes []compat.Change, err error)
+
+// ToolPolicyLoweringRule compiles policy after the effective target tool set
+// is known. handled=false delegates to the standard protocol rule.
+type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
+
+// MessageLoweringRule mutates or annotates one lowered Chat Completions message
+// at its canonical occurrence during traversal.
+type MessageLoweringRule func(msg *ProviderRequestMessage, items []canonical.CanonicalItem) error
+
+// ReasoningLoweringRule compiles provider-specific reasoning request fields.
+type ReasoningLoweringRule func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error)
+
+// CompileOptions contains only proven target-dialect extension points.
+type CompileOptions struct {
+	LowerTool              ToolLoweringRule
+	LowerToolPolicy        ToolPolicyLoweringRule
+	LowerReasoning         ReasoningLoweringRule
+	LowerMessage           MessageLoweringRule
+	UseMaxCompletionTokens bool
 }
 
 type toolCallBody struct {
@@ -55,19 +139,16 @@ type toolCustomBody struct {
 }
 
 func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := LowerProviderRequestDocument(req, names, d, changeLog, exchangeID)
+	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{})
 	if err != nil {
-		return carrier.Document{}, err
-	}
-	if err := ApplyStandardProviderRequestReasoning(&document, req, changeLog, exchangeID); err != nil {
 		return carrier.Document{}, err
 	}
 	return EncodeProviderRequestDocument(document)
 }
 
-// LowerProviderRequestDocument produces the standard typed Chat Completions
-// document before any exact-provider dialect adaptation.
-func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (ProviderRequestDocument, error) {
+// CompileProviderRequestDocument lowers canonical semantics for one exact
+// target, preserving source order and resolving dependent policy afterward.
+func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options CompileOptions) (ProviderRequestDocument, error) {
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -120,14 +201,14 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		}
 		conversation = append(conversation, item)
 	}
-	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID)
+	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID, options.LowerMessage)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if contextErr != nil {
 		return ProviderRequestDocument{}, contextErr
 	}
-	wireTools, err := encodeChatCompletionsTools(tools, names, changeLog, exchangeID)
+	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -135,7 +216,23 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err := encodeChatCompletionsToolChoice(policy, tools, names, changeLog, exchangeID)
+	var choice any
+	if options.LowerToolPolicy != nil {
+		var handled bool
+		var policyChanges []compat.Change
+		choice, handled, policyChanges, err = options.LowerToolPolicy(policy, loweredTools, names)
+		if changeLog != nil {
+			*changeLog = append(*changeLog, policyChanges...)
+		}
+		if err != nil {
+			return ProviderRequestDocument{}, err
+		}
+		if !handled {
+			choice, err = encodeChatCompletionsToolChoice(policy, loweredTools, names, changeLog, exchangeID)
+		}
+	} else {
+		choice, err = encodeChatCompletionsToolChoice(policy, loweredTools, names, changeLog, exchangeID)
+	}
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -145,10 +242,7 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
-	if hasChatCompletionsWebSearch(tools) {
-		payload["web_search_options"] = map[string]any{}
-	}
-	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), len(tools) > 0); err != nil {
+	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
@@ -159,12 +253,45 @@ func LowerProviderRequestDocument(req canonical.CanonicalRequest, names wire.Too
 		maxTokens = &value
 	}
 	delete(payload, "max_tokens")
-	payload["messages"] = wireMessages
-	document := ProviderRequestDocument{Payload: payload, Messages: wireMessages, Tools: wireTools, ToolChoice: choice, MaxTokens: maxTokens}
+	if options.UseMaxCompletionTokens && maxTokens != nil {
+		payload["max_completion_tokens"] = *maxTokens
+	}
+	var providerTools any
+	if loweredTools.TotalFragments() > 0 {
+		providerTools = compiledTools
+	}
+	document := ProviderRequestDocument{
+		Payload:       payload,
+		Messages:      wireMessages,
+		Tools:         wireTools,
+		ToolChoice:    choice,
+		MaxTokens:     maxTokens,
+		providerTools: providerTools,
+	}
+	if options.UseMaxCompletionTokens && maxTokens != nil {
+		document.MaxCompletionTokens = maxTokens
+		document.MaxTokens = nil
+	}
 	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
 		return ProviderRequestDocument{}, err
 	} else if len(responseFormat) > 0 {
 		payload["response_format"] = json.RawMessage(responseFormat)
+	}
+	if _, err := projectChatResponsesReasoningContext(req.Reasoning(), changeLog, exchangeID); err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if options.LowerReasoning != nil {
+		fields, err := options.LowerReasoning(req, changeLog, exchangeID)
+		if err != nil {
+			return ProviderRequestDocument{}, err
+		}
+		if err := applyReasoningFields(payload, fields); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	} else {
+		if err := encodeChatCompletionsReasoning(payload, req, changeLog); err != nil {
+			return ProviderRequestDocument{}, err
+		}
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
@@ -185,19 +312,59 @@ func projectChatResponsesReasoningContext(reasoning canonical.ReasoningControls,
 	return false, nil
 }
 
-// ReplaceTools lets an exact provider compose its own typed tool union before
-// the protocol's single serialization boundary. Provider syntax remains in the
-// provider package; this document only owns where the final tools value lives.
-func (d *ProviderRequestDocument) ReplaceTools(tools any) {
-	d.providerTools = tools
+var chatReasoningSemanticFields = map[string]struct{}{
+	"reasoning_effort":  {},
+	"reasoning":         {},
+	"thinking":          {},
+	"include_reasoning": {},
 }
 
-// ApplyStandardProviderRequestReasoning composes the standard Chat
-// Completions reasoning spelling into a typed provider document. Exact
-// providers with a different reasoning contract intentionally omit it.
-func ApplyStandardProviderRequestReasoning(document *ProviderRequestDocument, req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) error {
-	if err := encodeChatCompletionsReasoning(document.Payload, req, changeLog); err != nil {
-		return err
+var nonReasoningChatSemanticFields = map[string]struct{}{
+	"model": {}, "messages": {}, "tools": {}, "tool_choice": {}, "parallel_tool_calls": {},
+	"functions": {}, "function_call": {}, "stream": {}, "stream_options": {},
+	"temperature": {}, "top_p": {}, "max_tokens": {}, "max_completion_tokens": {},
+	"stop": {}, "response_format": {}, "n": {}, "presence_penalty": {},
+	"frequency_penalty": {}, "seed": {}, "user": {}, "logprobs": {}, "top_logprobs": {},
+	"logit_bias": {}, "modalities": {},
+}
+
+var reservedChatSemanticFields = func() map[string]struct{} {
+	all := make(map[string]struct{}, len(chatReasoningSemanticFields)+len(nonReasoningChatSemanticFields))
+	for k := range chatReasoningSemanticFields {
+		all[k] = struct{}{}
+	}
+	for k := range nonReasoningChatSemanticFields {
+		all[k] = struct{}{}
+	}
+	return all
+}()
+
+// applyReasoningFields merges reasoning lowering fields into the Chat request payload.
+// Known reasoning-owned semantic fields and provider-private unknown reasoning carriers
+// are allowed; known non-reasoning Chat semantic fields are rejected.
+func applyReasoningFields(payload map[string]any, fields map[string]any) error {
+	for k, v := range fields {
+		trimmed := strings.ToLower(strings.TrimSpace(k))
+		if _, forbidden := nonReasoningChatSemanticFields[trimmed]; forbidden {
+			return canonical.InternalError(fmt.Sprintf("reasoning lowering illegally mutated non-reasoning semantic field %q", k))
+		}
+		payload[k] = v
+	}
+	return nil
+}
+
+// ApplyAttemptDecoration mutates the Chat request payload with non-semantic
+// provider attempt decoration fields, rejecting collisions with standard Chat semantics.
+func ApplyAttemptDecoration(payload map[string]any, fields map[string]any) error {
+	for k, v := range fields {
+		trimmed := strings.ToLower(strings.TrimSpace(k))
+		if _, exists := payload[k]; exists {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		if _, reserved := reservedChatSemanticFields[trimmed]; reserved {
+			return canonical.InternalError(fmt.Sprintf("attempt decoration illegally mutated semantic field %q", k))
+		}
+		payload[k] = v
 	}
 	return nil
 }
@@ -241,15 +408,6 @@ func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Do
 		raw,
 		carrier.Meta{},
 	), nil
-}
-
-func hasChatCompletionsWebSearch(tools []canonical.ToolDeclaration) bool {
-	for _, tool := range tools {
-		if tool.Kind() == canonical.ToolKindWebSearch {
-			return true
-		}
-	}
-	return false
 }
 
 func logChatCompletionsEncodeShape(req canonical.CanonicalRequest, tools []canonical.ToolDeclaration, wireMessages []ProviderRequestMessage, choice any, policy canonical.ToolPolicy, d delivery.Delivery) {
@@ -310,7 +468,7 @@ func chatCompletionsWireToolChoiceShape(choice any) string {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestMessage, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, lowerMessage MessageLoweringRule) ([]ProviderRequestMessage, error) {
 	var err error
 	items, err = projectChatResponsesItems(items, changeLog, exchangeID)
 	if err != nil {
@@ -371,6 +529,11 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			}
 		}
 		wire.SourceEnd = i
+		if lowerMessage != nil {
+			if err := lowerMessage(&wire, items); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, wire)
 	}
 	return out, nil

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -32,6 +33,9 @@ func TestResponsesContinuationConsumptionUsesVersionedCanonicalRefinement(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	codec := backend.Codec.(protocolcodec.Codec)
+	codec.ResponsesDialect.CaptureResponsesContinuation = true
+	backend.Codec = codec
 	turnOne := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-test"),
 		Items: []canonical.CanonicalItem{
@@ -83,6 +87,9 @@ func TestResponsesContinuationAfterLocalResultSendsOnlyFunctionOutput(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	codec := backend.Codec.(protocolcodec.Codec)
+	codec.ResponsesDialect.CaptureResponsesContinuation = true
+	backend.Codec = codec
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	declaration := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	base := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt-test"), Items: []canonical.CanonicalItem{

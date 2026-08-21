@@ -1,63 +1,15 @@
 package novita
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
-	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 )
 
 // ChatReplayScope is the exact Novita Chat continuation boundary. It prevents
 // another provider's opaque reasoning bytes from entering Novita history.
 const ChatReplayScope canonical.ProviderChatReplayScope = "novita-chat"
-
-type reasoningCodec struct{ standard protocolcodec.Codec }
-
-func (c reasoningCodec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
-	document, changes, err := protocolcodec.LowerChatCompletionsRequest(req)
-	if err != nil {
-		return carrier.Document{}, changes, err
-	}
-	if err := decorateReasoningDetails(&document, req.Canonical.Items()); err != nil {
-		return carrier.Document{}, changes, err
-	}
-	encoded, err := chatcompletions.EncodeProviderRequestDocument(document)
-	return encoded, changes, err
-}
-
-type requestMessage struct {
-	chatcompletions.ProviderRequestMessage
-	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
-}
-
-func decorateReasoningDetails(document *chatcompletions.ProviderRequestDocument, items []canonical.CanonicalItem) error {
-	messages := make([]requestMessage, len(document.Messages))
-	for index, message := range document.Messages {
-		messages[index].ProviderRequestMessage = message
-		raw, ok, err := protocolcodec.ProviderChatReplayForMessage(message, items, ChatReplayScope)
-		if err != nil {
-			return err
-		}
-		if ok {
-			if !json.Valid(raw) {
-				return canonical.InternalError("checkpoint contains invalid Novita Chat reasoning_details")
-			}
-			messages[index].ReasoningDetails = json.RawMessage(append([]byte(nil), raw...))
-		}
-	}
-	document.Payload["messages"] = messages
-	return nil
-}
-
-func (c reasoningCodec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	extractor := &reasoningDetailsExtractor{}
-	return protocolcodec.DecodeChatWithReasoningCarrier(ctx, c.standard, req, ingress, extractor)
-}
 
 // reasoningDetailsExtractor removes Novita's two reasoning carriers before
 // shared Chat decoding. The small per-response accumulator lets the shared
@@ -184,5 +136,4 @@ func detailText(items []json.RawMessage) string {
 	return text
 }
 
-var _ provider.Codec = reasoningCodec{}
 var _ protocolcodec.ChatReasoningExtractor = (*reasoningDetailsExtractor)(nil)

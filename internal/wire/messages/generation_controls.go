@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
@@ -106,11 +107,17 @@ func decodeMessagesReasoning(dto *messagesThinkingDTO) (canonical.ReasoningContr
 	return canonical.NewReasoningControls(params)
 }
 
-func encodeMessagesReasoning(payload map[string]any, reasoning canonical.ReasoningControls) error {
+func encodeMessagesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, omitAdaptiveThinking bool, changeLog *[]compat.Change) error {
 	compute, computeSet := reasoning.ComputeField().Get()
 	if computeSet {
 		if disclosure, present := reasoning.DisclosureField().Get(); present && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
 			return provider.IncompatibleCapability(canonical.RequestReasoning, canonical.Occurrence{}, "Messages cannot represent disabled reasoning with readable disclosure")
+		}
+		if omitAdaptiveThinking && (compute.Kind() == canonical.ReasoningAutomatic || compute.Kind() == canonical.ReasoningBudget) {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestReasoning, canonical.RequestReasoning, canonical.Occurrence{}))
+			}
+			return nil
 		}
 		thinking := map[string]any{}
 		switch compute.Kind() {

@@ -6,10 +6,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestDecodeChatCompletionsToolChoice_DefaultsBySurface(t *testing.T) {
@@ -104,7 +106,6 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 
 		"edit files",
 		canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"grammar","syntax":"lark","definition":"start: begin_patch hunk+ end_patch"}`)))
-	webSearchTool := canonical.NewWebSearchDeclaration()
 
 	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
 	projectedCustomName := providertest.ProjectedToolName(t, customTool)
@@ -130,24 +131,20 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 			tools:  []canonical.ToolDeclaration{customTool},
 			want:   `{"type":"custom","custom":{"name":"` + projectedCustomName + `"}}`,
 		},
-		{
-			name:   "specific web search",
-			policy: specificToolPolicy(webSearchTool.Key(), canonical.ToolTypeWebSearch),
-			tools:  []canonical.ToolDeclaration{webSearchTool},
-			want:   `{"type":"web_search"}`,
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var names provider.AttemptToolNames
+			var lowered wire.LoweredToolSet
 			if len(tc.tools) > 0 {
 				set, _ := canonical.NewToolSet(tc.tools)
 				item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 				names = testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
+				_, _, lowered, _ = compileChatCompletionsTools(tc.tools, names, nil, "", nil)
 			}
-			got, err := encodeChatCompletionsToolChoice(tc.policy, tc.tools, names, nil, "")
+			got, err := encodeChatCompletionsToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {
 				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
 			}
@@ -156,10 +153,33 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 	}
 }
 
+func TestEncodeChatCompletionsToolChoice_RejectsSemanticToolWithoutProviderPolicy(t *testing.T) {
+	t.Parallel()
+	webSearchTool := canonical.NewWebSearchDeclaration()
+	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearchTool})
+	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	names := testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
+		if tool.Kind() == canonical.ToolKindWebSearch {
+			return []any{ProviderRequestTool{Type: "web_search"}}, true, nil, nil
+		}
+		return nil, false, nil, nil
+	}
+	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearchTool}, names, nil, "", rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := specificToolPolicy(webSearchTool.Key(), canonical.ToolTypeWebSearch)
+	_, err = encodeChatCompletionsToolChoice(policy, lowered, names, nil, "")
+	if err == nil {
+		t.Fatal("expected encodeChatCompletionsToolChoice to reject semantic tool without provider policy")
+	}
+}
+
 func TestEncodeChatCompletionsToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), nil, nil, nil, "")
+	_, err := encodeChatCompletionsToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wire.LoweredToolSet{}, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected encodeChatCompletionsToolChoice to reject required without tools")
 	}
@@ -193,7 +213,7 @@ func TestEncodeChatCompletionsToolChoice_OmitsEmptySurfaceChoices(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := encodeChatCompletionsToolChoice(tc.policy, nil, nil, nil, "")
+			got, err := encodeChatCompletionsToolChoice(tc.policy, wire.LoweredToolSet{}, nil, nil, "")
 			if err != nil {
 				t.Fatalf("encodeChatCompletionsToolChoice returned error: %v", err)
 			}

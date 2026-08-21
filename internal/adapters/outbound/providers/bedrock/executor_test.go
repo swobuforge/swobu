@@ -220,7 +220,7 @@ func TestBedrockMantleMessagesUsesInlineImagePolyfill(t *testing.T) {
 	}
 }
 
-func TestBedrockMessagesInheritsProtocolWebSearch(t *testing.T) {
+func TestBedrockMessagesRejectsHostedWebSearch(t *testing.T) {
 	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages)
 	target.Model = "model"
 	backend, err := NewExecutor(nil).ResolveBackend(target)
@@ -234,12 +234,13 @@ func TestBedrockMessagesInheritsProtocolWebSearch(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	if err != nil {
-		t.Fatal(err)
+	_, _, err = backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err == nil {
+		t.Fatal("expected Bedrock Messages to reject unowned hosted web search")
 	}
-	if !strings.Contains(string(document.RawBytes()), `"type":"web_search_20260209"`) {
-		t.Fatalf("Bedrock target did not inherit Messages web search: %s", document.RawBytes())
+	var incompErr provider.IncompatibleTargetError
+	if !errors.As(err, &incompErr) {
+		t.Fatalf("expected IncompatibleTargetError, got %T: %v", err, err)
 	}
 }
 

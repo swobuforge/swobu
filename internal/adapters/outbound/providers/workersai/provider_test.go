@@ -104,7 +104,7 @@ func TestChatAndResponsesReuseSharedCodecsWithRequiredGenerationHeaders(t *testi
 			if !ok || codec.Protocol != test.kind {
 				t.Fatalf("codec = %#v", backend.Codec)
 			}
-			if codec.CaptureResponsesContinuation {
+			if codec.ResponsesDialect.CaptureResponsesContinuation {
 				t.Fatal("Workers AI invented provider-native Responses continuation")
 			}
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{

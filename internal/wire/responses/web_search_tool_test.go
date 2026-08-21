@@ -324,22 +324,32 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 	}
 }
 
-func TestEncodeRequestLowersStableWebSearchTool(t *testing.T) {
+func TestEncodeRequestLowersStableWebSearchTool_GenericRejectsAndRuleLowers(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
-	doc, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	_, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	if err == nil {
+		t.Fatal("expected generic EncodeCarrierWithChanges to reject web search")
+	}
+
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
+		if tool.Kind() != canonical.ToolKindWebSearch {
+			return nil, false, nil, nil
+		}
+		return []ProviderRequestTool{{Type: "web_search"}}, true, nil, nil
+	}
+	typed, err := CompileProviderRequestDocument(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{LowerTool: rule})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected compile error with rule: %v", err)
 	}
-	var body map[string]any
-	if err := json.Unmarshal(doc.RawBytes(), &body); err != nil {
-		t.Fatal(err)
+	doc, err := EncodeProviderRequestDocument(typed)
+	if err != nil {
+		t.Fatalf("unexpected encode error with rule: %v", err)
 	}
-	tool := body["tools"].([]any)[0].(map[string]any)
-	if tool["type"] != "web_search" || len(tool) != 1 {
-		t.Fatalf("tool = %#v", tool)
+	if !strings.Contains(string(doc.Raw), `"type":"web_search"`) {
+		t.Fatalf("expected web_search tool in payload, got %s", string(doc.Raw))
 	}
 }
 

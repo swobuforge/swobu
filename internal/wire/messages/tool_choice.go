@@ -2,10 +2,12 @@ package messages
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -67,11 +69,11 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclara
 	}
 }
 
-func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
-	if len(tools) == 0 {
+	if lowered.Len() == 0 {
 		switch policy.Mode {
 		case canonical.ToolPolicyRequired:
 			return nil, canonical.BadRequest("messages request tool_choice required requires at least one tool")
@@ -80,6 +82,27 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.Too
 		default:
 			// Empty tool surfaces are inert here. Omit the backend-visible
 			// field rather than emitting a no-op choice some backends reject.
+			return nil, nil
+		}
+	}
+	if lowered.TotalFragments() == 0 {
+		switch policy.Mode {
+		case canonical.ToolPolicyRequired:
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "target lowering produced no tool declarations to satisfy required tool policy")
+		case canonical.ToolPolicySpecific:
+			specific, ok := policy.SpecificID()
+			if !ok {
+				return nil, canonical.BadRequest("messages request tool_choice specific requires a tool id")
+			}
+			record, ok := lowered.FindSource(specific)
+			if !ok {
+				return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
+			}
+			if record.FragmentCount == 0 {
+				return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
+			}
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering cannot satisfy specific tool choice for tool %q", specific))
+		default:
 			return nil, nil
 		}
 	}
@@ -101,22 +124,29 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, tools []canonical.Too
 		if !ok {
 			return nil, canonical.BadRequest("messages request tool_choice specific requires a tool id")
 		}
-		wireType := canonical.ToolTypeFunction
-		if specific.Kind() == canonical.ToolKindWebSearch {
-			wireType = canonical.ToolTypeWebSearch
+		record, ok := lowered.FindSource(specific)
+		if !ok {
+			return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
 		}
-		decl, _, err := canonical.ResolveToolDeclarationByKey(tools, specific, wireType)
-		if err != nil {
-			return nil, err
+		if record.FragmentCount == 0 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
 		}
-		name, err := wire.EncodeToolName(names, decl.Key())
-		if err != nil {
-			return nil, err
+		if record.FragmentCount > 1 {
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "1->N lowered tool requires explicit provider tool policy lowering rule for specific selection")
 		}
-		return map[string]any{
-			"type": "tool",
-			"name": name,
-		}, nil
+		switch record.Kind {
+		case canonical.ToolKindFunction:
+			name, err := wire.EncodeToolName(names, record.Key)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"type": "tool",
+				"name": strings.TrimSpace(name),
+			}, nil
+		default:
+			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("Messages cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
+		}
 	default:
 		return nil, canonical.BadRequest("messages request tool_choice is invalid")
 	}
