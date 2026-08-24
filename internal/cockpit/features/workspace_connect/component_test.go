@@ -911,7 +911,7 @@ func (s *fullWorkspaceSurface) Render(app *ui.App) *ui.Element {
 	// Header
 	header := ui.New(ui.WithDisplay(ui.DisplayFlex), ui.WithDirection(ui.Row), ui.WithWidthPercent(100))
 	header.AddChild(ui.New(ui.WithText("⛉ SWOBU"), ui.WithWidth(9)))
-	header.AddChild(ui.New(ui.WithText("[› " + s.Slug + "] [+] [?]"), ui.WithFlexGrow(1)))
+	header.AddChild(ui.New(ui.WithText("[› "+s.Slug+"] [+] [?]"), ui.WithFlexGrow(1)))
 	header.AddChild(ui.New(ui.WithText("healthy")))
 	root.AddChild(header)
 

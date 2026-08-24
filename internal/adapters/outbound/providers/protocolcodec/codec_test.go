@@ -503,4 +503,3 @@ func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
 		})
 	}
 }
-
