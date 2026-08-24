@@ -2,7 +2,7 @@
 
 **One endpoint for your AI agents. Any LLM capacity underneath.**
 
-Your agent asks for a model. Swobu turns that model name into a route across providers, accounts, regions, and local servers — with balancing, failover, reasoning translation, and semantic protocol compatibility underneath.
+Make AI capacity routable. Your agent asks for a model. Swobu turns that model name into a route across providers, accounts, regions, and local servers — with balancing, failover, reasoning translation, and semantic protocol compatibility underneath.
 
 <p align="center">
   <img src="./assets/readme/free-demo.gif" alt="An AI agent using a Swobu route with balancing and failover" width="1280">
