@@ -146,9 +146,9 @@ func TestCompileProviderRequestDocument_RejectsReasoningMutatingNonReasoningFiel
 	// Known reasoning fields and unknown provider-private reasoning carriers are permitted.
 	allowedReasoning := func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 		return map[string]any{
-			"reasoning_effort":         "high",
-			"thinking":                 map[string]any{"type": "enabled", "budget_tokens": 1024},
-			"custom_provider_carrier":  "provider_specific_value",
+			"reasoning_effort":        "high",
+			"thinking":                map[string]any{"type": "enabled", "budget_tokens": 1024},
+			"custom_provider_carrier": "provider_specific_value",
 		}, nil
 	}
 	doc, err := CompileProviderRequestDocument(req, nil, delivery.BufferedDelivery(), nil, "", CompileOptions{
@@ -161,4 +161,3 @@ func TestCompileProviderRequestDocument_RejectsReasoningMutatingNonReasoningFiel
 		t.Fatalf("allowed reasoning fields not set in payload: %#v", doc.Payload)
 	}
 }
-

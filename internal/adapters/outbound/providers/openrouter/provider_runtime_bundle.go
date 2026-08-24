@@ -30,10 +30,10 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 		backend.Codec = protocolcodec.Codec{
 			Protocol: protocolkind.ChatCompletions,
 			ChatDialect: protocolcodec.ChatDialect{
-				LowerTool:            protocolcodec.ChatHostedSearchTool(nil, "openrouter:web_search"),
-				LowerToolPolicy:      protocolcodec.ChatHostedSearchToolPolicy("openrouter:web_search"),
-				LowerReasoning:       applyOpenRouterReasoning,
-				LowerMessage:         protocolcodec.ChatOpaqueReplayJSONMessageRule(ChatReplayScope, "reasoning_details"),
+				LowerTool:         protocolcodec.ChatHostedSearchTool(nil, "openrouter:web_search"),
+				LowerToolPolicy:   protocolcodec.ChatHostedSearchToolPolicy("openrouter:web_search"),
+				LowerReasoning:    applyOpenRouterReasoning,
+				LowerMessage:      protocolcodec.ChatOpaqueReplayJSONMessageRule(ChatReplayScope, "reasoning_details"),
 				DecorateAttempt:   decorateOpenRouterAttempt,
 				ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return &openRouterReasoningExtractor{} },
 			},

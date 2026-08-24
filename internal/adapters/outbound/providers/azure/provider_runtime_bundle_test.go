@@ -57,8 +57,8 @@ func TestContinueEmptyStopListIsOmittedFromAzureChatCompletionsProviderRequest(t
 		t.Fatal(err)
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("gpt-5-nano"),
-		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "Complete this code")},
+		Model:    canonical.Specify("gpt-5-nano"),
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "Complete this code")},
 		Controls: controls,
 	})
 	target := provider.NewTargetSnapshot("azure", string(profile.ProviderSpecAzure), "https://example.openai.azure.com", "env:AZURE_OPENAI_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
