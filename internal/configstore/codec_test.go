@@ -122,6 +122,10 @@ workspaces:
               - {id: azure, model: deployment, protocol: responses, connection: {azure: {project_endpoint: https://example.services.ai.azure.com/api/projects/prod, credential: env:AZURE_OPENAI_API_KEY}}}
               - {id: bedrock, model: openai.gpt, protocol: responses_stream, connection: {bedrock: {region: eu-west-2, endpoint: https://bedrock-mantle.eu-west-2.api.aws/openai/v1, credential: env:BEDROCK_API_KEY}}}
               - {id: custom, model: local, protocol: chat_completions, connection: {custom: {base_url: http://127.0.0.1:8080/v1, auth: {header: {name: x-api-key, credential: env:CUSTOM_KEY}}}}}
+              - {id: opencode-zen, model: default, protocol: chat_completions, connection: {opencode-zen: {credential: env:OPENCODE_ZEN_API_KEY}}}
+              - {id: nous, model: default, protocol: chat_completions, connection: {nous: {credential: env:NOUS_API_KEY}}}
+              - {id: commandcode, model: default, protocol: chat_completions, connection: {commandcode: {credential: env:COMMANDCODE_API_KEY}}}
+              - {id: venice, model: default, protocol: chat_completions, connection: {venice: {credential: env:VENICE_API_KEY}}}
 `
 
 func TestCodecRoundTripCoversEveryConnectionVariant(t *testing.T) {

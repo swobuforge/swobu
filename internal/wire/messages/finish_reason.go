@@ -19,35 +19,25 @@ func messagesCompletion(reason string) canonical.Completion {
 	}
 }
 
-func messagesStopReasonForCompletion(completion canonical.Completion, sawToolUse bool) string {
-	finishReason := strings.TrimSpace(completion.Reason()) // swobu:io-string source=boundary
-	normalized := strings.ToLower(finishReason)
-	switch normalized {
-	case "tool_use", "tool_calls":
-		return "tool_use"
-	case "refusal", "pause_turn":
-		return normalized
-	case "max_output_tokens", "length", "max_tokens":
-		return "max_tokens"
-	case "stop", "end_turn", "completed":
+func messagesStopReasonForCompletion(completion canonical.Completion, sawToolUse bool) (string, error) {
+	switch completion.Class() {
+	case canonical.CompletionCompleted:
 		if sawToolUse {
-			return "tool_use"
+			return "tool_use", nil
 		}
-		return "end_turn"
+		return "end_turn", nil
+	case canonical.CompletionIncomplete:
+		// pause_turn is an already-admitted Messages incomplete subtype, not
+		// permission to pass arbitrary provider reasons into client wire output.
+		if strings.EqualFold(strings.TrimSpace(completion.Reason()), "pause_turn") {
+			return "pause_turn", nil
+		}
+		return "max_tokens", nil
+	case canonical.CompletionDeclined:
+		return "refusal", nil
+	case canonical.CompletionFailed:
+		return "", canonical.NewBackendError("", 0, "backend response failed: "+completion.Reason(), "")
 	default:
-		if sawToolUse {
-			return "tool_use"
-		}
-		if finishReason != "" {
-			return finishReason
-		}
-		switch completion.Class() {
-		case canonical.CompletionIncomplete:
-			return "max_tokens"
-		case canonical.CompletionDeclined:
-			return "refusal"
-		default:
-			return "end_turn"
-		}
+		return "", canonical.InternalError("canonical completion class cannot be projected to Messages")
 	}
 }

@@ -163,13 +163,15 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		if len(s.pendingWebSearchCallIDs) > 0 {
 			return nil, canonical.NewBackendError("", 0, "backend returned an unresolved web-search lifecycle to a Chat Completions client", "")
 		}
-		finishReason := event.Completion.Reason()
-		projectionDecisions, projectionErr := finalizeChatClientProjection(s.sawReasoning, s.sawVisibleOutput, finishReason)
+		clientFinishReason, err := chatClientFinishReason(event.Completion, len(s.toolByID) > 0)
+		if err != nil {
+			return nil, err
+		}
+		projectionDecisions, projectionErr := finalizeChatClientProjection(s.sawReasoning, s.sawVisibleOutput, clientFinishReason)
 		s.changes = append(s.changes, projectionDecisions...)
 		if projectionErr != nil {
 			return nil, projectionErr
 		}
-		clientFinishReason := chatClientFinishReason(finishReason, len(s.toolByID) > 0)
 		frames, err := s.encodeChunk(chatCompletionsDeltaDTO{}, &clientFinishReason, chatUsageFromCanonical(event.Usage))
 		if err != nil {
 			return nil, err

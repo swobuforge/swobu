@@ -34,7 +34,7 @@ templ FileBrowserDirRow(dir string) {
 	<div class="flex-row w-full">
 		<span class="w-2"></span>
 		<span class="w-18">dir</span>
-		<span class="grow truncate nowrap">{dir}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{dir}</span>
 	</div>
 }
 
@@ -42,7 +42,7 @@ templ FileBrowserSearchRow(query string) {
 	<div class="flex-row w-full mb-1">
 		<span class="w-2"></span>
 		<span class="w-18">search</span>
-		<span class="grow truncate nowrap">{searchPickerQueryValue(query)}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{searchPickerQueryValue(query)}</span>
 	</div>
 }
 
@@ -51,16 +51,15 @@ func FileBrowserEntryComponent(b *FileBrowser, list *ChoiceList, row ChoiceRowMo
 }
 
 templ FileBrowserErrorRow(msg string) {
-	<div class="flex-row w-full">
-		<span class="w-2"></span>
-		<span class="grow truncate nowrap">{msg}</span>
+	<div class="pl-2 w-full">
+		@FlowText(msg)
 	</div>
 }
 
 templ FileBrowserHintRow(countLabel string) {
 	<div class="flex-row w-full mt-1">
 		<span class="w-2"></span>
-		<span class="grow truncate nowrap">{countLabel}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{countLabel}</span>
 		<span class="w-14">↑↓ choose</span>
 	</div>
 }

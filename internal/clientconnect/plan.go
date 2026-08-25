@@ -29,9 +29,8 @@ func ParseClientID(raw string) (ClientID, error) {
 
 // Client describes one locally discoverable named integration.
 type Client struct {
-	ID         ClientID
-	Name       string
-	Configured bool
+	ID   ClientID
+	Name string
 }
 
 // Change is one reviewed, Swobu-owned semantic leaf in a client mutation.

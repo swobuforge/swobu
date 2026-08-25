@@ -164,11 +164,10 @@ func (r *ConfirmActionRow) Render(_ *tui.App) *tui.Element {
 
 	if sub := r.subText(); sub != "" {
 		detail := tui.New(
-			tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 			tui.WithWidthPercent(100),
+			tui.WithPaddingTRBL(0, 0, 0, 4),
 		)
-		detail.AddChild(tui.New(tui.WithWidth(2)))
-		detail.AddChild(tui.New(tui.WithText("  " + sub)))
+		detail.AddChild(FlowText(sub).Root)
 		root.AddChild(detail)
 	}
 	return root

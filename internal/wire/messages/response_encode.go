@@ -17,6 +17,10 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
+	stopReason, err := messagesStopReasonForCompletion(output.Completion(), sse.ContainsToolUseOutput(items))
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
 	responseFingerprint, err := fingerprintMessagesResponseValue(messagesMessageDTO{Role: "assistant", Content: mustMarshalMessagesContent(content)})
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
@@ -27,7 +31,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 		Role:       "assistant",
 		Model:      output.Model(),
 		Content:    content,
-		StopReason: messagesStopReasonForCompletion(output.Completion(), sse.ContainsToolUseOutput(items)),
+		StopReason: stopReason,
 		Usage:      messagesUsageFromCanonical(output.Usage()),
 	})
 	if err != nil {

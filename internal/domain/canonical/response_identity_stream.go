@@ -48,6 +48,21 @@ func (s *BoundResponseIdentityStream) Next(ctx context.Context) (Event, error) {
 		event.Payload = payload
 		event.Meta.NativeID = ""
 	}
+	if event.Kind == EventItemCompleted {
+		if payload, ok := event.Payload.(ItemEvent); ok {
+			if completedPayload, ok := payload.Payload.(ItemCompletedPayload); ok {
+				if completedPayload.Item.Kind() == ItemKindReasoning && s.binding.TargetID != "" && s.binding.TargetVersion != 0 {
+					boundItem, err := completedPayload.Item.withTargetOrigin(s.binding.TargetID, s.binding.TargetVersion)
+					if err != nil {
+						return Event{}, err
+					}
+					completedPayload.Item = boundItem
+					payload.Payload = completedPayload
+					event.Payload = payload
+				}
+			}
+		}
+	}
 	return event, nil
 }
 

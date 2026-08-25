@@ -133,7 +133,7 @@ func TestDiscoveryIsolatesPresenceAndPlanFailures(t *testing.T) {
 		{id: "broken-plan", name: "Broken plan", present: alwaysPresent, planCurrent: func(*Service, Target) (plannedMutation, error) { return plannedMutation{}, os.ErrPermission }},
 	}
 	clients := (&Service{}).Discover(testTarget(t))
-	if len(clients) != 1 || clients[0].ID != "safe" {
+	if len(clients) != 2 || clients[0].ID != "safe" || clients[1].ID != "broken-plan" {
 		t.Fatalf("clients = %#v", clients)
 	}
 }
@@ -326,7 +326,7 @@ func TestKiloAddsMissingObjectLevelsAndRejectsStructuralConflict(t *testing.T) {
 	}
 }
 
-func TestDiscoveryIncludesOnlyClientsWithSafePlans(t *testing.T) {
+func TestDiscoveryIncludesPresentClientsEvenWhenPlanFails(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o700)
 	_ = os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[broken"), 0o600)
@@ -341,10 +341,14 @@ func TestDiscoveryIncludesOnlyClientsWithSafePlans(t *testing.T) {
 		},
 	}
 	clients := service.Discover(testTarget(t))
+	found := false
 	for _, client := range clients {
 		if client.ID == ClientCodex {
-			t.Fatalf("unsafe Codex plan surfaced: %v", clients)
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("present client with broken plan omitted from discovery: %v", clients)
 	}
 }
 

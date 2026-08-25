@@ -180,8 +180,19 @@ func reasoningReusableEqual(left, right ReasoningItem) bool {
 }
 
 func opaqueThinkingReusableEqual(left, right OpaqueThinking) bool {
-	return left.kind == right.kind && bytes.Equal(left.raw, right.raw) &&
-		left.providerChatScope == right.providerChatScope && left.responsesItemID == right.responsesItemID
+	if left.kind != right.kind || !bytes.Equal(left.raw, right.raw) ||
+		left.providerChatScope != right.providerChatScope || left.responsesItemID != right.responsesItemID {
+		return false
+	}
+	if (left.origin == nil) != (right.origin == nil) {
+		return false
+	}
+	if left.origin != nil {
+		if left.origin.targetID != right.origin.targetID || left.origin.targetVersion != right.origin.targetVersion {
+			return false
+		}
+	}
+	return true
 }
 
 func toolSetsReusableEqual(left, right ToolSet) bool {

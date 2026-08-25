@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/cerebras"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/commandcode"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepinfra"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/fireworks"
@@ -21,9 +22,11 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/llm7"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/mistral"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/modelscope"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/nous"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/novita"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/opencodezen"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openrouter"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/runpod"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -31,6 +34,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/scaleway"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/siliconflow"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/together"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/venice"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/workersai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -61,6 +65,10 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		llm7.NewRuntime(client, credentials),
 		mistral.NewRuntime(client, credentials),
 		modelscope.NewRuntime(client, credentials),
+		opencodezen.NewRuntime(client, credentials),
+		nous.NewRuntime(client, credentials),
+		commandcode.NewRuntime(client, credentials),
+		venice.NewRuntime(client, credentials),
 		novita.NewRuntime(client, credentials),
 		friendli.NewRuntime(client, credentials),
 		gemini.NewRuntime(client, credentials),

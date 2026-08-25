@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,19 +24,26 @@ func NewService() *Service {
 
 func runLocalCommand(name string, args ...string) ([]byte, int, error) {
 	cmd := exec.Command(name, args...)
-	stdout, err := cmd.Output()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	err := cmd.Run()
+	stdout := stdoutBuf.Bytes()
+	stderr := stderrBuf.Bytes()
 	if err == nil {
 		return stdout, 0, nil
 	}
 	if exitError, ok := err.(*exec.ExitError); ok {
-		return stdout, exitError.ExitCode(), nil
+		out := stdout
+		if len(bytes.TrimSpace(out)) == 0 && len(bytes.TrimSpace(stderr)) > 0 {
+			out = stderr
+		}
+		return out, exitError.ExitCode(), nil
 	}
 	return nil, -1, err
 }
 
-// Discover returns only clients with a cheap presence signal and a safe Plan.
-// Adapter-specific presence and planning failures are isolated: an unreadable
-// client never hides unrelated integrations or the Other clients fallback.
+// Discover returns all clients with a positive presence signal.
 func (s *Service) Discover(target Target) []Client {
 	if !target.IsLocal() {
 		return nil
@@ -43,18 +51,13 @@ func (s *Service) Discover(target Target) []Client {
 	var clients []Client
 	for _, adapter := range adapters {
 		present, err := adapter.present(s)
-		if err != nil {
+		if err != nil || !present {
 			continue
 		}
-		if !present {
-			continue
-		}
-		current, err := adapter.planCurrent(s, target)
-		if err != nil {
-			continue
-		}
-		current.plan = current.plan.withClient(adapter)
-		clients = append(clients, Client{ID: adapter.id, Name: adapter.name, Configured: current.plan.AlreadyConfigured()})
+		clients = append(clients, Client{
+			ID:   adapter.id,
+			Name: adapter.name,
+		})
 	}
 	return clients
 }

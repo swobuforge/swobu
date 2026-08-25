@@ -29,7 +29,7 @@ func (r *credentialResolver) ResolveCredential(context.Context, string, string) 
 
 func TestReasoningContentBecomesReadableTraceWithoutReplayState(t *testing.T) {
 	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{"choices":[{"message":{"role":"assistant","reasoning_content":"inspect first","content":"answer"},"finish_reason":"stop"}]}`), carrier.Meta{})
-	cleaned, item, err := protocolcodec.ExtractChatReasoningDocument(document, modelScopeReasoningExtractor{})
+	cleaned, item, err := protocolcodec.ExtractChatReasoningDocument(document, protocolcodec.ReasoningContentExtractor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestReasoningContentBecomesReadableTraceWithoutReplayState(t *testing.T) {
 	stream := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"inspect \"}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"repository\"}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
-	body := protocolcodec.NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(stream)), modelScopeReasoningExtractor{})
+	body := protocolcodec.NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(stream)), protocolcodec.ReasoningContentExtractor{})
 	cleanedStream, err := io.ReadAll(body)
 	if err != nil {
 		t.Fatal(err)
@@ -67,13 +67,13 @@ func TestMalformedReasoningContentFailsAtProviderDecoder(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if test.buffered {
 				message := map[string]json.RawMessage{"reasoning_content": json.RawMessage(`42`)}
-				if _, err := (modelScopeReasoningExtractor{}).ExtractBufferedChatReasoning(message); err == nil {
+				if _, err := (protocolcodec.ReasoningContentExtractor{}).ExtractBufferedChatReasoning(message); err == nil {
 					t.Fatal("non-string buffered reasoning_content decoded")
 				}
 				return
 			}
 			delta := map[string]json.RawMessage{"reasoning_content": json.RawMessage(`42`)}
-			if _, err := (modelScopeReasoningExtractor{}).ExtractStreamedChatReasoning(delta); err == nil {
+			if _, err := (protocolcodec.ReasoningContentExtractor{}).ExtractStreamedChatReasoning(delta); err == nil {
 				t.Fatal("non-string streamed reasoning_content decoded")
 			}
 		})

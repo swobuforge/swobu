@@ -1,6 +1,7 @@
 > name              _dev                                                    duplicate
                     name conflict
-  endpoint          after first target              preview
+  endpoint                                                                  preview
+                    after first target
 
 
 

@@ -465,3 +465,62 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 		t.Fatalf("store=%#v, want false (ChatGPT is stateless for replay)", payload["store"])
 	}
 }
+
+func TestChatGPTLowersWebSearchDeclarationAndPolicy(t *testing.T) {
+	t.Parallel()
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 1: Active tool declaration without specific policy is safely omitted for ChatGPT Codex compatibility.
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, set.Declarations()...),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search the web"),
+		},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: request,
+		ToolNames: names,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if tools, ok := payload["tools"].([]any); ok && len(tools) != 0 {
+		t.Fatalf("payload tools = %#v, want 0 tools (web_search omitted on ChatGPT)", payload["tools"])
+	}
+
+	// Case 2: Specific tool policy requiring web search returns IncompatibleCapability.
+	webSearchKey := canonical.WebSearchToolKey()
+	reqSpecific := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt-5.4-mini"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, set.Declarations()...),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search the web"),
+		},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &webSearchKey)),
+	})
+	namesSpecific, _, err := provider.BuildAttemptToolNames(reqSpecific)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: reqSpecific,
+		ToolNames: namesSpecific,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err == nil {
+		t.Fatal("expected error for specific web search policy on ChatGPT, got nil")
+	}
+}

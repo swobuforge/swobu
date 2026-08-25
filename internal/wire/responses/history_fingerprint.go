@@ -204,10 +204,13 @@ func normalizeResponsesHistoryItems(items []responsesHistoryItemDTO) ([]response
 		}
 		item := items[index]
 		if strings.TrimSpace(item.Type) != "web_search_call" { // swobu:io-string source=boundary
-			// Presentation IDs and generic wire statuses have no history
-			// consumer. Web-search status selects the replayed lifecycle, but
-			// its presentation ID and action are not stable client history:
-			// Codex appends only an actionless completion marker.
+			// Presentation IDs (including reasoning item IDs) and generic wire
+			// statuses are normalized out of checkpoint fingerprints so that
+			// fingerprint identity remains presentation-ID tolerant. Authoritative
+			// target-bound opaque reasoning state lives in canonical checkpoint
+			// history. Web-search status selects the replayed lifecycle, but its
+			// presentation ID and action are not stable client history: Codex
+			// appends only an actionless completion marker.
 			item.ID = ""
 			item.Status = ""
 		} else {
@@ -514,12 +517,12 @@ func (s *responsesResponseHistoryState) appendItem(request canonical.CanonicalRe
 		reasoning, _ := item.Reasoning()
 		disclosure, disclosureSet := request.Reasoning().DisclosureField().Get()
 		history := responsesHistoryItemDTO{Type: "reasoning"}
-		// This presentation identity is client-local and never enters provider
-		// replay because P0 supports only native ResponseRef continuation.
-		history.ID = fmt.Sprintf("rs_swobu_%d", ordinal)
 		history.Status = "completed"
 		if replay, ok := reasoning.Opaque().Responses(); ok {
+			history.ID = replay.ItemID // empty deliberately stays empty
 			history.EncryptedContent = replay.EncryptedContent
+		} else {
+			history.ID = fmt.Sprintf("rs_swobu_%d", ordinal)
 		}
 		for _, part := range reasoning.Parts() {
 			if disclosureSet && disclosure == canonical.ReasoningDisclosureNone {

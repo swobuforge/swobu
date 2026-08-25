@@ -348,7 +348,9 @@ templ (r *credentialRow) Render() {
 }
 
 templ CredentialInputError(message string) {
-	<div class="flex-row w-full"><span class="w-18"></span><span class="grow truncate nowrap">{message}</span></div>
+	<div class="pl-18 w-full">
+		@FlowText(message)
+	</div>
 }
 
 type credentialChooserBody struct{ row *credentialRow }

@@ -52,16 +52,23 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 			return providerCall{}, path.target, nil, s.mediaFetchCache, err
 		}
 	}
+	projectedRequest, replayChanges, err := projectOpaqueReplayForTarget(attemptRequest, path.target.TargetID, path.target.TargetVersion)
+	if err != nil {
+		return providerCall{}, path.target, nil, s.mediaFetchCache, err
+	}
+	attemptRequest = projectedRequest
+
 	projectionChanges := []compat.Change(nil)
-	structuralProjection := false
+	projectionChanges = append(projectionChanges, replayChanges...)
+	structuralProjection := len(replayChanges) > 0
 	if targetSupport.Get(canonical.RequestToolsDiscovery) != provider.SupportSupported {
 		projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)
 		if projectionErr != nil {
 			return providerCall{}, path.target, nil, s.mediaFetchCache, projectionErr
 		}
 		attemptRequest = projection.Request
-		projectionChanges = projection.Changes
-		structuralProjection = projection.StructuralHistoryChange
+		projectionChanges = append(projectionChanges, projection.Changes...)
+		structuralProjection = structuralProjection || projection.StructuralHistoryChange
 	}
 	toolNames, namingChanges, err := provider.BuildAttemptToolNames(attemptRequest)
 	if err != nil {

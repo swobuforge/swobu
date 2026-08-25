@@ -64,6 +64,28 @@ var (
 	providerProtocolsModelScope = []ProviderProtocolSpec{
 		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
 	}
+	providerProtocolsNous = []ProviderProtocolSpec{
+		bufferedProtocol("chat_completions", protocolkind.ChatCompletions),
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
+	providerProtocolsModelRouted = []ProviderProtocolSpec{
+		bufferedProtocol("responses", protocolkind.Responses),
+		streamingProtocol("responses_stream", protocolkind.Responses),
+		bufferedProtocol("chat_completions", protocolkind.ChatCompletions),
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+		bufferedProtocol("messages", protocolkind.Messages),
+		streamingProtocol("messages_stream", protocolkind.Messages),
+	}
+	providerProtocolsCommandCode = []ProviderProtocolSpec{
+		bufferedProtocol("chat_completions", protocolkind.ChatCompletions),
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+		bufferedProtocol("messages", protocolkind.Messages),
+		streamingProtocol("messages_stream", protocolkind.Messages),
+	}
+	providerProtocolsVenice = []ProviderProtocolSpec{
+		bufferedProtocol("chat_completions", protocolkind.ChatCompletions),
+		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
+	}
 	providerProtocolsRunPod = []ProviderProtocolSpec{
 		bufferedProtocol("responses", protocolkind.Responses),
 		streamingProtocol("responses_stream", protocolkind.Responses),
@@ -134,6 +156,54 @@ var (
 
 func catalog() []Profile {
 	profiles := []Profile{
+		{
+			ProviderID:          ProviderSpecOpenCodeZen,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "OpenCode Zen",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"OpenCode", "Zen", "credential", "model", "protocol"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://opencode.ai/zen/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENCODE_ZEN_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsModelRouted),
+		},
+		{
+			ProviderID:          ProviderSpecNous,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "Nous Portal",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"Nous", "Hermes", "credential", "model", "Chat Completions"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://inference-api.nousresearch.com/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "NOUS_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsNous),
+		},
+		{
+			ProviderID:          ProviderSpecCommandCode,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "Command Code",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"Command Code", "credential", "model", "protocol"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://api.commandcode.ai/provider/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "COMMANDCODE_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsCommandCode),
+		},
+		{
+			ProviderID:          ProviderSpecVenice,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "Venice AI",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"Venice", "credential", "model", "web search", "reasoning"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://api.venice.ai/api/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "VENICE_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsVenice),
+		},
 		{
 			ProviderID:          ProviderSpecOllama,
 			ConnectionShape:     routing.ConnectionShapeStandard,

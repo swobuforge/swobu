@@ -136,6 +136,45 @@ func TestCompareReusablePrefixIncludesToolOccurrenceVisibility(t *testing.T) {
 	}
 }
 
+func TestCompareReusablePrefixIncludesReasoningOpaqueOrigin(t *testing.T) {
+	unboundOpaque, _ := NewResponsesOpaqueThinking(ResponsesReasoningReplay{EncryptedContent: "cipher", ItemID: "rs_1"})
+	boundAOpaque, _ := unboundOpaque.withTargetOrigin("target-a", 1)
+	boundA2Opaque, _ := unboundOpaque.withTargetOrigin("target-a", 2)
+	boundBOpaque, _ := unboundOpaque.withTargetOrigin("target-b", 1)
+
+	summary := mustReasoningPart(t, ReasoningPartSummary, "thought")
+	unboundReasoning, _ := NewReasoningItem([]ReasoningPart{summary}, unboundOpaque)
+	boundAReasoning, _ := NewReasoningItem([]ReasoningPart{summary}, boundAOpaque)
+	boundA2Reasoning, _ := NewReasoningItem([]ReasoningPart{summary}, boundA2Opaque)
+	boundBReasoning, _ := NewReasoningItem([]ReasoningPart{summary}, boundBOpaque)
+
+	reqUnbound := NewCanonicalRequest(RequestParams{Model: Specify("m"), Items: []CanonicalItem{unboundReasoning, prefixMessage(t, "hi")}})
+	reqBoundA := NewCanonicalRequest(RequestParams{Model: Specify("m"), Items: []CanonicalItem{boundAReasoning, prefixMessage(t, "hi")}})
+	reqBoundA2 := NewCanonicalRequest(RequestParams{Model: Specify("m"), Items: []CanonicalItem{boundA2Reasoning, prefixMessage(t, "hi")}})
+	reqBoundB := NewCanonicalRequest(RequestParams{Model: Specify("m"), Items: []CanonicalItem{boundBReasoning, prefixMessage(t, "hi")}})
+	reqBoundASame := NewCanonicalRequest(RequestParams{Model: Specify("m"), Items: []CanonicalItem{boundAReasoning, prefixMessage(t, "hi")}})
+
+	// Same bound target is preserved
+	if got := CompareReusablePrefix(reqBoundA, reqBoundASame); !got.Preserved {
+		t.Fatalf("same target bound prefix not preserved: %#v", got)
+	}
+
+	// Bound vs Unbound is not preserved
+	if got := CompareReusablePrefix(reqBoundA, reqUnbound); got.Preserved || got.InputChanged == nil || got.InputChanged.Key() != "request:0" {
+		t.Fatalf("bound vs unbound comparison = %#v", got)
+	}
+
+	// Bound A:1 vs Bound A:2 is not preserved
+	if got := CompareReusablePrefix(reqBoundA, reqBoundA2); got.Preserved || got.InputChanged == nil || got.InputChanged.Key() != "request:0" {
+		t.Fatalf("bound A:1 vs bound A:2 comparison = %#v", got)
+	}
+
+	// Bound A:1 vs Bound B:1 is not preserved
+	if got := CompareReusablePrefix(reqBoundA, reqBoundB); got.Preserved || got.InputChanged == nil || got.InputChanged.Key() != "request:0" {
+		t.Fatalf("bound A:1 vs bound B:1 comparison = %#v", got)
+	}
+}
+
 func prefixMessage(t *testing.T, text string) CanonicalItem {
 	t.Helper()
 	item, err := NewMessageItem(MessageRoleUser, []MessagePart{NewTextMessagePart(text)})

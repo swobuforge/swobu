@@ -13,6 +13,8 @@ func newBackendCodec(_ string) protocolcodec.Codec {
 			ForceArrayInput:     true,
 			DefaultStore:        &falseVal,
 			RequireStreamingSSE: true,
+			LowerTool:           protocolcodec.ResponsesHostedSearchTool(""),
+			LowerToolPolicy:     protocolcodec.ResponsesHostedSearchToolPolicy(""),
 		},
 	}
 }

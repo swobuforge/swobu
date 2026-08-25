@@ -157,7 +157,7 @@ templ (a *ambientOrReferenceAuthentication) Render() {
 				if strings.TrimSpace(a.ref.Get()) == "" {
 					@AmbientOrReferenceUseReferenceOption(a)
 				} else {
-					<div><span>{a.referenceDetail()}</span></div>
+					<div class="w-full">@FlowText(a.referenceDetail())</div>
 					@AmbientOrReferenceChangeOption(a)
 					@AmbientOrReferenceUseAmbientOption(a)
 				}
@@ -165,7 +165,7 @@ templ (a *ambientOrReferenceAuthentication) Render() {
 		} else if a.stage.Get() == ambientOrReferenceChooser {
 			<div class="pl-3 flex-col w-full">@CredentialChooser(a.chooser.Get())</div>
 		} else if detail := a.referenceDetail(); detail != "" {
-			<div class="flex-row w-full"><span class="w-18"></span><span class="grow truncate nowrap">{detail}</span></div>
+			<div class="pl-18 w-full">@FlowText(detail)</div>
 		}
 	</div>
 }
