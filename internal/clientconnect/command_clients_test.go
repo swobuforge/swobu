@@ -2,7 +2,10 @@ package clientconnect
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -39,6 +42,229 @@ func commandService(t *testing.T, binary string, replies map[string]commandReply
 			return []byte(reply.stdout), reply.code, reply.err
 		},
 	}
+}
+
+type openClawE2EState struct {
+	ConfigPath string         `json:"configPath"`
+	Primary    string         `json:"primary"`
+	Provider   map[string]any `json:"provider"`
+	Allowlist  map[string]any `json:"allowlist"`
+}
+
+func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
+	t.Setenv("OPENCLAW_NIX_MODE", "")
+	t.Setenv("OPENCLAW_E2E_HELPER", "1")
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENCLAW_E2E_TEST_BINARY", testBinary)
+
+	tempDir := t.TempDir()
+	statePath := filepath.Join(tempDir, "openclaw-state.json")
+	t.Setenv("OPENCLAW_E2E_STATE", statePath)
+	writeOpenClawE2EState(t, statePath, openClawE2EState{
+		ConfigPath: filepath.Join(tempDir, "openclaw.json"),
+		Primary:    "openrouter/e2e",
+		Provider: map[string]any{
+			"baseUrl": "http://127.0.0.1:7926/c/old",
+			"api":     "legacy",
+			"apiKey":  "human-managed",
+			"metadata": map[string]any{
+				"owner": "operator",
+			},
+			"models": []any{
+				map[string]any{"id": "existing", "name": "Existing model"},
+			},
+		},
+		Allowlist: map[string]any{
+			"openrouter/e2e": map[string]any{"alias": "legacy"},
+		},
+	})
+
+	binDir := filepath.Join(tempDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/bin/sh\nexec \"$OPENCLAW_E2E_TEST_BINARY\" -test.run=^TestOpenClawCLIHelperProcess$ -- \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "openclaw"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	service := NewService()
+	target := testTarget(t)
+	clients := service.Discover(target)
+	found := false
+	for _, client := range clients {
+		if client.ID == ClientOpenClaw {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("OpenClaw not discovered through PATH: %#v", clients)
+	}
+
+	plan, err := service.Plan(ClientOpenClaw, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.AlreadyConfigured() {
+		t.Fatalf("initial plan unexpectedly configured: %#v", plan)
+	}
+	if err := service.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	state := readOpenClawE2EState(t, statePath)
+	if state.Primary != "swobu/default" {
+		t.Fatalf("primary = %q, want swobu/default", state.Primary)
+	}
+	if state.Provider["baseUrl"] != target.WorkspaceURL() || state.Provider["api"] != "openai-completions" || state.Provider["apiKey"] != "human-managed" {
+		t.Fatalf("provider not wired to target while preserving credentials: %#v", state.Provider)
+	}
+	metadata, ok := state.Provider["metadata"].(map[string]any)
+	if !ok || metadata["owner"] != "operator" {
+		t.Fatalf("provider metadata not preserved: %#v", state.Provider)
+	}
+	models, ok := state.Provider["models"].([]any)
+	if !ok || !modelListContains(models, "existing") || !modelListContains(models, "default") {
+		t.Fatalf("provider models not merged: %#v", state.Provider["models"])
+	}
+	if _, ok := state.Allowlist["openrouter/e2e"]; !ok {
+		t.Fatalf("existing allowlist entry not preserved: %#v", state.Allowlist)
+	}
+	if _, ok := state.Allowlist["swobu/default"]; !ok {
+		t.Fatalf("Swobu model missing from allowlist: %#v", state.Allowlist)
+	}
+
+	configured, err := service.Plan(ClientOpenClaw, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.AlreadyConfigured() {
+		t.Fatalf("post-apply plan is not idempotent: %#v", configured)
+	}
+}
+
+func TestOpenClawCLIHelperProcess(t *testing.T) {
+	if os.Getenv("OPENCLAW_E2E_HELPER") != "1" {
+		return
+	}
+	args := helperProcessArgs(os.Args)
+	if err := runOpenClawE2ECommand(os.Getenv("OPENCLAW_E2E_STATE"), args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func helperProcessArgs(args []string) []string {
+	for index, arg := range args {
+		if arg == "--" {
+			return args[index+1:]
+		}
+	}
+	return nil
+}
+
+func runOpenClawE2ECommand(statePath string, args []string) error {
+	state, err := loadOpenClawE2EState(statePath)
+	if err != nil {
+		return err
+	}
+	if reflect.DeepEqual(args, []string{"config", "file"}) {
+		fmt.Println(state.ConfigPath)
+		return nil
+	}
+	if len(args) >= 3 && args[0] == "config" && args[1] == "get" {
+		var value any
+		switch args[2] {
+		case "agents.defaults.model.primary":
+			value = state.Primary
+		case "agents.defaults.model":
+			value = ""
+		case "models.providers.swobu":
+			value = state.Provider
+		case "agents.defaults.models":
+			value = state.Allowlist
+		default:
+			return fmt.Errorf("unsupported config get path %q", args[2])
+		}
+		if value == nil || value == "" {
+			return fmt.Errorf("configuration path %q is absent", args[2])
+		}
+		if len(args) == 4 && args[3] == "--json" {
+			return json.NewEncoder(os.Stdout).Encode(value)
+		}
+		fmt.Println(value)
+		return nil
+	}
+	if len(args) >= 4 && args[0] == "config" && args[1] == "set" {
+		switch args[2] {
+		case "agents.defaults.model.primary":
+			state.Primary = args[3]
+		case "models.providers.swobu":
+			if err := json.Unmarshal([]byte(args[3]), &state.Provider); err != nil {
+				return err
+			}
+		case "agents.defaults.models":
+			if err := json.Unmarshal([]byte(args[3]), &state.Allowlist); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported config set path %q", args[2])
+		}
+		return saveOpenClawE2EState(statePath, state)
+	}
+	return fmt.Errorf("unsupported OpenClaw command: %q", args)
+}
+
+func modelListContains(models []any, id string) bool {
+	for _, model := range models {
+		if object, ok := model.(map[string]any); ok && object["id"] == id {
+			return true
+		}
+	}
+	return false
+}
+
+func writeOpenClawE2EState(t *testing.T, path string, state openClawE2EState) {
+	t.Helper()
+	if err := saveOpenClawE2EState(path, state); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readOpenClawE2EState(t *testing.T, path string) openClawE2EState {
+	t.Helper()
+	state, err := loadOpenClawE2EState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func loadOpenClawE2EState(path string) (openClawE2EState, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return openClawE2EState{}, err
+	}
+	var state openClawE2EState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return openClawE2EState{}, err
+	}
+	return state, nil
+}
+
+func saveOpenClawE2EState(path string, state openClawE2EState) error {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
 }
 
 func TestOpenClawDeclaresSwobuProviderThenSelectsIt(t *testing.T) {

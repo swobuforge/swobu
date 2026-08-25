@@ -57,8 +57,7 @@ func orderedProtocolOptions(providerSpec string, candidates []string) []protocol
 		allowed[canonical] = struct{}{}
 	}
 	// The profile manifest is the concrete-contract authority. Model metadata
-	// may narrow it, but it must not reorder delivery variants or collapse two
-	// concrete contracts that share one semantic protocol kind.
+	// may narrow it, but the profile defines the default contract ordering.
 	out := make([]protocolOption, 0, len(allowed))
 	for _, protocol := range profile.ConcreteProviderProtocolsForSpec(providerSpec) {
 		if _, ok := allowed[protocol]; !ok {

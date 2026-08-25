@@ -29,22 +29,22 @@ func ClientHeaderRow(d *Disclosure, id clientconnect.ClientID, name string) *coc
 }
 
 func CheckingClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "checking…", func() { d.chooseClient(obs) }))
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "checking…", func() { d.chooseClient(obs.Client.ID) }))
 }
 
 func ConfiguredClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configured ↵", func() { d.chooseClient(obs) }))
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configured ↵", func() { d.chooseClient(obs.Client.ID) }))
 }
 
 func NeedsChangeClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
 	if obs.Applying {
-		return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configuring…", func() { d.chooseClient(obs) }))
+		return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configuring…", func() { d.chooseClient(obs.Client.ID) }))
 	}
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configure ↵", func() { d.chooseClient(obs) }))
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configure ↵", func() { d.chooseClient(obs.Client.ID) }))
 }
 
 func FailedClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "retry ↵", func() { d.chooseClient(obs) }))
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "retry ↵", func() { d.chooseClient(obs.Client.ID) }))
 }
 
 func PlanActionRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
