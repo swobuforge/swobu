@@ -368,22 +368,21 @@ start_swobu() {
     return
   fi
 
-  if ! exec 3<>/dev/tty; then
-    say ""
-    warn "Swobu was installed, but this session has no controlling terminal."
-    say "Start it:"
-    say "  $install_path"
-    return
-  fi
+	if ! ( : </dev/tty >/dev/tty ) 2>/dev/null; then
+		say ""
+		warn "Swobu was installed, but this session has no controlling terminal."
+		say "Start it:"
+		say "  $install_path"
+		return
+	fi
 
-  say ""
-  step "Starting Swobu"
-  if ! "$install_path" <&3 >&3 2>&3; then
-    warn "Swobu was installed, but startup failed."
-    say "Try again:"
-    say "  $install_path"
-  fi
-  exec 3>&- 3<&-
+	say ""
+	step "Starting Swobu"
+	if ! "$install_path" </dev/tty >/dev/tty 2>/dev/tty; then
+		warn "Swobu was installed, but startup failed."
+		say "Try again:"
+		say "  $install_path"
+	fi
 }
 
 start_swobu
