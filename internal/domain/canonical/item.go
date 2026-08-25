@@ -758,6 +758,26 @@ func (r ReasoningItem) Clone() ReasoningItem {
 	return ReasoningItem{parts: cloneReasoningParts(r.parts), opaque: r.opaque.Clone()}
 }
 
+// withTargetOrigin returns a reasoning item with its opaque thinking bound to target.
+func (r ReasoningItem) withTargetOrigin(targetID string, targetVersion uint64) (CanonicalItem, error) {
+	if r.opaque.IsZero() {
+		return NewReasoningItem(r.parts, r.opaque)
+	}
+	boundOpaque, err := r.opaque.withTargetOrigin(targetID, targetVersion)
+	if err != nil {
+		return CanonicalItem{}, err
+	}
+	return NewReasoningItem(r.parts, boundOpaque)
+}
+
+// withTargetOrigin returns a copy of the canonical item with opaque reasoning bound to target.
+func (i CanonicalItem) withTargetOrigin(targetID string, targetVersion uint64) (CanonicalItem, error) {
+	if i.Kind() != ItemKindReasoning || i.reasoning == nil {
+		return i.Clone(), nil
+	}
+	return i.reasoning.withTargetOrigin(targetID, targetVersion)
+}
+
 // Object returns an independent object input when populated.
 func (i ToolInput) Object() (JSONObject, bool) {
 	if i.object == nil || i.text != nil || i.webSearch != nil {

@@ -77,6 +77,9 @@ func ChatHostedSearchTool(fragment func() any, spelling string) chatcompletions.
 		if fragment != nil {
 			return []any{fragment()}, true, nil, nil
 		}
+		if spelling == "" {
+			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
+		}
 		return []any{chatcompletions.ProviderRequestTool{Type: spelling}}, true, nil, nil
 	}
 }
@@ -108,11 +111,55 @@ func ChatHostedSearchToolPolicy(spelling string) chatcompletions.ToolPolicyLower
 	}
 }
 
+// ChatOutOfBandHostedSearch consumes the canonical hosted-search declaration
+// when a provider enables search through top-level request parameters rather
+// than a Chat tool fragment.
+func ChatOutOfBandHostedSearch() chatcompletions.ToolLoweringRule {
+	return func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
+		if tool.Kind() != canonical.ToolKindWebSearch {
+			return nil, false, nil, nil
+		}
+		return nil, true, nil, nil
+	}
+}
+
+// ChatOutOfBandHostedSearchPolicy consumes specific hosted-search selection
+// after proving the corresponding canonical declaration was lowered.
+func ChatOutOfBandHostedSearchPolicy() chatcompletions.ToolPolicyLoweringRule {
+	return func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, _ wire.ToolNames) (any, bool, []compat.Change, error) {
+		if policy.Mode == canonical.ToolPolicyRequired {
+			if lowered.Len() == 0 {
+				return nil, false, nil, nil
+			}
+			for _, record := range lowered.Records {
+				if record.Kind != canonical.ToolKindWebSearch || record.FragmentCount != 0 {
+					return nil, false, nil, nil
+				}
+			}
+			return nil, true, nil, nil
+		}
+		if policy.Mode != canonical.ToolPolicySpecific {
+			return nil, false, nil, nil
+		}
+		key, ok := policy.SpecificID()
+		if !ok || key.Kind() != canonical.ToolKindWebSearch {
+			return nil, false, nil, nil
+		}
+		if _, ok := lowered.FindSource(key); !ok {
+			return nil, true, nil, canonical.BadRequest("specific web-search tool is not declared")
+		}
+		return nil, true, nil, nil
+	}
+}
+
 // ResponsesHostedSearchTool lowers canonical hosted search for Responses.
 func ResponsesHostedSearchTool(spelling string) responses.ToolLoweringRule {
 	return func(_ responses.ToolLoweringContext, tool canonical.ToolDeclaration) ([]responses.ProviderRequestTool, bool, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
 			return nil, false, nil, nil
+		}
+		if spelling == "" {
+			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
 		return []responses.ProviderRequestTool{{Type: spelling}}, true, nil, nil
 	}
@@ -150,6 +197,9 @@ func MessagesHostedSearchTool(typeName string, allowedCallers ...string) message
 	return func(_ messages.ToolLoweringContext, tool canonical.ToolDeclaration) ([]messages.ProviderRequestTool, bool, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
 			return nil, false, nil, nil
+		}
+		if typeName == "" {
+			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
 		toolDTO := messages.ProviderRequestTool{
 			Type: typeName,

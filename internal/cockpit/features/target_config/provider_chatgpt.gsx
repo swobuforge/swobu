@@ -157,7 +157,7 @@ templ (m *chatGPTAuthModeMenu) Render() {
 }
 
 templ ChatGPTAuthURLText(w *TargetConfig) {
-	<div class="flex-col w-full h-auto pl-2">
-		<span class="w-full h-auto" minWidth={0}>{chatGPTAuthURL(w)}</span>
+	<div class="pl-2 w-full">
+		@FlowText(chatGPTAuthURL(w))
 	</div>
 }

@@ -41,19 +41,28 @@ func ModelPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 	return picker
 }
 
-func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
-	errText := strings.TrimSpace(w.Catalog.Get().Err)
-	value := errText
-	if value == "" { value = "catalog failed" }
-	switch strings.ToLower(errText) {
+type catalogErrorClassification struct {
+	summary    string
+	showDetail bool
+}
+
+func classifyCatalogError(errText string) catalogErrorClassification {
+	trimmed := strings.TrimSpace(errText)
+	switch strings.ToLower(trimmed) {
 	case "project not found":
-		value = "project not found"
+		return catalogErrorClassification{summary: "project not found", showDetail: false}
 	case "unauthorized":
-		value = "unauthorized"
+		return catalogErrorClassification{summary: "unauthorized", showDetail: false}
 	case "none found":
-		value = "none found"
+		return catalogErrorClassification{summary: "none found", showDetail: false}
+	default:
+		return catalogErrorClassification{summary: "catalog failed", showDetail: trimmed != ""}
 	}
-	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), TargetModelLabel(w), value, "retry ↵", w.RetryCatalog)
+}
+
+func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
+	cls := classifyCatalogError(w.Catalog.Get().Err)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), TargetModelLabel(w), cls.summary, "retry ↵", w.RetryCatalog)
 	row.AutoFocus = true
 	return row
 }
@@ -234,10 +243,10 @@ type targetTail struct{ root *TargetConfig }
 func TargetConfigTail(w *TargetConfig) tui.Component { return &targetTail{root: w} }
 
 templ InertTargetField(label string, value string, action string) {
-	<div class="flex w-full">
-		<span class="w-2"> </span>
+	<div class="flex-row w-full">
+		<span class="w-2"></span>
 		<span class="w-18">{label}</span>
-		<span class="flex-1">{value}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{value}</span>
 		if action != "" { <span class="w-14">{action}</span> }
 	</div>
 }
@@ -252,6 +261,11 @@ templ (t *targetTail) Render() {
 			@ManualModelInput(t.root)
 		} else if targetCatalogFailed(t.root) && targetCatalogRetryable(t.root) {
 			@ModelCatalogRetry(t.root)
+			if cls := classifyCatalogError(t.root.Catalog.Get().Err); cls.showDetail {
+				<div class="pl-20 w-full">
+					@FlowText(strings.TrimSpace(t.root.Catalog.Get().Err))
+				</div>
+			}
 		} else if setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)
 		} else {

@@ -289,26 +289,32 @@ func staleRefreshNotice(message string) readmodel.Notice {
 	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
 }
 
+type FlowTextView = ui.FlowTextView
+
+func FlowText(text string) *FlowTextView {
+	return ui.FlowText(text)
+}
+
 templ ShellNotice(notice readmodel.Notice) {
-	<div class="flex-row w-full">
-		<span>{notice.Message}</span>
+	<div class="w-full">
+		@FlowText(notice.Message)
 	</div>
 }
 
 templ ShellHeader(model readmodel.CockpitReadModel) {
 	<div class="flex-row w-full">
-		<span class="w-9 font-bold">⛉ SWOBU</span>
+		<span class="w-9 font-bold nowrap">⛉ SWOBU</span>
 		<div class="flex-row gap-1 grow justify-end">
 			for _, tab := range model.Tabs {
 				if tab.Selected {
-					<span>{activeTabLabel(tab)}</span>
+					<span class="truncate nowrap" minWidth={0}>{activeTabLabel(tab)}</span>
 				} else {
-					<span>{inactiveTabLabel(tab)}</span>
+					<span class="truncate nowrap" minWidth={0}>{inactiveTabLabel(tab)}</span>
 				}
 			}
 		</div>
 		if model.HeaderRight != "" {
-			<span class="ml-2">{model.HeaderRight}</span>
+			<span class="ml-2 truncate nowrap" minWidth={0}>{model.HeaderRight}</span>
 		}
 	</div>
 }

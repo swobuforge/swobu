@@ -6,12 +6,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	ui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/clientconnect"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	cockpitui "github.com/swobuforge/swobu/internal/cockpit/ui"
 )
+
+func waitFor(t *testing.T, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("condition not met within timeout")
+}
 
 type fakeOperations struct {
 	clients       []clientconnect.Client
@@ -55,9 +68,9 @@ func connectTarget(t *testing.T) clientconnect.Target {
 func allSixClients() []clientconnect.Client {
 	return []clientconnect.Client{
 		{ID: clientconnect.ClientCodex, Name: "Codex CLI"},
-		{ID: clientconnect.ClientClaude, Name: "Claude Code", Configured: true},
+		{ID: clientconnect.ClientClaude, Name: "Claude Code"},
 		{ID: clientconnect.ClientKilo, Name: "Kilo Code"},
-		{ID: clientconnect.ClientPi, Name: "pi", Configured: true},
+		{ID: clientconnect.ClientPi, Name: "pi"},
 		{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"},
 		{ID: clientconnect.ClientHermes, Name: "Hermes Agent"},
 	}
@@ -80,6 +93,47 @@ func connectFixture(t *testing.T) (*Disclosure, *fakeOperations) {
 					{Field: "model", BeforeExists: true, Before: "gpt-5-preview", After: "default"},
 				},
 			},
+			clientconnect.ClientClaude: {
+				ClientID:   clientconnect.ClientClaude,
+				ClientName: "Claude Code",
+				ConfigPath: "/tmp/.claude/settings.json",
+				Target:     target,
+				Changes:    nil, // AlreadyConfigured
+			},
+			clientconnect.ClientKilo: {
+				ClientID:   clientconnect.ClientKilo,
+				ClientName: "Kilo Code",
+				ConfigPath: "/tmp/.kilo/config.json",
+				Target:     target,
+				Changes: []clientconnect.Change{
+					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
+				},
+			},
+			clientconnect.ClientPi: {
+				ClientID:   clientconnect.ClientPi,
+				ClientName: "pi",
+				ConfigPath: "/tmp/.pi/config.toml",
+				Target:     target,
+				Changes:    nil, // AlreadyConfigured
+			},
+			clientconnect.ClientOpenClaw: {
+				ClientID:   clientconnect.ClientOpenClaw,
+				ClientName: "OpenClaw",
+				ConfigPath: "/tmp/.openclaw/config.json",
+				Target:     target,
+				Changes: []clientconnect.Change{
+					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
+				},
+			},
+			clientconnect.ClientHermes: {
+				ClientID:   clientconnect.ClientHermes,
+				ClientName: "Hermes Agent",
+				ConfigPath: "/tmp/.hermes/config.yaml",
+				Target:     target,
+				Changes: []clientconnect.Change{
+					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
+				},
+			},
 		},
 	}
 	d := New(target, ops)
@@ -87,27 +141,35 @@ func connectFixture(t *testing.T) (*Disclosure, *fakeOperations) {
 }
 
 func TestDiscoveryRunsOnlyOnDeliberateOpenAndReopen(t *testing.T) {
-	configured := false
-	ops := &fakeOperations{discover: func() []clientconnect.Client {
-		return []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI", Configured: configured}}
-	}}
+	ops := &fakeOperations{
+		clients: []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}},
+		plans: map[clientconnect.ClientID]clientconnect.Plan{
+			clientconnect.ClientCodex: {
+				ClientID:   clientconnect.ClientCodex,
+				ClientName: "Codex CLI",
+				ConfigPath: "/tmp/.codex/config.toml",
+				Changes: []clientconnect.Change{
+					{Field: "backend", BeforeExists: false, After: "swobu"},
+				},
+			},
+		},
+	}
 	d := New(connectTarget(t), ops)
 	_ = testkit.RenderMountedTrimmed(t, d, 100, 10)
 	if ops.discoverCalls != 0 {
 		t.Fatalf("collapsed mount discovery calls = %d", ops.discoverCalls)
 	}
 	d.toggleEndpoint()
-	if ops.discoverCalls != 1 || d.Clients.Get()[0].Configured {
-		t.Fatalf("first open = calls %d clients %#v", ops.discoverCalls, d.Clients.Get())
+	if ops.discoverCalls != 1 || len(d.Observations.Get()) != 1 {
+		t.Fatalf("first open = calls %d observations %#v", ops.discoverCalls, d.Observations.Get())
 	}
 	d.toggleEndpoint()
 	if ops.discoverCalls != 1 {
 		t.Fatalf("close discovery calls = %d", ops.discoverCalls)
 	}
-	configured = true
 	d.toggleEndpoint()
-	if ops.discoverCalls != 2 || !d.Clients.Get()[0].Configured {
-		t.Fatalf("reopen = calls %d clients %#v", ops.discoverCalls, d.Clients.Get())
+	if ops.discoverCalls != 2 || len(d.Observations.Get()) != 1 {
+		t.Fatalf("reopen = calls %d observations %#v", ops.discoverCalls, d.Observations.Get())
 	}
 }
 
@@ -124,7 +186,7 @@ func TestDisclosureRestingAndExpandedFrames(t *testing.T) {
 	}
 	d.toggleEndpoint()
 	expanded := testkit.RenderMountedTrimmed(t, d, 100, 20)
-	for _, want := range []string{"Codex CLI", "configure ↵", "Claude Code", "configured", "Kilo Code", "pi", "Other clients", "setup ↵"} {
+	for _, want := range []string{"Codex CLI", "configure ↵", "Claude Code", "configured ↵", "Kilo Code", "pi", "Other clients", "setup ↵"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded frame missing %q:\n%s", want, expanded)
 		}
@@ -138,7 +200,7 @@ func TestDisclosureRestingAndExpandedFrames(t *testing.T) {
 func TestDisclosurePlanChildScopeAndApplyConfiguresClientWithoutToast(t *testing.T) {
 	d, ops := connectFixture(t)
 	d.toggleEndpoint()
-	d.chooseClient(d.Clients.Get()[0])
+	d.chooseClient(d.Observations.Get()[0])
 	frame := testkit.RenderMountedTrimmed(t, d, 100, 20)
 	for _, want := range []string{"Codex CLI", "close ↵", "backend", "openai → swobu", "base URL", "https://api.openai.com/v1 → /c/work", "model", "gpt-5-preview → default", "config", "/tmp/.codex/config.toml", "replace ↵"} {
 		if !strings.Contains(frame, want) {
@@ -154,22 +216,14 @@ func TestDisclosurePlanChildScopeAndApplyConfiguresClientWithoutToast(t *testing
 		t.Fatalf("plan frame used 'writes' instead of 'config':\n%s", frame)
 	}
 
-	// Make discovery return configured after apply
-	ops.discover = func() []clientconnect.Client {
-		return []clientconnect.Client{
-			{ID: clientconnect.ClientCodex, Name: "Codex CLI", Configured: true},
-			{ID: clientconnect.ClientClaude, Name: "Claude Code", Configured: true},
-		}
-	}
-
-	d.applyPlan()
+	d.applyPlan(clientconnect.ClientCodex)
 	if ops.applied.ClientID != clientconnect.ClientCodex {
 		t.Fatalf("applied = %#v", ops.applied)
 	}
 
-	// Browse list returned with Codex CLI configured
+	// Browse list returned with Codex CLI configured ↵ and zero extra Discover calls
 	frame = testkit.RenderMountedTrimmed(t, d, 100, 20)
-	if !strings.Contains(frame, "Codex CLI") || !strings.Contains(frame, "configured") || strings.Contains(frame, "/tmp/.codex/config.toml") {
+	if !strings.Contains(frame, "Codex CLI") || !strings.Contains(frame, "configured ↵") || strings.Contains(frame, "/tmp/.codex/config.toml") {
 		t.Fatalf("success frame:\n%s", frame)
 	}
 }
@@ -191,7 +245,8 @@ func TestPlanActionGrammarDistinguishesInsertFromOverwrite(t *testing.T) {
 				change.BeforeExists, change.Before = true, "https://old"
 			}
 			plan := clientconnect.Plan{ClientID: clientconnect.ClientCodex, ConfigPath: "/tmp/config", Target: connectTarget(t), Changes: []clientconnect.Change{change}}
-			frame := testkit.RenderMountedTrimmed(t, PlanActionRow(d, plan), 100, 2)
+			obs := clientObservation{Client: clientconnect.Client{ID: clientconnect.ClientCodex, Name: "Codex CLI"}, Kind: observationNeedsChange, Plan: plan}
+			frame := testkit.RenderMountedTrimmed(t, PlanActionRow(d, obs), 100, 2)
 			if !strings.Contains(frame, tc.want) || strings.Contains(frame, tc.forbidden) {
 				t.Fatalf("action grammar frame:\n%s", frame)
 			}
@@ -203,13 +258,13 @@ func TestDisclosureApplyErrorStatesNothingChangedAndKeepsPlan(t *testing.T) {
 	d, ops := connectFixture(t)
 	ops.applyErr = errors.New("client configuration changed; nothing was overwritten")
 	d.toggleEndpoint()
-	d.chooseClient(d.Clients.Get()[0])
-	d.applyPlan()
+	d.chooseClient(d.Observations.Get()[0])
+	d.applyPlan(clientconnect.ClientCodex)
 	frame := testkit.RenderMountedTrimmed(t, d, 100, 22)
-	if !strings.Contains(frame, "nothing was overwritten") || !strings.Contains(frame, "replace ↵") {
+	if !strings.Contains(frame, "nothing was") || !strings.Contains(frame, "overwritten") || !strings.Contains(frame, "replace ↵") {
 		t.Fatalf("error frame:\n%s", frame)
 	}
-	if !d.Child.Get().hasPlan(clientconnect.ClientCodex) {
+	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
 		t.Fatalf("error dismissed plan state: %#v", d.Child.Get())
 	}
 }
@@ -355,9 +410,9 @@ func TestDisclosureBackScopeGrammar(t *testing.T) {
 	}
 
 	// Open named-client plan
-	d.chooseClient(d.Clients.Get()[0])
-	if !d.Child.Get().hasPlan(clientconnect.ClientCodex) {
-		t.Fatal("chooseClient did not set plan")
+	d.chooseClient(d.Observations.Get()[0])
+	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
+		t.Fatal("chooseClient did not set client child")
 	}
 
 	// Esc / Back() from plan -> returns to browse (endpoint stays open)
@@ -394,6 +449,10 @@ func TestDisclosureAppLoopEnterDisclosesEndpoint(t *testing.T) {
 	defer h.Close()
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyDown})
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyEnter})
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) > 0
+	})
 	if !strings.Contains(h.Frame(), "Codex CLI") {
 		t.Fatalf("Enter did not disclose endpoint:\n%s", h.Frame())
 	}
@@ -418,6 +477,10 @@ func TestDisclosureAppLoopOtherClientsManualSetupFlow(t *testing.T) {
 	// 1. Open endpoint
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyDown})
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyEnter})
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) > 0
+	})
 	if !strings.Contains(h.Frame(), "Other clients") {
 		t.Fatalf("expected Other clients row:\n%s", h.Frame())
 	}
@@ -466,14 +529,7 @@ func TestDisclosureAppLoopOtherClientsManualSetupFlow(t *testing.T) {
 }
 
 func TestDisclosureAppLoopNamedClientPlanFlow(t *testing.T) {
-	d, ops := connectFixture(t)
-	// Start with unconfigured Codex CLI
-	configured := false
-	ops.discover = func() []clientconnect.Client {
-		return []clientconnect.Client{
-			{ID: clientconnect.ClientCodex, Name: "Codex CLI", Configured: configured},
-		}
-	}
+	d, _ := connectFixture(t)
 
 	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
 	if err != nil {
@@ -485,8 +541,12 @@ func TestDisclosureAppLoopNamedClientPlanFlow(t *testing.T) {
 	// 1. Open endpoint
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyDown})
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyEnter})
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) > 0 && d.Observations.Get()[0].Kind == observationNeedsChange
+	})
 
-	// 2. Focus Codex CLI (first unconfigured client) and press Enter
+	// 2. Focus Codex CLI and press Enter
 	for i := 0; i < 5; i++ {
 		h.DispatchKey(ui.KeyEvent{Key: ui.KeyDown})
 		frame := h.Frame()
@@ -497,13 +557,14 @@ func TestDisclosureAppLoopNamedClientPlanFlow(t *testing.T) {
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyEnter})
 
 	// Plan view is displayed
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().isClient(clientconnect.ClientCodex)
+	})
 	frame := h.Frame()
 	if !strings.Contains(frame, "config") || !strings.Contains(frame, "replace ↵") {
 		t.Fatalf("expected plan view:\n%s", frame)
 	}
-
-	// After apply, discover will return configured: true
-	configured = true
 
 	// 3. Navigate to config row and press Enter (apply)
 	for i := 0; i < 5; i++ {
@@ -515,9 +576,13 @@ func TestDisclosureAppLoopNamedClientPlanFlow(t *testing.T) {
 	}
 	h.DispatchKey(ui.KeyEvent{Key: ui.KeyEnter})
 
-	// Returns to browse list, Codex CLI is now configured
+	// Returns to browse list, Codex CLI is now configured ↵
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().kind == childNone
+	})
 	frame = h.Frame()
-	if !strings.Contains(frame, "Codex CLI") || !strings.Contains(frame, "configured") {
+	if !strings.Contains(frame, "Codex CLI") || !strings.Contains(frame, "configured ↵") {
 		t.Fatalf("expected configured row:\n%s", frame)
 	}
 }
@@ -546,8 +611,16 @@ func TestWorkspaceIdentityKeyRemountsConnectDisclosure(t *testing.T) {
 	h.Open()
 	defer h.Close()
 	root.mounted.toggleEndpoint()
-	root.mounted.chooseClient(root.mounted.Clients.Get()[0])
-	if !root.mounted.Child.Get().hasPlan(clientconnect.ClientCodex) || !root.mounted.EndpointOpen.Get() {
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(root.mounted.Observations.Get()) > 0
+	})
+	root.mounted.chooseClient(root.mounted.Observations.Get()[0])
+	waitFor(t, func() bool {
+		h.Frame()
+		return root.mounted.Child.Get().isClient(clientconnect.ClientCodex)
+	})
+	if !root.mounted.EndpointOpen.Get() {
 		t.Fatal("workspace A disclosure was not open")
 	}
 
@@ -560,7 +633,11 @@ func TestWorkspaceIdentityKeyRemountsConnectDisclosure(t *testing.T) {
 		t.Fatalf("workspace B reused A state: target=%q open=%v child=%#v", root.mounted.Target.WorkspaceSlug(), root.mounted.EndpointOpen.Get(), root.mounted.Child.Get())
 	}
 	root.mounted.toggleEndpoint()
-	if got := root.mounted.Clients.Get(); len(got) != 1 || got[0].Name != "Claude B" {
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(root.mounted.Observations.Get()) > 0
+	})
+	if got := root.mounted.Observations.Get(); len(got) != 1 || got[0].Client.Name != "Claude B" {
 		t.Fatalf("workspace B discovery = %#v", got)
 	}
 }
@@ -590,7 +667,7 @@ func TestFullFrameMultiWidthFixtures(t *testing.T) {
 			}
 
 			// 3. Named-client replacement Plan
-			d.chooseClient(d.Clients.Get()[0])
+			d.chooseClient(d.Observations.Get()[0])
 			planReplace := testkit.RenderMountedTrimmed(t, d, w, 20)
 			if !strings.Contains(planReplace, "Codex CLI") || !strings.Contains(planReplace, "config") || !strings.Contains(planReplace, "replace ↵") {
 				t.Fatalf("plan replace fixture failed at width %d:\n%s", w, planReplace)
@@ -600,14 +677,8 @@ func TestFullFrameMultiWidthFixtures(t *testing.T) {
 			dAdditive, _ := connectFixture(t)
 			dAdditive.toggleEndpoint()
 			dAdditive.Child.Set(childScope{
-				kind: childPlan,
-				plan: clientconnect.Plan{
-					ClientID:   clientconnect.ClientKilo,
-					ClientName: "Kilo Code",
-					ConfigPath: "/tmp/.kilo/config.json",
-					Target:     connectTarget(t),
-					Changes:    []clientconnect.Change{{Field: "endpoint", After: connectTarget(t).WorkspaceURL()}},
-				},
+				kind:     childClient,
+				clientID: clientconnect.ClientKilo,
 			})
 			planApply := testkit.RenderMountedTrimmed(t, dAdditive, w, 20)
 			if !strings.Contains(planApply, "Kilo Code") || !strings.Contains(planApply, "config") || !strings.Contains(planApply, "apply ↵") {
@@ -702,22 +773,9 @@ func TestCockpitSurfaceWorstCasePlanAtAllWidths(t *testing.T) {
 		t.Run("Width_"+string(rune('0'+w/100))+string(rune('0'+(w/10)%10))+string(rune('0'+w%10)), func(t *testing.T) {
 			d, ops := connectFixture(t)
 			ops.clients = allSixClients()
-			ops.plans = map[clientconnect.ClientID]clientconnect.Plan{
-				clientconnect.ClientCodex: {
-					ClientID:   clientconnect.ClientCodex,
-					ClientName: "Codex CLI",
-					ConfigPath: "/home/alice/.codex/config.toml",
-					Target:     connectTarget(t),
-					Changes: []clientconnect.Change{
-						{Field: "backend", BeforeExists: true, Before: "openai", After: "swobu"},
-						{Field: "base URL", BeforeExists: true, Before: "https://api.openai.com/v1", After: connectTarget(t).WorkspaceURL()},
-						{Field: "model", BeforeExists: true, Before: "gpt-5-preview", After: "default"},
-					},
-				},
-			}
 
 			surface := &fullWorkspaceSurface{Disclosure: d, Slug: "dev"}
-			h, err := testkit.NewHarnessAt(surface, w, 24)
+			h, err := testkit.NewHarnessAt(surface, w, 32)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -726,7 +784,15 @@ func TestCockpitSurfaceWorstCasePlanAtAllWidths(t *testing.T) {
 
 			// Open endpoint and choose Codex CLI to expand worst-case Plan
 			d.toggleEndpoint()
-			d.chooseClient(d.Clients.Get()[0])
+			waitFor(t, func() bool {
+				h.Frame()
+				return len(d.Observations.Get()) > 0
+			})
+			d.chooseClient(d.Observations.Get()[0])
+			waitFor(t, func() bool {
+				h.Frame()
+				return d.Child.Get().isClient(clientconnect.ClientCodex)
+			})
 			h.App().MarkDirty()
 
 			frame := h.FrameTrimmed()
@@ -759,7 +825,7 @@ func TestCockpitSurfaceWorstCasePlanAtAllWidths(t *testing.T) {
 			}
 
 			// 4. All sibling client rows remain visible in the browse list
-			for _, want := range []string{"Claude Code", "configured", "Kilo Code", "configure ↵", "pi", "OpenClaw", "Hermes Agent", "Other clients", "setup ↵"} {
+			for _, want := range []string{"Claude Code", "configured ↵", "Kilo Code", "configure ↵", "pi", "OpenClaw", "Hermes Agent", "Other clients", "setup ↵"} {
 				if !strings.Contains(frame, want) {
 					t.Fatalf("surface missing sibling client element %q:\n%s", want, frame)
 				}
@@ -793,6 +859,10 @@ func TestCockpitSurfaceOtherClientsManualSetupAtAllWidths(t *testing.T) {
 
 			// Open endpoint and open Other clients manual setup
 			d.toggleEndpoint()
+			waitFor(t, func() bool {
+				h.Frame()
+				return len(d.Observations.Get()) > 0
+			})
 			d.openManualSetup()
 			h.App().MarkDirty()
 
@@ -819,7 +889,7 @@ func TestCockpitSurfaceOtherClientsManualSetupAtAllWidths(t *testing.T) {
 			}
 
 			// 3. Sibling client rows remain visible
-			for _, want := range []string{"Codex CLI", "configure ↵", "Claude Code", "configured", "Kilo Code", "pi", "OpenClaw", "Hermes Agent"} {
+			for _, want := range []string{"Codex CLI", "configure ↵", "Claude Code", "configured ↵", "Kilo Code", "pi", "OpenClaw", "Hermes Agent"} {
 				if !strings.Contains(frame, want) {
 					t.Fatalf("surface missing sibling client element %q:\n%s", want, frame)
 				}
@@ -845,21 +915,9 @@ func TestCockpitSurfaceOtherClientsManualSetupAtAllWidths(t *testing.T) {
 func TestCockpitSurfaceStructuralStress60Columns(t *testing.T) {
 	d, ops := connectFixture(t)
 	ops.clients = allSixClients()
-	ops.plans = map[clientconnect.ClientID]clientconnect.Plan{
-		clientconnect.ClientCodex: {
-			ClientID:   clientconnect.ClientCodex,
-			ClientName: "Codex CLI",
-			ConfigPath: "/home/alice/.codex/config.toml",
-			Target:     connectTarget(t),
-			Changes: []clientconnect.Change{
-				{Field: "backend", BeforeExists: true, Before: "openai", After: "swobu"},
-				{Field: "base URL", BeforeExists: true, Before: "https://api.openai.com/v1", After: connectTarget(t).WorkspaceURL()},
-			},
-		},
-	}
 
 	surface := &fullWorkspaceSurface{Disclosure: d, Slug: "dev"}
-	h, err := testkit.NewHarnessAt(surface, 60, 24)
+	h, err := testkit.NewHarnessAt(surface, 60, 32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +926,15 @@ func TestCockpitSurfaceStructuralStress60Columns(t *testing.T) {
 
 	// 1. Test stress with Plan open
 	d.toggleEndpoint()
-	d.chooseClient(d.Clients.Get()[0])
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) > 0
+	})
+	d.chooseClient(d.Observations.Get()[0])
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().isClient(clientconnect.ClientCodex)
+	})
 	h.App().MarkDirty()
 
 	frame := h.FrameTrimmed()
@@ -979,7 +1045,9 @@ type remountRoot struct {
 func (r *remountRoot) Render(app *ui.App) *ui.Element {
 	root := ui.New(ui.WithDisplay(ui.DisplayFlex), ui.WithDirection(ui.Column), ui.WithWidthPercent(100))
 	root.AddChild(app.Mount(r, ui.MountKey(0, r.key), func() ui.Component {
-		r.mounted = New(r.target, r.ops)
+		if r.mounted == nil || r.mounted.Target.WorkspaceURL() != r.target.WorkspaceURL() {
+			r.mounted = New(r.target, r.ops)
+		}
 		return r.mounted
 	}))
 	return root
@@ -1001,4 +1069,497 @@ func (r *connectRoot) KeyMap() ui.KeyMap {
 		ui.OnStop(ui.KeyEnter, cockpitui.ActivateCurrentSelection),
 	)
 	return keys
+}
+
+func TestAsyncDiscoveryDeliversResultsWithoutBlockingMountedApp(t *testing.T) {
+	d, ops := connectFixture(t)
+	unblock := make(chan struct{})
+	ops.discover = func() []clientconnect.Client {
+		<-unblock
+		return []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}}
+	}
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	d.toggleEndpoint()
+	if !d.EndpointOpen.Get() {
+		t.Fatal("endpoint was not opened immediately")
+	}
+	if len(d.Observations.Get()) != 0 {
+		t.Fatalf("observations populated before discovery unblocked: %#v", d.Observations.Get())
+	}
+
+	// Pre-unblock frame must contain 'finding installed clients…', 'wait', and 'Other clients'
+	frame := h.Frame()
+	if !strings.Contains(frame, "finding installed clients…") || !strings.Contains(frame, "wait") || !strings.Contains(frame, "Other clients") {
+		t.Fatalf("expected pre-unblock finding installed clients frame:\n%s", frame)
+	}
+
+	close(unblock)
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 1
+	})
+	if d.Observations.Get()[0].Client.Name != "Codex CLI" {
+		t.Fatalf("unexpected discovered client: %#v", d.Observations.Get())
+	}
+}
+
+func TestAsyncDiscoveryStaleResultIgnoredOnRapidReopen(t *testing.T) {
+	d, ops := connectFixture(t)
+	firstUnblock := make(chan struct{})
+	callCount := 0
+	ops.discover = func() []clientconnect.Client {
+		callCount++
+		if callCount == 1 {
+			<-firstUnblock
+			return []clientconnect.Client{{ID: clientconnect.ClientClaude, Name: "Stale First"}}
+		}
+		return []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Fresh Second"}}
+	}
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	// 1. First open (slow)
+	d.toggleEndpoint()
+
+	// 2. Close and reopen (fresh)
+	d.toggleEndpoint()
+	d.toggleEndpoint()
+
+	// Wait for fresh second discovery
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 1 && d.Observations.Get()[0].Client.Name == "Fresh Second"
+	})
+
+	// 3. Unblock first discovery (must be ignored due to endpointGeneration)
+	close(firstUnblock)
+	h.Frame()
+	time.Sleep(10 * time.Millisecond)
+	h.Frame()
+
+	obs := d.Observations.Get()
+	if len(obs) != 1 || obs[0].Client.Name != "Fresh Second" {
+		t.Fatalf("stale discovery overwritten fresh result: %#v", obs)
+	}
+}
+
+func TestAsyncPlanInspectionCompletesAndUpdatesParentRowAfterChildScopeClose(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}}
+	planUnblock := make(chan struct{})
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	// Wrap ops.plans with blocking behavior
+	customOps := &delayedPlanOperations{
+		fakeOperations: ops,
+		planUnblock:    planUnblock,
+	}
+	d.Ops = customOps
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 1
+	})
+
+	d.chooseClient(d.Observations.Get()[0])
+
+	// While Plan inspection is in flight, user backs out to parent browse list
+	d.Back()
+	if d.Child.Get().kind != childNone {
+		t.Fatalf("child scope not closed on Back: %#v", d.Child.Get())
+	}
+
+	// Unblock delayed plan: according to RFC §17, closing child scope does not cancel in-flight inspection;
+	// completion updates the parent row's observation state.
+	close(planUnblock)
+	waitFor(t, func() bool {
+		h.Frame()
+		obs := d.Observations.Get()
+		return len(obs) == 1 && obs[0].Kind == observationNeedsChange
+	})
+
+	// Child scope remains closed, and parent row displays configure ↵
+	if d.Child.Get().kind != childNone {
+		t.Fatalf("child scope opened unexpectedly: %#v", d.Child.Get())
+	}
+	frame := h.Frame()
+	if !strings.Contains(frame, "Codex CLI") || !strings.Contains(frame, "configure ↵") {
+		t.Fatalf("parent row not updated with inspection result:\n%s", frame)
+	}
+}
+
+type delayedPlanOperations struct {
+	*fakeOperations
+	planUnblock chan struct{}
+}
+
+func (d *delayedPlanOperations) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+	<-d.planUnblock
+	return d.fakeOperations.Plan(id, target)
+}
+
+func TestAsyncApplyInFlightGuardAndLocalConfiguredUpdate(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}}
+	ops.plans = map[clientconnect.ClientID]clientconnect.Plan{
+		clientconnect.ClientCodex: {
+			ClientID:   clientconnect.ClientCodex,
+			ClientName: "Codex CLI",
+			ConfigPath: "/tmp/codex.toml",
+			Target:     connectTarget(t),
+			Changes: []clientconnect.Change{
+				{Field: "backend", BeforeExists: false, After: "swobu"},
+			},
+		},
+	}
+
+	applyUnblock := make(chan struct{})
+	applyCalls := 0
+	delayedOps := &delayedApplyOperations{
+		fakeOperations: ops,
+		applyUnblock:   applyUnblock,
+		onApply:        func() { applyCalls++ },
+	}
+	d.Ops = delayedOps
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 1 && d.Observations.Get()[0].Kind == observationNeedsChange
+	})
+
+	d.chooseClient(d.Observations.Get()[0])
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().isClient(clientconnect.ClientCodex)
+	})
+
+	// Reset discover call counter before Apply
+	ops.discoverCalls = 0
+
+	// First apply (enters in-flight)
+	d.applyPlan(clientconnect.ClientCodex)
+	if !d.Observations.Get()[0].Applying {
+		t.Fatal("applyPlan did not set Applying on observation")
+	}
+
+	// In-flight frame shows 'configuring…'
+	frame := h.Frame()
+	if !strings.Contains(frame, "configuring…") {
+		t.Fatalf("expected configuring… during in-flight apply:\n%s", frame)
+	}
+
+	// Duplicate apply attempt while in flight is ignored
+	d.applyPlan(clientconnect.ClientCodex)
+
+	// Unblock apply
+	close(applyUnblock)
+
+	waitFor(t, func() bool {
+		h.Frame()
+		obs := d.Observations.Get()
+		return len(obs) == 1 && !obs[0].Applying && obs[0].Kind == observationMatch && d.Child.Get().kind == childNone
+	})
+
+	if applyCalls != 1 {
+		t.Fatalf("applyCalls = %d, want 1", applyCalls)
+	}
+	// Zero post-Apply Discover calls required by Connect RFC
+	if ops.discoverCalls != 0 {
+		t.Fatalf("Apply invoked Discover %d times; want 0 post-Apply Discover calls", ops.discoverCalls)
+	}
+	obs := d.Observations.Get()
+	if len(obs) != 1 || obs[0].Kind != observationMatch {
+		t.Fatalf("client observation was not updated to observationMatch: %#v", obs)
+	}
+}
+
+type delayedApplyOperations struct {
+	*fakeOperations
+	applyUnblock chan struct{}
+	onApply      func()
+}
+
+func (d *delayedApplyOperations) Apply(plan clientconnect.Plan) error {
+	if d.onApply != nil {
+		d.onApply()
+	}
+	<-d.applyUnblock
+	return d.fakeOperations.Apply(plan)
+}
+
+func TestDisclosurePlanErrorOpensClientChildScopeAndEscCloses(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{
+		{ID: clientconnect.ClientCodex, Name: "Codex CLI"},
+		{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"},
+	}
+	delete(ops.plans, clientconnect.ClientOpenClaw)
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		return len(d.Observations.Get()) == 2
+	})
+	d.chooseClient(d.Observations.Get()[1]) // OpenClaw, which has no plan in ops.plans -> fails
+
+	if !d.Child.Get().isClient(clientconnect.ClientOpenClaw) {
+		t.Fatalf("expected childClient for OpenClaw, got %#v", d.Child.Get())
+	}
+
+	frame := testkit.RenderMountedTrimmed(t, d, 100, 20)
+	if !strings.Contains(frame, "OpenClaw") || !strings.Contains(frame, "close ↵") {
+		t.Fatalf("expected OpenClaw close ↵ header:\n%s", frame)
+	}
+	if !strings.Contains(frame, "plan failed. Nothing changed.") {
+		t.Fatalf("expected error detail in frame:\n%s", frame)
+	}
+	openClawIdx := strings.Index(frame, "OpenClaw")
+	errIdx := strings.Index(frame, "plan failed")
+	otherIdx := strings.Index(frame, "Other clients")
+	if !(openClawIdx < errIdx && errIdx < otherIdx) {
+		t.Fatalf("layout ordering violated: openclaw=%d, err=%d, other=%d\nFrame:\n%s", openClawIdx, errIdx, otherIdx, frame)
+	}
+
+	// Back / Esc closes the error scope
+	if !d.Back() {
+		t.Fatal("Back() returned false on error child scope")
+	}
+	if d.Child.Get().kind != childNone {
+		t.Fatalf("expected childNone after Back, got %#v", d.Child.Get())
+	}
+	frameAfterBack := testkit.RenderMountedTrimmed(t, d, 100, 20)
+	if strings.Contains(frameAfterBack, "plan failed") {
+		t.Fatalf("error remained after Back():\n%s", frameAfterBack)
+	}
+	if !strings.Contains(frameAfterBack, "OpenClaw") || !strings.Contains(frameAfterBack, "retry ↵") {
+		t.Fatalf("OpenClaw should show retry ↵ after Back():\n%s", frameAfterBack)
+	}
+}
+
+func TestDetailRowMultilineSemanticAlignment(t *testing.T) {
+	errText := "OpenClaw is not automatically wireable: SyntaxError: Unexpected token.\nNothing changed."
+	rendered := testkit.RenderMountedTrimmed(t, DetailRow(errText), 100, 4)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d:\n%s", len(lines), rendered)
+	}
+	for i := 0; i < 2; i++ {
+		line := lines[i]
+		if !strings.HasPrefix(line, strings.Repeat(" ", 20)) {
+			t.Fatalf("line %d not aligned to column 20: %q", i, line)
+		}
+	}
+}
+
+func TestDetailRowWordWrapping(t *testing.T) {
+	longError := "OpenClaw is not automatically wireable: Config path not found: agents.defaults.model.primary. Nothing changed."
+	rendered := testkit.RenderMountedTrimmed(t, DetailRow(longError), 80, 6)
+	lines := strings.Split(rendered, "\n")
+	nonEmpty := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		nonEmpty++
+		if !strings.HasPrefix(line, strings.Repeat(" ", 20)) {
+			t.Fatalf("line %d not aligned to column 20: %q", i, line)
+		}
+		if len(line) > 80 {
+			t.Fatalf("line %d exceeded width 80 (got %d chars): %q", i, len(line), line)
+		}
+	}
+	if nonEmpty < 2 {
+		t.Fatalf("expected at least 2 wrapped lines, got %d:\n%s", nonEmpty, rendered)
+	}
+	if !strings.Contains(rendered, "Nothing") || !strings.Contains(rendered, "changed.") {
+		t.Fatalf("expected full content to survive word wrapping:\n%s", rendered)
+	}
+}
+
+func TestInFlightCheckingClientCanBeOpenedAndRetainsSinglePlanCall(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}}
+	planUnblock := make(chan struct{})
+	planCalls := 0
+
+	customOps := &countingDelayedPlanOps{
+		fakeOperations: ops,
+		planUnblock:    planUnblock,
+		onPlan:         func() { planCalls++ },
+	}
+	d.Ops = customOps
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 1 && d.Observations.Get()[0].Kind == observationChecking
+	})
+
+	if planCalls != 1 {
+		t.Fatalf("planCalls after discovery = %d, want 1", planCalls)
+	}
+
+	// While checking, activate the checking client row
+	obs := d.Observations.Get()[0]
+	d.chooseClient(obs)
+
+	// Child scope opened immediately
+	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
+		t.Fatalf("child scope not opened for in-flight client: %#v", d.Child.Get())
+	}
+
+	// Plan call count must remain 1 (no duplicate Plan launched)
+	if planCalls != 1 {
+		t.Fatalf("planCalls after chooseClient = %d, want 1", planCalls)
+	}
+
+	// Child view presents "checking configuration…" and "wait"
+	frame := h.Frame()
+	for _, want := range []string{"Codex CLI", "close ↵", "checking configuration…", "wait"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("in-flight child frame missing %q:\n%s", want, frame)
+		}
+	}
+
+	// Unblock Plan inspection
+	close(planUnblock)
+	waitFor(t, func() bool {
+		h.Frame()
+		obs := d.Observations.Get()
+		return len(obs) == 1 && obs[0].Kind == observationNeedsChange
+	})
+
+	// Frame transitions smoothly to complete Plan view
+	planFrame := h.Frame()
+	for _, want := range []string{"Codex CLI", "close ↵", "backend", "config", "replace ↵"} {
+		if !strings.Contains(planFrame, want) {
+			t.Fatalf("completed plan frame missing %q:\n%s", want, planFrame)
+		}
+	}
+}
+
+type countingDelayedPlanOps struct {
+	*fakeOperations
+	planUnblock chan struct{}
+	onPlan      func()
+}
+
+func (c *countingDelayedPlanOps) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+	if c.onPlan != nil {
+		c.onPlan()
+	}
+	<-c.planUnblock
+	return c.fakeOperations.Plan(id, target)
+}
+
+func TestApplyingParentRowStateAndSelectiveChildScopeClose(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{
+		{ID: clientconnect.ClientCodex, Name: "Codex CLI"},
+		{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"},
+	}
+
+	applyUnblock := make(chan struct{})
+	applyCalls := 0
+	delayedOps := &delayedApplyOperations{
+		fakeOperations: ops,
+		applyUnblock:   applyUnblock,
+		onApply:        func() { applyCalls++ },
+	}
+	d.Ops = delayedOps
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		return len(d.Observations.Get()) == 2 && d.Observations.Get()[0].Kind == observationNeedsChange
+	})
+
+	// Open Codex CLI plan and launch Apply
+	d.chooseClient(d.Observations.Get()[0])
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().isClient(clientconnect.ClientCodex) && d.Observations.Get()[0].Kind == observationNeedsChange
+	})
+	d.applyPlan(clientconnect.ClientCodex)
+
+	if !d.Observations.Get()[0].Applying {
+		t.Fatal("Codex CLI observation not marked Applying")
+	}
+
+	// User closes child scope with Back / Esc
+	d.Back()
+	if d.Child.Get().kind != childNone {
+		t.Fatalf("expected childNone after Back, got %#v", d.Child.Get())
+	}
+
+	// Parent browse list renders "configuring…" for Codex CLI
+	browseFrame := h.Frame()
+	if !strings.Contains(browseFrame, "Codex CLI") || !strings.Contains(browseFrame, "configuring…") {
+		t.Fatalf("parent browse list did not show configuring…:\n%s", browseFrame)
+	}
+
+	// User opens Other clients manual setup child while Codex is still applying
+	d.openManualSetup()
+	if !d.Child.Get().isManual() {
+		t.Fatalf("failed to open manual setup: %#v", d.Child.Get())
+	}
+
+	// Unblock Codex Apply
+	close(applyUnblock)
+
+	waitFor(t, func() bool {
+		h.Frame()
+		obs := d.Observations.Get()
+		return len(obs) == 2 && !obs[0].Applying && obs[0].Kind == observationMatch
+	})
+
+	// Apply completion must NOT close the unrelated (manual setup) child scope!
+	if !d.Child.Get().isManual() {
+		t.Fatalf("apply completion closed unrelated child scope: %#v", d.Child.Get())
+	}
+
+	// Codex CLI is now observationMatch
+	if d.Observations.Get()[0].Kind != observationMatch {
+		t.Fatalf("Codex CLI observation = %v, want observationMatch", d.Observations.Get()[0].Kind)
+	}
 }

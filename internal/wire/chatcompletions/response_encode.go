@@ -20,10 +20,14 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
+	finishReason, err := chatClientFinishReason(output.Completion(), len(message.ToolCalls) > 0)
+	if err != nil {
+		return wire.ClientDocumentResult{}, err
+	}
 	projectionDecisions, err := finalizeChatClientProjection(
 		chatItemsContainReasoning(items),
 		message.Content != "" || len(message.ToolCalls) > 0,
-		output.Completion().Reason(),
+		finishReason,
 	)
 	changes = append(changes, projectionDecisions...)
 	if err != nil {
@@ -40,7 +44,7 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 		Choices: []chatCompletionsBufferedChoiceDTO{{
 			Index:        0,
 			Message:      message,
-			FinishReason: chatClientFinishReason(output.Completion().Reason(), len(message.ToolCalls) > 0),
+			FinishReason: finishReason,
 		}},
 		Usage: chatUsageFromCanonical(output.Usage()),
 	})
@@ -57,11 +61,22 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(_ canonical.CanonicalReque
 
 // chatClientFinishReason derives terminal meaning from canonical output while
 // the canonical completion retains the provider reason for diagnostics.
-func chatClientFinishReason(providerReason string, hasToolCalls bool) string {
-	if hasToolCalls {
-		return "tool_calls"
+func chatClientFinishReason(completion canonical.Completion, hasToolCalls bool) (string, error) {
+	switch completion.Class() {
+	case canonical.CompletionCompleted:
+		if hasToolCalls {
+			return "tool_calls", nil
+		}
+		return "stop", nil
+	case canonical.CompletionIncomplete:
+		return "length", nil
+	case canonical.CompletionDeclined:
+		return "content_filter", nil
+	case canonical.CompletionFailed:
+		return "", canonical.NewBackendError("", 0, "backend response failed: "+completion.Reason(), "")
+	default:
+		return "", canonical.InternalError("canonical completion class cannot be projected to Chat Completions")
 	}
-	return sse.DefaultFinishReason(providerReason, "stop")
 }
 
 func chatItemsContainReasoning(items []canonical.CanonicalItem) bool {

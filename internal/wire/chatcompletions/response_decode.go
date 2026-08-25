@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -396,6 +397,7 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		case canonical.ToolTypeFunction:
 			object, err := canonical.ParseJSONObject([]byte(state.Args))
 			if err != nil {
+				logInvalidStreamedToolArguments(s.exchangeID, s.resultID, idx, state, err)
 				return canonical.NewBackendError("", 0, "chat completions streamed tool arguments are invalid", "")
 			}
 			input = canonical.NewJSONObjectToolInput(object)
@@ -439,6 +441,40 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 	return nil
+}
+
+func logInvalidStreamedToolArguments(exchangeID, responseID string, index int, state streamToolState, err error) {
+	slog.Warn("chat completions streamed tool arguments are invalid",
+		"component", "protocol.chat_completions",
+		"event", "streamed_tool_arguments_invalid",
+		"exchange_id", exchangeID,
+		"provider_response_id", responseID,
+		"tool_call_index", index,
+		"tool_call_id", state.WireCallID,
+		"tool_name", state.WireName,
+		"argument_bytes", len(state.Args),
+		"argument_fragments", len(state.ArgDeltas),
+		"parse_error_kind", streamedToolArgumentErrorKind(state.Args, err),
+	)
+}
+
+func streamedToolArgumentErrorKind(arguments string, err error) string {
+	if strings.TrimSpace(arguments) == "" {
+		return "empty"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "duplicate key"):
+		return "duplicate_key"
+	case strings.Contains(message, "top-level value is not an object"):
+		return "non_object"
+	case strings.Contains(message, "trailing"):
+		return "trailing_data"
+	case !json.Valid([]byte(arguments)):
+		return "invalid_json"
+	default:
+		return "invalid_object"
+	}
 }
 
 func (s *chatCompletionsEventReader) validateToolOccurrenceFrontier() error {

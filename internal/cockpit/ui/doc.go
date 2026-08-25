@@ -111,6 +111,22 @@
 // workaround.
 //
 // ---------------------------------------------------------------------------
+// Text Geometry & FlowText
+// ---------------------------------------------------------------------------
+//
+// Cockpit text has three canonical geometries:
+//  1. Single-line row value: nowrap + truncate in horizontal flex rows.
+//  2. Flowing text: lossless wrapping + variable height in block layout (FlowText).
+//  3. Editable input: single-line horizontal text entry viewport (InlineEditor).
+//
+// FlowText is the sole primitive for lossless flowing text (URLs, raw errors,
+// multi-line instructions, file paths). It configures go-tui with WithWrap(true),
+// WithTruncate(false), WithMinWidth(0), WithHeightAuto(), and WithWidthPercent(100).
+// Invariant: FlowText must always be placed in a column/block container with
+// layout-owned padding, never as a wrapping child of a horizontal flex row alongside
+// fixed sibling elements.
+//
+// ---------------------------------------------------------------------------
 // Package boundary
 // ---------------------------------------------------------------------------
 //

@@ -25,6 +25,35 @@ func TestChatResponseUnknownOnlyCallCannotSatisfyToolCallsFinish(t *testing.T) {
 	}
 }
 
+func TestStreamedToolArgumentErrorKindDoesNotExposeArguments(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments string
+		want      string
+	}{
+		{name: "empty", arguments: " ", want: "empty"},
+		{name: "invalid JSON", arguments: `{"secret":"token"`, want: "invalid_json"},
+		{name: "non object", arguments: `["secret"]`, want: "non_object"},
+		{name: "trailing data", arguments: `{"secret":"token"}{}`, want: "trailing_data"},
+		{name: "duplicate key", arguments: `{"secret":1,"secret":2}`, want: "duplicate_key"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := canonical.ParseJSONObject([]byte(test.arguments))
+			if err == nil {
+				t.Fatal("invalid arguments unexpectedly parsed")
+			}
+			got := streamedToolArgumentErrorKind(test.arguments, err)
+			if got != test.want {
+				t.Fatalf("error kind = %q, want %q", got, test.want)
+			}
+			if strings.Contains(got, "secret") || strings.Contains(got, "token") {
+				t.Fatalf("error kind exposed argument content: %q", got)
+			}
+		})
+	}
+}
+
 func TestChatStreamRejectsContradictoryTypeAfterToolAdmission(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))

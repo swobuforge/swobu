@@ -378,6 +378,49 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	}
 }
 
+func TestExecute_EncodesWebSearchDeclaration(t *testing.T) {
+	t.Parallel()
+
+	rt := &captureRoundTripper{}
+	exec := NewExecutor(&http.Client{Transport: rt}, stubCredentialResolver{})
+	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := newTestProviderRequest("test-ex", protocolkind.Responses,
+		canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("gpt-5.4-mini"),
+			Items: []canonical.CanonicalItem{
+				canonicaltest.ToolDeclarations(t, set.Declarations()...),
+				canonicaltest.Message(t, canonical.MessageRoleUser, "search news"),
+			},
+		}),
+		carrier.Document{},
+		exchange.NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		provider.NewTargetSnapshot(
+			"draft",
+			string(profile.ProviderSpecChatGPT),
+			"https://api.openai.com/v1",
+			"secret:chatgpt/plus/sess_abc",
+			protocolkind.Responses,
+			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
+	)
+	resp, err := executeTestProviderRequest(context.Background(), exec, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	streamIngress, ok := resp.(provider.StreamIngress)
+	if !ok || streamIngress.Stream.Body == nil {
+		t.Fatal("expected transport stream response")
+	}
+	_ = streamIngress.Stream.Body.Close()
+
+	body := mustJSONBodyMap(t, rt.lastBody)
+	if tools, ok := body["tools"].([]any); ok && len(tools) != 0 {
+		t.Fatalf("body tools = %#v, want 0 tools (web_search omitted on ChatGPT)", body["tools"])
+	}
+}
+
 func TestExecute_UsesProvidedCodexBaseURL(t *testing.T) {
 	t.Parallel()
 

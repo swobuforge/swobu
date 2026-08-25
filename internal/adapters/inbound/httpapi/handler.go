@@ -132,11 +132,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeModelResolutionHeaders(writer)
-	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, nil)
 
 	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
 	if deliveryResult.Kind != delivery.Succeeded {
 		err := deliveryResult.Err
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, err)
 		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
@@ -158,6 +158,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
+	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, nil)
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 }
 
@@ -288,7 +289,7 @@ func logRequestOutcome(
 			var backendErr canonical.BackendError
 			if errors.As(err, &backendErr) {
 				result = "backend_error"
-				statusCode = backendErr.StatusCode
+				statusCode = statusCodeForBackendError(backendErr)
 				errorOrigin = string(canonical.ErrorOriginBackend)
 				if targetID == "" {
 					targetID = strings.TrimSpace(backendErr.TargetID) // swobu:io-string source=boundary

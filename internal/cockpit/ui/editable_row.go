@@ -333,19 +333,12 @@ func (r *EditableRow) wrapWithHint(root *tui.Element) *tui.Element {
 }
 
 func editableRowHelperLine(text string) *tui.Element {
-	row := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+	block := tui.New(
 		tui.WithWidthPercent(100),
+		tui.WithPaddingTRBL(0, 0, 0, 20),
 	)
-	row.AddChild(tui.New(tui.WithWidth(2)))
-	row.AddChild(tui.New(tui.WithWidth(18)))
-	row.AddChild(tui.New(
-		tui.WithText(text),
-		tui.WithFlexGrow(1),
-		tui.WithWrap(false),
-		tui.WithTruncate(true),
-	))
-	return row
+	block.AddChild(FlowText(text).Root)
+	return block
 }
 
 func (r *EditableRow) rowWidth() int {

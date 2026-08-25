@@ -1,6 +1,7 @@
 > name              _                                                       required
                     enter a workspace name
-  endpoint          after first target              preview
+  endpoint                                                                  preview
+                    after first target
 
 
 

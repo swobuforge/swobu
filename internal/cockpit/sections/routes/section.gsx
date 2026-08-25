@@ -103,7 +103,7 @@ templ (s *SectionView) Render() {
 templ StepHeaderRow(label string) {
 	<div class="flex-row w-full mt-1">
 		<span class="w-2"></span>
-		<span>{label}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{label}</span>
 	</div>
 }
 
@@ -111,7 +111,7 @@ templ SectionInertRow(label string, value string, action string) {
 	<div class="flex-row w-full">
 		<span class="w-2"></span>
 		<span class="w-18">{label}</span>
-		<span class="w-32">{value}</span>
-		<span>{action}</span>
+		<span class="grow truncate nowrap" minWidth={0}>{value}</span>
+		if action != "" { <span class="w-14">{action}</span> }
 	</div>
 }

@@ -226,3 +226,120 @@ func mustReasoningPart(t *testing.T, kind ReasoningPartKind, text string) Reason
 	}
 	return part
 }
+
+func TestOpaqueThinkingTargetOriginProvenance(t *testing.T) {
+	unbound, err := NewResponsesOpaqueThinking(ResponsesReasoningReplay{EncryptedContent: "cipher-token", ItemID: "rs_orig"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Unbound origin
+	if unbound.MatchesTarget("target-a", 1) {
+		t.Fatal("unbound opaque thinking matched target-a:1")
+	}
+
+	// 2. Invalid origin binding parameters
+	if _, err := unbound.withTargetOrigin("", 1); err == nil {
+		t.Fatal("empty target ID accepted for origin binding")
+	}
+	if _, err := unbound.withTargetOrigin("target-a", 0); err == nil {
+		t.Fatal("zero target version accepted for origin binding")
+	}
+
+	// 3. Provider binding
+	bound, err := unbound.withTargetOrigin("target-a", 1)
+	if err != nil {
+		t.Fatalf("withTargetOrigin failed: %v", err)
+	}
+	if !bound.MatchesTarget("target-a", 1) {
+		t.Fatal("bound opaque thinking did not match target-a:1")
+	}
+	if bound.MatchesTarget("target-a", 2) {
+		t.Fatal("bound opaque thinking matched different target version")
+	}
+	if bound.MatchesTarget("target-b", 1) {
+		t.Fatal("bound opaque thinking matched different target ID")
+	}
+
+	// 4. Same binding is stable
+	reboundSame, err := bound.withTargetOrigin("target-a", 1)
+	if err != nil {
+		t.Fatalf("rebinding to same target failed: %v", err)
+	}
+	if !reboundSame.MatchesTarget("target-a", 1) {
+		t.Fatal("rebound same did not match target-a:1")
+	}
+
+	// 5. Different rebinding is rejected
+	if _, err := bound.withTargetOrigin("target-b", 1); err == nil {
+		t.Fatal("rebinding to different target ID was accepted")
+	}
+	if _, err := bound.withTargetOrigin("target-a", 2); err == nil {
+		t.Fatal("rebinding to different target version was accepted")
+	}
+
+	// 6. Clone preserves origin
+	cloned := bound.Clone()
+	if !cloned.MatchesTarget("target-a", 1) {
+		t.Fatal("cloned bound opaque thinking did not match target-a:1")
+	}
+
+	// 7. Zero value is safe
+	zero := OpaqueThinking{}
+	if zeroBound, err := zero.withTargetOrigin("target-a", 1); err != nil || !zeroBound.IsZero() {
+		t.Fatalf("zero withTargetOrigin = (%v, %v), want (zero, nil)", zeroBound, err)
+	}
+	if zero.MatchesTarget("target-a", 1) {
+		t.Fatal("zero MatchesTarget returned true")
+	}
+}
+
+func TestBoundResponseIdentityStreamBindsReasoningItem(t *testing.T) {
+	unbound, err := NewResponsesOpaqueThinking(ResponsesReasoningReplay{EncryptedContent: "enc_data", ItemID: "rs_123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := NewReasoningItem([]ReasoningPart{mustReasoningPart(t, ReasoningPartSummary, "thinking summary")}, unbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream := NewSliceEventReader([]Event{
+		{Kind: EventResponseIdentity, Payload: ResponseIdentityPayload{Response: ResponseRef{SwobuID: "resp_native"}}},
+		{Kind: EventItemCompleted, Payload: ItemEvent{Position: ItemPosition{Item: 0}, Payload: ItemCompletedPayload{Item: item}}},
+	})
+
+	boundStream := NewBoundResponseIdentityStream(stream, ResponseBinding{
+		SwobuID:       "resp_swobu",
+		TargetID:      "target-provider-x",
+		TargetVersion: 3,
+	})
+
+	ev1, err := boundStream.Next(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev1.Kind != EventResponseIdentity {
+		t.Fatalf("first event = %v, want EventResponseIdentity", ev1.Kind)
+	}
+
+	ev2, err := boundStream.Next(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev2.Kind != EventItemCompleted {
+		t.Fatalf("second event = %v, want EventItemCompleted", ev2.Kind)
+	}
+
+	completed := ev2.Payload.(ItemEvent).Payload.(ItemCompletedPayload)
+	reasoning, ok := completed.Item.Reasoning()
+	if !ok {
+		t.Fatal("completed item was not reasoning")
+	}
+	if !reasoning.Opaque().MatchesTarget("target-provider-x", 3) {
+		t.Fatal("completed reasoning item was not bound to target-provider-x:3")
+	}
+	if reasoning.Opaque().MatchesTarget("target-provider-x", 2) {
+		t.Fatal("completed reasoning item matched target-provider-x:2")
+	}
+}

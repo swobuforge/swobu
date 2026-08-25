@@ -82,6 +82,11 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("modelscope") {
 		t.Fatal("ModelScope provider spec should be supported")
 	}
+	for _, spec := range []string{"opencode-zen", "nous", "commandcode", "venice"} {
+		if !SupportsSpec(spec) {
+			t.Fatalf("%s provider spec should be supported", spec)
+		}
+	}
 	obsoleteIdentity := "openai_" + "compatible"
 	if SupportsSpec(obsoleteIdentity) {
 		t.Fatal("obsolete custom-endpoint provider identity must fail closed")
@@ -94,8 +99,8 @@ func TestCatalog_SpecSupport(t *testing.T) {
 // durable shape reasons, never recreate this inventory.
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 36 {
-		t.Fatalf("provider profile count = %d, want 36", len(profiles))
+	if len(profiles) != 40 {
+		t.Fatalf("provider profile count = %d, want 40", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -120,6 +125,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		ProviderSpecOpenRouter, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
 		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope,
+		ProviderSpecOpenCodeZen, ProviderSpecNous, ProviderSpecCommandCode, ProviderSpecVenice,
 	} {
 		if _, ok := seen[providerID]; !ok {
 			t.Fatalf("provider catalog omits %q", providerID)
@@ -127,7 +133,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 33,
+		routing.ConnectionShapeStandard: 37,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,

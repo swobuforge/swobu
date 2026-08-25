@@ -233,10 +233,14 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 			frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 		}
+		stopReason, err := messagesStopReasonForCompletion(event.Completion, s.sawToolUse)
+		if err != nil {
+			return nil, err
+		}
 		raw, _ := json.Marshal(messagesDeltaEventDTO{
 			Type: "message_delta",
 			Delta: messagesDeltaBodyDTO{
-				StopReason:   messagesStopReasonForCompletion(event.Completion, s.sawToolUse),
+				StopReason:   stopReason,
 				StopSequence: nil,
 			},
 			// Messages terminal usage is cumulative. Carry every known

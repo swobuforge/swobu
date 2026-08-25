@@ -31,6 +31,7 @@ const (
 	RequestItemsToolResultContent           CapabilityPath = "request.items.tool_result.content"
 	RequestItemsToolResultContentBoundaries CapabilityPath = "request.items.tool_result.content.boundaries"
 	RequestItemsToolResultIsError           CapabilityPath = "request.items.tool_result.is_error"
+	RequestItemsReasoningReplay             CapabilityPath = "request.items.reasoning.replay"
 	RequestItemsResponsesReasoningReplay    CapabilityPath = "request.items.reasoning.responses_replay"
 	RequestTools                            CapabilityPath = "request.tools"
 	RequestToolsKind                        CapabilityPath = "request.tools.kind"

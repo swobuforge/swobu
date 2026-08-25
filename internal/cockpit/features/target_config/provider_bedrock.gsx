@@ -286,11 +286,11 @@ templ (m *bedrockAuthenticationMenu) Render() {
 	<div class="flex-col w-full">
 		if m.choosing.Get() { @CredentialChooser(m.chooser.Get())
 		} else if strings.TrimSpace(m.target.Draft.Get().CredentialRef) == "" {
-			if detail := BedrockAuthenticationDetail(m.target); detail != "" { <div><span>{detail}</span></div> }
+			if detail := BedrockAuthenticationDetail(m.target); detail != "" { <div class="w-full">@FlowText(detail)</div> }
 			@BedrockRefreshIdentityOption(m)
 			@BedrockUseAPIKeyOption(m)
 		} else {
-			<div><span>{bedrockCredentialDetail(m.target.Draft.Get().CredentialRef)}</span></div>
+			<div class="w-full">@FlowText(bedrockCredentialDetail(m.target.Draft.Get().CredentialRef))</div>
 			@BedrockChangeCredentialOption(m)
 			@BedrockUseAWSIdentityOption(m)
 		}

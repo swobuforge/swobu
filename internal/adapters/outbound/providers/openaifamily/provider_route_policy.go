@@ -186,7 +186,14 @@ func LMStudioPolicy() ProviderRoutePolicy {
 // GMIPolicy retains GMI's documented Messages authentication headers. Its
 // other route behavior is the common Bearer OpenAI-family policy.
 func GMIPolicy() ProviderRoutePolicy {
-	policy := StandardBearerPolicy(profile.ProviderSpecGMI)
+	return BearerWithMessagesAPIKeyPolicy(profile.ProviderSpecGMI)
+}
+
+// BearerWithMessagesAPIKeyPolicy retains Bearer authentication for standard
+// OpenAI routes and adds the Anthropic-native headers required by a provider's
+// Messages compatibility endpoint.
+func BearerWithMessagesAPIKeyPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
+	policy := StandardBearerPolicy(providerID)
 	policy.applyProtocolHeaders = func(kind protocolkind.ProtocolKind, token string, headers HeaderSetter) {
 		if kind != protocolkind.Messages || headers == nil {
 			return

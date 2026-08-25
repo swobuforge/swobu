@@ -25,34 +25,34 @@ func TestChatResponseToolCallOverridesProviderStopTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, canonical.Completed("stop"))
-	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"tool_calls"`)) {
-		t.Fatalf("Chat response terminal = %s, want tool_calls", encoded.Document.RawBytes())
-	}
+	for _, providerReason := range []string{"stop", "completed"} {
+		t.Run(providerReason, func(t *testing.T) {
+			response := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{call}, canonical.Completed(providerReason))
+			encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"tool_calls"`)) {
+				t.Fatalf("Chat response terminal = %s, want tool_calls", encoded.Document.RawBytes())
+			}
 
-	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
-		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
-	))
-	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(
-		context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := io.ReadAll(streamed.Stream.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(raw, []byte(`"finish_reason":"tool_calls"`)) {
-		t.Fatalf("Chat stream terminal = %s, want tool_calls", raw)
+			events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage()))
+			streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := io.ReadAll(streamed.Stream.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(raw, []byte(`"finish_reason":"tool_calls"`)) {
+				t.Fatalf("Chat stream terminal = %s, want tool_calls", raw)
+			}
+		})
 	}
 }
 
-func TestChatResponseTextPreservesProviderStopTerminal(t *testing.T) {
+func TestChatResponseTextProjectsSuccessfulTerminalVocabulary(t *testing.T) {
 	message, err := canonical.NewMessageItem(
 		canonical.MessageRoleAssistant,
 		[]canonical.MessagePart{canonical.NewTextMessagePart("done")},
@@ -60,13 +60,54 @@ func TestChatResponseTextPreservesProviderStopTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{message}, canonical.Completed("stop"))
+	for _, providerReason := range []string{"completed", "stop", "end_turn", "whatever-provider-called-it"} {
+		t.Run(providerReason, func(t *testing.T) {
+			response := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{message}, canonical.Completed(providerReason))
+			encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"stop"`)) || bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"`+providerReason+`"`)) && providerReason != "stop" {
+				t.Fatalf("text response terminal = %s, want protocol stop", encoded.Document.RawBytes())
+			}
+
+			events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage()))
+			streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := io.ReadAll(streamed.Stream.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(raw, []byte(`"finish_reason":"stop"`)) || providerReason != "stop" && bytes.Contains(raw, []byte(`"finish_reason":"`+providerReason+`"`)) {
+				t.Fatalf("stream terminal = %s, want protocol stop", raw)
+			}
+		})
+	}
+}
+
+func TestChatResponseIncompleteProjectsLength(t *testing.T) {
+	message := canonicaltest.Message(t, canonical.MessageRoleAssistant, "partial")
+	response := canonicaltest.Response(t, "resp_1", "m", []canonical.CanonicalItem{message}, canonical.Incomplete("max_output_tokens"))
 	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"stop"`)) || bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"tool_calls"`)) {
-		t.Fatalf("text response terminal = %s, want stop", encoded.Document.RawBytes())
+	if !bytes.Contains(encoded.Document.RawBytes(), []byte(`"finish_reason":"length"`)) {
+		t.Fatalf("buffered terminal = %s, want length", encoded.Document.RawBytes())
+	}
+	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents("exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage()))
+	streamed, err := (ResponseStreamEncoder{}).EncodeResponseStream(context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(streamed.Stream.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"finish_reason":"length"`)) {
+		t.Fatalf("stream terminal = %s, want length", raw)
 	}
 }
 
