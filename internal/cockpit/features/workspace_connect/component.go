@@ -68,7 +68,6 @@ type Disclosure struct {
 	Feedback           *tui.State[copyFeedback]
 	app                *tui.App
 	endpointGeneration uint64
-	clientSeq          map[clientconnect.ClientID]uint64
 }
 
 func New(target clientconnect.Target, ops connectOperations) *Disclosure {
@@ -83,7 +82,6 @@ func New(target clientconnect.Target, ops connectOperations) *Disclosure {
 		EndpointOpen:     tui.NewState(false),
 		Child:            tui.NewState(childScope{}),
 		Feedback:         tui.NewState(copyFeedback{}),
-		clientSeq:        make(map[clientconnect.ClientID]uint64),
 	}
 }
 
@@ -190,8 +188,9 @@ func (d *Disclosure) toggleEndpoint() {
 
 func (d *Disclosure) startDiscovery(endpointGen uint64) {
 	target := d.Target
+	ops := d.Ops
 	if !d.hasLiveApp() {
-		clients := d.Ops.Discover(target)
+		clients := ops.Discover(target)
 		obsList := make([]clientObservation, len(clients))
 		for i, c := range clients {
 			obsList[i] = clientObservation{
@@ -200,7 +199,7 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 			}
 		}
 		for i, c := range clients {
-			plan, err := d.Ops.Plan(c.ID, target)
+			plan, err := ops.Plan(c.ID, target)
 			if err != nil {
 				obsList[i].Kind = observationFailed
 				obsList[i].Err = err.Error()
@@ -219,7 +218,7 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 
 	app := d.app
 	go func() {
-		clients := d.Ops.Discover(target)
+		clients := ops.Discover(target)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
 				return
@@ -227,7 +226,6 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 			d.DiscoveryPending.Set(false)
 			obsList := make([]clientObservation, len(clients))
 			for i, c := range clients {
-				d.clientSeq[c.ID]++
 				obsList[i] = clientObservation{
 					Client: c,
 					Kind:   observationChecking,
@@ -237,25 +235,20 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 
 			// Launch parallel Plan inspections for each discovered client
 			for _, c := range clients {
-				d.launchInspection(endpointGen, c.ID, d.clientSeq[c.ID])
+				d.launchInspection(endpointGen, c.ID, target, ops, app)
 			}
 		})
 	}()
 }
 
-func (d *Disclosure) launchInspection(endpointGen uint64, clientID clientconnect.ClientID, clientSeq uint64) {
-	target := d.Target
-	app := d.app
+func (d *Disclosure) launchInspection(endpointGen uint64, clientID clientconnect.ClientID, target clientconnect.Target, ops connectOperations, app *tui.App) {
 	if app == nil {
 		return
 	}
 	go func() {
-		plan, err := d.Ops.Plan(clientID, target)
+		plan, err := ops.Plan(clientID, target)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
-				return
-			}
-			if d.clientSeq[clientID] != clientSeq {
 				return
 			}
 			obsList := append([]clientObservation(nil), d.Observations.Get()...)
@@ -291,24 +284,39 @@ func (d *Disclosure) closeChildren() {
 	d.closeChildScope()
 }
 
-func (d *Disclosure) chooseClient(obs clientObservation) {
-	clientID := obs.Client.ID
+func (d *Disclosure) observationForClient(clientID clientconnect.ClientID) (clientObservation, bool) {
+	for _, obs := range d.Observations.Get() {
+		if obs.Client.ID == clientID {
+			return obs, true
+		}
+	}
+	return clientObservation{}, false
+}
+
+func (d *Disclosure) chooseClient(clientID clientconnect.ClientID) {
 	if d.Child.Get().isClient(clientID) {
 		d.closeChildScope()
 		return
 	}
+
+	// Look up current observation state. If the client is not present,
+	// do not open child scope or trigger an inspection.
+	currentObs, ok := d.observationForClient(clientID)
+	if !ok {
+		return
+	}
+
 	d.Child.Set(childScope{kind: childClient, clientID: clientID})
 	d.Feedback.Set(copyFeedback{})
 
-	// If already in-flight checking or applying, do not launch a new Plan
-	if obs.Kind == observationChecking || obs.Applying {
+	if currentObs.Kind == observationChecking || currentObs.Applying {
 		return
 	}
 
 	// Trigger fresh inspection on activation (configured, needs change, or failed)
-	d.clientSeq[clientID]++
-	clientSeq := d.clientSeq[clientID]
 	endpointGen := d.endpointGeneration
+	target := d.Target
+	ops := d.Ops
 
 	obsList := append([]clientObservation(nil), d.Observations.Get()...)
 	for i := range obsList {
@@ -321,7 +329,7 @@ func (d *Disclosure) chooseClient(obs clientObservation) {
 	d.Observations.Set(obsList)
 
 	if !d.hasLiveApp() {
-		plan, err := d.Ops.Plan(clientID, d.Target)
+		plan, err := ops.Plan(clientID, target)
 		obsList = append([]clientObservation(nil), d.Observations.Get()...)
 		for i := range obsList {
 			if obsList[i].Client.ID == clientID {
@@ -343,7 +351,7 @@ func (d *Disclosure) chooseClient(obs clientObservation) {
 		return
 	}
 
-	d.launchInspection(endpointGen, clientID, clientSeq)
+	d.launchInspection(endpointGen, clientID, target, ops, d.app)
 }
 
 func (d *Disclosure) openManualSetup() {
@@ -368,6 +376,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 
 	plan := targetObs.Plan
 	endpointGen := d.endpointGeneration
+	ops := d.Ops
 
 	nextObsList := append([]clientObservation(nil), obsList...)
 	nextObsList[targetIdx].Applying = true
@@ -375,7 +384,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 	d.Observations.Set(nextObsList)
 
 	if !d.hasLiveApp() {
-		err := d.Ops.Apply(plan)
+		err := ops.Apply(plan)
 		updated := append([]clientObservation(nil), d.Observations.Get()...)
 		for i := range updated {
 			if updated[i].Client.ID == clientID {
@@ -405,7 +414,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 
 	app := d.app
 	go func() {
-		err := d.Ops.Apply(plan)
+		err := ops.Apply(plan)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
 				return

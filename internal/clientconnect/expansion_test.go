@@ -138,6 +138,25 @@ func TestDiscoveryIsolatesPresenceAndPlanFailures(t *testing.T) {
 	}
 }
 
+func TestDiscoveryDoesNotInvokePlanCurrent(t *testing.T) {
+	original := adapters
+	t.Cleanup(func() { adapters = original })
+	adapters = []adapter{
+		{
+			id:      "test-client",
+			name:    "Test Client",
+			present: func(*Service) (bool, error) { return true, nil },
+			planCurrent: func(*Service, Target) (plannedMutation, error) {
+				panic("planCurrent must not be called during Discover")
+			},
+		},
+	}
+	clients := (&Service{}).Discover(testTarget(t))
+	if len(clients) != 1 || clients[0].ID != "test-client" {
+		t.Fatalf("unexpected clients: %#v", clients)
+	}
+}
+
 func TestKiloAndPiPresenceAvoidPlanningAbsentClients(t *testing.T) {
 	home := t.TempDir()
 	service := &Service{homeDir: func() (string, error) { return home, nil }, getenv: func(string) string { return "" }, lookPath: func(string) (string, error) { return "", os.ErrNotExist }}
