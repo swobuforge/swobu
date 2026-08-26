@@ -128,7 +128,7 @@ func TestDiscoveryPaginatesNativeModelsAndUsesBaseModelID(t *testing.T) {
 	if got := strings.Join(paths, ","); got != "/v1beta/models,/v1beta/models?pageToken=page-two" {
 		t.Fatalf("requests = %s", got)
 	}
-	if len(result.Options) != 2 || result.Options[0].Name != "gemini-1" || result.Options[0].ModelName != "First" || result.Options[1].Name != "gemini-2" || result.Options[1].ModelName != "Second" {
+	if len(result.Options) != 2 || result.Options[0].Name != "gemini-1" || result.Options[0].ModelName != "gemini-1" || result.Options[1].Name != "gemini-2" || result.Options[1].ModelName != "gemini-2" {
 		t.Fatalf("deployments = %#v", result.Options)
 	}
 }
@@ -146,7 +146,7 @@ func TestDiscoveryUsesExactModelsResourceNameWhenBaseModelIDIsAbsent(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Options) != 1 || result.Options[0].Name != "gemini-current" || result.Options[0].ModelName != "Current" {
+	if len(result.Options) != 1 || result.Options[0].Name != "gemini-current" || result.Options[0].ModelName != "gemini-current" {
 		t.Fatalf("deployments = %#v", result.Options)
 	}
 }

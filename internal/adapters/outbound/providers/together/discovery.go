@@ -58,7 +58,7 @@ func (d discovery) serverlessModels(ctx context.Context, target provider.TargetS
 		if id == "" {
 			continue
 		}
-		deployments = append(deployments, profile.NewModelAuthoringOption(id, model.DisplayName, model.Organization, "", model.Type, nil, ""))
+		deployments = append(deployments, profile.NewModelAuthoringOption(id, id, model.Organization, "", model.Type, nil, ""))
 	}
 	return uniqueSorted(deployments), nil
 }
@@ -88,7 +88,7 @@ func (d discovery) dedicatedEndpoints(ctx context.Context, target provider.Targe
 		if name == "" {
 			continue
 		}
-		deployments = append(deployments, profile.NewModelAuthoringOption(name, endpoint.Model, "Together AI", "", "dedicated", nil, ""))
+		deployments = append(deployments, profile.NewModelAuthoringOption(name, name, "Together AI", "", "dedicated", nil, ""))
 	}
 	return uniqueSorted(deployments), nil
 }

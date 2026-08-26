@@ -77,12 +77,8 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 			if modelID == "" {
 				continue
 			}
-			label := strings.TrimSpace(model.DisplayName) // swobu:io-string source=provider-wire
-			if label == "" {
-				label = modelID
-			}
 			deployments = append(deployments, profile.NewModelAuthoringOption(
-				modelID, label, string(profile.ProviderSpecGemini), "", string(profile.ProviderSpecGemini),
+				modelID, modelID, string(profile.ProviderSpecGemini), "", string(profile.ProviderSpecGemini),
 				profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecGemini)), "",
 			))
 		}

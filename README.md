@@ -361,13 +361,6 @@ Bug reports and compatibility reports are welcome.
 
 ---
 
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Swobu's current architecture was rebuilt during OpenAI Build Week 2026 using GPT 5.6 Sol.
-</details>
-
----
-
 <p align="center">
   <strong>One model name. Any capacity underneath.</strong>
 </p>

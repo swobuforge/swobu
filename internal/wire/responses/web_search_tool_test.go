@@ -170,7 +170,7 @@ func TestDecodeRequestResumesIDLessCodexWebSearchHistory(t *testing.T) {
 		"tools":[{"type":"web_search"}],
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"find the deadline"}]},
-			{"type":"web_search_call","status":"completed","action":{"type":"search","query":"site:openai.com Build Week submission deadline","queries":["site:openai.com Build Week submission deadline"]}},
+			{"type":"web_search_call","status":"completed","action":{"type":"search","query":"site:openai.com documentation search","queries":["site:openai.com documentation search"]}},
 			{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"July 21"}]},
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"verify it"}]}
 		]
