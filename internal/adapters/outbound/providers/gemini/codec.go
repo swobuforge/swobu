@@ -167,13 +167,16 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 	if err != nil {
 		return interactionRequest{}, nil, err
 	}
+	inputRequest, changes, err := projectSettledPortableSearchHistory(inputRequest)
+	if err != nil {
+		return interactionRequest{}, nil, err
+	}
 
 	encoded := interactionRequest{Model: canonicalRequest.Model(), PreviousInteractionID: previousInteractionID, Stream: true}
 	if store, specified := canonicalRequest.Store(); specified {
 		encoded.Store = &store
 	}
 
-	var changes []compat.Change
 	if encoded.GenerationConfig, changes, err = geminiGenerationConfig(canonicalRequest, inputRequest, request.ToolNames, changes); err != nil {
 		return interactionRequest{}, changes, err
 	}
@@ -302,6 +305,88 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 	return encoded, changes, nil
 }
 
+// projectSettledPortableSearchHistory omits only completed foreign Search
+// effects that have no exact Gemini replay on either occurrence. Active or
+// partially exact effects remain for the strict item encoder to reject.
+func projectSettledPortableSearchHistory(request canonical.CanonicalRequest) (canonical.CanonicalRequest, []compat.Change, error) {
+	items := request.Items()
+	drop := make(map[int]struct{})
+	changes := make([]compat.Change, 0)
+	var matcher canonical.ToolEffectMatcher
+	effects := make([]canonical.ToolEffect, 0)
+	for index, item := range items {
+		if call, ok := item.ToolCall(); ok && call.Tool().Kind() != canonical.ToolKindWebSearch {
+			continue
+		}
+		if _, isCall := item.ToolCall(); !isCall {
+			result, ok := item.ToolResult()
+			if !ok {
+				continue
+			}
+			if _, webSearch := result.WebSearch(); !webSearch {
+				continue
+			}
+		}
+		completed, err := matcher.Accept(index, item)
+		if err != nil {
+			return request, nil, provider.IncompatibleCapability(
+				canonical.RequestItemsKind,
+				canonical.Occurrence{},
+				"Gemini Interactions cannot correlate canonical web-search history",
+			)
+		}
+		if completed != nil {
+			effects = append(effects, *completed)
+		}
+	}
+	effects = append(effects, matcher.Pending()...)
+	for _, completed := range effects {
+		if completed.Kind != canonical.ToolKindWebSearch {
+			continue
+		}
+		if completed.ResultIndex < 0 {
+			return request, nil, provider.IncompatibleCapability(
+				canonical.RequestItemsKind,
+				canonical.CallOccurrence(completed.CallID),
+				"Gemini Interactions cannot represent unresolved web-search history",
+			)
+		}
+		call, _ := items[completed.CallIndex].ToolCall()
+		search, _ := call.Input().WebSearch()
+		_, callExact := search.InteractionsReplay()
+		result, _ := items[completed.ResultIndex].ToolResult()
+		searchResult, _ := result.WebSearch()
+		_, resultExact := searchResult.InteractionsReplay()
+		if callExact != resultExact {
+			return request, nil, provider.IncompatibleCapability(
+				canonical.RequestItemsKind,
+				canonical.CallOccurrence(completed.CallID),
+				"Gemini Interactions requires exact replay on both web-search call and result",
+			)
+		}
+		if callExact {
+			continue
+		}
+		drop[completed.CallIndex] = struct{}{}
+		drop[completed.ResultIndex] = struct{}{}
+		changes = append(changes, compat.NewOmission(
+			canonical.RequestItemsKind,
+			canonical.RequestItemOccurrence(uint32(completed.CallIndex)),
+		))
+	}
+	if len(drop) == 0 {
+		return request, nil, nil
+	}
+	projected := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
+	for index, item := range items {
+		if _, omitted := drop[index]; omitted {
+			continue
+		}
+		projected = append(projected, item)
+	}
+	return request.WithItems(projected), changes, nil
+}
+
 func validateGeminiThoughtReplay(raw []byte) error {
 	var step interactionInputStep
 	if err := json.Unmarshal(raw, &step); err != nil || strings.TrimSpace(step.Type) != "thought" || strings.TrimSpace(step.Signature) == "" {
@@ -348,6 +433,13 @@ func validateGeminiSearchResultReplay(raw []byte, callID canonical.ToolCallID) e
 
 func geminiGenerationConfig(request canonical.CanonicalRequest, input canonical.CanonicalRequest, names wire.ToolNames, changes []compat.Change) (*interactionGenerationConfig, []compat.Change, error) {
 	controls := request.Controls()
+	if compute, specified := request.Reasoning().ComputeField().Get(); specified && compute.Kind() == canonical.ReasoningDisabled {
+		return nil, changes, provider.IncompatibleCapability(
+			canonical.RequestReasoning,
+			canonical.Occurrence{},
+			"Gemini Interactions cannot represent hard-off reasoning",
+		)
+	}
 	config := &interactionGenerationConfig{}
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
 		config.MaxOutputTokens = &value
@@ -381,15 +473,14 @@ func geminiGenerationConfig(request canonical.CanonicalRequest, input canonical.
 	if err != nil {
 		return nil, changes, err
 	}
-	if request.ToolCallBatch().Mode == canonical.ToolCallBatchAtMostOne {
-		return nil, changes, provider.IncompatibleCapability(canonical.RequestToolCallBatch, canonical.Occurrence{}, "Gemini does not provide an exact at-most-one function-call control")
-	}
 	environment, environmentErr := canonical.EffectiveTools(input)
 	if environmentErr != nil {
 		return nil, changes, canonical.InternalError("Gemini function environment is ambiguous")
 	}
+	var flat wire.FlatToolSet
 	if !environment.IsEmpty() || request.ToolPolicySpecified() {
-		flat, flattenErr := wire.PrepareFlatToolSet(environment.Declarations(), func(tool canonical.ToolDeclaration) (string, error) {
+		var flattenErr error
+		flat, flattenErr = wire.PrepareFlatToolSet(environment.Declarations(), func(tool canonical.ToolDeclaration) (string, error) {
 			if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
 				return string(tool.Kind()), nil
 			}
@@ -408,6 +499,13 @@ func geminiGenerationConfig(request canonical.CanonicalRequest, input canonical.
 		}
 		config.ToolChoice = &choice
 	}
+	if request.ToolCallBatch().Mode == canonical.ToolCallBatchAtMostOne && policy.Mode != canonical.ToolPolicyNone && len(flat.Declarations) > 0 {
+		return nil, changes, provider.IncompatibleCapability(
+			canonical.RequestToolCallBatch,
+			canonical.Occurrence{},
+			"Gemini Interactions cannot enforce at-most-one tool call with active callable tools",
+		)
+	}
 	if config.MaxOutputTokens == nil && len(config.StopSequences) == 0 && config.Temperature == nil && config.TopP == nil && config.ThinkingLevel == "" && config.ThinkingSummaries == "" && config.ToolChoice == nil {
 		return nil, changes, nil
 	}
@@ -415,32 +513,28 @@ func geminiGenerationConfig(request canonical.CanonicalRequest, input canonical.
 }
 
 func geminiThinkingLevel(request canonical.CanonicalRequest) (string, []compat.Change) {
-	reasoning := request.Reasoning()
-	compute, computeSpecified := reasoning.ComputeField().Get()
-	effort, effortSpecified := request.Controls().Effort.Get()
-	if computeSpecified && compute.Kind() == canonical.ReasoningDisabled {
-		changes := []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})}
-		if effortSpecified {
-			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
-		}
-		return string(canonical.InferenceEffortMinimal), changes
+	projection := reasoningprojection.ProjectOrdinalReasoning(request.Reasoning(), request.Controls().Effort)
+	if projection.Kind != reasoningprojection.OrdinalEffort {
+		return "", projection.Changes
 	}
-	if effortSpecified {
-		switch effort {
-		case canonical.InferenceEffortMinimal, canonical.InferenceEffortLow, canonical.InferenceEffortMedium, canonical.InferenceEffortHigh:
-			return string(effort), nil
-		case canonical.InferenceEffortXHigh, canonical.InferenceEffortMax:
-			return string(canonical.InferenceEffortHigh), []compat.Change{compat.NewApproximation(canonical.RequestControlsEffort, canonical.RequestControlsEffort, canonical.Occurrence{})}
-		}
+	value := string(projection.Effort)
+	changes := projection.Changes
+	switch value {
+	case string(canonical.InferenceEffortLow), string(canonical.InferenceEffortMedium), string(canonical.InferenceEffortHigh):
+		return value, changes
+	case string(canonical.InferenceEffortMinimal):
+		changes = compat.AppendUnique(changes, geminiEffortApproximation())
+		return string(canonical.InferenceEffortLow), changes
+	case string(canonical.InferenceEffortXHigh), string(canonical.InferenceEffortMax):
+		changes = compat.AppendUnique(changes, geminiEffortApproximation())
+		return string(canonical.InferenceEffortHigh), changes
+	default:
+		panic("shared ordinal reasoning projection returned an unknown value")
 	}
-	if !computeSpecified || compute.Kind() == canonical.ReasoningAutomatic {
-		return "", nil
-	}
-	if compute.Kind() == canonical.ReasoningBudget {
-		tokens, _ := compute.Tokens()
-		return string(reasoningprojection.EffortFromReferenceReasoningBudget(tokens)), []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})}
-	}
-	return "", nil
+}
+
+func geminiEffortApproximation() compat.Change {
+	return compat.NewApproximation(canonical.RequestControlsEffort, canonical.RequestControlsEffort, canonical.Occurrence{})
 }
 
 func geminiToolChoice(policy canonical.ToolPolicy, tools []canonical.ToolDeclaration, names wire.ToolNames) (interactionToolChoice, error) {

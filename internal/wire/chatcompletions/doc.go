@@ -3,8 +3,13 @@
 // deterministic flat tool names, and the client-history fingerprint for this
 // family. Provider dialects, endpoint selection, and routing stay outside.
 //
-// Standard lowering is strict for provider-hosted WebSearch: only an exact
-// target dialect may replace that occurrence. Unknown additive list
+// Standard lowering omits a settled provider-hosted WebSearch call/result pair
+// from request history when Chat has no replay grammar, while preserving the
+// portable assistant continuation and recording request-item loss at the
+// canonical call position. Preserved cited text also records request-part
+// citation loss; Chat never synthesizes citation text or source summaries.
+// Unresolved history and active WebSearch declarations remain incompatible;
+// only an exact target dialect may replace those semantics. Unknown additive list
 // occurrences erase locally and preserve sibling order.
 // Closed request contracts, ambiguous projected tool names, invalid residual
 // responses, and contradictory stream identity fail at their owning boundary.

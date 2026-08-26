@@ -13,17 +13,17 @@ import (
 )
 
 type messagesEnvelopeStreamEncoder struct {
-	started                    bool
-	nextIndex                  int
-	activeTextID               string
-	activeBlockID              string
-	blockIndexByID             map[string]int
-	sawToolUse                 bool
-	adapter                    *sse.EnvelopeEventAdapter
-	request                    canonical.CanonicalRequest
-	pendingWebSearchStarts     map[string]sse.StreamEvent
-	unresolvedWebSearchCallIDs map[string]struct{}
-	changes                    []compat.Change
+	started                  bool
+	nextIndex                int
+	activeTextID             string
+	activeBlockID            string
+	blockIndexByID           map[string]int
+	sawToolUse               bool
+	adapter                  *sse.EnvelopeEventAdapter
+	request                  canonical.CanonicalRequest
+	pendingWebSearchStarts   map[string]sse.StreamEvent
+	unresolvedWebSearchCalls map[string]uint32
+	changes                  []compat.Change
 }
 
 func (s *messagesEnvelopeStreamEncoder) Changes() []compat.Change {
@@ -225,7 +225,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			more, err := s.Encode(event)
 			return append(frames, more...), err
 		}
-		if len(s.unresolvedWebSearchCallIDs) > 0 {
+		if len(s.unresolvedWebSearchCalls) > 0 {
 			return nil, provider.IncompatibleCapability(canonical.ResponseItemsKind, canonical.Occurrence{}, "Messages cannot represent an unresolved canonical web-search call")
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
@@ -335,7 +335,7 @@ func (s *messagesEnvelopeStreamEncoder) completeWebSearchCall(event sse.StreamEv
 	delete(s.pendingWebSearchStarts, event.ItemID)
 	search, ok := call.Input().WebSearch()
 	if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-		s.unresolvedWebSearchCallIDs[call.CallID().String()] = struct{}{}
+		s.unresolvedWebSearchCalls[call.CallID().String()] = event.ItemOrdinal
 		return nil, nil
 	}
 	startFrames, err := s.startWebSearchBlock(start)
@@ -353,12 +353,12 @@ func (s *messagesEnvelopeStreamEncoder) completeWebSearchCall(event sse.StreamEv
 
 func (s *messagesEnvelopeStreamEncoder) encodeCompletedWebSearchResult(event sse.StreamEvent, result canonical.ToolResultItem) ([][]byte, error) {
 	callID := result.CallID().String()
-	if _, omitted := s.unresolvedWebSearchCallIDs[callID]; omitted {
-		delete(s.unresolvedWebSearchCallIDs, callID)
+	if callOrdinal, omitted := s.unresolvedWebSearchCalls[callID]; omitted {
+		delete(s.unresolvedWebSearchCalls, callID)
 		s.changes = append(s.changes, compat.Change{
 			Capability: canonical.ResponseItemsKind,
 			Kind:       compat.Omission,
-			Occurrence: canonical.CallOccurrence(result.CallID()),
+			Occurrence: canonical.ResponseItemOccurrence(callOrdinal),
 		})
 		return nil, nil
 	}

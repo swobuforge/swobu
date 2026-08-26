@@ -57,11 +57,11 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		drop[effect.CallIndex] = struct{}{}
 		drop[effect.ResultIndex] = struct{}{}
-		changes = append(changes, compat.Change{
-			Capability: feature,
-			Kind:       compat.Omission,
-			Occurrence: canonical.CallOccurrence(effect.CallID),
-		})
+		occurrence := canonical.RequestItemOccurrence(uint32(effect.CallIndex))
+		if feature == canonical.ResponseItemsKind {
+			occurrence = canonical.ResponseItemOccurrence(uint32(effect.CallIndex))
+		}
+		changes = append(changes, compat.NewOmission(feature, occurrence))
 	}
 	if len(drop) == 0 {
 		return append([]canonical.CanonicalItem(nil), items...), nil, nil

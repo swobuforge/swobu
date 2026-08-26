@@ -159,6 +159,13 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		return ProviderRequestDocument{}, contextErr
 	}
 	items := req.Items()
+	items, historyChanges, err := projectChatCompletionsRequestHistory(items)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if changeLog != nil {
+		*changeLog = append(*changeLog, historyChanges...)
+	}
 	if wire.HasDeferredTools(items) {
 		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
 			return ProviderRequestDocument{}, err

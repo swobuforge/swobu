@@ -41,9 +41,9 @@ func TestResponsesUnrepresentableLifecycleProjectsAtomicallyToMessages(t *testin
 				encoded.Changes[0].Kind != compat.Omission {
 				t.Fatalf("changes = %#v", encoded.Changes)
 			}
-			call, ok := encoded.Changes[0].Occurrence.Call()
-			if !ok || call.String() != "ws_original" {
-				t.Fatalf("change occurrence = %#v, want call ws_original", encoded.Changes[0].Occurrence)
+			item, ok := encoded.Changes[0].Occurrence.ResponseItem()
+			if !ok || item != 0 {
+				t.Fatalf("change occurrence = %#v, want response item 0", encoded.Changes[0].Occurrence)
 			}
 		})
 	}

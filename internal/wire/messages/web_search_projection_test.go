@@ -83,11 +83,9 @@ func TestMessagesResponseOmitsCompletedUnrepresentableWebSearchPair(t *testing.T
 			if !bytes.Contains(raw, []byte(`"text":"answer"`)) || !bytes.Contains(raw, []byte(`"url":"https://example.com/source"`)) {
 				t.Fatalf("text or citation was lost: %s", raw)
 			}
-			if len(encoded.Changes) != 1 || encoded.Changes[0] != (compat.Change{
-				Capability: canonical.ResponseItemsKind,
-				Kind:       compat.Omission,
-				Occurrence: canonical.CallOccurrence(callID),
-			}) {
+			if len(encoded.Changes) != 1 || encoded.Changes[0] != compat.NewOmission(
+				canonical.ResponseItemsKind, canonical.ResponseItemOccurrence(0),
+			) {
 				t.Fatalf("changes = %#v", encoded.Changes)
 			}
 		})
@@ -125,12 +123,56 @@ func TestMessagesStreamingResponseOmitsCompletedUnrepresentableWebSearchPair(t *
 		t.Fatalf("assistant text was lost: %s", raw)
 	}
 	changes := encoded.Completion.Snapshot().Changes
-	if len(changes) != 1 || changes[0] != (compat.Change{
-		Capability: canonical.ResponseItemsKind,
-		Kind:       compat.Omission,
-		Occurrence: canonical.CallOccurrence(callID),
-	}) {
+	if len(changes) != 1 || changes[0] != compat.NewOmission(
+		canonical.ResponseItemsKind, canonical.ResponseItemOccurrence(0),
+	) {
 		t.Fatalf("changes = %#v", changes)
+	}
+}
+
+func TestMessagesStreamingResponseAddressesReusedWebSearchIDByPosition(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_reused")
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{
+		Action: canonical.WebSearchActionOpenPage,
+		URL:    canonical.Specify(mustWebURL(t, "https://example.com/source")),
+	}))
+	searchResult, _ := canonical.NewWebSearchResult(nil)
+	result, _ := canonical.NewWebSearchResultItem(callID, searchResult)
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{canonical.NewTextMessagePart("answer")})
+	response, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "resp_reused"}, "model",
+		[]canonical.CanonicalItem{call, result, call, result, message},
+		canonical.Completed("stop"), canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := canonical.NewSliceEventReader(canonical.SynthesizeResponseEnvelopeEvents(
+		"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),
+	))
+	encoded, err := (ResponseStreamEncoder{}).EncodeResponseStream(
+		context.Background(), canonical.CanonicalRequest{}, events, delivery.StreamingDelivery(delivery.FramingSSE),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(encoded.Stream.Body); err != nil {
+		t.Fatal(err)
+	}
+	changes := encoded.Completion.Snapshot().Changes
+	if len(changes) != 2 {
+		t.Fatalf("changes = %#v, want two lifecycle omissions", changes)
+	}
+	unique := make([]compat.Change, 0, len(changes))
+	for index, change := range changes {
+		item, ok := change.Occurrence.ResponseItem()
+		if change.Capability != canonical.ResponseItemsKind || change.Kind != compat.Omission || !ok || item != uint32(index*2) {
+			t.Fatalf("change = %#v", change)
+		}
+		unique = compat.AppendUnique(unique, change)
+	}
+	if len(unique) != 2 {
+		t.Fatalf("deduplicated changes = %#v, want two streamed occurrences", unique)
 	}
 }
 
@@ -160,6 +202,50 @@ func TestMessagesProjectionPairsReusedWebSearchIDByOccurrence(t *testing.T) {
 	}
 	if len(changes) != 2 {
 		t.Fatalf("changes = %#v, want two occurrence-local drops", changes)
+	}
+	unique := make([]compat.Change, 0, len(changes))
+	for index, change := range changes {
+		item, ok := change.Occurrence.ResponseItem()
+		if change.Capability != canonical.ResponseItemsKind || change.Kind != compat.Omission || !ok || item != uint32(index*2) {
+			t.Fatalf("change = %#v", change)
+		}
+		unique = compat.AppendUnique(unique, change)
+	}
+	if len(unique) != 2 {
+		t.Fatalf("deduplicated changes = %#v, want independently addressable occurrences", unique)
+	}
+}
+
+func TestMessagesRequestProjectionAddressesReusedWebSearchIDByPosition(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_reused")
+	input := mustWebSearchToolInput(t, canonical.WebSearchCall{
+		Action: canonical.WebSearchActionOpenPage,
+		URL:    canonical.Specify(mustWebURL(t, "https://example.com/source")),
+	})
+	call, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), input)
+	searchResult, _ := canonical.NewWebSearchResult(nil)
+	result, _ := canonical.NewWebSearchResultItem(callID, searchResult)
+	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("continue")})
+
+	projected, changes, err := projectMessagesWebSearchLifecycles(
+		[]canonical.CanonicalItem{call, result, call, result, message}, canonical.RequestItemsKind,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("projected items = %#v", projected)
+	}
+	unique := make([]compat.Change, 0, len(changes))
+	for index, change := range changes {
+		item, ok := change.Occurrence.RequestItem()
+		if change.Capability != canonical.RequestItemsKind || change.Kind != compat.Omission || !ok || item != uint32(index*2) {
+			t.Fatalf("change = %#v", change)
+		}
+		unique = compat.AppendUnique(unique, change)
+	}
+	if len(unique) != 2 {
+		t.Fatalf("deduplicated changes = %#v, want independently addressable occurrences", unique)
 	}
 }
 
@@ -222,8 +308,8 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 	if len(changes) != 1 {
 		t.Fatalf("changes = %#v", changes)
 	}
-	call, ok := changes[0].Occurrence.Call()
-	if changes[0].Capability != canonical.RequestItemsKind || changes[0].Kind != compat.Omission || !ok || call != callID {
+	item, ok := changes[0].Occurrence.RequestItem()
+	if changes[0].Capability != canonical.RequestItemsKind || changes[0].Kind != compat.Omission || !ok || item != 0 {
 		t.Fatalf("changes = %#v", changes)
 	}
 

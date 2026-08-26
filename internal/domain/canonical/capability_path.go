@@ -13,6 +13,7 @@ const (
 	RequestItemsKind                        CapabilityPath = "request.items.kind"
 	RequestItemsMessageRole                 CapabilityPath = "request.items.message.role"
 	RequestItemsMessageText                 CapabilityPath = "request.items.message.content.text"
+	RequestItemsMessageCitations            CapabilityPath = "request.items.message.content.text.citations"
 	RequestItemsMessageImage                CapabilityPath = "request.items.message.content.image"
 	RequestItemsMessageImageSourceURL       CapabilityPath = "request.items.message.content.image.source.url"
 	RequestItemsMessageImageSourceInline    CapabilityPath = "request.items.message.content.image.source.inline"

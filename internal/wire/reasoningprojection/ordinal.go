@@ -37,47 +37,66 @@ func EffortFromReferenceReasoningBudget(tokens int) canonical.InferenceEffort {
 	}
 }
 
-// ProjectOrdinalReasoning projects independent canonical compute and effort
-// controls into one ordinal reasoning field. Exact effort dominates derived
-// effort, while disabled compute is a hard-off constraint.
+type OrdinalKind uint8
+
+const (
+	OrdinalUnspecified OrdinalKind = iota
+	OrdinalAutomatic
+	OrdinalDisabled
+	OrdinalEffort
+)
+
+type OrdinalProjection struct {
+	Kind    OrdinalKind
+	Effort  canonical.InferenceEffort
+	Changes []compat.Change
+}
+
+// ProjectOrdinalReasoning preserves enablement separately from intensity.
+// Explicit effort dominates automatic or budget-derived intensity, while
+// disabled compute remains a hard-off constraint rather than a low ordinal.
 func ProjectOrdinalReasoning(
 	reasoning canonical.ReasoningControls,
 	effort canonical.Specified[canonical.InferenceEffort],
-) (value string, present bool, changes []compat.Change) {
+) OrdinalProjection {
 	compute, computeSpecified := reasoning.ComputeField().Get()
 	explicitEffort, effortSpecified := effort.Get()
 
 	if computeSpecified && compute.Kind() == canonical.ReasoningDisabled {
+		var changes []compat.Change
 		if effortSpecified {
 			changes = compat.AppendUnique(changes, compat.NewOmission(
 				canonical.RequestControlsEffort,
 				canonical.Occurrence{},
 			))
 		}
-		return "none", true, changes
+		return OrdinalProjection{Kind: OrdinalDisabled, Changes: changes}
 	}
 
 	if effortSpecified {
+		var changes []compat.Change
 		if computeSpecified && compute.Kind() == canonical.ReasoningBudget {
 			changes = compat.AppendUnique(changes, reasoningApproximation())
 		}
-		return string(explicitEffort), true, changes
+		return OrdinalProjection{Kind: OrdinalEffort, Effort: explicitEffort, Changes: changes}
 	}
 
 	if !computeSpecified {
-		return "", false, nil
+		return OrdinalProjection{}
 	}
 
 	switch compute.Kind() {
 	case canonical.ReasoningAutomatic:
-		changes = compat.AppendUnique(changes, reasoningApproximation())
-		return string(canonical.InferenceEffortMedium), true, changes
+		return OrdinalProjection{Kind: OrdinalAutomatic}
 	case canonical.ReasoningBudget:
 		tokens, _ := compute.Tokens()
-		changes = compat.AppendUnique(changes, reasoningApproximation())
-		return string(EffortFromReferenceReasoningBudget(tokens)), true, changes
+		return OrdinalProjection{
+			Kind:    OrdinalEffort,
+			Effort:  EffortFromReferenceReasoningBudget(tokens),
+			Changes: []compat.Change{reasoningApproximation()},
+		}
 	default:
-		return "", false, nil
+		return OrdinalProjection{}
 	}
 }
 

@@ -115,12 +115,15 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 		}
 	}
 
-	value, present, changes := reasoningprojection.ProjectOrdinalReasoning(reasoning, effortField)
-	if present {
-		wireReasoning["effort"] = value
+	projection := reasoningprojection.ProjectOrdinalReasoning(reasoning, effortField)
+	switch projection.Kind {
+	case reasoningprojection.OrdinalDisabled:
+		wireReasoning["effort"] = "none"
+	case reasoningprojection.OrdinalEffort:
+		wireReasoning["effort"] = string(projection.Effort)
 	}
 	if changeLog != nil {
-		for _, change := range changes {
+		for _, change := range projection.Changes {
 			*changeLog = compat.AppendUnique(*changeLog, change)
 		}
 	}

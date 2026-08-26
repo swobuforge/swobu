@@ -83,32 +83,28 @@ func TestProjectOrdinalReasoningLaw(t *testing.T) {
 		name        string
 		compute     *canonical.ReasoningCompute
 		effort      canonical.Specified[canonical.InferenceEffort]
-		wantValue   string
-		wantSet     bool
+		wantKind    OrdinalKind
+		wantEffort  canonical.InferenceEffort
 		wantChanges []compat.Change
 	}{
 		{name: "unspecified"},
-		{name: "effort only", effort: low, wantValue: "low", wantSet: true},
-		{name: "disabled", compute: &disabled, wantValue: "none", wantSet: true},
+		{name: "effort only", effort: low, wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortLow},
+		{name: "disabled", compute: &disabled, wantKind: OrdinalDisabled},
 		{
 			name: "disabled dominates effort", compute: &disabled, effort: low,
-			wantValue: "none", wantSet: true,
+			wantKind:    OrdinalDisabled,
 			wantChanges: []compat.Change{compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{})},
 		},
-		{
-			name: "automatic derives medium", compute: &automatic,
-			wantValue: "medium", wantSet: true,
-			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})},
-		},
-		{name: "automatic preserves effort", compute: &automatic, effort: low, wantValue: "low", wantSet: true},
+		{name: "automatic remains automatic", compute: &automatic, wantKind: OrdinalAutomatic},
+		{name: "automatic preserves effort", compute: &automatic, effort: low, wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortLow},
 		{
 			name: "budget derives effort", compute: &budget,
-			wantValue: "medium", wantSet: true,
+			wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortMedium,
 			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})},
 		},
 		{
 			name: "effort dominates budget", compute: &budget, effort: low,
-			wantValue: "low", wantSet: true,
+			wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortLow,
 			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})},
 		},
 	}
@@ -125,16 +121,16 @@ func TestProjectOrdinalReasoningLaw(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			value, present, changes := ProjectOrdinalReasoning(reasoning, test.effort)
-			if value != test.wantValue || present != test.wantSet {
-				t.Fatalf("projection = (%q, %v), want (%q, %v)", value, present, test.wantValue, test.wantSet)
+			projection := ProjectOrdinalReasoning(reasoning, test.effort)
+			if projection.Kind != test.wantKind || projection.Effort != test.wantEffort {
+				t.Fatalf("projection = %#v, want kind=%d effort=%q", projection, test.wantKind, test.wantEffort)
 			}
-			if len(changes) != len(test.wantChanges) {
-				t.Fatalf("changes = %#v, want %#v", changes, test.wantChanges)
+			if len(projection.Changes) != len(test.wantChanges) {
+				t.Fatalf("changes = %#v, want %#v", projection.Changes, test.wantChanges)
 			}
-			for i := range changes {
-				if changes[i] != test.wantChanges[i] {
-					t.Fatalf("change %d = %#v, want %#v", i, changes[i], test.wantChanges[i])
+			for i := range projection.Changes {
+				if projection.Changes[i] != test.wantChanges[i] {
+					t.Fatalf("change %d = %#v, want %#v", i, projection.Changes[i], test.wantChanges[i])
 				}
 			}
 		})
@@ -163,15 +159,15 @@ func TestProjectOrdinalReasoningPreservesEveryExplicitEffort(t *testing.T) {
 		canonical.InferenceEffortMax,
 	} {
 		t.Run(string(effort), func(t *testing.T) {
-			value, present, changes := ProjectOrdinalReasoning(reasoning, canonical.Specify(effort))
-			if !present || value != string(effort) {
-				t.Fatalf("projection = (%q, %v), want exact explicit effort %q", value, present, effort)
+			projection := ProjectOrdinalReasoning(reasoning, canonical.Specify(effort))
+			if projection.Kind != OrdinalEffort || projection.Effort != effort {
+				t.Fatalf("projection = %#v, want exact explicit effort %q", projection, effort)
 			}
-			if len(changes) != 1 ||
-				changes[0].Capability != canonical.RequestReasoning ||
-				changes[0].Kind != compat.Approximation ||
-				changes[0].Preserved != canonical.RequestControlsEffort {
-				t.Fatalf("changes = %#v, want one compute approximation through explicit effort", changes)
+			if len(projection.Changes) != 1 ||
+				projection.Changes[0].Capability != canonical.RequestReasoning ||
+				projection.Changes[0].Kind != compat.Approximation ||
+				projection.Changes[0].Preserved != canonical.RequestControlsEffort {
+				t.Fatalf("changes = %#v, want one compute approximation through explicit effort", projection.Changes)
 			}
 		})
 	}

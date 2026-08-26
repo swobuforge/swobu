@@ -107,7 +107,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto messag
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
-	toolCallBatch, err := decodeMessagesToolCallBatch(dto.DisableParallelToolUse)
+	toolCallBatch, toolCallBatchSpecified, err := decodeMessagesToolCallBatch(dto.ToolChoice, dto.DisableParallelToolUse)
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
@@ -180,7 +180,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto messag
 	if len(dto.ToolChoice) > 0 {
 		params.ToolPolicy = canonical.Specify(toolPolicy)
 	}
-	if len(dto.DisableParallelToolUse) > 0 {
+	if toolCallBatchSpecified {
 		params.ToolCallBatch = canonical.Specify(toolCallBatch)
 	}
 	if len(dto.ResponseFormat) > 0 || dto.OutputConfig != nil && dto.OutputConfig.Format != nil {

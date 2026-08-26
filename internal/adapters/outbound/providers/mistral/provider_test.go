@@ -283,6 +283,14 @@ func TestMistralReplayRejectsDuplicateAndIgnoresForeignOpaqueState(t *testing.T)
 }
 
 func TestMistralEffortProjectionIncludesBoundedMaxApproximation(t *testing.T) {
+	automatic, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMistralEffort(t, canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Reasoning: automatic}), "", false)
+
 	disabled, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
 		Compute: canonical.Specify(canonical.NewDisabledReasoningCompute()),
 	})
@@ -327,8 +335,13 @@ func assertMistralEffort(t *testing.T, request canonical.CanonicalRequest, want 
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["reasoning_effort"] != want {
-		t.Fatalf("reasoning_effort = %#v, want %q; document=%s", payload["reasoning_effort"], want, document.RawBytes())
+	got, present := payload["reasoning_effort"]
+	if want == "" {
+		if present {
+			t.Fatalf("reasoning_effort = %#v, want omitted; document=%s", got, document.RawBytes())
+		}
+	} else if !present || got != want {
+		t.Fatalf("reasoning_effort = %#v, want %q; document=%s", got, want, document.RawBytes())
 	}
 	gotApprox := false
 	for _, change := range changes {
