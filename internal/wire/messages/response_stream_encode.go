@@ -14,10 +14,10 @@ import (
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &messagesEnvelopeStreamEncoder{
-		adapter:                    sse.NewEnvelopeEventAdapter(),
-		pendingWebSearchStarts:     map[string]sse.StreamEvent{},
-		unresolvedWebSearchCallIDs: map[string]struct{}{},
-		changes:                    []compat.Change{},
+		adapter:                  sse.NewEnvelopeEventAdapter(),
+		pendingWebSearchStarts:   map[string]sse.StreamEvent{},
+		unresolvedWebSearchCalls: map[string]uint32{},
+		changes:                  []compat.Change{},
 	}
 }
 

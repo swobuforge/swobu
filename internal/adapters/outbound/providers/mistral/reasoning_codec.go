@@ -14,12 +14,16 @@ import (
 const ChatReplayScope canonical.ProviderChatReplayScope = "mistral-chat"
 
 func applyMistralReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
-	value, present, changes := reasoningprojection.ProjectOrdinalReasoning(req.Reasoning(), req.Controls().Effort)
+	projection := reasoningprojection.ProjectOrdinalReasoning(req.Reasoning(), req.Controls().Effort)
 	if changeLog != nil {
-		*changeLog = append(*changeLog, changes...)
+		*changeLog = append(*changeLog, projection.Changes...)
 	}
-	if !present {
+	if projection.Kind == reasoningprojection.OrdinalUnspecified || projection.Kind == reasoningprojection.OrdinalAutomatic {
 		return nil, nil
+	}
+	value := "none"
+	if projection.Kind == reasoningprojection.OrdinalEffort {
+		value = string(projection.Effort)
 	}
 	if value == string(canonical.InferenceEffortMax) {
 		value = string(canonical.InferenceEffortXHigh)

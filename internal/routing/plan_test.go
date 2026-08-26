@@ -27,6 +27,28 @@ func TestBuildPlanPreservesTierOrderAndRouteIsolation(t *testing.T) {
 	}
 }
 
+func TestBuildPlanStickinessNeverOverridesTierPriority(t *testing.T) {
+	primary, _ := NewTier([]Target{testTarget(t, "local-a"), testTarget(t, "local-b")})
+	fallback, _ := NewTier([]Target{testTarget(t, "paid-a"), testTarget(t, "paid-b")})
+	name, _ := ParseRouteName("chat")
+	route, _ := NewRoute(name, []Tier{primary, fallback})
+
+	first := BuildPlan("stable-session", route)
+	second := BuildPlan("stable-session", route)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same locality produced different plans: %#v != %#v", first, second)
+	}
+	for index, target := range first {
+		wantPrefix := "local-"
+		if index >= 2 {
+			wantPrefix = "paid-"
+		}
+		if got := target.ID().String(); len(got) < len(wantPrefix) || got[:len(wantPrefix)] != wantPrefix {
+			t.Fatalf("plan[%d] = %q, want %s tier", index, got, wantPrefix)
+		}
+	}
+}
+
 func TestBuildPlanIsDeterministic(t *testing.T) {
 	tier, _ := NewTier([]Target{testTarget(t, "a"), testTarget(t, "b"), testTarget(t, "c")})
 	name, _ := ParseRouteName("chat")

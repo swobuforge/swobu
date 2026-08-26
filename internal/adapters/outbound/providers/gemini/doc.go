@@ -8,6 +8,9 @@
 // Google Application Default Credentials and sends Bearer authentication plus
 // an available quota project. Detection, token refresh, and safe failure copy
 // remain private to this adapter, and neither path falls back to the other.
+// End-user ADC for the Gemini Developer API must carry Google's documented
+// generative-language.retriever scope; generic cloud-platform credentials or
+// successful Vertex AI admission do not establish this provider contract.
 // This is analogous to Bedrock only at the ambient-versus-reference authoring
 // boundary; Google ADC/OAuth and AWS credential-chain/SigV4 mechanics must not
 // be merged behind a shared runtime authenticator.
@@ -24,6 +27,19 @@
 // without a native continuation handle. ResponseRef.Interactions and
 // previous_interaction_id are optional compression over that canonical truth,
 // never the only source of supported continuation.
+//
+// Completed portable Google Search effects without exact Interactions replay
+// are omitted atomically from only the outbound Gemini request. Exact replay is
+// preserved, while unresolved or partially exact Search history remains
+// incompatible rather than fabricating provider-native lifecycle state.
+//
+// Automatic reasoning without explicit effort omits thinking_level so Gemini
+// retains its provider-owned model default. Hard-off reasoning is incompatible
+// because Interactions has no generic exact off representation. Other compute
+// and effort controls pass through the shared ordinal projection that owns
+// explicit-effort precedence and reference-budget binning; this adapter then
+// bounds only that result to Interactions' closed low/medium/high set. Model
+// identity and backend error prose never select this translation.
 //
 // The Interactions request grammar never becomes a Swobu client protocol or
 // shared wire family unless a second provider becomes a demonstrated reader.

@@ -18,10 +18,10 @@ type chatCompletionsEnvelopeStreamEncoder struct {
 	toolKind map[string]string
 	adapter  *sse.EnvelopeEventAdapter
 
-	pendingWebSearchCallIDs map[string]struct{}
-	sawReasoning            bool
-	sawVisibleOutput        bool
-	changes                 []compat.Change
+	pendingWebSearchCalls map[string]uint32
+	sawReasoning          bool
+	sawVisibleOutput      bool
+	changes               []compat.Change
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Changes() []compat.Change {
@@ -64,7 +64,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		if event.ItemKind == canonical.ItemKindToolCall {
 			kind := strings.ToLower(strings.TrimSpace(event.ToolType))
 			if kind == canonical.ToolTypeWebSearch {
-				s.pendingWebSearchCallIDs[event.ToolUseID] = struct{}{}
+				s.pendingWebSearchCalls[event.ToolUseID] = event.ItemOrdinal
 				return nil, nil
 			}
 			index := len(s.toolByID)
@@ -143,14 +143,15 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 			if result, ok := event.CompletedItem.ToolResult(); ok {
 				if _, webSearch := result.WebSearch(); webSearch {
 					callID := result.CallID().String()
-					if _, pending := s.pendingWebSearchCallIDs[callID]; !pending {
+					callOrdinal, pending := s.pendingWebSearchCalls[callID]
+					if !pending {
 						return nil, canonical.NewBackendError("", 0, "backend returned an orphan web-search result to a Chat Completions client", "")
 					}
-					delete(s.pendingWebSearchCallIDs, callID)
+					delete(s.pendingWebSearchCalls, callID)
 					s.changes = append(s.changes, compat.Change{
 						Capability: canonical.ResponseItemsKind,
 						Kind:       compat.Omission,
-						Occurrence: canonical.CallOccurrence(result.CallID()),
+						Occurrence: canonical.ResponseItemOccurrence(callOrdinal),
 					})
 					return nil, nil
 				}
@@ -160,7 +161,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		}
 		return nil, nil
 	case sse.StreamEventCompleted:
-		if len(s.pendingWebSearchCallIDs) > 0 {
+		if len(s.pendingWebSearchCalls) > 0 {
 			return nil, canonical.NewBackendError("", 0, "backend returned an unresolved web-search lifecycle to a Chat Completions client", "")
 		}
 		clientFinishReason, err := chatClientFinishReason(event.Completion, len(s.toolByID) > 0)

@@ -80,3 +80,23 @@ func TestMountedAmbientOrReferenceEscapeRetreatsOneLevelAtATime(t *testing.T) {
 		t.Fatalf("third Escape did not close authentication menu:\n%s", frame)
 	}
 }
+
+func TestMountedAmbientOrReferenceHeaderEnterTogglesClosed(t *testing.T) {
+	a := ambientOrReferenceVisual("")
+	h, err := testkit.NewHarnessAt(a, 100, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	h.Open()
+	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "use Gemini API key") {
+		t.Fatalf("menu not opened on first Enter:\n%s", frame)
+	}
+	// Focus is still on the header row ("close ↵"). Pressing Enter again toggles it closed.
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if frame := h.FrameTrimmed(); strings.Contains(frame, "use Gemini API key") {
+		t.Fatalf("menu not closed when activating header row:\n%s", frame)
+	}
+}

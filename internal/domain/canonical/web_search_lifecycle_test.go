@@ -127,6 +127,23 @@ func TestWebSearchResultCorrelatesToPriorResponseCall(t *testing.T) {
 	}
 }
 
+func TestCompletedResponseRejectsUnsettledProviderWebSearch(t *testing.T) {
+	callID, _ := NewToolCallID("search_unsettled")
+	input, err := NewWebSearchToolInput(WebSearchCall{Action: WebSearchActionSearch, Queries: []string{"deadline"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := NewToolCallItem(callID, WebSearchToolKey(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewCanonicalResponse(
+		ResponseRef{SwobuID: "resp_unsettled"}, "model", []CanonicalItem{call}, Completed("stop"), NewUnknownTokenUsage(),
+	); err == nil {
+		t.Fatal("completed response accepted unresolved provider web search")
+	}
+}
+
 func TestWebCitationValidatesUTF8ByteBoundaries(t *testing.T) {
 	webURL, _ := NewWebURL("https://example.com")
 	source, _ := NewWebSource(webURL, Unspecified[string]())

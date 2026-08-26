@@ -33,6 +33,95 @@ func TestResumeStoresCompleteRequestAndReturnsTargetGatedPreviousHistory(t *test
 	}
 }
 
+func TestResumePreservesSettledWebSearchCanonicalTruth(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	previousRequest := makeRequest("m", makeItems("find deadline"), nil)
+	call, result, answer := settledWebSearchItems(t)
+	record := checkpoint("resp_previous", previousRequest, makeResponse(call, result, answer), nativeResponses(target, "provider_previous"))
+	resolved, err := Resume(makeRequest("m", makeItems("explain it"), &canonical.ResponseRef{SwobuID: "resp_previous"}), record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := resolved.Request().Items()
+	if len(items) != 5 || items[1].Kind() != canonical.ItemKindToolCall || items[2].Kind() != canonical.ItemKindToolResult || items[3].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("resumed items = %#v", items)
+	}
+	if got, want := items[1:4], []canonical.CanonicalItem{call, result, answer}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resumed settled lifecycle changed:\n got  %#v\n want %#v", got, want)
+	}
+}
+
+func TestWebSearchResumeContinuationIsExactTargetGated(t *testing.T) {
+	target := testBackendTarget(t, "m")
+	call, result, answer := settledWebSearchItems(t)
+	record := checkpoint(
+		"resp_previous", makeRequest("m", makeItems("find deadline"), nil),
+		makeResponse(call, result, answer), nativeResponses(target, "provider_previous"),
+	)
+	resolved, err := Resume(makeRequest("m", makeItems("explain it"), &canonical.ResponseRef{SwobuID: "resp_previous"}), record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion)
+	if !ok || previous.Response.Responses == nil || previous.Response.Responses.ProviderResponseID.String() != "provider_previous" {
+		t.Fatalf("exact target continuation = (%#v, %t)", previous, ok)
+	}
+	if _, ok := resolved.PreviousHistory("local-vllm", target.TargetVersion); ok {
+		t.Fatal("foreign target reused web-search native continuation")
+	}
+	if _, ok := resolved.PreviousHistory(target.TargetID, target.TargetVersion+1); ok {
+		t.Fatal("changed target version reused web-search native continuation")
+	}
+}
+
+func settledWebSearchItems(t *testing.T) (canonical.CanonicalItem, canonical.CanonicalItem, canonical.CanonicalItem) {
+	t.Helper()
+	callID, _ := canonical.NewToolCallID("search_1")
+	input, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"deadline"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refinement, err := canonical.NewResponsesWebSearchRefinement(canonical.ResponsesItemID("ws_provider_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItemWithResponsesWebSearch(callID, canonical.WebSearchToolKey(), input, &refinement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webURL, err := canonical.NewWebURL("https://example.test/rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := canonical.NewWebSource(webURL, canonical.Specify("Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := canonical.NewWebSearchResult([]canonical.WebSource{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err = search.WithInteractionsReplay([]byte(`{"type":"google_search_result","id":"result-private"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewWebSearchResultItem(callID, search)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := canonical.NewCitedTextMessagePart("Hosted search answer", []canonical.WebCitation{{
+		Source: source, Excerpt: canonical.Specify("Hosted"), Start: canonical.Specify(uint32(0)), End: canonical.Specify(uint32(6)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := canonical.NewMessageItem(canonical.MessageRoleAssistant, []canonical.MessagePart{part})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return call, result, answer
+}
+
 func TestContinueAfterLocalResultMatchesCheckpointResumeSemantics(t *testing.T) {
 	target := testBackendTarget(t, "m")
 	base := makeRequest("m", makeItems("turn one"), nil)

@@ -881,6 +881,76 @@ data: {"event_type":"error","error":{"code":"permission_denied","message":"denie
 	})
 }
 
+func TestInteractionsStreamPreservesMultipleParallelFunctionCalls(t *testing.T) {
+	keyA := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "func_a")
+	keyB := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "func_b")
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gemini-model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t,
+				canonicaltest.MustFunctionTool(keyA, "function A", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()),
+				canonicaltest.MustFunctionTool(keyB, "function B", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()),
+			),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "run both tools"),
+		},
+	})
+	names, _, err := provider.BuildAttemptToolNames(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{
+		ExchangeID: "gemini-multi-call",
+		Canonical:  req,
+		ToolNames:  names,
+		Delivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+	}, strings.Join([]string{
+		`data: {"event_type":"interaction.created","interaction":{"id":"interaction_multi","model":"gemini-model","status":"in_progress"}}`,
+		``,
+		`data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_1","name":"func_a","arguments":{"arg":"a"}}}`,
+		``,
+		`data: {"event_type":"step.stop","index":0}`,
+		``,
+		`data: {"event_type":"step.start","index":1,"step":{"type":"function_call","id":"call_2","name":"func_b","arguments":{"arg":"b"}}}`,
+		``,
+		`data: {"event_type":"step.stop","index":1}`,
+		``,
+		`data: {"event_type":"interaction.completed","interaction":{"id":"interaction_multi","status":"completed"}}`,
+		``,
+	}, "\n"))
+
+	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{
+		SwobuID: "resp_multi", TargetID: "gemini-target", TargetVersion: 1,
+	})
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := response.Items()
+	if len(items) != 2 {
+		t.Fatalf("items count = %d, want 2", len(items))
+	}
+	callA, ok := items[0].ToolCall()
+	if !ok || callA.CallID().String() != "call_1" || callA.Tool().Name() != "func_a" {
+		t.Fatalf("callA = %#v", callA)
+	}
+	objA, ok := callA.Input().Object()
+	if !ok || objA.String() != `{"arg":"a"}` {
+		t.Fatalf("callA obj = %#v", objA)
+	}
+	callB, ok := items[1].ToolCall()
+	if !ok || callB.CallID().String() != "call_2" || callB.Tool().Name() != "func_b" {
+		t.Fatalf("callB = %#v", callB)
+	}
+	objB, ok := callB.Input().Object()
+	if !ok || objB.String() != `{"arg":"b"}` {
+		t.Fatalf("callB obj = %#v", objB)
+	}
+}
+
 func TestInteractionsStreamReportsUnexpectedEOFAsTerminalError(t *testing.T) {
 	stream := decodeGeminiStream(t, `data: {"event_type":"interaction.created","interaction":{"id":"interaction_1","model":"gemini-model","status":"in_progress"}}
 

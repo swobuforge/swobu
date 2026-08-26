@@ -29,7 +29,7 @@ func TestResponsesProjectsOrdinalReasoningCompute(t *testing.T) {
 		wantKind   compat.Kind
 	}{
 		{name: "budget", compute: budget, want: "medium", wantChange: canonical.RequestReasoning, wantKind: compat.Approximation},
-		{name: "automatic", compute: automatic, want: "medium", wantChange: canonical.RequestReasoning, wantKind: compat.Approximation},
+		{name: "automatic", compute: automatic},
 		{name: "automatic with effort", compute: automatic, effort: responsesEffortPointer(canonical.InferenceEffortHigh), want: "high"},
 		{name: "budget with effort", compute: budget, effort: responsesEffortPointer(canonical.InferenceEffortLow), want: "low", wantChange: canonical.RequestReasoning, wantKind: compat.Approximation},
 		{name: "disabled with effort", compute: disabled, effort: responsesEffortPointer(canonical.InferenceEffortHigh), want: "none", wantChange: canonical.RequestControlsEffort, wantKind: compat.Omission},
@@ -61,7 +61,13 @@ func TestResponsesProjectsOrdinalReasoningCompute(t *testing.T) {
 				t.Fatal(err)
 			}
 			wireReasoning, ok := payload["reasoning"].(map[string]any)
-			if !ok || wireReasoning["effort"] != test.want {
+			if test.want == "" {
+				if ok {
+					if _, hasEffort := wireReasoning["effort"]; hasEffort {
+						t.Fatalf("reasoning = %#v, want automatic effort omission", wireReasoning)
+					}
+				}
+			} else if !ok || wireReasoning["effort"] != test.want {
 				t.Fatalf("reasoning = %#v, want effort %q", payload["reasoning"], test.want)
 			}
 			if test.wantChange == "" {

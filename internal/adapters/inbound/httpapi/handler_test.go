@@ -143,8 +143,11 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 			t.Fatalf("logs missing %q\nlogs:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "provider failed") {
-		t.Fatalf("backend response content reached logs:\n%s", out)
+	if strings.Contains(out, "provider failed") || strings.Contains(out, "backend_error_detail") {
+		t.Fatalf("backend response content reached ordinary logs:\n%s", out)
+	}
+	if body := recFail.Body.String(); body != `{"error":"provider failed"}` {
+		t.Fatalf("backend response body = %q", body)
 	}
 }
 

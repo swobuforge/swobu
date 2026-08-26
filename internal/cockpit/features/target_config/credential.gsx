@@ -108,6 +108,14 @@ func FileCredentialBrowser(r *credentialRow) *ui.FileBrowser {
 	return browser
 }
 
+func (r *credentialRow) toggle() {
+	if r.stage.Get() == credStageClosed {
+		r.stage.Set(credStageMenu)
+		return
+	}
+	r.stage.Set(credStageClosed)
+}
+
 func (r *credentialRow) open() {
 	r.stage.Set(credStageMenu)
 }
@@ -231,7 +239,7 @@ func CredentialControlWithAutoFocus(r *credentialRow) *ui.SelectableRow {
 		label,
 		value,
 		action,
-		r.open,
+		r.toggle,
 	)
 	row.AutoFocus = strings.TrimSpace(r.props.Ref) == "" && r.stage.Get() == credStageClosed && r.props.AutoFocus
 	return row

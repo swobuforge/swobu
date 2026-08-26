@@ -7,19 +7,45 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func decodeMessagesToolCallBatch(raw json.RawMessage) (canonical.ToolCallBatchPolicy, error) {
-	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
-	if trimmed == "" || trimmed == "null" {
-		return canonical.ToolCallBatchPolicy{}, nil
+func decodeMessagesToolCallBatch(toolChoiceRaw json.RawMessage, topLevelRaw json.RawMessage) (canonical.ToolCallBatchPolicy, bool, error) {
+	var nestedSpecified bool
+	var nestedDisabled bool
+	if trimmedChoice := strings.TrimSpace(string(toolChoiceRaw)); trimmedChoice != "" && trimmedChoice != "null" && strings.HasPrefix(trimmedChoice, "{") {
+		var rawFields map[string]json.RawMessage
+		if err := json.Unmarshal(toolChoiceRaw, &rawFields); err == nil {
+			if field, exists := rawFields["disable_parallel_tool_use"]; exists {
+				fieldTrimmed := strings.TrimSpace(string(field))
+				if fieldTrimmed != "" && fieldTrimmed != "null" {
+					var flag bool
+					if err := json.Unmarshal(field, &flag); err != nil {
+						return canonical.ToolCallBatchPolicy{}, false, canonical.BadRequest("messages request tool_choice disable_parallel_tool_use is invalid")
+					}
+					nestedSpecified = true
+					nestedDisabled = flag
+				}
+			}
+		}
 	}
-	var disabled bool
-	if err := json.Unmarshal(raw, &disabled); err != nil {
-		return canonical.ToolCallBatchPolicy{}, canonical.BadRequest("messages request disable_parallel_tool_use is invalid")
+
+	var topSpecified bool
+	var topDisabled bool
+	if trimmedTop := strings.TrimSpace(string(topLevelRaw)); trimmedTop != "" && trimmedTop != "null" {
+		var flag bool
+		if err := json.Unmarshal(topLevelRaw, &flag); err != nil {
+			return canonical.ToolCallBatchPolicy{}, false, canonical.BadRequest("messages request disable_parallel_tool_use is invalid")
+		}
+		topSpecified = true
+		topDisabled = flag
 	}
-	if disabled {
-		return canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne), nil
+
+	if nestedSpecified && topSpecified && nestedDisabled != topDisabled {
+		return canonical.ToolCallBatchPolicy{}, false, canonical.BadRequest("messages request specifies conflicting disable_parallel_tool_use")
 	}
-	return canonical.ToolCallBatchPolicy{}, nil
+
+	if (nestedSpecified && nestedDisabled) || (topSpecified && topDisabled) {
+		return canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne), true, nil
+	}
+	return canonical.ToolCallBatchPolicy{}, nestedSpecified || topSpecified, nil
 }
 
 func encodeMessagesToolCallBatch(toolChoice any, policy canonical.ToolCallBatchPolicy, hasTools bool) (any, error) {

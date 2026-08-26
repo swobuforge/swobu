@@ -21,5 +21,7 @@
 // literal loopback request authority, and exact browser origin before upgrade;
 // native loopback clients may omit Origin. Forwarded headers are not trust
 // inputs. This package must not take on provider-dialect logic or redefine
-// canonical request semantics.
+// canonical request semantics. Terminal backend failures preserve their body in
+// the client response and traffic evidence, while ordinary request-outcome logs
+// remain metadata-only: status, origin, target, and normalized error category.
 package httpapi

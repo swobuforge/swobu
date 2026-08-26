@@ -73,6 +73,14 @@ func (a *ambientOrReferenceAuthentication) key(suffix string) string {
 	return a.props.ID + ":" + suffix
 }
 
+func (a *ambientOrReferenceAuthentication) toggle() {
+	if a.stage.Get() == ambientOrReferenceClosed {
+		a.stage.Set(ambientOrReferenceMenu)
+		return
+	}
+	a.stage.Set(ambientOrReferenceClosed)
+}
+
 func (a *ambientOrReferenceAuthentication) open() {
 	if a.stage.Get() == ambientOrReferenceClosed {
 		a.stage.Set(ambientOrReferenceMenu)
@@ -134,7 +142,7 @@ func AmbientOrReferenceHeader(a *ambientOrReferenceAuthentication) *ui.Selectabl
 	if a.stage.Get() != ambientOrReferenceClosed {
 		action = "close ↵"
 	}
-	return ui.NewSelectableRow(a.key("header"), "authentication", value, action, a.open)
+	return ui.NewSelectableRow(a.key("header"), "authentication", value, action, a.toggle)
 }
 
 func AmbientOrReferenceUseReferenceOption(a *ambientOrReferenceAuthentication) *ui.SelectableRow {

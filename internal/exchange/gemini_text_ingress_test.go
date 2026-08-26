@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -72,6 +73,69 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 				t.Fatalf("client response missing Gemini text: %s", raw)
 			}
 		})
+	}
+}
+
+func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t *testing.T) {
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		providerRequests++
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(body, []byte("google_search_call")) || bytes.Contains(body, []byte("google_search_result")) {
+			t.Fatalf("settled portable Search history reached Gemini: %s", body)
+		}
+		if !bytes.Contains(body, []byte(`"text":"verify it"`)) {
+			t.Fatalf("current Responses turn missing from Gemini request: %s", body)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, geminiTextSSE)
+	}))
+	defer server.Close()
+
+	registry, err := providersadapter.NewProviderRegistry(server.Client(), geminiTextCredentialResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := geminiTextRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), registry: registry}
+	workspace := geminiTextWorkspace(t, server.URL+"/v1")
+	ingress := NewIngress(geminiTextWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
+		PolicyResolver: StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
+		ResponseIDs:    deterministicResponseIDGenerator{},
+	})
+	body := []byte(`{
+		"model":"default",
+		"stream":false,
+		"tools":[{"type":"web_search"}],
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"find the deadline"}]},
+			{"type":"web_search_call","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[]}},
+			{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"July 21"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"verify it"}]}
+		]
+	}`)
+	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+		ExchangeID: "gemini-buffered-portable-search",
+		Request: NewTransportRequest(
+			http.MethodPost,
+			"/responses",
+			http.Header{"Content-Type": {"application/json"}},
+			body,
+		),
+		ClientFamily: canonical.ClientFamilyResponses,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := ClientTransportForTest(out.Response)
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerRequests != 1 || !strings.Contains(string(raw), "hello from Gemini") {
+		t.Fatalf("provider requests = %d response = %s", providerRequests, raw)
 	}
 }
 

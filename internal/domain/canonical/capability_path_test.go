@@ -11,7 +11,7 @@ var capabilitySegment = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 func TestCapabilityPathsUseCanonicalGrammar(t *testing.T) {
 	paths := []CapabilityPath{
 		RequestModel, RequestInstructions, RequestItemsKind,
-		RequestItemsMessageRole, RequestItemsMessageText, RequestItemsMessageImage,
+		RequestItemsMessageRole, RequestItemsMessageText, RequestItemsMessageCitations, RequestItemsMessageImage,
 		RequestItemsMessageImageSourceURL, RequestItemsMessageImageSourceInline,
 		RequestItemsMessageImageMediaType, RequestItemsMessageImageDetail,
 		RequestItemsToolResultImage, RequestItemsToolResultImageSourceURL,

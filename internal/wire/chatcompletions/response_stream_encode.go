@@ -14,9 +14,9 @@ import (
 
 func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 	return &chatCompletionsEnvelopeStreamEncoder{
-		adapter:                 sse.NewEnvelopeEventAdapter(),
-		pendingWebSearchCallIDs: map[string]struct{}{},
-		changes:                 []compat.Change{},
+		adapter:               sse.NewEnvelopeEventAdapter(),
+		pendingWebSearchCalls: map[string]uint32{},
+		changes:               []compat.Change{},
 	}
 }
 

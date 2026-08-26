@@ -143,3 +143,27 @@ func TestIncompleteCreateStatusDoesNotParticipateInSelection(t *testing.T) {
 		t.Fatalf("incomplete create participated in selection:\n%s", frame)
 	}
 }
+
+func TestMountedCredentialHeaderEnterTogglesClosed(t *testing.T) {
+	field := newCredentialField(CredentialFieldProps{
+		ID:              "auth:test",
+		SuggestedEnvVar: "TEST_API_KEY",
+		ChoiceAction:    "select ↵",
+	})
+	h, err := testkit.NewHarnessAt(field, 100, 12)
+	if err != nil {
+		t.Fatalf("NewHarnessAt: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "environment variable") {
+		t.Fatalf("credential menu not opened on first Enter:\n%s", frame)
+	}
+	// Focus is still on the credential row ("close ↵"). Pressing Enter again toggles it closed.
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if frame := h.FrameTrimmed(); strings.Contains(frame, "environment variable") {
+		t.Fatalf("credential menu not closed when activating header row:\n%s", frame)
+	}
+}
