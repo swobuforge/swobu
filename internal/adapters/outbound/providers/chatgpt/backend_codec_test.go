@@ -155,7 +155,7 @@ func TestChatGPTWebSearchReplayOmitsSyntheticItemID(t *testing.T) {
 	// request-local correlation id and no Responses refinement, plus its result.
 	searchInput, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{
 		Action:  canonical.WebSearchActionSearch,
-		Queries: []string{"site:openai.com Build Week submission deadline"},
+		Queries: []string{"site:openai.com documentation search"},
 	})
 	if err != nil {
 		t.Fatal(err)

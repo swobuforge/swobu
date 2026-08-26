@@ -81,15 +81,11 @@ func (s *modelSupportStore) projectModel(providerID profile.ProviderID, row mode
 	s.byModel[row.ID()] = support
 	s.searchModel[row.ID()] = boolSupport(model.ModelSpec.Capabilities.WebSearch)
 	s.mu.Unlock()
-	name := strings.TrimSpace(model.ModelSpec.Name)
-	if name == "" {
-		name = row.ID()
-	}
 	publisher := strings.TrimSpace(model.OwnedBy)
 	if publisher == "" {
 		publisher = string(providerID)
 	}
-	return profile.NewModelAuthoringOption(row.ID(), name, publisher, "", "", []string{"chat_completions", "chat_completions_stream"}, "chat_completions"), true, nil
+	return profile.NewModelAuthoringOption(row.ID(), row.ID(), publisher, "", "", []string{"chat_completions", "chat_completions_stream"}, "chat_completions"), true, nil
 }
 
 func combinedToolSupport(functionCalling, webSearch *bool) provider.Support {
