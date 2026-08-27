@@ -48,6 +48,31 @@ func TestModelSelectionDefaultsProtocolAndAdvancesSelectionToCreate(t *testing.T
 	}
 }
 
+func TestOpenSetModelRowUsesEnterThenUseGrammar(t *testing.T) {
+	config := authoringConfig(t, profile.ProviderSpecWorkersAI, "https://api.cloudflare.com/client/v4/accounts/example/ai/v1", "env:CLOUDFLARE_API_TOKEN")
+	config.Open()
+
+	h, err := testkit.NewHarness(config)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+
+	frame := h.Frame()
+	if !strings.Contains(frame, "use ↵") {
+		t.Fatalf("empty open-set model row must enter authoring immediately:\n%s", frame)
+	}
+	for _, key := range []rune("@cf/meta/llama") {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: key})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	if got := config.SelectedModel.Get().ModelName; got != "@cf/meta/llama" {
+		t.Fatalf("selected model = %q, want @cf/meta/llama", got)
+	}
+}
+
 func TestModelSelectionDefaultsToFirstResolvedProtocolAndRemainsEditable(t *testing.T) {
 	providers := []profile.ProviderID{
 		profile.ProviderSpecVLLM,

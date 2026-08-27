@@ -86,19 +86,18 @@ func TestMountedZAIModelIsPlainInputAndSubmitsTypedName(t *testing.T) {
 	h.Open()
 
 	frame := h.FrameTrimmed()
-	if !strings.Contains(frame, "> model") || !strings.Contains(frame, "required") {
-		t.Fatalf("Z.AI model input did not own the required field:\n%s", frame)
+	if !strings.Contains(frame, "> model") || !strings.Contains(frame, "use ↵") {
+		t.Fatalf("Z.AI model input did not enter immediate authoring:\n%s", frame)
 	}
 	if strings.Contains(frame, "search") || strings.Contains(frame, "shown") {
 		t.Fatalf("Z.AI model field mounted catalog-picker chrome:\n%s", frame)
 	}
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	for _, key := range runeKeys("glm-5") {
 		h.DispatchKey(key)
 	}
 	editing := h.FrameTrimmed()
-	if !strings.Contains(editing, "glm-5") || !strings.Contains(editing, "save ↵") {
+	if !strings.Contains(editing, "glm-5") || !strings.Contains(editing, "use ↵") {
 		t.Fatalf("Z.AI model row did not expose a plain text editor:\n%s", editing)
 	}
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
@@ -124,7 +123,6 @@ func TestMountedZAIModelEscapeCancelsInputWithoutClosingTargetConfig(t *testing.
 	t.Cleanup(h.Close)
 	h.Open()
 
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	for _, key := range runeKeys("discard-me") {
 		h.DispatchKey(key)
 	}

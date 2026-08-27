@@ -32,7 +32,7 @@ Choose a different first target when one constraint matters more:
 | Most published recurring token capacity | LLM7 + `default` | Published allowance is 1M tokens per 24 hours and 100 requests/hour | Dynamic model; current Swobu E2E proves text streaming, not free-tier tools |
 | Fast agent reasoning | Groq + `openai/gpt-oss-20b` | Credentialed reasoning and tool continuation pass at Groq speed | Published free allowance is 200K tokens/day despite a high request ceiling |
 | Strongest proven recurring tool loop | Workers AI + Gemma 4 | Two-call tool continuation passes on the Free plan | 10K Neurons/day is not directly convertible to tokens |
-| Automatic free-model selection | OpenRouter + `openrouter/free` | Router can select a currently available free model; live proof selected `openai/gpt-oss-20b:free` | About 50 free requests/day; model identity and capability can change per request |
+| Automatic free-model selection | OpenRouter + `openrouter/free` | Router selects a currently available free model; one observed run selected `openai/gpt-oss-20b:free` | About 50 free requests/day; model identity and capability can change per request |
 | Extra prototype capacity | NVIDIA NIM Hosted + `nvidia/nemotron-mini-4b-instruct` | Credentialed hosted streaming passes | Free hosted access is for prototyping; no stable aggregate token allowance is asserted here |
 | Account-specific monthly battery | Mistral + `ministral-3b-2512` | Direct Studio key, catalog, and streaming Chat pass | Free Mode allowance and available models are controlled by the account |
 | Exhaust last, not recurring | Cerebras + `gemma-4-31b` | Credentialed reasoning/tool continuation passes | Signup credit only; remove the tier when credit is exhausted |
