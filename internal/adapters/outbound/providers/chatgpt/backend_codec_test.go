@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -467,7 +466,7 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	}
 }
 
-func TestChatGPTRejectsCurrentWebSearchDeclarationBeforeDispatch(t *testing.T) {
+func TestChatGPTOmitsCurrentWebSearchDeclarationDuringProjection(t *testing.T) {
 	t.Parallel()
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
@@ -485,14 +484,13 @@ func TestChatGPTRejectsCurrentWebSearchDeclarationBeforeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = newBackendCodec("chatgpt").Encode(provider.Request{
+	document, changes, err := newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: request,
 		ToolNames: names,
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	if err != nil || len(document.RawBytes()) == 0 || len(changes) == 0 {
+		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 
 	webSearchKey := canonical.WebSearchToolKey()
@@ -508,12 +506,12 @@ func TestChatGPTRejectsCurrentWebSearchDeclarationBeforeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = newBackendCodec("chatgpt").Encode(provider.Request{
+	document, changes, err = newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: reqSpecific,
 		ToolNames: namesSpecific,
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	})
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("specific policy error = %T, want IncompatibleTargetError", err)
+	if err != nil || len(document.RawBytes()) == 0 || len(changes) == 0 {
+		t.Fatalf("specific document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 }

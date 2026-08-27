@@ -50,12 +50,6 @@ func TestRequestOutcomeFromSwobuError_UsesRecoveryOwnedStatusAndResult(t *testin
 			wantStatus: http.StatusNotImplemented,
 		},
 		{
-			name:       "target configuration",
-			code:       canonical.ErrorCodeNoCompatibleTarget,
-			wantResult: trafficevidence.ResultClassNoCompatibleTarget,
-			wantStatus: http.StatusBadGateway,
-		},
-		{
 			name:       "temporary target availability",
 			code:       canonical.ErrorCodeNoAvailableTarget,
 			wantResult: trafficevidence.ResultClassSwobuError,

@@ -190,7 +190,7 @@ func TestChatRequestProjectionPreservesSiblingOrder(t *testing.T) {
 	}
 }
 
-func TestCurrentWebSearchDeclarationRequiresExactChatLowering(t *testing.T) {
+func TestCurrentWebSearchDeclarationOmitsLocallyWithoutBlockingChatWire(t *testing.T) {
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
 		t.Fatal(err)
@@ -203,14 +203,17 @@ func TestCurrentWebSearchDeclarationRequiresExactChatLowering(t *testing.T) {
 		},
 	})
 
-	_, err = EncodeCarrierWithChanges(request, nil, delivery.BufferedDelivery(), nil, "")
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, nil, delivery.BufferedDelivery(), &changes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("document=%s changes=%#v", document.RawBytes(), changes)
 	}
 }
 
-func TestCompileChatToolsOmitsPolicyDeadWebSearch(t *testing.T) {
+func TestCompileChatToolsIsIndependentOfToolPolicy(t *testing.T) {
 	lookup := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	tools := []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), lookup}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools...)}})
@@ -218,28 +221,16 @@ func TestCompileChatToolsOmitsPolicyDeadWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	search := canonical.WebSearchToolKey()
-	other := lookup.Key()
-	for _, test := range []struct {
-		name   string
-		policy canonical.ToolPolicy
-	}{
-		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)},
-		{name: "specific other", policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, &other)},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			encoded, _, lowered, err := compileChatCompletionsTools(tools, names, nil, "", nil, &test.policy)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(encoded) != 1 || encoded[0].Function.Name != "lookup" {
-				t.Fatalf("tools = %#v, want lookup only", encoded)
-			}
-			record, ok := lowered.FindSource(search)
-			if !ok || record.FragmentCount != 0 {
-				t.Fatalf("web search lowering = %#v, present=%v", record, ok)
-			}
-		})
+	encoded, _, lowered, err := compileChatCompletionsTools(tools, names, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 1 || encoded[0].Function.Name != "lookup" {
+		t.Fatalf("tools = %#v, want lookup only", encoded)
+	}
+	record, ok := lowered.FindSource(canonical.WebSearchToolKey())
+	if !ok || record.FragmentCount != 0 {
+		t.Fatalf("web search lowering = %#v, present=%v", record, ok)
 	}
 }
 

@@ -2,12 +2,10 @@ package messages
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -70,11 +68,12 @@ func decodeMessagesToolChoice(raw json.RawMessage, tools []canonical.ToolDeclara
 }
 
 func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	record, err := wire.ResolveLoweredToolPolicy(policy, lowered)
-	if err != nil {
-		return nil, err
-	}
 	if lowered.TotalFragments() == 0 {
+		if policy.Mode == canonical.ToolPolicyRequired || policy.Mode == canonical.ToolPolicySpecific {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+		}
 		// Empty surviving surfaces are inert for soft policies. Omit the
 		// backend-visible field rather than emitting a no-op choice.
 		return nil, nil
@@ -93,6 +92,17 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredT
 			"type": "any",
 		}, nil
 	case canonical.ToolPolicySpecific:
+		key, ok := policy.SpecificID()
+		if !ok {
+			return nil, canonical.BadRequest("specific tool policy requires a tool id")
+		}
+		record, ok := lowered.FindSource(key)
+		if !ok || record.FragmentCount != 1 {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+			return nil, nil
+		}
 		switch record.Kind {
 		case canonical.ToolKindFunction:
 			name, err := wire.EncodeToolName(names, record.Key)
@@ -104,7 +114,10 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredT
 				"name": strings.TrimSpace(name),
 			}, nil
 		default:
-			return nil, provider.NewIncompatibleTarget(fmt.Sprintf("Messages cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+			return nil, nil
 		}
 	default:
 		return nil, canonical.BadRequest("messages request tool_choice is invalid")

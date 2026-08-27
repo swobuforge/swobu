@@ -118,7 +118,7 @@ func TestResponsesCodecUsesSharedOfficialToolLowering(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsWebSearchRequiresExactLowering(t *testing.T) {
+func TestChatCompletionsWebSearchOmitsWithoutNativeLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
@@ -127,10 +127,9 @@ func TestChatCompletionsWebSearchRequiresExactLowering(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	document, changes, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil || len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 }
 
@@ -196,7 +195,7 @@ func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsCodecRequiresExactWebSearchLowering(t *testing.T) {
+func TestChatCompletionsCodecOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := provider.Request{
 		ExchangeID: "exchange-shared-lowering",
@@ -209,10 +208,9 @@ func TestChatCompletionsCodecRequiresExactWebSearchLowering(t *testing.T) {
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}
-	_, _, err := CompileChatRequest(request, ChatDialect{})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	document, changes, err := CompileChatRequest(request, ChatDialect{})
+	if err != nil || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("document=%#v changes=%#v err=%v", document, changes, err)
 	}
 }
 
@@ -383,7 +381,7 @@ func TestCompileChatRequest_ToolPolicyLoweringRule(t *testing.T) {
 		Delivery: delivery.BufferedDelivery(),
 	}
 
-	// 1. Without LowerToolPolicy, specific tool choice on semantic tool must fail with IncompatibleTargetError
+	// Without LowerToolPolicy, the tool remains serialized while specific choice is omitted.
 	dialectWithoutPolicy := ChatDialect{
 		LowerTool: func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
 			if tool.Kind() == canonical.ToolKindWebSearch {
@@ -392,10 +390,9 @@ func TestCompileChatRequest_ToolPolicyLoweringRule(t *testing.T) {
 			return nil, false, nil, nil
 		},
 	}
-	_, _, err := CompileChatRequest(request, dialectWithoutPolicy)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("without LowerToolPolicy error = %T %v, want IncompatibleTargetError", err, err)
+	docWithoutPolicy, changes, err := CompileChatRequest(request, dialectWithoutPolicy)
+	if err != nil || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("without LowerToolPolicy document=%#v changes=%#v err=%v", docWithoutPolicy, changes, err)
 	}
 
 	// 2. With LowerToolPolicy, provider produces target-aware tool choice

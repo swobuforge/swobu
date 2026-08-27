@@ -28,10 +28,8 @@ const (
 )
 
 // AttemptFailure is the validated terminal fact for one provider attempt.
-// Incompatible targets are rejected during preparation and therefore require
-// ExecutionNotDispatched. Bound transports conservatively wrap an untyped
-// error as ExecutionMayHaveOccurred; only the exact adapter may claim an
-// earlier fact.
+// Bound transports conservatively wrap an untyped error as
+// ExecutionMayHaveOccurred; only the exact adapter may claim an earlier fact.
 type AttemptFailure struct {
 	execution ExecutionPossibility
 	cause     error
@@ -58,11 +56,6 @@ func newAttemptFailure(execution ExecutionPossibility, cause error) AttemptFailu
 		cause = prior.Cause()
 	}
 	cause = normalizeFailureCause(cause)
-	if isIncompatibleTarget(cause) && execution != ExecutionNotDispatched {
-		// Later execution states would let a representation failure authorize
-		// replay after provider I/O, risking duplicate execution.
-		panic("incompatible target requires ExecutionNotDispatched")
-	}
 	failure := AttemptFailure{execution: execution, cause: cause}
 	if !failure.valid() {
 		panic("provider attempt failure has invalid execution possibility")
@@ -89,32 +82,6 @@ func AsAttemptFailure(err error) (AttemptFailure, bool) {
 		return AttemptFailure{}, false
 	}
 	return failure, true
-}
-
-// IncompatibleTargetError means dispatch would violate an explicit hard caller
-// promise. Exchange may try another candidate with the unchanged request only
-// before dispatch; this type is never a public client error.
-type IncompatibleTargetError struct {
-	Reason string
-}
-
-func (e IncompatibleTargetError) Error() string {
-	if e.Reason == "" {
-		return "canonical request is incompatible with provider candidate"
-	}
-	return fmt.Sprintf("canonical request is incompatible with provider candidate: %s", e.Reason)
-}
-
-func (IncompatibleTargetError) providerFailure() {}
-
-// NewIncompatibleTarget marks a pre-dispatch hard caller-promise residual.
-func NewIncompatibleTarget(message string) error {
-	return IncompatibleTargetError{Reason: message}
-}
-
-func isIncompatibleTarget(err error) bool {
-	var incompatible IncompatibleTargetError
-	return errors.As(err, &incompatible)
 }
 
 // UnavailableError means provider I/O could not produce a usable backend

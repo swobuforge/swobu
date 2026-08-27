@@ -7,7 +7,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
@@ -89,11 +88,11 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 }
 
 func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil, nil)
+	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil)
 	return typed, err
 }
 
-func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule, policy *canonical.ToolPolicy) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
+func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
 		return nil, nil, wire.LoweredToolSet{}, nil
 	}
@@ -101,13 +100,6 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 	out := make([]any, 0, len(tools))
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
 	for ordinal, tool := range tools {
-		if tool.Kind() == canonical.ToolKindWebSearch && policy != nil && !policy.Permits(tool.Key()) {
-			if changeLog != nil {
-				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
-			}
-			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
-			continue
-		}
 		if rule != nil {
 			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
 			if changeLog != nil {
@@ -128,9 +120,6 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 		}
 		if _, function := tool.Function(); !function {
 			if _, custom := tool.Custom(); !custom {
-				if tool.Kind() == canonical.ToolKindWebSearch {
-					return nil, nil, wire.LoweredToolSet{}, provider.NewIncompatibleTarget("Chat Completions target cannot execute the current hosted-search declaration")
-				}
 				if changeLog != nil {
 					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
 				}
@@ -348,11 +337,12 @@ func cloneBoolPointer(ptr *bool) *bool {
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
 func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	record, err := wire.ResolveLoweredToolPolicy(policy, lowered)
-	if err != nil {
-		return nil, err
-	}
 	if lowered.TotalFragments() == 0 {
+		if policy.Mode == canonical.ToolPolicyRequired || policy.Mode == canonical.ToolPolicySpecific {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+		}
 		// Empty surviving surfaces are inert for soft policies. Omit the
 		// backend-visible field rather than emitting a no-op choice.
 		return nil, nil
@@ -365,6 +355,17 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 	case canonical.ToolPolicyRequired:
 		return "required", nil
 	case canonical.ToolPolicySpecific:
+		key, ok := policy.SpecificID()
+		if !ok {
+			return nil, canonical.BadRequest("specific tool policy requires a tool id")
+		}
+		record, ok := lowered.FindSource(key)
+		if !ok || record.FragmentCount != 1 {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+			return nil, nil
+		}
 		switch record.Kind {
 		case canonical.ToolKindFunction:
 			name, err := wire.EncodeToolName(names, record.Key)
@@ -389,7 +390,10 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 				},
 			}, nil
 		default:
-			return nil, provider.NewIncompatibleTarget(fmt.Sprintf("Chat Completions cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+			}
+			return nil, nil
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

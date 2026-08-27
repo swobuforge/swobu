@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -237,7 +238,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 			names := toolChoiceNames(t, tc.tools)
 			var lowered wire.LoweredToolSet
 			if len(tc.tools) > 0 {
-				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil, nil)
+				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
 			}
 			got, err := encodeToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {
@@ -248,19 +249,30 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 	}
 }
 
-func TestEncodeToolChoice_RejectsRequiredWithoutTools(t *testing.T) {
+func TestEncodeToolChoice_RecordsPolicyLossWithoutProjectedTools(t *testing.T) {
 	t.Parallel()
 
-	_, err := encodeToolChoice(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wire.LoweredToolSet{}, nil, nil, "")
-	if err == nil {
-		t.Fatal("expected encodeToolChoice to reject required without tools")
+	webSearch := canonical.NewWebSearchDeclaration()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
+	_, lowered, err := compileResponsesTools([]canonical.ToolDeclaration{webSearch}, canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
+	policies := []canonical.ToolPolicy{
+		canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		specificToolPolicy(webSearch.Key(), canonical.ToolTypeWebSearch),
 	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
+	for _, policy := range policies {
+		policy := policy
+		t.Run(string(policy.Mode), func(t *testing.T) {
+			t.Parallel()
+			var changes []compat.Change
+			choice, err := encodeToolChoice(policy, lowered, nil, &changes, "")
+			want := compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})
+			if err != nil || choice != nil || len(changes) != 1 || changes[0] != want {
+				t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)
+			}
+		})
 	}
 }
 

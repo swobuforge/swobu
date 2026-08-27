@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -325,15 +324,15 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 	}
 }
 
-func TestEncodeRequestLowersStableWebSearchTool_GenericRejectsAndRuleLowers(t *testing.T) {
+func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
-	_, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), &changes, "", EncodeOptions{})
+	if err != nil || len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 
 	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
@@ -355,31 +354,19 @@ func TestEncodeRequestLowersStableWebSearchTool_GenericRejectsAndRuleLowers(t *t
 	}
 }
 
-func TestCompileResponsesToolsOmitsPolicyDeadWebSearch(t *testing.T) {
+func TestCompileResponsesToolsIsIndependentOfToolPolicy(t *testing.T) {
 	lookup := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	tools := []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), lookup}
-	search := canonical.WebSearchToolKey()
-	other := lookup.Key()
-	for _, test := range []struct {
-		name   string
-		policy canonical.ToolPolicy
-	}{
-		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)},
-		{name: "specific other", policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, &other)},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			encoded, lowered, err := compileResponsesTools(tools, canonical.ToolVisibilityRefinements{}, nil, nil, "", nil, &test.policy)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(encoded) != 1 || encoded[0].Name != "lookup" {
-				t.Fatalf("tools = %#v, want lookup only", encoded)
-			}
-			record, ok := lowered.FindSource(search)
-			if !ok || record.FragmentCount != 0 {
-				t.Fatalf("web search lowering = %#v, present=%v", record, ok)
-			}
-		})
+	encoded, lowered, err := compileResponsesTools(tools, canonical.ToolVisibilityRefinements{}, nil, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 1 || encoded[0].Name != "lookup" {
+		t.Fatalf("tools = %#v, want lookup only", encoded)
+	}
+	record, ok := lowered.FindSource(canonical.WebSearchToolKey())
+	if !ok || record.FragmentCount != 0 {
+		t.Fatalf("web search lowering = %#v, present=%v", record, ok)
 	}
 }
 

@@ -19,7 +19,6 @@ const (
 	ErrorCodeBadRequest           ErrorCode = "BAD_REQUEST"
 	ErrorCodeUnknownTarget        ErrorCode = "UNKNOWN_TARGET"
 	ErrorCodeNotImplemented       ErrorCode = "NOT_IMPLEMENTED"
-	ErrorCodeNoCompatibleTarget   ErrorCode = "NO_COMPATIBLE_TARGET"
 	ErrorCodeNoAvailableTarget    ErrorCode = "NO_AVAILABLE_TARGET"
 )
 
@@ -34,7 +33,7 @@ const (
 // itself a code; callers gate it separately.
 func ValidErrorCode(c ErrorCode) bool {
 	switch c {
-	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoCompatibleTarget, ErrorCodeNoAvailableTarget:
+	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoAvailableTarget:
 		return true
 	}
 	return false
@@ -123,12 +122,6 @@ func ClientUnsupportedOperation(message, retryChange string) Error {
 // required codec or canonical path is absent from Swobu.
 func NotImplemented(message string) Error {
 	return newSwobuError(ErrorCodeNotImplemented, message)
-}
-
-// NoCompatibleTarget reports that every configured candidate rejected the
-// unchanged canonical request as unrepresentable.
-func NoCompatibleTarget(message string) Error {
-	return newSwobuError(ErrorCodeNoCompatibleTarget, message)
 }
 
 // NoAvailableTarget reports that runtime suppression prevents the remaining

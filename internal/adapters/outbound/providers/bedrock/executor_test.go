@@ -230,7 +230,7 @@ func TestBedrockMantleMessagesUsesInlineImagePolyfill(t *testing.T) {
 	}
 }
 
-func TestBedrockMessagesRequiresExactWebSearchLowering(t *testing.T) {
+func TestBedrockMessagesOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 	target := newBedrockTarget("https://bedrock-runtime.us-east-1.amazonaws.com", "env:AWS_BEARER_TOKEN_BEDROCK", protocolkind.Messages)
 	target.Model = "model"
 	backend, err := NewExecutor(nil).ResolveBackend(target)
@@ -244,10 +244,9 @@ func TestBedrockMessagesRequiresExactWebSearchLowering(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	_, _, err = backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil || len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
+		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 }
 

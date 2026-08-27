@@ -2,11 +2,11 @@ package messages
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -173,22 +173,15 @@ func TestEncodeCarrier_WiresToolChoiceAndRejectsUnsupportedRequired(t *testing.T
 		})
 	}
 
-	_, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
+	document, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("claude-haiku"),
 		Items: []canonical.CanonicalItem{
 			canonicaltest.Message(t, canonical.MessageRoleUser, "hi"),
 		},
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 	}), delivery.BufferedDelivery())
-	if err == nil {
-		t.Fatal("expected required tool choice without tools to be rejected")
-	}
-	var compatErr canonical.Error
-	if !errors.As(err, &compatErr) {
-		t.Fatalf("expected canonical.Error, got %T", err)
-	}
-	if compatErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error code = %q, want %q", compatErr.Code, canonical.ErrorCodeBadRequest)
+	if err != nil || len(document.RawBytes()) == 0 {
+		t.Fatalf("document=%s err=%v", document.RawBytes(), err)
 	}
 }
 
@@ -230,6 +223,33 @@ func TestEncodeCarrier_OmitsToolChoiceWhenToolSurfaceIsEmpty(t *testing.T) {
 			}
 			if _, ok := payload["tool_choice"]; ok {
 				t.Fatalf("tool_choice = %#v, want omitted on empty tool surface", payload["tool_choice"])
+			}
+		})
+	}
+}
+
+func TestEncodeMessagesToolChoice_RecordsPolicyLossWithoutProjectedTools(t *testing.T) {
+	t.Parallel()
+
+	webSearch := canonical.NewWebSearchDeclaration()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
+	_, lowered, err := compileMessagesTools([]canonical.ToolDeclaration{webSearch}, nil, testAttemptToolNames(request), nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies := []canonical.ToolPolicy{
+		canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+		specificToolPolicy(webSearch.Key(), canonical.ToolTypeWebSearch),
+	}
+	for _, policy := range policies {
+		policy := policy
+		t.Run(string(policy.Mode), func(t *testing.T) {
+			t.Parallel()
+			var changes []compat.Change
+			choice, err := encodeMessagesToolChoice(policy, lowered, nil, &changes, "")
+			want := compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})
+			if err != nil || choice != nil || len(changes) != 1 || changes[0] != want {
+				t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)
 			}
 		})
 	}

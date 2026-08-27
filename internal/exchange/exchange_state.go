@@ -505,14 +505,6 @@ func advanceProviderExecutionFrom(ctx context.Context, s exchangeState, runner r
 				selection = next
 				continue
 			}
-			var incompatible provider.IncompatibleTargetError
-			if errors.As(err, &incompatible) {
-				if routeHasSuppressedCandidate(s) {
-					err = noAvailableTarget()
-				} else {
-					err = noCompatibleTarget(err)
-				}
-			}
 		}
 		s.phase = failedPhase{problem: err, target: target}
 		return reducerOutcome{nextState: s}, nil
@@ -572,37 +564,12 @@ func terminateProviderExecution(s exchangeState) reducerOutcome {
 	}
 	last := s.providerCallAttempts[len(s.providerCallAttempts)-1]
 	problem := last.failure.Attempt.Cause()
-	var incompatible provider.IncompatibleTargetError
-	if errors.As(problem, &incompatible) {
-		if routeHasSuppressedCandidate(s) {
-			problem = noAvailableTarget()
-		} else {
-			problem = noCompatibleTarget(problem)
-		}
-	}
 	s.phase = failedPhase{problem: problem, target: last.target}
 	return reducerOutcome{nextState: s}
 }
 
-func routeHasSuppressedCandidate(s exchangeState) bool {
-	for _, target := range s.route.targets {
-		if s.targetBackoff.active(target) {
-			return true
-		}
-	}
-	return false
-}
-
 func noAvailableTarget() canonical.Error {
 	return canonical.NoAvailableTarget("no currently available configured target can serve the request")
-}
-
-func noCompatibleTarget(lastRejection error) canonical.Error {
-	message := "no configured target can represent the canonical request"
-	if lastRejection != nil {
-		message += ": " + lastRejection.Error()
-	}
-	return canonical.NoCompatibleTarget(message)
 }
 
 func nativePreviousResponseSent(request provider.Request) bool {
@@ -639,9 +606,8 @@ func nativeReferenceFailureAdmitsFullHistory(attempt providerCallAttempt) bool {
 }
 
 func candidatePreparationCanAdvance(err error) bool {
-	var incompatible provider.IncompatibleTargetError
 	var unavailable provider.UnavailableError
-	return errors.As(err, &incompatible) || errors.As(err, &unavailable)
+	return errors.As(err, &unavailable)
 }
 
 func providerRecoveryPermitted(attempt providerCallAttempt) bool {
@@ -659,11 +625,9 @@ func providerRecoveryPermitted(attempt providerCallAttempt) bool {
 }
 
 func providerFailureAdvancesCandidate(err error) bool {
-	var incompatible provider.IncompatibleTargetError
 	var rejected provider.RejectedError
 	var unavailable provider.UnavailableError
 	return errors.As(err, &unavailable) ||
-		errors.As(err, &incompatible) ||
 		errors.As(err, &rejected)
 }
 

@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
@@ -155,7 +154,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool, &policy)
+	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -534,11 +533,11 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 }
 
 func encodeMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, nil, nil)
+	typed, _, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, nil)
 	return typed, err
 }
 
-func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule, policy *canonical.ToolPolicy) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
+func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
 		return nil, wire.LoweredToolSet{}, nil
 	}
@@ -555,13 +554,6 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 	out := make([]ProviderRequestTool, 0, len(tools))
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
 	for ordinal, tool := range tools {
-		if tool.Kind() == canonical.ToolKindWebSearch && policy != nil && !policy.Permits(tool.Key()) {
-			if changeLog != nil {
-				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
-			}
-			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
-			continue
-		}
 		if rule != nil {
 			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
 			if changeLog != nil {
@@ -632,9 +624,6 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 				FragmentCount: 1,
 			})
 			continue
-		}
-		if tool.Kind() == canonical.ToolKindWebSearch {
-			return nil, wire.LoweredToolSet{}, provider.NewIncompatibleTarget("Messages target cannot execute the current hosted-search declaration")
 		}
 		if changeLog != nil {
 			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))

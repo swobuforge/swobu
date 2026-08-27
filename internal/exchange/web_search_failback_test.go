@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -31,7 +31,7 @@ func (l capabilityFallbackWorkspaceLookup) GetWorkspace(context.Context, routing
 
 func (r capabilityFallbackRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	codec := provider.Codec(testBackendCodec{protocol: target.ProtocolKind})
-	if target.TargetID == "paid-openai" {
+	if target.ProtocolKind == protocolkind.Responses {
 		codec = protocolcodec.Codec{
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
@@ -47,86 +47,129 @@ func (r capabilityFallbackRuntime) ResolveBackend(target provider.TargetSnapshot
 	}, nil
 }
 
-func TestCurrentSearchFallsBackAndSettledSearchHistoryReentersPrimary(t *testing.T) {
-	workspace := capabilityFallbackWorkspace(t)
-	store := session.NewMemoryStore()
+func TestCurrentSearchGrammarOmissionReachesPrimaryWithoutFallback(t *testing.T) {
+	local := capabilityFallbackTarget(t, "local", "chat_completions")
+	fallback := capabilityFallbackTarget(t, "fallback", "responses")
+	workspace := capabilityFallbackWorkspace(t, "search-omission", []routing.Target{local}, []routing.Target{fallback})
 	transportCounts := map[string]int{}
-	var localRequests []carrier.Document
+	var primaryRequest carrier.Document
 
 	runtime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
 		transportCounts[target.TargetID]++
-		switch {
-		case strings.HasPrefix(target.TargetID, "local-"):
-			localRequests = append(localRequests, document)
-			return provider.DocumentIngress{Document: carrier.NewDocument(
-				protocolkind.ChatCompletions, "application/json", nil,
-				[]byte(`{"id":"chat_local","model":"local","choices":[{"index":0,"message":{"role":"assistant","content":"local answer"},"finish_reason":"stop"}]}`), carrier.Meta{},
-			)}, nil
-		case target.TargetID == "paid-openai":
-			return provider.DocumentIngress{Document: carrier.NewDocument(
-				protocolkind.Responses, "application/json", nil,
-				[]byte(`{"id":"resp_paid","model":"paid","status":"completed","output":[{"type":"web_search_call","id":"search_1","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hosted search answer","annotations":[{"type":"url_citation","url":"https://example.test/rules","title":"Rules","start_index":0,"end_index":6}]}]}]}`), carrier.Meta{},
-			)}, nil
+		if target.TargetID != "local" {
+			t.Fatalf("grammar omission advanced to fallback target %q", target.TargetID)
+		}
+		primaryRequest = document
+		return capabilityFallbackChatResponse("local answer"), nil
+	}}
+	ingress := capabilityFallbackIngress(workspace, session.NewMemoryStore(), runtime)
+	out := runCapabilityFallbackTurn(t, ingress, workspace, "omission", `{
+		"model":"chat",
+		"tools":[{"type":"web_search"}],
+		"input":"find the deadline"
+	}`)
+
+	if transportCounts["local"] != 1 || transportCounts["fallback"] != 0 {
+		t.Fatalf("transports = %#v, want primary once and fallback zero", transportCounts)
+	}
+	if bytes.Contains(primaryRequest.RawBytes(), []byte("web_search")) {
+		t.Fatalf("generic Chat projection leaked web_search: %s", primaryRequest.RawBytes())
+	}
+	assertCapabilityOmission(t, out, canonical.RequestToolsKind)
+}
+
+func TestNativeSearchProviderRejectionAdvancesToFallback(t *testing.T) {
+	native := capabilityFallbackTarget(t, "native-search", "responses")
+	fallback := capabilityFallbackTarget(t, "local-fallback", "chat_completions")
+	workspace := capabilityFallbackWorkspace(t, "search-rejection", []routing.Target{native}, []routing.Target{fallback})
+	var transportOrder []string
+	nativeCalls := 0
+
+	runtime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+		transportOrder = append(transportOrder, target.TargetID)
+		switch target.TargetID {
+		case "native-search":
+			nativeCalls++
+			if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search_preview"`)) {
+				t.Fatalf("native search rejection lacked search wire: %s", document.RawBytes())
+			}
+			return nil, canonical.NewBackendError(target.TargetID, 400, "search unsupported", "")
+		case "local-fallback":
+			if bytes.Contains(document.RawBytes(), []byte("web_search")) {
+				t.Fatalf("fallback Chat projection leaked web_search: %s", document.RawBytes())
+			}
+			return capabilityFallbackChatResponse("fallback answer"), nil
 		default:
 			t.Fatalf("unexpected target %q", target.TargetID)
 			return nil, nil
 		}
 	}}
-
-	ingress := NewIngress(capabilityFallbackWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
-		CheckpointStore: store,
-		ResponseIDs:     deterministicResponseIDGenerator{},
-	})
-	runCapabilityFallbackTurn(t, ingress, workspace, "turn1", `{
+	ingress := capabilityFallbackIngress(workspace, session.NewMemoryStore(), runtime)
+	out := runCapabilityFallbackTurn(t, ingress, workspace, "rejection", `{
 		"model":"chat",
-		"input":"hello"
-	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 1 || transportCounts["paid-openai"] != 0 {
-		t.Fatalf("turn 1 transports = %#v", transportCounts)
-	}
-
-	runCapabilityFallbackTurn(t, ingress, workspace, "turn2", `{
-		"model":"chat",
-		"previous_response_id":"swobu_turn1",
 		"tools":[{"type":"web_search"}],
 		"input":"find the deadline"
 	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 1 || transportCounts["paid-openai"] != 1 {
-		t.Fatalf("turn 2 transports = %#v; local incompatibility must happen before I/O", transportCounts)
-	}
 
-	runCapabilityFallbackTurn(t, ingress, workspace, "turn3", `{
+	if nativeCalls != 1 || len(transportOrder) != 2 || transportOrder[0] != "native-search" || transportOrder[1] != "local-fallback" {
+		t.Fatalf("transport order = %#v, want native search rejection before fallback", transportOrder)
+	}
+	if out.Target.TargetID != "local-fallback" {
+		t.Fatalf("winning target = %q, want local-fallback", out.Target.TargetID)
+	}
+}
+
+func TestSettledSearchHistoryReentersLocalTarget(t *testing.T) {
+	store := session.NewMemoryStore()
+	searchTarget := capabilityFallbackTarget(t, "native-search", "responses")
+	searchWorkspace := capabilityFallbackWorkspace(t, "search-history", []routing.Target{searchTarget})
+	searchRuntime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+		if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search_preview"`)) {
+			t.Fatalf("search-producing turn lacked native search wire: %s", document.RawBytes())
+		}
+		return capabilityFallbackSearchResponse(), nil
+	}}
+	searchIngress := capabilityFallbackIngress(searchWorkspace, store, searchRuntime)
+	runCapabilityFallbackTurn(t, searchIngress, searchWorkspace, "search", `{
 		"model":"chat",
-		"previous_response_id":"swobu_turn2",
+		"tools":[{"type":"web_search"}],
+		"input":"find the deadline"
+	}`)
+
+	localTarget := capabilityFallbackTarget(t, "local", "chat_completions")
+	localWorkspace := capabilityFallbackWorkspace(t, "search-history", []routing.Target{localTarget})
+	var reentry carrier.Document
+	localRuntime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+		if target.TargetID != "local" {
+			t.Fatalf("historical continuation selected %q, want local", target.TargetID)
+		}
+		reentry = document
+		return capabilityFallbackChatResponse("local continuation"), nil
+	}}
+	localIngress := capabilityFallbackIngress(localWorkspace, store, localRuntime)
+	runCapabilityFallbackTurn(t, localIngress, localWorkspace, "continue", `{
+		"model":"chat",
+		"previous_response_id":"swobu_search",
 		"input":"explain that answer"
 	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 2 || transportCounts["paid-openai"] != 1 {
-		t.Fatalf("turn 3 transports = %#v", transportCounts)
-	}
-	if len(localRequests) != 2 {
-		t.Fatalf("local requests = %d, want ordinary turn and historical-search re-entry", len(localRequests))
-	}
-	reentry := localRequests[1].RawBytes()
+
 	for _, wanted := range [][]byte{[]byte("Hosted search answer"), []byte("explain that answer")} {
-		if !bytes.Contains(reentry, wanted) {
-			t.Fatalf("local re-entry request missing %q: %s", wanted, reentry)
+		if !bytes.Contains(reentry.RawBytes(), wanted) {
+			t.Fatalf("local re-entry request missing %q: %s", wanted, reentry.RawBytes())
 		}
 	}
 	for _, forbidden := range [][]byte{[]byte("web_search"), []byte("search_1"), []byte("example.test/rules")} {
-		if bytes.Contains(reentry, forbidden) {
-			t.Fatalf("local re-entry leaked settled search machinery %q: %s", forbidden, reentry)
+		if bytes.Contains(reentry.RawBytes(), forbidden) {
+			t.Fatalf("local re-entry leaked settled search machinery %q: %s", forbidden, reentry.RawBytes())
 		}
 	}
+}
 
-	runCapabilityFallbackTurn(t, ingress, workspace, "turn4", `{
-		"model":"chat",
-		"previous_response_id":"swobu_turn3",
-		"tools":[{"type":"web_search"}],
-		"input":"search again"
-	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 2 || transportCounts["paid-openai"] != 2 {
-		t.Fatalf("turn 4 transports = %#v", transportCounts)
-	}
+func capabilityFallbackIngress(workspace routing.Workspace, store session.Store, runtime capabilityFallbackRuntime) RequestIngress {
+	return NewIngress(capabilityFallbackWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
+		CheckpointStore: store,
+		ResponseIDs:     deterministicResponseIDGenerator{},
+	})
 }
 
 func runCapabilityFallbackTurn(t *testing.T, ingress RequestIngress, workspace routing.Workspace, exchangeID, raw string) RequestOutput {
@@ -149,25 +192,56 @@ func runCapabilityFallbackTurn(t *testing.T, ingress RequestIngress, workspace r
 	return out
 }
 
-func capabilityFallbackWorkspace(t *testing.T) routing.Workspace {
+func assertCapabilityOmission(t *testing.T, out RequestOutput, capability canonical.CapabilityPath) {
 	t.Helper()
-	localA := capabilityFallbackTarget(t, "local-a", "chat_completions")
-	localB := capabilityFallbackTarget(t, "local-b", "chat_completions")
-	paid := capabilityFallbackTarget(t, "paid-openai", "responses")
-	primary, _ := routing.NewTier([]routing.Target{localA, localB})
-	fallback, _ := routing.NewTier([]routing.Target{paid})
+	if out.Compatibility == nil {
+		t.Fatal("response compatibility completion is nil")
+	}
+	changes := out.Compatibility.Snapshot().Changes
+	want := compat.NewOmission(capability, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
+	for _, change := range changes {
+		if change == want {
+			return
+		}
+	}
+	t.Fatalf("compatibility changes = %#v, want %#v", changes, want)
+}
+
+func capabilityFallbackChatResponse(text string) provider.Ingress {
+	return provider.DocumentIngress{Document: carrier.NewDocument(
+		protocolkind.ChatCompletions, "application/json", nil,
+		[]byte(`{"id":"chat_local","model":"local","choices":[{"index":0,"message":{"role":"assistant","content":"`+text+`"},"finish_reason":"stop"}]}`), carrier.Meta{},
+	)}
+}
+
+func capabilityFallbackSearchResponse() provider.Ingress {
+	return provider.DocumentIngress{Document: carrier.NewDocument(
+		protocolkind.Responses, "application/json", nil,
+		[]byte(`{"id":"resp_search","model":"paid","status":"completed","output":[{"type":"web_search_call","id":"search_1","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hosted search answer","annotations":[{"type":"url_citation","url":"https://example.test/rules","title":"Rules","start_index":0,"end_index":6}]}]}]}`), carrier.Meta{},
+	)}
+}
+
+func capabilityFallbackWorkspace(t *testing.T, slugName string, tiers ...[]routing.Target) routing.Workspace {
+	t.Helper()
+	routeTiers := make([]routing.Tier, 0, len(tiers))
+	for _, targets := range tiers {
+		tier, err := routing.NewTier(targets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routeTiers = append(routeTiers, tier)
+	}
 	routeName, _ := routing.ParseRouteName("chat")
-	route, _ := routing.NewRoute(routeName, []routing.Tier{primary, fallback})
-	slug, _ := routing.ParseWorkspaceSlug("capability-fallback")
+	route, err := routing.NewRoute(routeName, routeTiers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug(slugName)
 	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return workspace
-}
-
-func capabilityFallbackLocalTransportCount(counts map[string]int) int {
-	return counts["local-a"] + counts["local-b"]
 }
 
 func capabilityFallbackTarget(t *testing.T, id, protocolName string) routing.Target {

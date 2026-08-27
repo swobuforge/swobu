@@ -402,6 +402,29 @@ func TestOpenClawPlanSurfacesMalformedJSONError(t *testing.T) {
 	}
 }
 
+func TestOpenClawMissingPathDiagnosticsPlanFreshConfiguration(t *testing.T) {
+	missing := func(path string) commandReply {
+		return commandReply{code: 1, stdout: "Config path not found: " + path + ". Run openclaw config validate to inspect config shape.\n"}
+	}
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"openclaw config file":                              {stdout: "/path/to/config.json\n"},
+		"openclaw config get agents.defaults.model.primary": missing("agents.defaults.model.primary"),
+		"openclaw config get agents.defaults.model":         missing("agents.defaults.model"),
+		"openclaw config get models.providers.swobu --json": missing("models.providers.swobu"),
+		"openclaw config get agents.defaults.models --json": missing("agents.defaults.models"),
+	}
+	service := commandService(t, "openclaw", replies, &calls)
+
+	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	if err != nil {
+		t.Fatalf("Plan with OpenClaw missing-path diagnostics failed: %v", err)
+	}
+	if plan.AlreadyConfigured() {
+		t.Fatal("fresh OpenClaw configuration was already configured")
+	}
+}
+
 func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) {
 	var calls []commandCall
 	replies := map[string]commandReply{

@@ -507,21 +507,20 @@ func TestCodecLowersJSONObjectsAndReasoningTable(t *testing.T) {
 	}
 }
 
-func TestCodecRejectsDisabledReasoningWithoutExactGeminiOffRepresentation(t *testing.T) {
+func TestCodecOmitsDisabledReasoningWithoutGeminiOffRepresentation(t *testing.T) {
 	for _, effort := range []*canonical.InferenceEffort{nil, geminiEffort(canonical.InferenceEffortMax)} {
 		controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: effort})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+		document, changes, err := (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:     canonical.Specify("gemini-model"),
 			Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 			Controls:  controls,
 			Reasoning: mustGeminiReasoning(t, canonical.NewDisabledReasoningCompute()),
 		}), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+		if err != nil || len(document.RawBytes()) == 0 || !containsGeminiChange(changes, canonical.RequestReasoning) {
+			t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 		}
 	}
 }
@@ -912,20 +911,20 @@ func TestCodecEvaluatesToolPolicyAfterNativeToolProjection(t *testing.T) {
 	user := canonicaltest.Message(t, canonical.MessageRoleUser, "hello")
 
 	for _, tc := range []struct {
-		name              string
-		declarations      []canonical.ToolDeclaration
-		policy            canonical.ToolPolicy
-		batch             canonical.Specified[canonical.ToolCallBatchPolicy]
-		wantIncompatible  bool
-		wantChoiceMode    string
-		wantTools         int
-		wantBatchOmission bool
+		name               string
+		declarations       []canonical.ToolDeclaration
+		policy             canonical.ToolPolicy
+		batch              canonical.Specified[canonical.ToolCallBatchPolicy]
+		wantPolicyOmission bool
+		wantChoiceMode     string
+		wantTools          int
+		wantBatchOmission  bool
 	}{
 		{
-			name:             "required with only omitted custom tool",
-			declarations:     []canonical.ToolDeclaration{custom},
-			policy:           canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
-			wantIncompatible: true,
+			name:               "required with only omitted custom tool",
+			declarations:       []canonical.ToolDeclaration{custom},
+			policy:             canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+			wantPolicyOmission: true,
 		},
 		{
 			name:         "auto with only omitted custom tool",
@@ -958,13 +957,6 @@ func TestCodecEvaluatesToolPolicyAfterNativeToolProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			document, changes, err := (codec{}).Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-			var incompatible provider.IncompatibleTargetError
-			if tc.wantIncompatible {
-				if !errors.As(err, &incompatible) {
-					t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -974,6 +966,9 @@ func TestCodecEvaluatesToolPolicyAfterNativeToolProjection(t *testing.T) {
 			}
 			if len(payload.Tools) != tc.wantTools {
 				t.Fatalf("tools = %#v, want %d", payload.Tools, tc.wantTools)
+			}
+			if tc.wantPolicyOmission != containsGeminiChange(changes, canonical.RequestToolPolicy) {
+				t.Fatalf("policy omission = %t, changes=%#v", tc.wantPolicyOmission, changes)
 			}
 			choiceMode := ""
 			if payload.GenerationConfig != nil && payload.GenerationConfig.ToolChoice != nil {
@@ -1081,17 +1076,17 @@ func TestGeminiCodecToolCallBatchAtMostOneSemantics(t *testing.T) {
 	})
 }
 
-func TestGeminiFunctionStrictnessOnlyHardFailsWhenTrue(t *testing.T) {
+func TestGeminiFunctionStrictnessDegradesOnlyWhenTrue(t *testing.T) {
 	functionKey := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	user := canonicaltest.Message(t, canonical.MessageRoleUser, "hello")
 	for _, tc := range []struct {
 		name         string
 		strict       canonical.Specified[bool]
-		incompatible bool
+		wantOmission bool
 	}{
 		{name: "unspecified", strict: canonical.Unspecified[bool]()},
 		{name: "explicit false", strict: canonical.Specify(false)},
-		{name: "explicit true", strict: canonical.Specify(true), incompatible: true},
+		{name: "explicit true", strict: canonical.Specify(true), wantOmission: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			declaration := canonicaltest.MustFunctionTool(functionKey, "lookup", canonicaltest.Schema(t, `{"type":"object"}`), tc.strict)
@@ -1103,18 +1098,11 @@ func TestGeminiFunctionStrictnessOnlyHardFailsWhenTrue(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, changes, err := (codec{}).Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-			if tc.incompatible {
-				var incompatible provider.IncompatibleTargetError
-				if !errors.As(err, &incompatible) {
-					t.Fatalf("error = %T %v, want IncompatibleTargetError", err, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(changes) != 0 {
-				t.Fatalf("changes = %#v, want exact lowering", changes)
+			if tc.wantOmission != containsGeminiChange(changes, canonical.RequestToolsSchemaStrict) {
+				t.Fatalf("strict omission = %t, changes=%#v", tc.wantOmission, changes)
 			}
 		})
 	}
@@ -1147,6 +1135,15 @@ func assertGeminiChanges(t *testing.T, changes []compat.Change, capabilities ...
 			t.Fatalf("changes = %#v, missing %s", changes, capability)
 		}
 	}
+}
+
+func containsGeminiChange(changes []compat.Change, capability canonical.CapabilityPath) bool {
+	for _, change := range changes {
+		if change.Capability == capability {
+			return true
+		}
+	}
+	return false
 }
 
 func mustGeminiReasoning(t *testing.T, compute canonical.ReasoningCompute) canonical.ReasoningControls {

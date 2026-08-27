@@ -30,13 +30,13 @@
 //
 // Completed portable Google Search effects without exact Interactions replay
 // are omitted atomically from only the outbound Gemini request. Exact replay is
-// preserved, while unresolved or partially exact Search history remains
-// incompatible rather than fabricating provider-native lifecycle state.
+// preserved, while unresolved or partially exact Search history fails locally
+// as unimplemented rather than fabricating provider-native lifecycle state.
 //
 // Automatic reasoning without explicit effort omits thinking_level so Gemini
-// retains its provider-owned model default. Hard-off reasoning is incompatible
-// because Interactions has no generic exact off representation. Other compute
-// and effort controls pass through the shared ordinal projection that owns
+// retains its provider-owned model default. Hard-off reasoning is omitted with
+// compatibility evidence because Interactions has no generic off field. Other
+// compute and effort controls pass through the shared ordinal projection that owns
 // explicit-effort precedence and reference-budget binning; this adapter then
 // bounds only that result to Interactions' closed low/medium/high set. Model
 // identity and backend error prose never select this translation.

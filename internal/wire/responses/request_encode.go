@@ -139,7 +139,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool, &policy)
+	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
