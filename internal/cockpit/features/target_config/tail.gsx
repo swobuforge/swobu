@@ -89,7 +89,9 @@ func ManualModelInput(w *TargetConfig) *ui.EditableRow {
 	model := strings.TrimSpace(w.SelectedModel.Get().ModelName)
 	row := ui.NewEditableRow(TargetAddMountKey(w, "manual-model-input"), TargetModelLabel(w), tui.NewState(model))
 	row.Placeholder = "required"
-	row.AutoFocus = model == ""
+	row.ViewAction = "enter ↵"
+	row.EditAction = "use ↵"
+	row.StartEditing = model == ""
 	row.OnSubmit = func(value string) {
 		w.selectModelByID(strings.TrimSpace(value))
 	}

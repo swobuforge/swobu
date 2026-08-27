@@ -276,11 +276,8 @@ func TestBedrockMessagesReplaysOpaqueThinking(t *testing.T) {
 	}
 }
 
-// RFC G2 §7.6: the Bedrock Responses seam (mantleResponsesCodec) is an identity
-// decorator. It preserves the reasoning wire id paired with encrypted content
-// verbatim through encode — no rs_→rsn_ rewrite, no rejection — because the
-// proven normalization set is empty (§7.7 intentionally skipped).
-func TestBedrockMantleResponsesPreservesReasoningReplayID(t *testing.T) {
+// Bedrock Responses introduces no provider-specific reasoning-ID rewrite.
+func TestBedrockResponsesPreservesReasoningReplayID(t *testing.T) {
 	opaque, err := canonical.NewResponsesOpaqueThinking(canonical.ResponsesReasoningReplay{EncryptedContent: "cipher", ItemID: "rs_1"})
 	if err != nil {
 		t.Fatal(err)
@@ -308,10 +305,10 @@ func TestBedrockMantleResponsesPreservesReasoningReplayID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(document.RawBytes(), []byte(`"id":"rs_1"`)) {
-		t.Fatalf("Bedrock Responses seam rewrote or dropped the reasoning replay id: %s", document.RawBytes())
+		t.Fatalf("Bedrock Responses rewrote or dropped the reasoning replay id: %s", document.RawBytes())
 	}
 	if bytes.Contains(document.RawBytes(), []byte(`"id":"rsn_1"`)) {
-		t.Fatalf("Bedrock Responses seam rewrote the reasoning replay id: %s", document.RawBytes())
+		t.Fatalf("Bedrock Responses rewrote the reasoning replay id: %s", document.RawBytes())
 	}
 }
 

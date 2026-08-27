@@ -54,11 +54,6 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 	switch target.ProtocolKind {
 	case protocolkind.Messages:
 		codec = mantleMessagesCodec{Codec: codec}
-	case protocolkind.Responses:
-		// RFC G2 §7.6: the Bedrock Responses reasoning-replay identity seam. It is
-		// an identity decorator today; the named site where a proven normalization
-		// of the reasoning wire id would land (see mantleResponsesCodec).
-		codec = mantleResponsesCodec{Codec: codec}
 	}
 	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
 	if err := backend.Validate(); err != nil {
