@@ -3,7 +3,6 @@ package chatcompletions
 import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // projectChatCompletionsRequestHistory composes target-local history losses:
@@ -44,9 +43,7 @@ func projectChatCompletionsRequestWebSearchLifecycles(items []canonical.Canonica
 		}
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
-			return nil, nil, provider.IncompatibleCapability(
-				canonical.RequestItemsKind, canonical.Occurrence{}, "Chat Completions cannot correlate canonical web-search history",
-			)
+			return nil, nil, canonical.InternalError("canonical web-search history cannot be correlated")
 		}
 		if completed != nil {
 			effects = append(effects, *completed)
@@ -58,10 +55,7 @@ func projectChatCompletionsRequestWebSearchLifecycles(items []canonical.Canonica
 			continue
 		}
 		if effect.ResultIndex < 0 {
-			return nil, nil, provider.IncompatibleCapability(
-				canonical.RequestItemsKind, canonical.CallOccurrence(effect.CallID),
-				"Chat Completions cannot represent unresolved web-search history",
-			)
+			return nil, nil, canonical.NotImplemented("Chat Completions cannot project unresolved web-search history")
 		}
 		drop[effect.CallIndex] = struct{}{}
 		drop[effect.ResultIndex] = struct{}{}

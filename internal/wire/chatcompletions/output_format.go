@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -71,7 +70,7 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 		return json.RawMessage(`{"type":"json_object"}`), nil
 	}
 	if format.Kind != canonical.OutputFormatJSONSchema {
-		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Chat Completions cannot represent the canonical output format")
+		return nil, canonical.InternalError("canonical output format kind is invalid")
 	}
 	dto := chatCompletionsResponseFormatDTO{
 		Type: string(canonical.OutputFormatJSONSchema),

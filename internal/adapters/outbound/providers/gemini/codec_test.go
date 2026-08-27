@@ -670,9 +670,9 @@ func TestCodecOmitsSettledPortableGoogleSearchHistory(t *testing.T) {
 		}),
 		Delivery: providerDelivery,
 	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("unsettled Search Encode error = %T %v, want incompatible target", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("unsettled Search Encode error = %T %v, want NOT_IMPLEMENTED", err, err)
 	}
 
 	exactCall, err := canonical.NewInteractionsWebSearchCall(canonical.WebSearchCall{
@@ -697,8 +697,8 @@ func TestCodecOmitsSettledPortableGoogleSearchHistory(t *testing.T) {
 		}),
 		Delivery: providerDelivery,
 	})
-	if !errors.As(err, &incompatible) || len(changes) != 0 {
-		t.Fatalf("partially exact Search Encode = (%#v, %T %v), want unchanged incompatibility", changes, err, err)
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal || len(changes) != 0 {
+		t.Fatalf("partially exact Search Encode = (%#v, %T %v), want INTERNAL_ERROR", changes, err, err)
 	}
 }
 
@@ -711,20 +711,21 @@ func TestSettledPortableSearchProjectionFailsClosedAndPreservesOccurrences(t *te
 	current := canonicaltest.Message(t, canonical.MessageRoleUser, "continue")
 
 	for _, tc := range []struct {
-		name  string
-		items []canonical.CanonicalItem
+		name     string
+		items    []canonical.CanonicalItem
+		wantCode canonical.ErrorCode
 	}{
-		{name: "orphan result", items: []canonical.CanonicalItem{portableResult, current}},
-		{name: "duplicate result", items: []canonical.CanonicalItem{portableCall, portableResult, portableResult, current}},
-		{name: "unresolved call", items: []canonical.CanonicalItem{portableCall, current}},
-		{name: "exact call portable result", items: []canonical.CanonicalItem{exactCall, portableResult, current}},
-		{name: "portable call exact result", items: []canonical.CanonicalItem{portableCall, exactResult, current}},
+		{name: "orphan result", items: []canonical.CanonicalItem{portableResult, current}, wantCode: canonical.ErrorCodeInternal},
+		{name: "duplicate result", items: []canonical.CanonicalItem{portableCall, portableResult, portableResult, current}, wantCode: canonical.ErrorCodeInternal},
+		{name: "unresolved call", items: []canonical.CanonicalItem{portableCall, current}, wantCode: canonical.ErrorCodeNotImplemented},
+		{name: "exact call portable result", items: []canonical.CanonicalItem{exactCall, portableResult, current}, wantCode: canonical.ErrorCodeInternal},
+		{name: "portable call exact result", items: []canonical.CanonicalItem{portableCall, exactResult, current}, wantCode: canonical.ErrorCodeInternal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := projectSettledPortableSearchHistory(canonical.NewCanonicalRequest(canonical.RequestParams{Items: tc.items}))
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(err, &incompatible) {
-				t.Fatalf("projection error = %T %v, want incompatible target", err, err)
+			var swobuErr canonical.Error
+			if !errors.As(err, &swobuErr) || swobuErr.Code != tc.wantCode {
+				t.Fatalf("projection error = %T %v, want %s", err, err, tc.wantCode)
 			}
 		})
 	}
@@ -830,9 +831,9 @@ func TestCodecRejectsResidualMCPBeforeProviderLowering(t *testing.T) {
 		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration), canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 	})
 	_, _, err = (codec{}).Encode(provider.Request{Canonical: request, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-	var unsupported compat.UnsupportedError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("Encode error = %T %v, want typed target incompatibility", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal {
+		t.Fatalf("Encode error = %T %v, want INTERNAL_ERROR", err, err)
 	}
 }
 
@@ -887,16 +888,110 @@ func TestCodecRejectsUnrepresentableToolAndReplaySemanticsBeforeDispatch(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			params := base()
 			tc.mutate(&params)
-			_, _, err := (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(params), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(err, &incompatible) {
-				t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+			_, changes, err := (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(params), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(customKey))
+			if len(changes) != 1 || changes[0] != want {
+				t.Fatalf("changes = %#v, want %#v", changes, want)
 			}
 		})
 	}
 	document, _, err := (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gemini-model"), Items: []canonical.CanonicalItem{result}}), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
 	if err != nil || !strings.Contains(string(document.RawBytes()), `"type":"function_result"`) {
 		t.Fatalf("stateless function result = %s, %v", document.RawBytes(), err)
+	}
+}
+
+func TestCodecEvaluatesToolPolicyAfterNativeToolProjection(t *testing.T) {
+	customKey := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell")
+	functionKey := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	custom := canonicaltest.MustCustomTool(customKey, "", canonicaltest.MustToolFormat(`{"type":"text"}`))
+	function := canonicaltest.MustFunctionTool(functionKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	user := canonicaltest.Message(t, canonical.MessageRoleUser, "hello")
+
+	for _, tc := range []struct {
+		name              string
+		declarations      []canonical.ToolDeclaration
+		policy            canonical.ToolPolicy
+		batch             canonical.Specified[canonical.ToolCallBatchPolicy]
+		wantIncompatible  bool
+		wantChoiceMode    string
+		wantTools         int
+		wantBatchOmission bool
+	}{
+		{
+			name:             "required with only omitted custom tool",
+			declarations:     []canonical.ToolDeclaration{custom},
+			policy:           canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+			wantIncompatible: true,
+		},
+		{
+			name:         "auto with only omitted custom tool",
+			declarations: []canonical.ToolDeclaration{custom},
+			policy:       canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
+		},
+		{
+			name:           "required with supported function and omitted custom tool",
+			declarations:   []canonical.ToolDeclaration{function, custom},
+			policy:         canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil),
+			wantChoiceMode: "any",
+			wantTools:      1,
+		},
+		{
+			name:         "at most one with only omitted custom tool",
+			declarations: []canonical.ToolDeclaration{custom},
+			policy:       canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil),
+			batch:        canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model:         canonical.Specify("gemini-model"),
+				Items:         []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tc.declarations...), user},
+				ToolPolicy:    canonical.Specify(tc.policy),
+				ToolCallBatch: tc.batch,
+			})
+			names, _, err := provider.BuildAttemptToolNames(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, changes, err := (codec{}).Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			var incompatible provider.IncompatibleTargetError
+			if tc.wantIncompatible {
+				if !errors.As(err, &incompatible) {
+					t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload interactionRequest
+			if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Tools) != tc.wantTools {
+				t.Fatalf("tools = %#v, want %d", payload.Tools, tc.wantTools)
+			}
+			choiceMode := ""
+			if payload.GenerationConfig != nil && payload.GenerationConfig.ToolChoice != nil {
+				choiceMode = payload.GenerationConfig.ToolChoice.Mode
+			}
+			if choiceMode != tc.wantChoiceMode {
+				t.Fatalf("tool choice mode = %q, want %q", choiceMode, tc.wantChoiceMode)
+			}
+			batchOmitted := false
+			for _, change := range changes {
+				if change == compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{}) {
+					batchOmitted = true
+				}
+			}
+			if batchOmitted != tc.wantBatchOmission {
+				t.Fatalf("batch omission = %t, want %t; changes = %#v", batchOmitted, tc.wantBatchOmission, changes)
+			}
+		})
 	}
 }
 
@@ -943,59 +1038,86 @@ func TestGeminiCodecToolCallBatchAtMostOneSemantics(t *testing.T) {
 		}
 	})
 
-	t.Run("with active tools and auto tool_choice is incompatible", func(t *testing.T) {
+	t.Run("with active tools and auto tool_choice succeeds with omission", func(t *testing.T) {
 		req := canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:         canonical.Specify("gemini-model"),
 			Items:         []canonical.CanonicalItem{toolDecl, userMsg},
 			ToolPolicy:    canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil)),
 			ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 		})
-		names, _, err := provider.BuildAttemptToolNames(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _, err = (codec{}).Encode(provider.Request{Canonical: req, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+		changes := encodeReq(t, req)
+		wantChange := compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{})
+		if len(changes) != 1 || changes[0] != wantChange {
+			t.Fatalf("changes = %#v, want [%#v]", changes, wantChange)
 		}
 	})
 
-	t.Run("with active tools and required tool_choice is incompatible", func(t *testing.T) {
+	t.Run("with active tools and required tool_choice succeeds with omission", func(t *testing.T) {
 		req := canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:         canonical.Specify("gemini-model"),
 			Items:         []canonical.CanonicalItem{toolDecl, userMsg},
 			ToolPolicy:    canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 			ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 		})
-		names, _, err := provider.BuildAttemptToolNames(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _, err = (codec{}).Encode(provider.Request{Canonical: req, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+		changes := encodeReq(t, req)
+		wantChange := compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{})
+		if len(changes) != 1 || changes[0] != wantChange {
+			t.Fatalf("changes = %#v, want [%#v]", changes, wantChange)
 		}
 	})
 
-	t.Run("with active tools and specific tool_choice is incompatible", func(t *testing.T) {
+	t.Run("with active tools and specific tool_choice succeeds with omission", func(t *testing.T) {
 		req := canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:         canonical.Specify("gemini-model"),
 			Items:         []canonical.CanonicalItem{toolDecl, userMsg},
 			ToolPolicy:    canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &functionKey)),
 			ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
 		})
-		names, _, err := provider.BuildAttemptToolNames(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _, err = (codec{}).Encode(provider.Request{Canonical: req, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+		changes := encodeReq(t, req)
+		wantChange := compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{})
+		if len(changes) != 1 || changes[0] != wantChange {
+			t.Fatalf("changes = %#v, want [%#v]", changes, wantChange)
 		}
 	})
+}
+
+func TestGeminiFunctionStrictnessOnlyHardFailsWhenTrue(t *testing.T) {
+	functionKey := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	user := canonicaltest.Message(t, canonical.MessageRoleUser, "hello")
+	for _, tc := range []struct {
+		name         string
+		strict       canonical.Specified[bool]
+		incompatible bool
+	}{
+		{name: "unspecified", strict: canonical.Unspecified[bool]()},
+		{name: "explicit false", strict: canonical.Specify(false)},
+		{name: "explicit true", strict: canonical.Specify(true), incompatible: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			declaration := canonicaltest.MustFunctionTool(functionKey, "lookup", canonicaltest.Schema(t, `{"type":"object"}`), tc.strict)
+			request := canonical.NewCanonicalRequest(canonical.RequestParams{
+				Model: canonical.Specify("gemini-model"), Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration), user},
+			})
+			names, _, err := provider.BuildAttemptToolNames(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, changes, err := (codec{}).Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+			if tc.incompatible {
+				var incompatible provider.IncompatibleTargetError
+				if !errors.As(err, &incompatible) {
+					t.Fatalf("error = %T %v, want IncompatibleTargetError", err, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(changes) != 0 {
+				t.Fatalf("changes = %#v, want exact lowering", changes)
+			}
+		})
+	}
 }
 
 func mustGeminiImageMessage(t *testing.T, text string, images ...canonical.ImagePart) canonical.CanonicalItem {
@@ -1058,8 +1180,8 @@ func TestCodecRejectsNonSSEProviderDelivery(t *testing.T) {
 		}),
 		Delivery: delivery.BufferedDelivery(),
 	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("Encode error = %T %v, want incompatible target", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeBadEndpoint {
+		t.Fatalf("Encode error = %T %v, want BAD_ENDPOINT", err, err)
 	}
 }

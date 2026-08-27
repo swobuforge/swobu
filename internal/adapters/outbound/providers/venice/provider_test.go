@@ -12,6 +12,7 @@ import (
 
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -23,19 +24,20 @@ import (
 func TestVeniceLowersCanonicalWebSearchByToolPolicy(t *testing.T) {
 	function := canonicaltest.FunctionTool(t, "lookup", canonicaltest.Schema(t, `{"type":"object"}`))
 	tests := []struct {
-		name       string
-		tools      []canonical.ToolDeclaration
-		policy     canonical.ToolPolicy
-		wantMode   string
-		wantSearch bool
-		wantError  bool
+		name         string
+		tools        []canonical.ToolDeclaration
+		policy       canonical.ToolPolicy
+		wantMode     string
+		wantSearch   bool
+		wantFunction bool
+		wantOmitted  canonical.ToolKey
 	}{
 		{name: "none", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)},
 		{name: "auto", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, policy: canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil), wantMode: "auto", wantSearch: true},
 		{name: "required sole search", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wantMode: "on", wantSearch: true},
-		{name: "required mixed tools", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), function}, policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wantError: true},
+		{name: "required mixed tools", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), function}, policy: canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil), wantFunction: true, wantOmitted: canonical.WebSearchToolKey()},
 		{name: "specific sole search", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, webSearchKey()), wantMode: "on", wantSearch: true},
-		{name: "specific search with function", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), function}, policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, webSearchKey()), wantError: true},
+		{name: "specific search with function", tools: []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), function}, policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, webSearchKey()), wantMode: "on", wantSearch: true, wantOmitted: function.Key()},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -45,13 +47,7 @@ func TestVeniceLowersCanonicalWebSearchByToolPolicy(t *testing.T) {
 				ToolPolicy: canonical.Specify(test.policy),
 			})
 			attempt := providerRequest(t, request, delivery.BufferedDelivery())
-			document, _, err := resolvedCodec(t).Encode(attempt)
-			if test.wantError {
-				if err == nil {
-					t.Fatal("expected widened search policy to fail")
-				}
-				return
-			}
+			document, changes, err := resolvedCodec(t).Encode(attempt)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,6 +67,16 @@ func TestVeniceLowersCanonicalWebSearchByToolPolicy(t *testing.T) {
 			}
 			if bytes.Contains(document.RawBytes(), []byte(`"type":"web_search"`)) {
 				t.Fatalf("Venice search leaked as a Chat tool fragment: %s", document.RawBytes())
+			}
+			functionPresent := bytes.Contains(document.RawBytes(), []byte(`"name":"lookup"`))
+			if functionPresent != test.wantFunction {
+				t.Fatalf("function present = %t, want %t: %s", functionPresent, test.wantFunction, document.RawBytes())
+			}
+			if !test.wantOmitted.IsZero() {
+				want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(test.wantOmitted))
+				if len(changes) != 1 || changes[0] != want {
+					t.Fatalf("changes = %#v, want [%#v]", changes, want)
+				}
 			}
 		})
 	}
@@ -222,7 +228,7 @@ func TestVeniceDiscoveryPublishesExactTargetSupport(t *testing.T) {
 	}
 }
 
-func TestVeniceRejectsSearchForModelKnownUnsupported(t *testing.T) {
+func TestVeniceOmitsOptionalSearchForModelKnownUnsupported(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"no-search","type":"text","model_spec":{"capabilities":{"supportsFunctionCalling":true,"supportsWebSearch":false}}}]}`))
 	}))
@@ -237,9 +243,29 @@ func TestVeniceRejectsSearchForModelKnownUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = backend.Codec.Encode(providerRequest(t, baseRequest(t), delivery.BufferedDelivery()))
-	if err == nil {
-		t.Fatal("expected known unsupported Venice web search to fail")
+	document, changes, err := backend.Codec.Encode(providerRequest(t, baseRequest(t), delivery.BufferedDelivery()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("venice_parameters")) {
+		t.Fatalf("unsupported optional search leaked into payload: %s", document.RawBytes())
+	}
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
+	}
+}
+
+func TestVeniceRejectsRequiredSearchForModelKnownUnsupported(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("venice-model"),
+		Items:      []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()), canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+	})
+	backend := resolvedCodec(t).(codec)
+	backend.webSearchSupport = provider.SupportUnsupported
+	if _, _, err := backend.Encode(providerRequest(t, request, delivery.BufferedDelivery())); err == nil {
+		t.Fatal("expected required unsupported Venice web search to fail")
 	}
 }
 

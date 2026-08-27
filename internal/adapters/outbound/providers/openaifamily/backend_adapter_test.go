@@ -101,9 +101,12 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
-			if encodeErr == nil {
-				t.Fatalf("%s target unexpectedly inherited protocol web search", tc.name)
+			document, changes, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+			if encodeErr != nil {
+				t.Fatal(encodeErr)
+			}
+			if bytes.Contains(document.RawBytes(), []byte("web_search")) || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
+				t.Fatalf("%s lowering = %s changes=%#v", tc.name, document.RawBytes(), changes)
 			}
 		})
 	}
@@ -511,7 +514,7 @@ func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
 	}
 }
 
-func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
+func TestSendProviderRequest_ClassifiesConfirmedUnsupportedResponseAsRejected(t *testing.T) {
 	body := io.NopCloser(strings.NewReader(`{"error":{"message":"tool_choice required is unsupported","param":"tool_choice","code":"unsupported_parameter"}}`))
 	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body, Request: req}, nil
@@ -522,9 +525,13 @@ func TestSendProviderRequest_MarksConfirmedUnsupportedResponse(t *testing.T) {
 	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini","tool_choice":"required"}`), carrier.Meta{})
 
 	_, err := exec.Send(context.Background(), target, doc)
-	var unsupported provider.IncompatibleTargetError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T, want provider.IncompatibleTargetError", err)
+	var rejected provider.RejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("error = %T, want provider.RejectedError", err)
+	}
+	var incompatible provider.IncompatibleTargetError
+	if errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, must not be provider.IncompatibleTargetError", err)
 	}
 	failure, ok := provider.AsAttemptFailure(err)
 	if !ok || failure.Execution() != provider.ExecutionRejectedBeforeExecution {

@@ -209,9 +209,10 @@ Providers disagree about:
 - provider-native capabilities
 - protocol details and edge cases
 
-Swobu translates requests when it can preserve their meaning.
-
-Targets that cannot represent required semantics can be excluded rather than silently degrading the request.
+Swobu preserves what a target can carry, records bounded approximations and
+omissions, and still executes useful requests. A target is excluded only when
+dispatch would violate an explicit caller promise such as a required or
+specifically selected tool.
 
 Compatibility is not the product you should have to think about. It is what makes the routing trustworthy.
 

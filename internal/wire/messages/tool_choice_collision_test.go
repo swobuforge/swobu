@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestMessagesRejectsSpecificChoiceAmbiguousAcrossFunctionAndBuiltin(t *testing.T) {
+func TestMessagesTreatsPostAllocationWireNameCollisionAsInternalInvariant(t *testing.T) {
 	function := canonicaltest.MustFunctionTool(
 		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "request/web_search"),
 		"", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
@@ -29,8 +29,8 @@ func TestMessagesRejectsSpecificChoiceAmbiguousAcrossFunctionAndBuiltin(t *testi
 	}
 
 	_, err = CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "", CompileOptions{})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
+	var canonicalError canonical.Error
+	if !errors.As(err, &canonicalError) || canonicalError.Code != canonical.ErrorCodeInternal {
+		t.Fatalf("error = %T %v, want internal allocator invariant failure", err, err)
 	}
 }

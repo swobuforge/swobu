@@ -3,6 +3,7 @@ package exchange
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +129,75 @@ func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t 
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	response := ClientTransportForTest(out.Response)
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerRequests != 1 || !strings.Contains(string(raw), "hello from Gemini") {
+		t.Fatalf("provider requests = %d response = %s", providerRequests, raw)
+	}
+}
+
+func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *testing.T) {
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		providerRequests++
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/interactions" {
+			t.Fatalf("method/path = %s %s", request.Method, request.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["model"] != "gemini-model" {
+			t.Fatalf("model = %#v", payload["model"])
+		}
+		tools, ok := payload["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools payload = %#v", payload["tools"])
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, geminiTextSSE)
+	}))
+	defer server.Close()
+
+	registry, err := providersadapter.NewProviderRegistry(server.Client(), geminiTextCredentialResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := geminiTextRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), registry: registry}
+	workspace := geminiTextWorkspace(t, server.URL+"/v1")
+	ingress := NewIngress(geminiTextWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
+		PolicyResolver: StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
+		ResponseIDs:    deterministicResponseIDGenerator{},
+	})
+	body := []byte(`{
+		"model":"default",
+		"stream":true,
+		"parallel_tool_calls":false,
+		"tools":[{
+			"type":"function",
+			"name":"lookup",
+			"description":"lookup function",
+			"parameters":{"type":"object","properties":{"q":{"type":"string"}}}
+		}],
+		"input":"hello"
+	}`)
+	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+		ExchangeID: "gemini-responses-parallel-tool-calls-false",
+		Request: NewTransportRequest(
+			http.MethodPost,
+			"/responses",
+			http.Header{"Content-Type": {"application/json"}},
+			body,
+		),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatalf("HandleRequestWithWorkspace failed: %v", err)
 	}
 	response := ClientTransportForTest(out.Response)
 	raw, err := io.ReadAll(response.Body)

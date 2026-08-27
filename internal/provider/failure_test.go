@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -57,30 +56,10 @@ func TestNormalizeFailureFailsClosedByConcreteClass(t *testing.T) {
 }
 
 func TestNormalizeFailurePreservesExplicitUnsupported(t *testing.T) {
-	err := NormalizeFailure(IncompatibleTarget(errors.New("unsupported")))
+	err := NormalizeFailure(NewIncompatibleTarget("unsupported"))
 	var unsupported IncompatibleTargetError
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("error = %T, want IncompatibleTargetError", err)
-	}
-}
-
-func TestIncompatibleCapabilityPreservesCanonicalIssue(t *testing.T) {
-	err := IncompatibleCapability(
-		canonical.RequestOutputFormat,
-		canonical.Occurrence{},
-		"target cannot represent structured output",
-	)
-	var incompatible IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
-	}
-	var unsupported compat.UnsupportedError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T, want UnsupportedError", err)
-	}
-	issues := unsupported.Issues()
-	if len(issues) != 1 || issues[0].Capability() != canonical.RequestOutputFormat {
-		t.Fatalf("issues = %#v", issues)
 	}
 }
 
@@ -130,4 +109,39 @@ func TestAttemptFailureConstructionClosesExecutionVocabulary(t *testing.T) {
 			t.Fatalf("failure = %#v", failure)
 		}
 	}
+}
+
+func TestIncompatibleTargetRequiresNotDispatchedAttempt(t *testing.T) {
+	incompatible := NewIncompatibleTarget("hard caller promise cannot be preserved")
+	failure := AttemptNotDispatched(incompatible)
+	if failure.Execution() != ExecutionNotDispatched {
+		t.Fatalf("execution = %v, want ExecutionNotDispatched", failure.Execution())
+	}
+
+	for _, tc := range []struct {
+		name      string
+		construct func(error) AttemptFailure
+	}{
+		{name: "rejected before execution", construct: AttemptRejectedBeforeExecution},
+		{name: "may have executed", construct: AttemptMayHaveExecuted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid incompatible attempt did not panic")
+				}
+			}()
+			tc.construct(incompatible)
+		})
+	}
+}
+
+func TestIncompatibleTargetInvariantSurvivesAttemptRewrap(t *testing.T) {
+	prior := AttemptNotDispatched(NewIncompatibleTarget("hard caller promise cannot be preserved"))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("rewrapped incompatible attempt did not panic")
+		}
+	}()
+	AttemptMayHaveExecuted(prior)
 }

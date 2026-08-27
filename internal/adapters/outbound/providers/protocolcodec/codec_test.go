@@ -127,10 +127,12 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
+	document, changes, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("web_search")) || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
+		t.Fatalf("generic lowering = %s changes=%#v", document.RawBytes(), changes)
 	}
 }
 
@@ -158,9 +160,9 @@ func TestProviderCodecsRejectResidualMCPInsteadOfChangingExecutionOwner(t *testi
 		protocolkind.Responses, protocolkind.ChatCompletions, protocolkind.Messages,
 	} {
 		_, _, encodeErr := (Codec{Protocol: protocol}).Encode(providerRequest)
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(encodeErr, &incompatible) {
-			t.Fatalf("%s encode error = %T %v, want target incompatibility", protocol, encodeErr, encodeErr)
+		var swobuErr canonical.Error
+		if !errors.As(encodeErr, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal {
+			t.Fatalf("%s encode error = %T %v, want INTERNAL_ERROR", protocol, encodeErr, encodeErr)
 		}
 	}
 }
@@ -189,9 +191,9 @@ func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
 		_, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
 			Canonical: request, Delivery: delivery.BufferedDelivery(),
 		})
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("policy %s error = %T %v, want target incompatibility", policy.Mode, err, err)
+		var swobuErr canonical.Error
+		if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal {
+			t.Fatalf("policy %s error = %T %v, want INTERNAL_ERROR", policy.Mode, err, err)
 		}
 	}
 }
@@ -209,10 +211,12 @@ func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}
-	_, _, err := CompileChatRequest(request, ChatDialect{})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
+	document, changes, err := CompileChatRequest(request, ChatDialect{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tools) != 0 || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
+		t.Fatalf("generic lowering tools=%#v changes=%#v", document.Tools, changes)
 	}
 }
 

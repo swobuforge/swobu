@@ -80,6 +80,16 @@ func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonic
 				continue
 			}
 		}
+		_, function := tool.Function()
+		_, custom := tool.Custom()
+		_, discovery := tool.Discovery()
+		if !function && !custom && !discovery {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+			}
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+			continue
+		}
 		wireTool, err := encodeResponsesTool(tool, names)
 		if err != nil {
 			return nil, wire.LoweredToolSet{}, err
@@ -106,7 +116,7 @@ func responsesFlatToolIdentity(tool canonical.ToolDeclaration, names wire.ToolNa
 	case canonical.ToolKindWebSearch, canonical.ToolKindDiscovery:
 		return string(tool.Kind()), nil
 	default:
-		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
+		return "", canonical.InternalError("Responses flat-tool identity received an unsupported declaration kind")
 	}
 }
 
@@ -121,7 +131,7 @@ func encodeResponsesTool(tool canonical.ToolDeclaration, names wire.ToolNames) (
 		return encodeResponsesCustomTool(tool, decl, names)
 	}
 	if tool.Kind() == canonical.ToolKindWebSearch {
-		return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses target does not support canonical hosted web search")
+		return ProviderRequestTool{}, canonical.InternalError("Responses generic tool encoder received hosted web search after projection")
 	}
 	if discovery, ok := tool.Discovery(); ok {
 		parameters, err := responsesToolParametersFromSchema(discovery.InputSchema())
@@ -134,7 +144,7 @@ func encodeResponsesTool(tool canonical.ToolDeclaration, names wire.ToolNames) (
 		}
 		return ProviderRequestTool{Type: "tool_search", Description: discovery.Description(), Parameters: parameters, Execution: execution}, nil
 	}
-	return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
+	return ProviderRequestTool{}, canonical.InternalError("Responses tool encoder received an unsupported declaration kind")
 }
 
 func responsesNamespaceLeafName(name string) string {
@@ -259,39 +269,12 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 }
 
 func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	if err := policy.Validate(); err != nil {
+	record, err := wire.ResolveLoweredToolPolicy(policy, lowered)
+	if err != nil {
 		return nil, err
 	}
-	if lowered.Len() == 0 {
-		switch policy.Mode {
-		case canonical.ToolPolicyRequired:
-			return nil, canonical.BadRequest("response request tool_choice required requires at least one tool")
-		case canonical.ToolPolicySpecific:
-			return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
-		default:
-			return nil, nil
-		}
-	}
 	if lowered.TotalFragments() == 0 {
-		switch policy.Mode {
-		case canonical.ToolPolicyRequired:
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "target lowering produced no tool declarations to satisfy required tool policy")
-		case canonical.ToolPolicySpecific:
-			specific, ok := policy.SpecificID()
-			if !ok {
-				return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
-			}
-			record, ok := lowered.FindSource(specific)
-			if !ok {
-				return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
-			}
-			if record.FragmentCount == 0 {
-				return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
-			}
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering cannot satisfy specific tool choice for tool %q", specific))
-		default:
-			return nil, nil
-		}
+		return nil, nil
 	}
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
@@ -301,20 +284,6 @@ func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, 
 	case canonical.ToolPolicyRequired:
 		return "required", nil
 	case canonical.ToolPolicySpecific:
-		specific, ok := policy.SpecificID()
-		if !ok {
-			return nil, canonical.BadRequest("response request tool_choice specific requires a tool id")
-		}
-		record, ok := lowered.FindSource(specific)
-		if !ok {
-			return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
-		}
-		if record.FragmentCount == 0 {
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
-		}
-		if record.FragmentCount > 1 {
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "1->N lowered tool requires explicit provider tool policy lowering rule for specific selection")
-		}
 		switch record.Kind {
 		case canonical.ToolKindFunction:
 			name, err := wire.EncodeToolName(names, record.Key)
@@ -335,7 +304,7 @@ func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, 
 				"name": strings.TrimSpace(name),
 			}, nil
 		default:
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("Responses cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
+			return nil, provider.NewIncompatibleTarget(fmt.Sprintf("Responses cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
 		}
 	default:
 		return nil, canonical.BadRequest("response request tool_choice is invalid")

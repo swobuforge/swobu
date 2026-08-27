@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func TestProjectToolDiscoveryPolyfillRetainsMaterializedDeclarations(t *testing.T) {
@@ -65,7 +64,7 @@ func TestProjectToolDiscoveryPolyfillRejectsBareLiveClientDiscovery(t *testing.T
 	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem}})
 
-	assertProjectionIncompatible(t, request)
+	assertProjectionNotImplemented(t, request)
 }
 
 func TestProjectToolDiscoveryPolyfillRejectsLiveClientDiscoveryBesideUnrelatedFunction(t *testing.T) {
@@ -75,7 +74,7 @@ func TestProjectToolDiscoveryPolyfillRejectsLiveClientDiscoveryBesideUnrelatedFu
 	declarationItem, _ := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem}})
 
-	assertProjectionIncompatible(t, request)
+	assertProjectionNotImplemented(t, request)
 }
 
 func TestProjectToolDiscoveryPolyfillRejectsLiveClientDeclarationAfterCompletedDiscovery(t *testing.T) {
@@ -90,7 +89,7 @@ func TestProjectToolDiscoveryPolyfillRejectsLiveClientDeclarationAfterCompletedD
 	result, _ := canonical.NewToolDiscoveryResultItem(callID, loadedSet, canonical.DiscoveryExecutorClient)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call, result}})
 
-	assertProjectionIncompatible(t, request)
+	assertProjectionNotImplemented(t, request)
 }
 
 func TestProjectToolDiscoveryPolyfillRejectsPendingDiscoveryBesideMaterializedFunction(t *testing.T) {
@@ -103,7 +102,7 @@ func TestProjectToolDiscoveryPolyfillRejectsPendingDiscoveryBesideMaterializedFu
 	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(inputObject), canonical.DiscoveryExecutorProvider)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{declarationItem, call}})
 
-	assertProjectionIncompatible(t, request)
+	assertProjectionNotImplemented(t, request)
 }
 
 func TestProjectToolDiscoveryPolyfillPairsReusedCallIDByOccurrence(t *testing.T) {
@@ -221,11 +220,11 @@ func mustProjectionDiscovery(t *testing.T, executor canonical.DiscoveryExecutor)
 	return tool
 }
 
-func assertProjectionIncompatible(t *testing.T, request canonical.CanonicalRequest) {
+func assertProjectionNotImplemented(t *testing.T, request canonical.CanonicalRequest) {
 	t.Helper()
 	_, err := ProjectToolDiscoveryPolyfill(request)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error=%T %v want target incompatibility", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("error=%T %v want NOT_IMPLEMENTED", err, err)
 	}
 }

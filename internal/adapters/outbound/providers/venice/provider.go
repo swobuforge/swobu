@@ -172,12 +172,22 @@ func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	if err != nil {
 		return carrier.Document{}, nil, err
 	}
-	if searchEnabled && c.webSearchSupport == provider.SupportUnsupported {
-		return carrier.Document{}, nil, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.NewWebSearchDeclaration().Key()), "Venice model does not support native web search")
+	if searchEnabled && searchMode != "auto" && c.webSearchSupport == provider.SupportUnsupported {
+		return carrier.Document{}, nil, provider.NewIncompatibleTarget("Venice model does not support native web search")
 	}
+	projected, projectionChanges, err := projectVeniceHardToolSurface(req.Canonical)
+	if err != nil {
+		return carrier.Document{}, nil, err
+	}
+	req.Canonical = projected
 	document, changes, err := c.standard.Encode(req)
+	changes = append(projectionChanges, changes...)
 	if err != nil || !searchEnabled {
 		return document, changes, err
+	}
+	if c.webSearchSupport == provider.SupportUnsupported {
+		changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey())))
+		return document, changes, nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
@@ -222,19 +232,90 @@ func webSearchMode(request canonical.CanonicalRequest) (string, bool, error) {
 		if len(declarations) == searchCount {
 			return "on", true, nil
 		}
-		return "", false, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(canonical.NewWebSearchDeclaration().Key()), "Venice cannot require one tool across mixed native-search and client-executed declarations")
+		return "", false, nil
 	case canonical.ToolPolicySpecific:
 		key, ok := policy.SpecificID()
 		if ok && key.Kind() == canonical.ToolKindWebSearch {
-			if len(declarations) != searchCount {
-				return "", false, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), "Venice cannot force native web search while client-executed declarations remain available")
-			}
 			return "on", true, nil
 		}
 		return "", false, nil
 	default:
 		return "", false, canonical.BadRequest("web-search tool policy is invalid")
 	}
+}
+
+// projectVeniceHardToolSurface removes declarations made unreachable by a hard
+// caller policy before standard Chat lowering evaluates the surviving surface.
+func projectVeniceHardToolSurface(request canonical.CanonicalRequest) (canonical.CanonicalRequest, []compat.Change, error) {
+	policy, err := request.EffectiveToolPolicy()
+	if err != nil {
+		return canonical.CanonicalRequest{}, nil, err
+	}
+	keep := func(canonical.ToolDeclaration) bool { return true }
+	switch policy.Mode {
+	case canonical.ToolPolicyRequired:
+		environment, environmentErr := canonical.EffectiveTools(request)
+		if environmentErr != nil {
+			return canonical.CanonicalRequest{}, nil, environmentErr
+		}
+		hasSearch := false
+		hasOrdinary := false
+		for _, declaration := range environment.Declarations() {
+			if declaration.Kind() == canonical.ToolKindWebSearch {
+				hasSearch = true
+			} else {
+				hasOrdinary = true
+			}
+		}
+		if !hasSearch || !hasOrdinary {
+			return request, nil, nil
+		}
+		keep = func(declaration canonical.ToolDeclaration) bool {
+			return declaration.Kind() != canonical.ToolKindWebSearch
+		}
+	case canonical.ToolPolicySpecific:
+		key, ok := policy.SpecificID()
+		if !ok || key.Kind() != canonical.ToolKindWebSearch {
+			return request, nil, nil
+		}
+		keep = func(declaration canonical.ToolDeclaration) bool {
+			return declaration.Kind() == canonical.ToolKindWebSearch
+		}
+	default:
+		return request, nil, nil
+	}
+
+	items := request.Items()
+	projected := make([]canonical.CanonicalItem, 0, len(items))
+	var changes []compat.Change
+	for _, item := range items {
+		declarations, ok := item.ToolDeclarations()
+		if !ok {
+			projected = append(projected, item)
+			continue
+		}
+		var surviving []canonical.ToolDeclaration
+		for _, declaration := range declarations.Tools().Declarations() {
+			if keep(declaration) {
+				surviving = append(surviving, declaration)
+				continue
+			}
+			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key())))
+		}
+		if len(surviving) == 0 {
+			continue
+		}
+		set, setErr := canonical.NewToolSet(surviving)
+		if setErr != nil {
+			return canonical.CanonicalRequest{}, nil, canonical.InternalError("Venice hard tool projection produced an invalid declaration set")
+		}
+		projectedItem, itemErr := canonical.NewToolDeclarationsItemWithVisibility(set, declarations.Scope(), declarations.Visibility())
+		if itemErr != nil {
+			return canonical.CanonicalRequest{}, nil, canonical.InternalError("Venice hard tool projection produced invalid visibility")
+		}
+		projected = append(projected, projectedItem)
+	}
+	return request.WithItems(projected), changes, nil
 }
 
 func (c codec) Decode(ctx context.Context, req provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {

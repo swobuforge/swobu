@@ -501,7 +501,7 @@ func TestChatGPTLowersWebSearchDeclarationAndPolicy(t *testing.T) {
 		t.Fatalf("payload tools = %#v, want 0 tools (web_search omitted on ChatGPT)", payload["tools"])
 	}
 
-	// Case 2: Specific tool policy requiring web search returns IncompatibleCapability.
+	// Case 2: Specific tool policy requiring web search is a hard incompatibility.
 	webSearchKey := canonical.WebSearchToolKey()
 	reqSpecific := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-5.4-mini"),

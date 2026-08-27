@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -17,7 +16,6 @@ import (
 	. "github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 )
 
 type capabilityFallbackRuntime struct {
@@ -49,124 +47,40 @@ func (r capabilityFallbackRuntime) ResolveBackend(target provider.TargetSnapshot
 	}, nil
 }
 
-func TestCapabilityFallbackAutomaticallyReentersPrimaryAfterSettledWebSearch(t *testing.T) {
+func TestOptionalWebSearchLossDoesNotAdvanceRoute(t *testing.T) {
 	workspace := capabilityFallbackWorkspace(t)
-	store := session.NewMemoryStore()
 	transportCounts := map[string]int{}
-	var localRequests []carrier.Document
-	var localTargets []string
+	var localRequest carrier.Document
 
 	runtime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
 		transportCounts[target.TargetID]++
-		switch {
-		case strings.HasPrefix(target.TargetID, "local-"):
-			localTargets = append(localTargets, target.TargetID)
-			localRequests = append(localRequests, document)
-			answer := "local ordinary answer"
-			if len(localTargets) == 2 {
-				answer = "local re-entry answer"
-			}
-			return provider.DocumentIngress{Document: carrier.NewDocument(
-				protocolkind.ChatCompletions, "application/json", nil,
-				[]byte(`{"id":"chat_local","model":"local","choices":[{"index":0,"message":{"role":"assistant","content":"`+answer+`"},"finish_reason":"stop"}]}`), carrier.Meta{},
-			)}, nil
-		case target.TargetID == "paid-openai":
-			return provider.DocumentIngress{Document: carrier.NewDocument(
-				protocolkind.Responses, "application/json", nil,
-				[]byte(`{"id":"resp_paid","model":"paid","status":"completed","output":[{"type":"web_search_call","id":"search_1","status":"completed","action":{"type":"search","queries":["deadline"],"sources":[{"type":"url","url":"https://example.test/rules","title":"Rules"}]}},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hosted search answer","annotations":[{"type":"url_citation","url":"https://example.test/rules","title":"Rules","start_index":0,"end_index":6}]}]}]}`), carrier.Meta{},
-			)}, nil
-		default:
-			t.Fatalf("unexpected target %q", target.TargetID)
-			return nil, nil
+		if !strings.HasPrefix(target.TargetID, "local-") {
+			t.Fatalf("optional web search advanced to %q", target.TargetID)
 		}
+		localRequest = document
+		return provider.DocumentIngress{Document: carrier.NewDocument(
+			protocolkind.ChatCompletions, "application/json", nil,
+			[]byte(`{"id":"chat_local","model":"local","choices":[{"index":0,"message":{"role":"assistant","content":"local answer"},"finish_reason":"stop"}]}`), carrier.Meta{},
+		)}, nil
 	}}
 
 	ingress := NewIngress(capabilityFallbackWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
-		CheckpointStore: store,
-		ResponseIDs:     deterministicResponseIDGenerator{},
+		ResponseIDs: deterministicResponseIDGenerator{},
 	})
-
-	_ = runCapabilityFallbackTurn(t, ingress, workspace, "turn1", `{
+	output := runCapabilityFallbackTurn(t, ingress, workspace, "soft-web-search", `{
 		"model":"chat",
-		"input":"hello"
-	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 1 || transportCounts["paid-openai"] != 0 {
-		t.Fatalf("turn 1 transports = %#v", transportCounts)
-	}
-
-	_ = runCapabilityFallbackTurn(t, ingress, workspace, "turn2", `{
-		"model":"chat",
-		"previous_response_id":"swobu_turn1",
 		"tools":[{"type":"web_search"}],
 		"input":"find the deadline"
 	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 1 || transportCounts["paid-openai"] != 1 {
-		t.Fatalf("turn 2 transports = %#v; local incompatibility must happen before I/O", transportCounts)
+	if capabilityFallbackLocalTransportCount(transportCounts) != 1 || transportCounts["paid-openai"] != 0 {
+		t.Fatalf("transports = %#v, want one local execution", transportCounts)
 	}
-	checkpoint, ok, err := store.Get(context.Background(), workspace.Slug().String(), "swobu_turn2")
-	if err != nil || !ok {
-		t.Fatalf("turn 2 checkpoint = (%t, %v)", ok, err)
+	if bytes.Contains(localRequest.RawBytes(), []byte("web_search")) {
+		t.Fatalf("omitted web search leaked into local request: %s", localRequest.RawBytes())
 	}
-	settledBeforeReentry := checkpoint.Response.Items()
-	assertSettledWebSearchTruth(t, settledBeforeReentry)
-
-	reentryOutput := runCapabilityFallbackTurn(t, ingress, workspace, "turn3", `{
-		"model":"chat",
-		"previous_response_id":"swobu_turn2",
-		"input":"explain that answer"
-	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 2 || transportCounts["paid-openai"] != 1 {
-		t.Fatalf("turn 3 transports = %#v", transportCounts)
-	}
-	if len(localTargets) != 2 || localTargets[0] != localTargets[1] {
-		t.Fatalf("same-tier locality changed across fallback: %#v", localTargets)
-	}
-	reentryChanges := reentryOutput.Compatibility.Snapshot().Changes
-	if len(reentryChanges) != 2 {
-		t.Fatalf("re-entry compatibility changes = %#v, want lifecycle and citation omissions", reentryChanges)
-	}
-	item, itemOK := reentryChanges[0].Occurrence.RequestItem()
-	part, partOK := reentryChanges[1].Occurrence.RequestPart()
-	if reentryChanges[0].Capability != canonical.RequestItemsKind || reentryChanges[0].Kind != compat.Omission || !itemOK || item != 3 ||
-		reentryChanges[1].Capability != canonical.RequestItemsMessageCitations || reentryChanges[1].Kind != compat.Omission || !partOK || part.Item != 5 || part.Part != 0 {
-		t.Fatalf("re-entry compatibility changes = %#v", reentryChanges)
-	}
-	if len(localRequests) != 2 {
-		t.Fatalf("local requests = %d, want turn 1 and turn 3", len(localRequests))
-	}
-	reentry := localRequests[1].RawBytes()
-	for _, want := range [][]byte{[]byte("Hosted search answer"), []byte("explain that answer")} {
-		if !bytes.Contains(reentry, want) {
-			t.Fatalf("local re-entry request missing %q: %s", want, reentry)
-		}
-	}
-	for _, forbidden := range [][]byte{[]byte("web_search"), []byte("search_1"), []byte("example.test/rules")} {
-		if bytes.Contains(reentry, forbidden) {
-			t.Fatalf("local re-entry request leaked settled search %q: %s", forbidden, reentry)
-		}
-	}
-	checkpoint, ok, err = store.Get(context.Background(), workspace.Slug().String(), "swobu_turn2")
-	if err != nil || !ok {
-		t.Fatalf("turn 2 checkpoint after re-entry = (%t, %v)", ok, err)
-	}
-	settledAfterReentry := checkpoint.Response.Items()
-	assertSettledWebSearchTruth(t, settledAfterReentry)
-	if !reflect.DeepEqual(settledAfterReentry, settledBeforeReentry) {
-		t.Fatalf("canonical settled lifecycle changed across re-entry:\n before %#v\n after  %#v", settledBeforeReentry, settledAfterReentry)
-	}
-
-	activeSearch := runCapabilityFallbackTurn(t, ingress, workspace, "turn4", `{
-		"model":"chat",
-		"previous_response_id":"swobu_turn3",
-		"tools":[{"type":"web_search"}],
-		"input":"search again"
-	}`)
-	if capabilityFallbackLocalTransportCount(transportCounts) != 2 || transportCounts["paid-openai"] != 2 {
-		t.Fatalf("active-search continuation transports = %#v", transportCounts)
-	}
-	activeSearchChanges := activeSearch.Compatibility.Snapshot().Changes
-	if len(activeSearchChanges) != 0 {
-		t.Fatalf("failed local-candidate compatibility leaked into exact paid winner: %#v", activeSearchChanges)
+	changes := output.Compatibility.Snapshot().Changes
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind || changes[0].Kind != compat.Omission {
+		t.Fatalf("compatibility changes = %#v, want tool-kind omission", changes)
 	}
 }
 
@@ -226,51 +140,4 @@ func capabilityFallbackTarget(t *testing.T, id, protocolName string) routing.Tar
 		t.Fatal(err)
 	}
 	return target
-}
-
-func assertSettledWebSearchTruth(t *testing.T, items []canonical.CanonicalItem) {
-	t.Helper()
-	if len(items) != 3 || items[0].Kind() != canonical.ItemKindToolCall || items[1].Kind() != canonical.ItemKindToolResult || items[2].Kind() != canonical.ItemKindMessage {
-		t.Fatalf("settled canonical web-search lifecycle = %#v", items)
-	}
-	call, _ := items[0].ToolCall()
-	result, _ := items[1].ToolResult()
-	if call.Tool().Kind() != canonical.ToolKindWebSearch {
-		t.Fatalf("call kind = %q", call.Tool().Kind())
-	}
-	if _, ok := result.WebSearch(); !ok || result.CallID() != call.CallID() {
-		t.Fatalf("result does not settle call %q", call.CallID())
-	}
-	searchCall, ok := call.Input().WebSearch()
-	if !ok || !reflect.DeepEqual(searchCall.Queries, []string{"deadline"}) {
-		t.Fatalf("search call = %#v", searchCall)
-	}
-	refinement, ok := call.ResponsesWebSearch()
-	if !ok || refinement.ItemID().String() != "search_1" {
-		t.Fatalf("responses refinement = (%#v, %t)", refinement, ok)
-	}
-	searchResult, _ := result.WebSearch()
-	sources := searchResult.Sources()
-	if len(sources) != 1 || sources[0].URL.String() != "https://example.test/rules" {
-		t.Fatalf("search sources = %#v", sources)
-	}
-	if title, ok := sources[0].Title.Get(); !ok || title != "Rules" {
-		t.Fatalf("search source title = (%q, %t)", title, ok)
-	}
-	message, _ := items[2].Message()
-	content := message.Content()
-	if len(content) != 1 {
-		t.Fatalf("assistant content = %#v", content)
-	}
-	text, ok := content[0].Text()
-	if !ok || text.Text() != "Hosted search answer" {
-		t.Fatalf("assistant text = (%#v, %t)", text, ok)
-	}
-	citations := content[0].Citations()
-	if len(citations) != 1 || citations[0].Source.URL.String() != "https://example.test/rules" {
-		t.Fatalf("assistant citations = %#v", citations)
-	}
-	if title, ok := citations[0].Source.Title.Get(); !ok || title != "Rules" {
-		t.Fatalf("citation title = (%q, %t)", title, ok)
-	}
 }

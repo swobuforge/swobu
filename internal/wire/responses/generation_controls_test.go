@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -50,21 +49,29 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 	}
 }
 
-func TestEncode_RejectsStopSequencesWithoutTargetExtension(t *testing.T) {
+func TestEncode_OmitsStopSequencesWithoutTargetExtension(t *testing.T) {
 	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
 		StopSequences: []string{"END"},
 	})
 	if err != nil {
 		t.Fatalf("NewGenerationControls returned error: %v", err)
 	}
-	_, err = EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:    canonical.Specify("gpt-4o-mini"),
 		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
 		Controls: controls,
-	}), delivery.BufferedDelivery())
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("EncodeCarrier error = %T %v, want IncompatibleTargetError", err, err)
+	})
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request}, delivery.BufferedDelivery(), &changes, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(document.Raw) == "" {
+		t.Fatal("empty provider request")
+	}
+	want := compat.NewOmission(canonical.RequestControlsStopSequences, canonical.Occurrence{})
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 }
 

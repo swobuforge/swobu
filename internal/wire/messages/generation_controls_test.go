@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -160,13 +159,50 @@ func TestMessagesJSONObjectIngressRequiresSchemaForProviderProjection(t *testing
 	if decoded.Kind != canonical.OutputFormatJSONObject {
 		t.Fatalf("decoded format = %#v", decoded)
 	}
-	if _, err := encodeMessagesOutputFormat(decoded); err == nil {
-		t.Fatal("Messages provider projection accepted schema-free json_object")
-	} else {
-		var incompatible provider.IncompatibleTargetError
-		if !errors.As(err, &incompatible) {
-			t.Fatalf("json_object projection error = %T %v, want target-local incompatibility", err, err)
-		}
+	var changes []compat.Change
+	encoded, err := encodeMessagesOutputFormat(decoded, &changes)
+	if err != nil || len(encoded) != 0 {
+		t.Fatalf("json_object projection = (%s, %v), want omission", encoded, err)
+	}
+	want := compat.NewOmission(canonical.RequestOutputFormat, canonical.Occurrence{})
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
+	}
+}
+
+func TestMessagesStructuredOutputStrictnessControlsHardness(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		strict     bool
+		wantChange bool
+	}{
+		{name: "non-strict", wantChange: true},
+		{name: "strict", strict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+				Kind: canonical.OutputFormatJSONSchema, Name: "reply", Strict: tc.strict,
+				Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var changes []compat.Change
+			_, err = encodeMessagesOutputFormat(format, &changes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantChange {
+				if len(changes) != 0 {
+					t.Fatalf("changes = %#v, want exact strict lowering", changes)
+				}
+				return
+			}
+			want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{})
+			if len(changes) != 1 || changes[0] != want {
+				t.Fatalf("changes = %#v, want %#v", changes, want)
+			}
+		})
 	}
 }
 

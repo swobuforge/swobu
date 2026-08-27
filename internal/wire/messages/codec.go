@@ -8,7 +8,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
@@ -226,7 +225,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			return append(frames, more...), err
 		}
 		if len(s.unresolvedWebSearchCalls) > 0 {
-			return nil, provider.IncompatibleCapability(canonical.ResponseItemsKind, canonical.Occurrence{}, "Messages cannot represent an unresolved canonical web-search call")
+			return nil, canonical.NotImplemented("Messages cannot project an unresolved canonical web-search call")
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {

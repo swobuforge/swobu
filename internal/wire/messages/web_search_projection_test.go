@@ -11,7 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func TestMessagesCitationExcerptRoundTripsAsCitationEvidence(t *testing.T) {
@@ -315,21 +314,9 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 
 	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
 	_, err = EncodeCarrierWithChanges(unresolved, nil, delivery.BufferedDelivery(), nil, "")
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want candidate incompatibility", err, err)
-	}
-	var unsupported compat.UnsupportedError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %T %v, want canonical unsupported issue", err, err)
-	}
-	issues := unsupported.Issues()
-	if len(issues) != 1 {
-		t.Fatalf("unsupported issues = %#v", issues)
-	}
-	issueCall, ok := issues[0].Occurrence().Call()
-	if issues[0].Capability() != canonical.RequestItemsKind || !ok || issueCall != callID {
-		t.Fatalf("unsupported issues = %#v", issues)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
 	}
 }
 

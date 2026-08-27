@@ -39,11 +39,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		completedDiscovery[effect.ResultIndex] = struct{}{}
 	}
 	if pendingDiscoveryIndex >= 0 {
-		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-			canonical.RequestItemsKind,
-			canonical.RequestItemOccurrence(uint32(pendingDiscoveryIndex)),
-			"portable tool-discovery projection cannot erase an unresolved discovery call",
-		)
+		return ToolDiscoveryProjection{}, canonical.NotImplemented("portable tool-discovery projection cannot erase an unresolved discovery call")
 	}
 
 	environment, err := canonical.EffectiveTools(request)
@@ -64,11 +60,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		portable = append(portable, declaration)
 	}
 	if clientDiscoveryDeclared {
-		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-			canonical.RequestToolsKind,
-			canonical.ToolOccurrence(canonical.ToolDiscoveryKey()),
-			"portable tool-discovery projection cannot replace live client discovery inventory",
-		)
+		return ToolDiscoveryProjection{}, canonical.NotImplemented("portable tool-discovery projection cannot replace live client discovery inventory")
 	}
 
 	hasDeferred := HasDeferredTools(items)
@@ -99,11 +91,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 			continue
 		}
 		if _, completed := completedDiscovery[index]; !completed {
-			return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-				canonical.RequestItemsKind,
-				canonical.RequestItemOccurrence(uint32(index)),
-				"portable tool-discovery projection cannot represent an orphan discovery result",
-			)
+			return ToolDiscoveryProjection{}, canonical.InternalError("canonical tool-discovery history contains an orphan result")
 		}
 		for _, loaded := range result.Tools().Declarations() {
 			if loaded.Kind() == canonical.ToolKindDiscovery {
@@ -111,11 +99,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 			}
 			resolved, present := environment.Lookup(loaded.Key())
 			if !present || !resolved.Equivalent(loaded) {
-				return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-					canonical.RequestTools,
-					canonical.RequestItemOccurrence(uint32(index)),
-					"portable tool-discovery projection cannot omit discovery before its returned declarations are materialized",
-				)
+				return ToolDiscoveryProjection{}, canonical.InternalError("canonical tool-discovery result is not materialized in the tool environment")
 			}
 		}
 	}
@@ -125,11 +109,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		return ToolDiscoveryProjection{}, err
 	}
 	if err := policy.ValidateForTools(portable); err != nil {
-		return ToolDiscoveryProjection{}, provider.IncompatibleCapability(
-			canonical.RequestToolPolicy,
-			canonical.Occurrence{},
-			"portable tool-discovery projection cannot preserve the canonical tool-selection constraint",
-		)
+		return ToolDiscoveryProjection{}, provider.NewIncompatibleTarget("portable tool-discovery projection cannot preserve the canonical tool-selection constraint")
 	}
 
 	prelude, history, err := canonical.SplitRequestPrelude(items)

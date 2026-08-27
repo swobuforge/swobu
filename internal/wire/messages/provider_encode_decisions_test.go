@@ -85,15 +85,22 @@ func TestDeferredWebSearchRoundTripsNatively(t *testing.T) {
 	}
 }
 
-func TestMessagesRejectsAllToolsDeferred(t *testing.T) {
+func TestMessagesApproximatesAllDeferredToolsWithOneEagerTool(t *testing.T) {
 	raw := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[{"name":"lookup","input_schema":{"type":"object"},"defer_loading":true}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), "exchange")
-	if err == nil {
-		t.Fatal("all-deferred Messages tools were accepted")
+	result, err := (ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(wire.ProviderEncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.BufferedDelivery(), "exchange")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.Document.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("all-deferred visibility leaked unchanged: %s", result.Document.RawBytes())
+	}
+	want := compat.NewApproximation(canonical.RequestToolsVisibility, canonical.RequestTools, canonical.Occurrence{})
+	if len(result.Changes) != 1 || result.Changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
 	}
 }
 

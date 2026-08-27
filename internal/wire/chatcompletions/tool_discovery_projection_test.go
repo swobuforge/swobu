@@ -1,16 +1,15 @@
 package chatcompletions
 
 import (
-	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestChatCompletionsRejectsLiveDiscoveryCapabilityForRouteFallback(t *testing.T) {
+func TestChatCompletionsOmitsUnsupportedLiveDiscoveryCapability(t *testing.T) {
 	discovery, err := canonical.NewToolDiscoveryTool(
 		"find a tool",
 		canonicaltest.Schema(t, `{"type":"object"}`),
@@ -26,9 +25,16 @@ func TestChatCompletionsRejectsLiveDiscoveryCapabilityForRouteFallback(t *testin
 			canonicaltest.Message(t, canonical.MessageRoleUser, "find an appropriate tool"),
 		},
 	})
-	_, err = CompileProviderRequestDocument(request, nil, delivery.BufferedDelivery(), nil, "exchange", CompileOptions{})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
+	var changes []compat.Change
+	document, err := CompileProviderRequestDocument(request, nil, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tools) != 0 {
+		t.Fatalf("unsupported discovery leaked into request: %#v", document.Tools)
+	}
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(discovery.Key()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 }

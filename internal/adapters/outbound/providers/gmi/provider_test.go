@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -33,8 +34,11 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 		}
 		doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 		if kind == protocolkind.ChatCompletions || kind == protocolkind.Messages {
-			if err == nil {
-				t.Fatalf("GMI %s unexpectedly inherited hosted search", kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(doc.RawBytes()), "web_search") {
+				t.Fatalf("GMI %s leaked unsupported hosted search: %s", kind, doc.RawBytes())
 			}
 			continue
 		}

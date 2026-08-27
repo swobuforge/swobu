@@ -119,6 +119,15 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 				continue
 			}
 		}
+		if _, function := tool.Function(); !function {
+			if _, custom := tool.Custom(); !custom {
+				if changeLog != nil {
+					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+				}
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+				continue
+			}
+		}
 		wireTool, err := encodeChatCompletionsTool(tool, names)
 		if err != nil {
 			return nil, nil, wire.LoweredToolSet{}, err
@@ -144,7 +153,7 @@ func encodeChatCompletionsTool(tool canonical.ToolDeclaration, names wire.ToolNa
 	if decl, ok := tool.Custom(); ok {
 		return encodeChatCompletionsCustomTool(tool, decl, names)
 	}
-	return ProviderRequestTool{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Chat Completions cannot represent canonical tool declaration kind "+chatCompletionsUnsupportedToolKind(tool))
+	return ProviderRequestTool{}, canonical.InternalError("Chat Completions tool encoder received unsupported declaration kind " + chatCompletionsUnsupportedToolKind(tool))
 }
 
 func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -329,41 +338,14 @@ func cloneBoolPointer(ptr *bool) *bool {
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
 func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	if err := policy.Validate(); err != nil {
+	record, err := wire.ResolveLoweredToolPolicy(policy, lowered)
+	if err != nil {
 		return nil, err
 	}
-	if lowered.Len() == 0 {
-		switch policy.Mode {
-		case canonical.ToolPolicyRequired:
-			return nil, canonical.BadRequest("chat completions request tool_choice required requires at least one tool")
-		case canonical.ToolPolicySpecific:
-			return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
-		default:
-			// Empty tool surfaces are inert here. Omit the backend-visible
-			// field rather than emitting a no-op choice some backends reject.
-			return nil, nil
-		}
-	}
 	if lowered.TotalFragments() == 0 {
-		switch policy.Mode {
-		case canonical.ToolPolicyRequired:
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "target lowering produced no tool declarations to satisfy required tool policy")
-		case canonical.ToolPolicySpecific:
-			specific, ok := policy.SpecificID()
-			if !ok {
-				return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
-			}
-			record, ok := lowered.FindSource(specific)
-			if !ok {
-				return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
-			}
-			if record.FragmentCount == 0 {
-				return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
-			}
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering cannot satisfy specific tool choice for tool %q", specific))
-		default:
-			return nil, nil
-		}
+		// Empty surviving surfaces are inert for soft policies. Omit the
+		// backend-visible field rather than emitting a no-op choice.
+		return nil, nil
 	}
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
@@ -373,20 +355,6 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 	case canonical.ToolPolicyRequired:
 		return "required", nil
 	case canonical.ToolPolicySpecific:
-		specific, ok := policy.SpecificID()
-		if !ok {
-			return nil, canonical.BadRequest("chat completions request tool_choice specific requires a tool id")
-		}
-		record, ok := lowered.FindSource(specific)
-		if !ok {
-			return nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", specific))
-		}
-		if record.FragmentCount == 0 {
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("target lowering produced 0 fragments for tool %q", specific))
-		}
-		if record.FragmentCount > 1 {
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, "1->N lowered tool requires explicit provider tool policy lowering rule for specific selection")
-		}
 		switch record.Kind {
 		case canonical.ToolKindFunction:
 			name, err := wire.EncodeToolName(names, record.Key)
@@ -411,7 +379,7 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 				},
 			}, nil
 		default:
-			return nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.Occurrence{}, fmt.Sprintf("Chat Completions cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
+			return nil, provider.NewIncompatibleTarget(fmt.Sprintf("Chat Completions cannot represent specific tool choice for semantic tool kind %q without a provider policy rule", record.Kind))
 		}
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")

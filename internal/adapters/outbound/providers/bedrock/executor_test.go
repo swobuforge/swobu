@@ -43,7 +43,7 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 		region, delivery.BufferedDelivery())
 }
 
-func TestBedrockMantleMessagesRejectsStructuredOutputBeforeTransport(t *testing.T) {
+func TestBedrockMantleMessagesApproximatesStrictStructuredOutput(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind:   canonical.OutputFormatJSONSchema,
 		Name:   "reply",
@@ -68,13 +68,23 @@ func TestBedrockMantleMessagesRejectsStructuredOutputBeforeTransport(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = backend.Codec.Encode(provider.Request{
+	document, changes, err := backend.Codec.Encode(provider.Request{
 		Canonical: request,
 		Delivery:  delivery.BufferedDelivery(),
 	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("encode error = %T %v, want IncompatibleTargetError", err, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{})
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := payload["output_config"]; !ok {
+		t.Fatalf("Mantle Messages payload omitted approximated structured output: %s", document.RawBytes())
 	}
 }
 
@@ -234,13 +244,12 @@ func TestBedrockMessagesRejectsHostedWebSearch(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	_, _, err = backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	if err == nil {
-		t.Fatal("expected Bedrock Messages to reject unowned hosted web search")
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var incompErr provider.IncompatibleTargetError
-	if !errors.As(err, &incompErr) {
-		t.Fatalf("expected IncompatibleTargetError, got %T: %v", err, err)
+	if bytes.Contains(document.RawBytes(), []byte("web_search")) || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
+		t.Fatalf("Bedrock Messages lowering = %s changes=%#v", document.RawBytes(), changes)
 	}
 }
 

@@ -15,7 +15,7 @@
 // canonical semantics.
 //
 // Static top-level system/tools fields cannot represent arbitrary mid-history
-// activation order. Lowering may hoist only the proven leading prefix; other
-// cases are target incompatibilities. Provider adapters must reject unsupported
-// native fields, such as Mantle structured output, before network I/O.
+// activation order. Lowering hoists the proven leading prefix and may expose one
+// deferred declaration to preserve an otherwise empty callable surface. Any
+// remaining loss is compatibility evidence, not a routing decision.
 package messages

@@ -99,13 +99,13 @@ func ChatHostedSearchToolPolicy(spelling string) chatcompletions.ToolPolicyLower
 			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
 		}
 		if record.FragmentCount == 0 {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
+			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
 		}
 		if record.FragmentCount != 1 {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
+			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
 		}
 		if spelling == "" {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), "target cannot require hosted search specifically")
+			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
 		}
 		return map[string]any{"type": spelling}, true, nil, nil
 	}
@@ -180,13 +180,13 @@ func ResponsesHostedSearchToolPolicy(spelling string) responses.ToolPolicyLoweri
 			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
 		}
 		if record.FragmentCount == 0 {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
+			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
 		}
 		if record.FragmentCount != 1 {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
+			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
 		}
 		if spelling == "" {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), "target cannot require hosted search specifically")
+			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
 		}
 		return map[string]any{"type": spelling}, true, nil, nil
 	}
@@ -227,7 +227,7 @@ func MessagesHostedSearchToolPolicy(typeName string) messages.ToolPolicyLowering
 			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
 		}
 		if typeName == "" {
-			return nil, true, nil, provider.IncompatibleCapability(canonical.RequestToolPolicy, canonical.ToolOccurrence(key), "target cannot require hosted search specifically")
+			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
 		}
 		return map[string]any{"type": "tool", "name": canonical.WebSearchToolKey().Name()}, true, nil, nil
 	}
