@@ -2,32 +2,9 @@ package responses
 
 import (
 	"log/slog"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
-
-func logResponsesTerminalCheckpointMismatch(exchangeID string, outputIndex int, checkpointItems []canonical.CanonicalItem, terminalItems []canonical.CanonicalItem, mismatch string) {
-	slog.Warn("responses terminal checkpoint mismatch",
-		"component", "httpapi",
-		"event", "responses_terminal_checkpoint_mismatch",
-		"exchange_id", exchangeID,
-		"output_index", outputIndex,
-		"checkpoint_item_count", len(checkpointItems),
-		"terminal_item_count", len(terminalItems),
-		"checkpoint_kinds", responsesCanonicalKindSequence(checkpointItems),
-		"terminal_kinds", responsesCanonicalKindSequence(terminalItems),
-		"mismatch", mismatch,
-	)
-}
-
-func responsesCanonicalKindSequence(items []canonical.CanonicalItem) string {
-	kinds := make([]string, len(items))
-	for index, item := range items {
-		kinds[index] = string(item.Kind())
-	}
-	return strings.Join(kinds, ",")
-}
 
 func logResponsesEgressBuffered(payload []byte) {
 	slog.Debug("responses buffered egress",

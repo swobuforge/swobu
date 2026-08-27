@@ -227,28 +227,34 @@ func TestResponsesStreamReasoningIDSurvivesFramePositions(t *testing.T) {
 	}
 }
 
-// RFC G2 §7.3/§7.4: streaming and buffered decoding synthesize equal canonical
-// reasoning replay, so a stateless turn replays identically regardless of how
-// the provider delivered the turn.
-func TestResponsesStreamAndBufferedReasoningReplayAreEqual(t *testing.T) {
-	bufferedRaw := []byte(`{"id":"resp","model":"gpt","status":"completed","output":[{"type":"reasoning","id":"rs_7","status":"completed","encrypted_content":"cipher","summary":[{"type":"summary_text","text":"brief"}]}]}`)
+// Buffered terminal output and streamed item-done output share portable
+// completed reasoning semantics, while each preserves the usable opaque replay
+// selected by its own authority boundary.
+func TestResponsesStreamAndBufferedReasoningConvergeWithoutOpaqueReplayEquality(t *testing.T) {
+	bufferedRaw := []byte(`{"id":"resp","model":"gpt","status":"completed","output":[{"type":"reasoning","id":"rs_7","status":"completed","encrypted_content":"cipher-B","summary":[{"type":"summary_text","text":"brief"}]}]}`)
 	streamRaw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n" +
-		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"brief\"}]}}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"completed\",\"output\":[]}}\n\n"
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher-A\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"brief\"}]}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"completed\",\"output\":[{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher-B\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"brief\"}]}]}}\n\n"
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
 	buffered, err := decodeResponseBuffered(context.Background(), request, testAttemptToolNames(request), bufferedRaw, "ex", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bufferedReplay, _ := firstReasoningReplay(t, buffered)
-	streamedReplay, _ := firstReasoningReplay(t, decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamRaw))}, "ex", nil, true))
-	if bufferedReplay != streamedReplay {
-		t.Fatalf("buffered = %+v, streamed = %+v", bufferedReplay, streamedReplay)
+	bufferedReasoning, bufferedReplay := firstReasoningItem(t, buffered)
+	streamedReasoning, streamedReplay := firstReasoningItem(t, decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamRaw))}, "ex", nil, true))
+	if len(bufferedReasoning.Parts()) != 1 || len(streamedReasoning.Parts()) != 1 || bufferedReasoning.Parts()[0] != streamedReasoning.Parts()[0] {
+		t.Fatalf("portable reasoning differs: buffered=%#v streamed=%#v", bufferedReasoning.Parts(), streamedReasoning.Parts())
+	}
+	if bufferedReplay.ItemID != "rs_7" || bufferedReplay.EncryptedContent != "cipher-B" {
+		t.Fatalf("buffered replay = %+v", bufferedReplay)
+	}
+	if streamedReplay.ItemID != "rs_7" || streamedReplay.EncryptedContent != "cipher-A" {
+		t.Fatalf("streamed replay = %+v", streamedReplay)
 	}
 }
 
-func TestResponsesStreamReconcilesTerminalReasoningWithOmittedCommittedID(t *testing.T) {
+func TestResponsesStreamAcceptsTerminalReasoningWithOmittedCommittedID(t *testing.T) {
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"completed\",\"encrypted_content\":\"cipher\",\"summary\":[]}}\n\n" +
@@ -265,12 +271,12 @@ func TestResponsesStreamReconcilesTerminalReasoningWithOmittedCommittedID(t *tes
 			break
 		}
 		if err != nil {
-			t.Fatalf("terminal reconciliation failed: %v", err)
+			t.Fatalf("terminal identity observation failed: %v", err)
 		}
 	}
 }
 
-func TestResponsesStreamReconcilesTerminalDependentReasoningWithOmittedCommittedID(t *testing.T) {
+func TestResponsesStreamCommitsDeferredReasoningWithOmittedTerminalID(t *testing.T) {
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp\",\"model\":\"gpt\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_7\",\"type\":\"reasoning\",\"status\":\"incomplete\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"partial\"}]}}\n\n" +
@@ -278,11 +284,11 @@ func TestResponsesStreamReconcilesTerminalDependentReasoningWithOmittedCommitted
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt")})
 	response := readResponsesStreamResponse(t, request, raw)
 	if response.Completion().Reason() != "incomplete" || len(response.Items()) != 1 {
-		t.Fatalf("terminal-dependent reasoning completion=%q items=%#v", response.Completion().Reason(), response.Items())
+		t.Fatalf("deferred reasoning completion=%q items=%#v", response.Completion().Reason(), response.Items())
 	}
 	reasoning, ok := response.Items()[0].Reasoning()
 	if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "partial" {
-		t.Fatalf("terminal-dependent reasoning = %#v", response.Items()[0])
+		t.Fatalf("deferred reasoning = %#v", response.Items()[0])
 	}
 }
 
@@ -302,6 +308,29 @@ func firstReasoningReplay(t *testing.T, stream canonical.ResponseStream) (canoni
 				return replay, true
 			}
 		}
+	}
+}
+
+func firstReasoningItem(t *testing.T, stream canonical.ResponseStream) (canonical.ReasoningItem, canonical.ResponsesReasoningReplay) {
+	t.Helper()
+	for {
+		event, err := stream.Next(context.Background())
+		if err != nil {
+			t.Fatalf("reasoning item missing: %v", err)
+		}
+		if event.Kind != canonical.EventItemCompleted {
+			continue
+		}
+		item := event.Payload.(canonical.ItemEvent).Payload.(canonical.ItemCompletedPayload).Item
+		reasoning, ok := item.Reasoning()
+		if !ok {
+			continue
+		}
+		replay, ok := reasoning.Opaque().Responses()
+		if !ok {
+			t.Fatal("reasoning item has no Responses replay")
+		}
+		return reasoning, replay
 	}
 }
 

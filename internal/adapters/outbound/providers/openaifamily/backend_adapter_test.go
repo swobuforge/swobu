@@ -74,7 +74,7 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 	}
 }
 
-func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
+func TestOpenAIFamilyTargetsRequireExactChatCompletionsWebSearchDialect(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{
@@ -101,12 +101,10 @@ func TestOpenAIFamilyTargetsInheritChatCompletionsWebSearch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, changes, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
-			if encodeErr != nil {
-				t.Fatal(encodeErr)
-			}
-			if bytes.Contains(document.RawBytes(), []byte("web_search")) || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
-				t.Fatalf("%s lowering = %s changes=%#v", tc.name, document.RawBytes(), changes)
+			_, _, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+			var incompatible provider.IncompatibleTargetError
+			if !errors.As(encodeErr, &incompatible) {
+				t.Fatalf("%s error = %T, want IncompatibleTargetError", tc.name, encodeErr)
 			}
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -40,19 +41,12 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	}
 }
 
-func TestEncodeMessagesWebSearch_GenericOmitsAndRuleLowers(t *testing.T) {
+func TestEncodeMessagesWebSearch_GenericRejectsAndRuleLowers(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
-	var changes []compat.Change
-	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, &changes, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tools) != 0 {
-		t.Fatalf("generic tools = %#v, want omission", tools)
-	}
-	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()))
-	if len(changes) != 1 || changes[0] != want {
-		t.Fatalf("changes = %#v, want %#v", changes, want)
+	_, err := encodeMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "")
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, want IncompatibleTargetError", err)
 	}
 	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
@@ -64,13 +58,46 @@ func TestEncodeMessagesWebSearch_GenericOmitsAndRuleLowers(t *testing.T) {
 			AllowedCallers: []string{"direct"},
 		}}, true, nil, nil
 	}
-	tools, _, err = compileMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "", rule)
+	tools, _, err := compileMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "", rule, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(tools[0])
 	if string(raw) != `{"type":"web_search_20260209","name":"web_search","allowed_callers":["direct"]}` {
 		t.Fatalf("tool = %s", raw)
+	}
+}
+
+func TestCompileMessagesToolsOmitsPolicyDeadWebSearch(t *testing.T) {
+	lookup := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	tools := []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), lookup}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tools...)}})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := canonical.WebSearchToolKey()
+	other := lookup.Key()
+	for _, test := range []struct {
+		name   string
+		policy canonical.ToolPolicy
+	}{
+		{name: "none", policy: canonical.NewToolPolicy(canonical.ToolPolicyNone, nil)},
+		{name: "specific other", policy: canonical.NewToolPolicy(canonical.ToolPolicySpecific, &other)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, lowered, err := compileMessagesTools(tools, nil, names, nil, "", nil, &test.policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(encoded) != 1 || encoded[0].Name != "lookup" {
+				t.Fatalf("tools = %#v, want lookup only", encoded)
+			}
+			record, ok := lowered.FindSource(search)
+			if !ok || record.FragmentCount != 0 {
+				t.Fatalf("web search lowering = %#v, present=%v", record, ok)
+			}
+		})
 	}
 }
 

@@ -102,7 +102,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	}
 	for index := range state.summaryParts {
 		if index >= len(frame.Item.Summary) {
-			return false, canonical.NewBackendError("responses", 0, "responses terminal checkpoint is missing streamed reasoning summary", "")
+			return false, canonical.NewBackendError("responses", 0, "responses completed item is missing streamed reasoning summary", "")
 		}
 	}
 
@@ -138,7 +138,7 @@ func (s *responsesResponseStream) completeReasoningState(frame streamFrame) (boo
 	}
 	for index := range state.traceParts {
 		if index >= len(content) {
-			return false, canonical.NewBackendError("responses", 0, "responses terminal checkpoint is missing streamed reasoning trace", "")
+			return false, canonical.NewBackendError("responses", 0, "responses completed item is missing streamed reasoning trace", "")
 		}
 	}
 

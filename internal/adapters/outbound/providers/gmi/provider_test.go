@@ -3,9 +3,9 @@ package gmi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -34,11 +34,9 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 		}
 		doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 		if kind == protocolkind.ChatCompletions || kind == protocolkind.Messages {
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(doc.RawBytes()), "web_search") {
-				t.Fatalf("GMI %s leaked unsupported hosted search: %s", kind, doc.RawBytes())
+			var incompatible provider.IncompatibleTargetError
+			if !errors.As(err, &incompatible) {
+				t.Fatalf("GMI %s error = %T, want IncompatibleTargetError", kind, err)
 			}
 			continue
 		}

@@ -142,7 +142,7 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 				set, _ := canonical.NewToolSet(tc.tools)
 				item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 				names = testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
-				_, _, lowered, _ = compileChatCompletionsTools(tc.tools, names, nil, "", nil)
+				_, _, lowered, _ = compileChatCompletionsTools(tc.tools, names, nil, "", nil, nil)
 			}
 			got, err := encodeChatCompletionsToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {
@@ -165,7 +165,7 @@ func TestEncodeChatCompletionsToolChoice_RejectsSemanticToolWithoutProviderPolic
 		}
 		return nil, false, nil, nil
 	}
-	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearchTool}, names, nil, "", rule)
+	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearchTool}, names, nil, "", rule, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

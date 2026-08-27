@@ -39,11 +39,11 @@ type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (frag
 type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
 
 func encodeResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, err := compileResponsesTools(tools, visibility, names, changeLog, exchangeID, nil)
+	typed, _, err := compileResponsesTools(tools, visibility, names, changeLog, exchangeID, nil, nil)
 	return typed, err
 }
 
-func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
+func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule, policy *canonical.ToolPolicy) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
 		return nil, wire.LoweredToolSet{}, nil
 	}
@@ -62,6 +62,13 @@ func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonic
 	out := make([]ProviderRequestTool, 0, len(tools))
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
 	for ordinal, tool := range tools {
+		if tool.Kind() == canonical.ToolKindWebSearch && policy != nil && !policy.Permits(tool.Key()) {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+			}
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+			continue
+		}
 		if rule != nil {
 			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
 			if changeLog != nil {
@@ -84,6 +91,9 @@ func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonic
 		_, custom := tool.Custom()
 		_, discovery := tool.Discovery()
 		if !function && !custom && !discovery {
+			if tool.Kind() == canonical.ToolKindWebSearch {
+				return nil, wire.LoweredToolSet{}, provider.NewIncompatibleTarget("Responses target cannot execute the current hosted-search declaration")
+			}
 			if changeLog != nil {
 				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
 			}

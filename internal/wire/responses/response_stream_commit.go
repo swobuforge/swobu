@@ -23,34 +23,32 @@ type committedOutputIdentity struct {
 // erasure evidence, and resolution cannot be looked up through any other key.
 //
 // responsesOutputPhase is the closed provider lifecycle for one output index.
-// Publication is orthogonal: checkpointed output may stream to the client
-// before the response terminal verifies it and advances the slot to settled.
+// Publication is orthogonal: complete item-done output may stream immediately,
+// while incomplete item-done output waits only for a compatible response
+// outcome before its already-admitted semantics become publishable.
 type responsesOutputPhase uint8
 
 const (
 	responsesOutputAccumulating responsesOutputPhase = iota
 	responsesOutputAwaitingTerminal
-	responsesOutputCheckpointed
-	responsesOutputSettled
+	responsesOutputDone
 )
 
 // State transitions:
 //
-//	absent → accumulating → checkpointed → settled
-//	                    └→ awaiting terminal → settled
-//	                    └→ settled (terminal-only output)
+//	absent → accumulating → done
+//	                    └→ awaiting terminal → done
+//	                    └→ done (terminal-only output)
 //
-// Provider order publishes while the contiguous checkpoint-ready frontier
+// Provider order publishes while the contiguous done frontier
 // advances; known groups contribute their span and erased groups contribute
-// zero. Only settled is terminal for provider semantics.
+// zero.
 type responsesOutputSlot struct {
 	identity            committedOutputIdentity
 	events              canonical.EventSequence
 	text                *responsesTextState
 	tool                *responsesToolState
 	reasoning           *responsesReasoningState
-	checkpointItems     []canonical.CanonicalItem
-	checkpointStatus    string
 	terminalPendingItem json.RawMessage
 	base                uint32
 	span                uint32
@@ -62,8 +60,8 @@ type responsesOutputSlot struct {
 	statusDropRecorded  bool
 }
 
-func (s *responsesOutputSlot) checkpointReady() bool {
-	return s.phase == responsesOutputCheckpointed || s.phase == responsesOutputSettled
+func (s *responsesOutputSlot) done() bool {
+	return s.phase == responsesOutputDone
 }
 
 func responsesIdentityForFrame(frameType string, frame streamFrame) committedOutputIdentity {
@@ -101,7 +99,7 @@ func responsesIdentityForFrame(frameType string, frame streamFrame) committedOut
 }
 
 // acceptOutputFrame admits one frame to its indexed owner. The boolean
-// result reports frozen duplicate evidence that dispatch must ignore so a
+// result reports duplicate completion evidence that dispatch must ignore so a
 // resolved output cannot emit events or change span.
 func (s *responsesResponseStream) acceptOutputFrame(frameType string, frame streamFrame) (bool, error) {
 	if frame.OutputIndex == nil {
@@ -113,7 +111,7 @@ func (s *responsesResponseStream) acceptOutputFrame(frameType string, frame stre
 	}
 	state := s.outputAt(index)
 	identity := responsesIdentityForFrame(frameType, frame)
-	if state.checkpointReady() {
+	if state.phase == responsesOutputDone {
 		if err := state.identity.validateFrozen(identity); err != nil {
 			return false, err
 		}
@@ -123,6 +121,12 @@ func (s *responsesResponseStream) acceptOutputFrame(frameType string, frame stre
 		return true, nil
 	}
 	if state.phase == responsesOutputAwaitingTerminal {
+		if err := state.identity.validateFrozen(identity); err != nil {
+			return false, err
+		}
+		if frameType == "response.output_item.done" {
+			return true, nil
+		}
 		return false, canonical.NewBackendError("responses", 0, "responses output lifecycle continued after deferred completion", "")
 	}
 	// An unknown announcement is deliberately open, not erased. Its unknown
@@ -146,7 +150,7 @@ func (s *responsesResponseStream) acceptTerminalOutput(index int, item responses
 		callID:   strings.TrimSpace(item.CallID),
 		toolName: strings.TrimSpace(item.Name),
 	}
-	if state.checkpointReady() {
+	if state.phase == responsesOutputDone {
 		return state.identity.validateFrozen(identity)
 	}
 	if state.ignoredAtAdded && state.identity.kind == "" && identity.kind != "" {
@@ -235,7 +239,7 @@ func (s *responsesResponseStream) stageOutputEvent(outputIndex *int, event canon
 		return
 	}
 	state := s.outputAt(*outputIndex)
-	if state.checkpointReady() {
+	if state.done() {
 		return
 	}
 	if itemEvent.Position.Item+1 > state.span {
@@ -255,12 +259,12 @@ func rebaseResponsesOutputEvent(event canonical.Event, base uint32) canonical.Ev
 	return event
 }
 
-func (s *responsesResponseStream) checkpointOutput(outputIndex *int) {
+func (s *responsesResponseStream) markOutputDone(outputIndex *int) {
 	if outputIndex == nil || *outputIndex < 0 {
 		return
 	}
 	state := s.outputAt(*outputIndex)
-	state.phase = responsesOutputCheckpointed
+	state.phase = responsesOutputDone
 	s.publishReadyOutputs()
 }
 
@@ -278,7 +282,7 @@ func (s *responsesResponseStream) publishReadyOutputs() {
 			}
 			state.events = nil
 		}
-		if !state.checkpointReady() {
+		if !state.done() {
 			return
 		}
 		s.nextOrdinal = state.base + state.span

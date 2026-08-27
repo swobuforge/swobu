@@ -8,8 +8,9 @@
 // portable assistant continuation and recording request-item loss at the
 // canonical call position. Preserved cited text also records request-part
 // citation loss; Chat never synthesizes citation text or source summaries.
-// Unresolved history and active WebSearch declarations remain incompatible;
-// only an exact target dialect may replace those semantics. Unknown additive list
+// Unresolved history and policy-executable active WebSearch declarations remain
+// incompatible; policy-dead declarations omit locally, and only an exact target
+// dialect may replace executable search semantics. Unknown additive list
 // occurrences erase locally and preserve sibling order.
 // Closed request contracts, ambiguous projected tool names, invalid residual
 // responses, and contradictory stream identity fail at their owning boundary.

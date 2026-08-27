@@ -214,11 +214,11 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if contextErr != nil {
 		return ProviderRequestDocument{}, contextErr
 	}
-	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool)
+	policy, err := req.EffectiveToolPolicy()
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	policy, err := req.EffectiveToolPolicy()
+	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool, &policy)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
