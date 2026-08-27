@@ -3,27 +3,35 @@
 // projection, stream reduction, and the client-history fingerprint. Canonical
 // remains the only portable graph; this package retains no parallel transcript.
 //
-// Standard lowering is strict for provider-hosted WebSearch: only an exact
-// target dialect may replace that occurrence. Unknown additive occurrences
-// erase locally and preserve sibling order.
+// A current provider-hosted WebSearch declaration is target-selecting when the
+// effective tool policy permits it to execute: only an exact target dialect
+// may lower it, and an unhandled executable declaration makes that candidate
+// incompatible before dispatch. Policy-dead declarations omit locally.
+// Settled historical WebSearch calls
+// and results are transcript facts, not current capability requirements; the
+// conversation projector replays them independently without re-execution.
+// Unknown additive declarations erase locally and preserve sibling order.
 // Missing discriminators, closed-contract violations, invalid residual
 // containers, and contradictory lifecycle or identity fail at their owning
-// boundary. Buffered and streamed delivery must converge on the same completed
-// canonical semantics. Terminal-checkpoint mismatch diagnostics expose only
-// canonical item shape and a closed mismatch category; provider frames and
-// inference content never enter logs. Each provider output index has one slot
-// with an explicit accumulating, terminal-dependent, checkpointed, or settled
-// phase. Checkpointed output may publish incrementally before response-terminal
-// verification; only settled ends provider semantics. Every terminal item is
-// observed once through that slot. Its first non-empty identity remains
-// authoritative when later snapshots omit it, while repeated non-empty
-// identity must agree. Reasoning checkpoint equivalence is defined by ordered
-// readable parts and opaque Responses replay semantics, not private
-// nil-versus-empty storage shape.
+// boundary. Buffered and streamed delivery converge on portable completed
+// semantics and each preserve usable provider replay; opaque replay bytes need
+// not match across those distinct authority paths. Each provider output index
+// has one slot with an explicit accumulating, awaiting-terminal, or done phase.
+// The first successfully
+// admitted response.output_item.done owns that occurrence's immutable canonical
+// semantics; later item-done or response-terminal copies may confirm identity
+// but cannot rewrite or invalidate content. Incomplete item-done content remains
+// authoritative while publication waits for a compatible response outcome.
+// Response terminals own response-level outcome and backfill only indexes that
+// never produced an admitted item-done. Compatibility evidence comes only from
+// the observation used to construct canonical semantics. The slot owns the
+// first non-empty output identity, reconstructs later omissions, and rejects
+// repeated non-empty identity mutation. Encrypted replay remains opaque item
+// content and is never compared across duplicate observations.
 //
 // An unfamiliar web-search status erases only that lifecycle refinement. The
 // known call survives without a synthesized result, and provider completion
-// remains subject to canonical settlement.
+// remains subject to canonical response validation.
 //
 // Known MCP declarations retain typed URL, connector, tunnel, selection,
 // approval, loading, and caller semantics. Authorization and headers remain

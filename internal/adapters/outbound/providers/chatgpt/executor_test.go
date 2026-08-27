@@ -378,7 +378,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	}
 }
 
-func TestExecute_EncodesWebSearchDeclaration(t *testing.T) {
+func TestExecute_RejectsCurrentWebSearchDeclarationBeforeTransport(t *testing.T) {
 	t.Parallel()
 
 	rt := &captureRoundTripper{}
@@ -405,19 +405,13 @@ func TestExecute_EncodesWebSearchDeclaration(t *testing.T) {
 			protocolkind.Responses,
 			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
-	resp, err := executeTestProviderRequest(context.Background(), exec, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err = executeTestProviderRequest(context.Background(), exec, req)
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, want IncompatibleTargetError", err)
 	}
-	streamIngress, ok := resp.(provider.StreamIngress)
-	if !ok || streamIngress.Stream.Body == nil {
-		t.Fatal("expected transport stream response")
-	}
-	_ = streamIngress.Stream.Body.Close()
-
-	body := mustJSONBodyMap(t, rt.lastBody)
-	if tools, ok := body["tools"].([]any); ok && len(tools) != 0 {
-		t.Fatalf("body tools = %#v, want 0 tools (web_search omitted on ChatGPT)", body["tools"])
+	if len(rt.lastBody) != 0 {
+		t.Fatalf("current hosted search reached transport: %s", rt.lastBody)
 	}
 }
 

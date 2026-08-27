@@ -24,6 +24,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/modelscope"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/nous"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/novita"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/ollama"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/opencodezen"
@@ -87,7 +88,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		openrouter.NewRuntime(client, credentials),
 		runpod.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
-		openaifamily.NewRuntime(client, credentials, openaifamily.StandardNoAuthPolicy(profile.ProviderSpecOllama)),
+		ollama.NewRuntime(client, credentials),
 		openaifamily.NewRuntime(client, credentials, openaifamily.LMStudioPolicy()),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecVLLM)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecCustom)),

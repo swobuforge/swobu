@@ -135,7 +135,11 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
+	policy, err := req.EffectiveToolPolicy()
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool, &policy)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -150,10 +154,6 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		wireTools = []ProviderRequestTool{}
 	}
 
-	policy, err := req.EffectiveToolPolicy()
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
 	var choice any
 	if compile.LowerToolPolicy != nil {
 		var handled bool

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -466,14 +467,13 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	}
 }
 
-func TestChatGPTLowersWebSearchDeclarationAndPolicy(t *testing.T) {
+func TestChatGPTRejectsCurrentWebSearchDeclarationBeforeDispatch(t *testing.T) {
 	t.Parallel()
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Case 1: Active tool declaration without specific policy is safely omitted for ChatGPT Codex compatibility.
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-5.4-mini"),
 		Items: []canonical.CanonicalItem{
@@ -485,23 +485,16 @@ func TestChatGPTLowersWebSearchDeclarationAndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+	_, _, err = newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: request,
 		ToolNames: names,
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	})
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if tools, ok := payload["tools"].([]any); ok && len(tools) != 0 {
-		t.Fatalf("payload tools = %#v, want 0 tools (web_search omitted on ChatGPT)", payload["tools"])
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, want IncompatibleTargetError", err)
 	}
 
-	// Case 2: Specific tool policy requiring web search is a hard incompatibility.
 	webSearchKey := canonical.WebSearchToolKey()
 	reqSpecific := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("gpt-5.4-mini"),
@@ -520,7 +513,7 @@ func TestChatGPTLowersWebSearchDeclarationAndPolicy(t *testing.T) {
 		ToolNames: namesSpecific,
 		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	})
-	if err == nil {
-		t.Fatal("expected error for specific web search policy on ChatGPT, got nil")
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("specific policy error = %T, want IncompatibleTargetError", err)
 	}
 }

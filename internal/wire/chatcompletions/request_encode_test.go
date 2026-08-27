@@ -1,8 +1,8 @@
 package chatcompletions
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -66,7 +66,7 @@ func TestEncodeCarrier_OmitsDisclosureOnlyReasoning(t *testing.T) {
 	}
 }
 
-func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
+func TestEncodeCarrier_CurrentHostedSearchRequiresExactTargetLowering(t *testing.T) {
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
 		t.Fatal(err)
@@ -84,17 +84,10 @@ func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
 		{name: "streaming", delivery: delivery.StreamingDelivery(delivery.FramingSSE)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var changes []compat.Change
-			document, err := EncodeCarrierWithChanges(req, nil, tc.delivery, &changes, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bytes.Contains(document.RawBytes(), []byte("web_search")) {
-				t.Fatalf("generic hosted search leaked into request: %s", document.RawBytes())
-			}
-			want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
-			if len(changes) != 1 || changes[0] != want {
-				t.Fatalf("changes = %#v, want %#v", changes, want)
+			_, err := EncodeCarrierWithChanges(req, nil, tc.delivery, nil, "")
+			var incompatible provider.IncompatibleTargetError
+			if !errors.As(err, &incompatible) {
+				t.Fatalf("error = %T, want IncompatibleTargetError", err)
 			}
 		})
 	}

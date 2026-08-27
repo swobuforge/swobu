@@ -118,7 +118,7 @@ func TestResponsesCodecUsesSharedOfficialToolLowering(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
+func TestChatCompletionsWebSearchRequiresExactLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
@@ -127,12 +127,10 @@ func TestChatCompletionsWebSearchUsesProtocolDefault(t *testing.T) {
 			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
 		},
 	})
-	document, changes, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(document.RawBytes(), []byte("web_search")) || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
-		t.Fatalf("generic lowering = %s changes=%#v", document.RawBytes(), changes)
+	_, _, err := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, want IncompatibleTargetError", err)
 	}
 }
 
@@ -198,7 +196,7 @@ func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
+func TestChatCompletionsCodecRequiresExactWebSearchLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := provider.Request{
 		ExchangeID: "exchange-shared-lowering",
@@ -211,12 +209,10 @@ func TestChatCompletionsCodecSerializesSharedTypedLowering(t *testing.T) {
 		}),
 		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
 	}
-	document, changes, err := CompileChatRequest(request, ChatDialect{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(document.Tools) != 0 || len(changes) != 1 || changes[0].Capability != canonical.RequestToolsKind {
-		t.Fatalf("generic lowering tools=%#v changes=%#v", document.Tools, changes)
+	_, _, err := CompileChatRequest(request, ChatDialect{})
+	var incompatible provider.IncompatibleTargetError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("error = %T, want IncompatibleTargetError", err)
 	}
 }
 

@@ -10,25 +10,18 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestResponsesOutputSlotPhaseSeparatesCheckpointFromSettlement(t *testing.T) {
+func TestResponsesOutputSlotPhaseSeparatesDeferredFromDone(t *testing.T) {
 	slot := &responsesOutputSlot{}
-	if slot.checkpointReady() {
-		t.Fatal("new output slot is checkpoint-ready")
+	if slot.done() {
+		t.Fatal("new output slot is done")
 	}
 	slot.phase = responsesOutputAwaitingTerminal
-	if slot.checkpointReady() {
-		t.Fatal("terminal-dependent output published before response terminal")
+	if slot.done() {
+		t.Fatal("deferred output published before response terminal")
 	}
-	slot.phase = responsesOutputCheckpointed
-	if !slot.checkpointReady() {
-		t.Fatal("completed item checkpoint is not publication-ready")
-	}
-	if slot.phase == responsesOutputSettled {
-		t.Fatal("checkpointed output masquerades as response-settled")
-	}
-	slot.phase = responsesOutputSettled
-	if !slot.checkpointReady() {
-		t.Fatal("settled output lost its committed checkpoint")
+	slot.phase = responsesOutputDone
+	if !slot.done() {
+		t.Fatal("done output is not publication-ready")
 	}
 }
 

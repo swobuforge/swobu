@@ -196,7 +196,7 @@ func TestDecodeResponseStreamRejectsUnfinishedKnownOutput(t *testing.T) {
 	}
 }
 
-func TestDecodeResponseStreamRejectsPartialTextWithoutCheckpoint(t *testing.T) {
+func TestDecodeResponseStreamRejectsPartialTextWithoutCompletion(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n" +
 		responsesCompletedFrame("[]", "")
@@ -220,7 +220,7 @@ func TestDecodeResponseStreamRetainsPartialTextAcrossLaterToolStart(t *testing.T
 	message, _ := items[0].Message()
 	text, _ := message.Content()[0].Text()
 	if text.Text() != "hello" {
-		t.Fatalf("message text = %q, want terminal checkpoint hello", text.Text())
+		t.Fatalf("message text = %q, want completed item hello", text.Text())
 	}
 	call, ok := items[1].ToolCall()
 	if !ok {

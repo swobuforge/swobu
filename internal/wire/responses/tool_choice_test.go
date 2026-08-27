@@ -237,7 +237,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 			names := toolChoiceNames(t, tc.tools)
 			var lowered wire.LoweredToolSet
 			if len(tc.tools) > 0 {
-				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
+				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil, nil)
 			}
 			got, err := encodeToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {

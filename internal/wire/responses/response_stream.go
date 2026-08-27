@@ -223,10 +223,6 @@ func (s *responsesResponseStream) enqueueItemStart(outputIndex *int, ordinal uin
 }
 
 func (s *responsesResponseStream) commitOutputItem(outputIndex *int, ordinal uint32, item canonical.CanonicalItem) {
-	if outputIndex != nil && *outputIndex >= 0 {
-		output := s.outputAt(*outputIndex)
-		output.checkpointItems = append(output.checkpointItems, item.Clone())
-	}
 	s.enqueueOutputItemCompleted(outputIndex, ordinal, item)
 	s.completedItems++
 }
@@ -275,20 +271,11 @@ func (s *responsesResponseStream) handleTerminalCompletion(ctx context.Context, 
 	if s.completedItems == 0 && s.erasedOutput {
 		return canonical.NewBackendError("responses", 0, "backend produced no usable canonical output", "")
 	}
-	s.settleCheckpointedOutputs()
 	s.closeOpenTools(canonical.EnvelopeStatusCompleted)
 	s.enqueueUsage(s.latestUsage)
 	s.enqueueFinish(responsesCompletion(normalizedStatus, normalizedStatus))
 	s.enqueueEnvelopeEnd(s.responseEnvID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 	return nil
-}
-
-func (s *responsesResponseStream) settleCheckpointedOutputs() {
-	for _, slot := range s.providerOutputs {
-		if slot.phase == responsesOutputCheckpointed {
-			slot.phase = responsesOutputSettled
-		}
-	}
 }
 
 func (s *responsesResponseStream) discardOpenText() {
@@ -300,7 +287,7 @@ func (s *responsesResponseStream) discardOpenText() {
 func (s *responsesResponseStream) hasOpenKnownOutput() bool {
 	for _, state := range s.providerOutputs {
 		if state.text != nil || state.tool != nil || state.reasoning != nil ||
-			!state.checkpointReady() || !state.published || len(state.events) > 0 {
+			state.phase != responsesOutputDone || !state.published || len(state.events) > 0 {
 			return true
 		}
 	}
@@ -378,7 +365,7 @@ func (s *responsesResponseStream) eraseProviderOutput(frame streamFrame, field s
 	if err := s.classifyErasedProviderOutput(frame, field); err != nil {
 		return err
 	}
-	s.checkpointOutput(frame.OutputIndex)
+	s.markOutputDone(frame.OutputIndex)
 	return nil
 }
 
@@ -402,7 +389,7 @@ func (s *responsesResponseStream) recordUnknownWebSearchStatus(frame streamFrame
 
 // classifyErasedProviderOutput records one indexed additive erasure without
 // closing the lifecycle. Unknown fragmented items remain open until their item
-// checkpoint or terminal snapshot arrives.
+// completion or terminal snapshot arrives.
 func (s *responsesResponseStream) classifyErasedProviderOutput(frame streamFrame, field string) error {
 	s.erasedOutput = true
 	s.omitProviderOutput(frame.OutputIndex)

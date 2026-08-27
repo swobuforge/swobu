@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestDecodeResponseStreamRejectsProviderMCPBeforeSiblingPublication(t *testi
 	assertResponsesBackendError(t, drainResponsesStream(stream))
 }
 
-func TestDecodeResponseStreamRejectsTerminalSemanticMutation(t *testing.T) {
+func TestDecodeResponseStreamRetainsFirstCompletedItemAcrossTerminalContentMutation(t *testing.T) {
 	tests := []struct {
 		name     string
 		request  canonical.CanonicalRequest
@@ -58,11 +59,6 @@ func TestDecodeResponseStreamRejectsTerminalSemanticMutation(t *testing.T) {
 			terminal: `{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"goodbye"}]}`,
 		},
 		{
-			name:     "reasoning encrypted replay",
-			doneItem: `{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher-one","summary":[]}`,
-			terminal: `{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"cipher-two","summary":[]}`,
-		},
-		{
 			name:     "web search action",
 			doneItem: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["one"],"sources":[]}}`,
 			terminal: `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["two"],"sources":[]}}`,
@@ -70,21 +66,130 @@ func TestDecodeResponseStreamRejectsTerminalSemanticMutation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			raw := responsesCreatedFrame() +
-				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + test.doneItem + "}\n\n" +
-				responsesCompletedFrame("["+test.terminal+"]", "")
-			assertResponsesDecoderBackendError(t, test.request, raw)
+			baseline := readResponsesStreamResponse(t, test.request, responsesCreatedFrame()+
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+test.doneItem+"}\n\n"+
+				responsesCompletedFrame("[]", ""))
+			mutated := readResponsesStreamResponse(t, test.request, responsesCreatedFrame()+
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+test.doneItem+"}\n\n"+
+				responsesCompletedFrame("["+test.terminal+"]", ""))
+			if !reflect.DeepEqual(mutated.Items(), baseline.Items()) {
+				t.Fatalf("terminal mutation changed items: got %#v want %#v", mutated.Items(), baseline.Items())
+			}
 		})
 	}
 }
 
-func TestDecodeResponseStreamValidatesResolvedTerminalAdditionsWithEvidence(t *testing.T) {
+func TestDecodeResponseStreamAcceptsOpaqueReasoningCiphertextChange(t *testing.T) {
+	doneItem := `{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"item-done-cipher","summary":[{"type":"summary_text","text":"same reasoning"}]}`
+	partial := `{"type":"reasoning","id":"rs_1","status":"incomplete","encrypted_content":"partial-cipher","summary":[{"type":"summary_text","text":"partial reasoning"}]}`
+	tests := []struct {
+		name       string
+		raw        string
+		wantCipher string
+	}{
+		{
+			name: "completed terminal observation retains item done",
+			raw: responsesCreatedFrame() +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + doneItem + "}\n\n" +
+				responsesCompletedFrame(`[{"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"terminal-cipher","summary":[{"type":"summary_text","text":"same reasoning"}]}]`, ""),
+			wantCipher: "item-done-cipher",
+		},
+		{
+			name: "duplicate item done retains first item done",
+			raw: responsesCreatedFrame() +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + doneItem + "}\n\n" +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"status\":\"banana\",\"encrypted_content\":\"duplicate-cipher\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"different reasoning\"}]}}\n\n" +
+				responsesCompletedFrame("["+doneItem+"]", ""),
+			wantCipher: "item-done-cipher",
+		},
+		{
+			name: "deferred incomplete retains item done observation",
+			raw: responsesCreatedFrame() +
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + partial + "}\n\n" +
+				"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"incomplete\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"status\":\"incomplete\",\"encrypted_content\":\"terminal-cipher\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"partial reasoning\"}]}]}}\n\n",
+			wantCipher: "partial-cipher",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := readResponsesStreamResponse(t, canonical.CanonicalRequest{}, test.raw)
+			reasoning, _ := response.Items()[0].Reasoning()
+			replay, _ := reasoning.Opaque().Responses()
+			if replay.EncryptedContent != test.wantCipher {
+				t.Fatalf("replay = %#v, want cipher %q", replay, test.wantCipher)
+			}
+		})
+	}
+}
+
+func TestDecodeResponseStreamHandlesDuplicateDeferredItemDoneByIdentity(t *testing.T) {
+	first := `{"type":"reasoning","id":"rs_1","status":"incomplete","encrypted_content":"first-cipher","summary":[{"type":"summary_text","text":"first summary"}]}`
+	terminal := "event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"incomplete\",\"output\":[]}}\n\n"
+
+	t.Run("same identity ignores duplicate content before admission", func(t *testing.T) {
+		duplicate := `{"type":"reasoning","id":"rs_1","status":"banana","encrypted_content":"second-cipher","summary":[{"type":"summary_text","text":"second summary"}]}`
+		response := readResponsesStreamResponse(t, canonical.CanonicalRequest{}, responsesCreatedFrame()+
+			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+first+"}\n\n"+
+			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+duplicate+"}\n\n"+
+			terminal)
+		reasoning, ok := response.Items()[0].Reasoning()
+		if !ok || len(reasoning.Parts()) != 1 || reasoning.Parts()[0].Text() != "first summary" {
+			t.Fatalf("reasoning = %#v, want first item-done summary", response.Items()[0])
+		}
+		replay, ok := reasoning.Opaque().Responses()
+		if !ok || replay.EncryptedContent != "first-cipher" {
+			t.Fatalf("replay = %#v, want first item-done cipher", replay)
+		}
+	})
+
+	t.Run("changed identity still fails", func(t *testing.T) {
+		duplicate := `{"type":"reasoning","id":"rs_2","status":"banana","encrypted_content":"second-cipher","summary":[{"type":"summary_text","text":"second summary"}]}`
+		assertResponsesDecoderBackendError(t, canonical.CanonicalRequest{}, responsesCreatedFrame()+
+			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+first+"}\n\n"+
+			"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+duplicate+"}\n\n"+
+			terminal)
+	})
+}
+
+func TestDecodeResponseStreamIgnoresTerminalReasoningReplayPresenceMutation(t *testing.T) {
+	tests := []struct {
+		name     string
+		done     string
+		terminal string
+	}{
+		{name: "present to absent", done: `,"encrypted_content":"cipher"`},
+		{name: "absent to present", terminal: `,"encrypted_content":"cipher"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			done := `{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"same reasoning"}]` + test.done + `}`
+			terminal := `{"type":"reasoning","id":"rs_1","status":"completed","summary":[{"type":"summary_text","text":"same reasoning"}]` + test.terminal + `}`
+			response := readResponsesStreamResponse(t, canonical.CanonicalRequest{}, responsesCreatedFrame()+
+				"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+done+"}\n\n"+
+				responsesCompletedFrame("["+terminal+"]", ""))
+			reasoning, _ := response.Items()[0].Reasoning()
+			_, replayPresent := reasoning.Opaque().Responses()
+			if replayPresent != (test.done != "") {
+				t.Fatalf("replay present = %t, want item-done presence %t", replayPresent, test.done != "")
+			}
+		})
+	}
+}
+
+func TestDecodeResponseStreamIgnoresCompatibilityEvidenceFromTerminalDuplicate(t *testing.T) {
 	raw := responsesCreatedFrame() +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"kept\"}]}}\n\n" +
 		responsesCompletedFrame(`[{"type":"message","id":"msg_1","status":"completed","content":[{"type":"output_text","text":"kept"},{"type":"future_content"}]}]`, "")
 	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
 	assertResponsesProviderOutputItems(t, stream, 1)
-	assertResponsesStreamDrop(t, stream, 1)
+	assertResponsesStreamDrop(t, stream, 0)
+}
+
+func TestDecodeResponseStreamRejectsTerminalDuplicateIdentityMutation(t *testing.T) {
+	raw := responsesCreatedFrame() +
+		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"kept\"}]}}\n\n" +
+		responsesCompletedFrame(`[{"type":"message","id":"msg_2","status":"completed","content":[{"type":"output_text","text":"ignored"}]}]`, "")
+	assertResponsesDecoderBackendError(t, canonical.CanonicalRequest{}, raw)
 }
 
 func TestDecodeResponseStreamReconcilesOutOfOrderReasoningIndexes(t *testing.T) {

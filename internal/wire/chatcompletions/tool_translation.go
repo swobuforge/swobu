@@ -89,11 +89,11 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 }
 
 func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil)
+	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil, nil)
 	return typed, err
 }
 
-func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
+func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule, policy *canonical.ToolPolicy) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
 	if len(tools) == 0 {
 		return nil, nil, wire.LoweredToolSet{}, nil
 	}
@@ -101,6 +101,13 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 	out := make([]any, 0, len(tools))
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
 	for ordinal, tool := range tools {
+		if tool.Kind() == canonical.ToolKindWebSearch && policy != nil && !policy.Permits(tool.Key()) {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+			}
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+			continue
+		}
 		if rule != nil {
 			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
 			if changeLog != nil {
@@ -121,6 +128,9 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 		}
 		if _, function := tool.Function(); !function {
 			if _, custom := tool.Custom(); !custom {
+				if tool.Kind() == canonical.ToolKindWebSearch {
+					return nil, nil, wire.LoweredToolSet{}, provider.NewIncompatibleTarget("Chat Completions target cannot execute the current hosted-search declaration")
+				}
 				if changeLog != nil {
 					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
 				}
