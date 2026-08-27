@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -56,7 +55,7 @@ func decodeMessagesOutputFormat(raw json.RawMessage, changeLog *[]compat.Change,
 	}
 }
 
-func encodeMessagesOutputFormat(format canonical.OutputFormat) (json.RawMessage, error) {
+func encodeMessagesOutputFormat(format canonical.OutputFormat, changeLog *[]compat.Change) (json.RawMessage, error) {
 	if format.IsZero() || format.Kind == canonical.OutputFormatText {
 		return nil, nil
 	}
@@ -65,8 +64,14 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat) (json.RawMessage,
 	}
 	switch format.Kind {
 	case canonical.OutputFormatJSONObject:
-		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Messages requires a schema for structured output and cannot represent json_object intent")
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestOutputFormat, canonical.Occurrence{}))
+		}
+		return nil, nil
 	case canonical.OutputFormatJSONSchema:
+		if !format.Strict && changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{}))
+		}
 		dto := messagesNativeOutputFormatDTO{
 			Type:   "json_schema",
 			Schema: json.RawMessage(format.Schema.RawObject()),
@@ -77,7 +82,7 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat) (json.RawMessage,
 		}
 		return raw, nil
 	default:
-		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Messages cannot represent the canonical output format")
+		return nil, canonical.InternalError("canonical output format kind is invalid")
 	}
 }
 

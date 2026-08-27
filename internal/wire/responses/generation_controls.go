@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 	"github.com/swobuforge/swobu/internal/wire/reasoningprojection"
 )
@@ -111,7 +110,7 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	wireReasoning := map[string]any{}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
-			return provider.IncompatibleCapability(canonical.RequestReasoning, canonical.Occurrence{}, "Responses cannot represent disabled reasoning with readable disclosure")
+			return canonical.InternalError("disabled reasoning carries readable disclosure")
 		}
 	}
 
@@ -139,7 +138,7 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	return nil
 }
 
-func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
+func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls, changeLog *[]compat.Change) {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
 		payload["max_output_tokens"] = value
 	}
@@ -150,9 +149,10 @@ func encodeResponsesGenerationControls(payload map[string]any, controls canonica
 		payload["top_p"] = value
 	}
 	if len(controls.Limits.StopSequences) > 0 {
-		return provider.IncompatibleCapability(canonical.RequestControlsStopSequences, canonical.Occurrence{}, "Responses target does not declare stop-sequence support")
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestControlsStopSequences, canonical.Occurrence{}))
+		}
 	}
-	return nil
 }
 
 func isRawControlSet(raw json.RawMessage) bool {

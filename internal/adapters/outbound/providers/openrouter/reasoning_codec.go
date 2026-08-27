@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ChatReplayScope owns the exact OpenRouter Chat opaque reasoning replay dialect.
@@ -22,7 +21,8 @@ func applyOpenRouterReasoning(req canonical.CanonicalRequest, changeLog *[]compa
 		switch compute.Kind() {
 		case canonical.ReasoningDisabled:
 			if effortSet {
-				return nil, provider.IncompatibleCapability(canonical.RequestReasoning, canonical.Occurrence{}, "OpenRouter target cannot combine disabled canonical reasoning with inference effort")
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
+				effortSet = false
 			}
 			out["enabled"] = false
 		case canonical.ReasoningAutomatic:

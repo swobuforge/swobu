@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -270,6 +271,36 @@ func TestOpenRouterCodecOwnsReasoningRequestAndOpaqueReplay(t *testing.T) {
 	first, _ := messages[0].(map[string]any)
 	if _, ok := first["reasoning_details"].([]any); !ok {
 		t.Fatalf("opaque reasoning_details were not replayed: %s", document.RawBytes())
+	}
+}
+
+func TestOpenRouterDisabledReasoningOmitsRedundantEffort(t *testing.T) {
+	effort := canonical.InferenceEffortHigh
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoningControls, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewDisabledReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{messageItem(t, canonical.MessageRoleUser, "hello")},
+		Controls: controls, Reasoning: reasoningControls,
+	})
+	backend := openRouterBackend(t, request.Model())
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(document.RawBytes(), []byte(`"enabled":false`)) || bytes.Contains(document.RawBytes(), []byte(`"effort"`)) {
+		t.Fatalf("reasoning payload = %s", document.RawBytes())
+	}
+	want := compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{})
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 }
 

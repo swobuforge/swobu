@@ -5,7 +5,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -15,7 +14,7 @@ import (
 // Attempt preparation has already projected every provider-facing key.
 func responsesToolWireName(tool canonical.ToolDeclaration, names wire.ToolNames) (string, error) {
 	if tool.Kind() != canonical.ToolKindFunction && tool.Kind() != canonical.ToolKindCustom {
-		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Responses cannot represent this canonical tool declaration type")
+		return "", canonical.InternalError("Responses tool-name lowering received an unsupported declaration kind")
 	}
 	wireName := tool.Key().Name()
 	if names != nil {

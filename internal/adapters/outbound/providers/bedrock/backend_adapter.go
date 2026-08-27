@@ -76,10 +76,10 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	// reverse-proxy prefix. The Bedrock adapter owns no URL parsing of its own.
 	resolution, err := profile.ResolveBedrockEndpoint(target.BaseURL, target.BedrockRegion(), target.ProtocolKind)
 	if err != nil {
-		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget(err.Error()))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint(err.Error()))
 	}
 	if resolution.RequestURL == "" {
-		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget("bedrock provider protocol has no request path"))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint("bedrock provider protocol has no request path"))
 	}
 	requestURL := resolution.RequestURL
 

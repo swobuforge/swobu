@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -152,7 +151,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, provider.NewIncompatibleTarget("Chat Completions target cannot represent the requested canonical delivery mode")
+		return ProviderRequestDocument{}, canonical.InternalError("Chat Completions received an invalid delivery mode")
 	}
 	contextRejected, contextErr := projectChatResponsesReasoningContext(req.Reasoning(), changeLog, exchangeID)
 	if contextErr != nil && !contextRejected {
@@ -514,7 +513,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		} else if item.Kind() == canonical.ItemKindToolCall {
 			wire.Role = "assistant"
 		} else {
-			return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Chat Completions cannot represent this canonical item kind")
+			return nil, canonical.NotImplemented("Chat Completions cannot project this canonical item kind")
 		}
 		if wire.Role == "assistant" {
 			callIDs := make([]canonical.ToolCallID, 0)
@@ -530,7 +529,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			}
 			if len(callIDs) > 0 {
 				if activeBatch != nil && !activeBatch.closed() {
-					return nil, provider.IncompatibleCapability(canonical.RequestToolCallBatch, canonical.Occurrence{}, "Chat Completions cannot start a canonical tool-call batch while a prior batch is unresolved")
+					return nil, canonical.InternalError("canonical tool-call batches overlap")
 				}
 				activeBatch = newChatActiveToolBatch(callIDs)
 			}
@@ -575,7 +574,7 @@ func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.Me
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, "Chat Completions accepts canonical image input only in user messages")
+				return nil, canonical.NotImplemented("Chat Completions cannot project image input outside user messages")
 			}
 			imagePart, _ := part.Image()
 			encoded, err := encodeChatImage(imagePart, canonical.RequestItemsMessageImageDetail, changeLog, exchangeID)
@@ -585,7 +584,7 @@ func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.Me
 			out = append(out, encoded)
 			continue
 		}
-		return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Chat Completions cannot represent this canonical content kind")
+		return nil, canonical.NotImplemented("Chat Completions cannot project this canonical content kind")
 	}
 	return out, nil
 }
@@ -623,7 +622,7 @@ func encodeChatToolCall(call canonical.ToolCallItem, names wire.ToolNames) (tool
 		}
 		return toolCallBody{ID: call.CallID().String(), Type: "custom", Custom: &toolCustomBody{Name: name, Input: text}}, nil
 	default:
-		return toolCallBody{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Chat Completions cannot represent this canonical tool-call kind")
+		return toolCallBody{}, canonical.NotImplemented("Chat Completions cannot project this canonical tool-call kind")
 	}
 }
 
@@ -649,7 +648,7 @@ func toolResultTextOnlyContent(parts []canonical.ToolResultPart, surface string)
 	for _, part := range parts {
 		value, ok := part.Text()
 		if !ok {
-			return "", provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, surface+" cannot represent this canonical content kind")
+			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
 		}
 		text.WriteString(value.Text())
 	}

@@ -19,12 +19,6 @@ type mantleMessagesCodec struct {
 }
 
 func (c mantleMessagesCodec) Encode(request provider.Request) (carrier.Document, []compat.Change, error) {
-	if request.Canonical.OutputFormatSpecified() {
-		format := request.Canonical.OutputFormat()
-		if !format.IsZero() && format.Kind != canonical.OutputFormatText {
-			return carrier.Document{}, nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Bedrock Mantle Messages cannot represent native structured output")
-		}
-	}
 	resolved, err := canonical.RewriteRequestImages(request.Canonical, func(_ canonical.RequestPartRef, _ canonical.ImagePlacement, image canonical.ImagePart) (canonical.ImagePart, error) {
 		urlImage, ok := image.Source().URL()
 		if !ok {

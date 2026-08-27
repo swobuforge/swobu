@@ -94,7 +94,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, provider.NewIncompatibleTarget("Responses target cannot represent the requested canonical delivery mode")
+		return ProviderRequestDocument{}, canonical.InternalError("Responses received an invalid delivery mode")
 	}
 
 	items := req.Items()
@@ -214,9 +214,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && loweredTools.TotalFragments() > 0 {
 		payload["parallel_tool_calls"] = true
 	}
-	if err := encodeResponsesGenerationControls(payload, req.Controls()); err != nil {
-		return ProviderRequestDocument{}, err
-	}
+	encodeResponsesGenerationControls(payload, req.Controls(), changeLog)
 	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -589,7 +587,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				}
 				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": wireCallID, "execution": execution, "arguments": json.RawMessage(object.String())})
 			default:
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Responses cannot represent this canonical tool-call kind")
+				return nil, canonical.NotImplemented("Responses cannot project this canonical tool-call kind")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := current.ToolResult()
@@ -650,7 +648,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 		case canonical.ItemKindToolDiscoveryResult:
 			result, _ := current.ToolDiscoveryResult()
 			if _, failed := result.Failure(); failed {
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.CallOccurrence(result.CallID()), "Responses cannot represent a typed failed discovery result")
+				return nil, canonical.NotImplemented("Responses cannot project a typed failed discovery result")
 			}
 			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), names, changeLog, exchangeID)
 			if err != nil {
@@ -711,7 +709,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			}
 			encoded = append(encoded, item)
 		default:
-			return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Responses cannot represent this canonical item kind")
+			return nil, canonical.NotImplemented("Responses cannot project this canonical item kind")
 		}
 	}
 	return encoded, nil
@@ -778,7 +776,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, "Responses accepts canonical image input only in user messages")
+				return nil, canonical.NotImplemented("Responses cannot project image input outside user messages")
 			}
 			image, _ := part.Image()
 			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
@@ -792,7 +790,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 			out = append(out, wireImage)
 			continue
 		}
-		return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Responses cannot represent this canonical content kind")
+		return nil, canonical.NotImplemented("Responses cannot project this canonical content kind")
 	}
 	return out, nil
 }
@@ -802,7 +800,7 @@ func responsesTextOnlyContent(parts []canonical.MessagePart, surface string) (st
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, surface+" cannot represent this canonical content kind")
+			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
 		}
 		builder.WriteString(text.Text())
 	}
@@ -839,7 +837,7 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLo
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, provider.IncompatibleCapability(canonical.RequestItemsToolResultContent, canonical.Occurrence{}, "Responses tool results cannot represent this canonical content kind")
+			return nil, canonical.NotImplemented("Responses cannot project this canonical tool-result content kind")
 		}
 		rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
 		if err != nil {

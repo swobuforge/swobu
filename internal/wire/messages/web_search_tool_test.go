@@ -40,10 +40,19 @@ func TestDecodeMessagesWebSearchDropsAllWirePreferences(t *testing.T) {
 	}
 }
 
-func TestEncodeMessagesWebSearch_GenericRejectsAndRuleLowers(t *testing.T) {
-	_, err := encodeMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "")
-	if err == nil {
-		t.Fatal("expected generic encodeMessagesTools to reject web search")
+func TestEncodeMessagesWebSearch_GenericOmitsAndRuleLowers(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
+	var changes []compat.Change
+	tools, err := encodeMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, &changes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("generic tools = %#v, want omission", tools)
+	}
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
@@ -55,7 +64,7 @@ func TestEncodeMessagesWebSearch_GenericRejectsAndRuleLowers(t *testing.T) {
 			AllowedCallers: []string{"direct"},
 		}}, true, nil, nil
 	}
-	tools, _, err := compileMessagesTools([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()}, nil, nil, nil, "", rule)
+	tools, _, err = compileMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "", rule)
 	if err != nil {
 		t.Fatal(err)
 	}

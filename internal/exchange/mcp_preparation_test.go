@@ -11,6 +11,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -189,7 +190,7 @@ func TestStructuralProjectionSuppressesApplicableNativePrefix(t *testing.T) {
 	}
 }
 
-func TestProviderPreparationFallsBackWhenNativeDiscoverySubtypeIsUnrepresentable(t *testing.T) {
+func TestProviderPreparationOmitsUnrepresentableNativeDiscoverySubtype(t *testing.T) {
 	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
 	if err != nil {
 		t.Fatal(err)
@@ -225,30 +226,11 @@ func TestProviderPreparationFallsBackWhenNativeDiscoverySubtypeIsUnrepresentable
 	}
 	wireRequest := call.document.RawBytes()
 	if bytes.Contains(wireRequest, []byte("tool_search")) || !bytes.Contains(wireRequest, []byte(`"name":"weather"`)) {
-		t.Fatalf("native fallback wire=%s", wireRequest)
+		t.Fatalf("native omission wire=%s", wireRequest)
 	}
-	if len(changes) == 0 {
-		t.Fatal("native fallback did not report projection evidence")
-	}
-}
-
-func TestNativeDiscoveryFallbackClassifierRejectsUnrelatedIncompatibility(t *testing.T) {
-	if isNativeDiscoveryRepresentationError(provider.NewIncompatibleTarget("unrelated codec incompatibility")) {
-		t.Fatal("generic target incompatibility selected discovery fallback")
-	}
-	if isNativeDiscoveryRepresentationError(provider.IncompatibleCapability(
-		canonical.RequestOutputFormat,
-		canonical.Occurrence{},
-		"unrelated output format",
-	)) {
-		t.Fatal("unrelated capability selected discovery fallback")
-	}
-	if !isNativeDiscoveryRepresentationError(provider.IncompatibleCapability(
-		canonical.RequestToolsKind,
-		canonical.ToolOccurrence(canonical.ToolDiscoveryKey()),
-		"native discovery subtype is unrepresentable",
-	)) {
-		t.Fatal("typed discovery declaration incompatibility did not select fallback")
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(discovery.Key()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want [%#v]", changes, want)
 	}
 }
 

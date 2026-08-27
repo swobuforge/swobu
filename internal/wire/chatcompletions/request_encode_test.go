@@ -1,8 +1,8 @@
 package chatcompletions
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -84,10 +84,17 @@ func TestEncodeCarrier_LowersOpenAIHostedSearchOptions(t *testing.T) {
 		{name: "streaming", delivery: delivery.StreamingDelivery(delivery.FramingSSE)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := EncodeCarrier(req, tc.delivery)
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(err, &incompatible) {
-				t.Fatalf("generic hosted search error = %T %v, want typed incompatibility", err, err)
+			var changes []compat.Change
+			document, err := EncodeCarrierWithChanges(req, nil, tc.delivery, &changes, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(document.RawBytes(), []byte("web_search")) {
+				t.Fatalf("generic hosted search leaked into request: %s", document.RawBytes())
+			}
+			want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
+			if len(changes) != 1 || changes[0] != want {
+				t.Fatalf("changes = %#v, want %#v", changes, want)
 			}
 		})
 	}

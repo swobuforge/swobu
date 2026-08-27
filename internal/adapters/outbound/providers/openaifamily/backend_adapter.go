@@ -101,7 +101,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	path, err := profile.ProviderRequestPath(target.ProviderID(), target.ProtocolKind)
 	if err != nil {
-		return nil, provider.AttemptNotDispatched(provider.NewIncompatibleTarget(err.Error()))
+		return nil, provider.AttemptNotDispatched(canonical.BadEndpoint(err.Error()))
 	}
 	wireReqBody := wireReqCarrier.RawBytes()
 	requestStreaming := requestsStreamingResponse(wireReqBody)
@@ -153,7 +153,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
 		classifiedErr := classifyBackendError(backendErr)
 		if canonical.IsBackendErrorClass(classifiedErr, canonical.BackendErrorClassToolChoiceUnsupported) {
-			return nil, provider.AttemptRejectedBeforeExecution(provider.IncompatibleTarget(classifiedErr))
+			return nil, provider.AttemptRejectedBeforeExecution(provider.Rejected(classifiedErr))
 		}
 		if canonical.IsBackendErrorClass(classifiedErr, canonical.BackendErrorClassContinuationReferenceInvalid) {
 			return nil, provider.AttemptRejectedBeforeExecution(provider.Rejected(classifiedErr))

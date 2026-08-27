@@ -34,7 +34,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	var err error
 	if c.Protocol == protocolkind.Responses && c.ResponsesDialect.RequireStreamingSSE {
 		if req.Delivery != delivery.StreamingDelivery(delivery.FramingSSE) {
-			return carrier.Document{}, nil, provider.NewIncompatibleTarget("Responses target requires SSE streaming delivery")
+			return carrier.Document{}, nil, canonical.BadEndpoint("Responses target requires SSE streaming delivery")
 		}
 	}
 	if c.Protocol != protocolkind.ChatCompletions {
@@ -94,7 +94,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 			}
 		}
 	default:
-		return carrier.Document{}, changes, provider.NewIncompatibleTarget("selected provider protocol has no request codec")
+		return carrier.Document{}, changes, canonical.BadEndpoint("selected provider protocol has no request codec")
 	}
 	if err != nil {
 		return carrier.Document{}, changes, err
@@ -197,7 +197,7 @@ func ValidateEncodeRequest(req provider.Request) error {
 		return canonical.InternalError("provider delivery is invalid")
 	}
 	if req.Delivery.IsStreaming() && req.Delivery.Framing != delivery.FramingSSE {
-		return provider.NewIncompatibleTarget("provider codec supports only SSE streaming delivery")
+		return canonical.BadEndpoint("provider codec supports only SSE streaming delivery")
 	}
 	return nil
 }

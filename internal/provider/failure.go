@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -28,9 +27,11 @@ const (
 	ExecutionMayHaveOccurred
 )
 
-// AttemptFailure is the validated terminal fact for one issued provider call.
-// Bound transports conservatively wrap an untyped error as
-// ExecutionMayHaveOccurred; only the exact adapter may claim an earlier fact.
+// AttemptFailure is the validated terminal fact for one provider attempt.
+// Incompatible targets are rejected during preparation and therefore require
+// ExecutionNotDispatched. Bound transports conservatively wrap an untyped
+// error as ExecutionMayHaveOccurred; only the exact adapter may claim an
+// earlier fact.
 type AttemptFailure struct {
 	execution ExecutionPossibility
 	cause     error
@@ -56,7 +57,13 @@ func newAttemptFailure(execution ExecutionPossibility, cause error) AttemptFailu
 	if prior, ok := AsAttemptFailure(cause); ok {
 		cause = prior.Cause()
 	}
-	failure := AttemptFailure{execution: execution, cause: normalizeFailureCause(cause)}
+	cause = normalizeFailureCause(cause)
+	if isIncompatibleTarget(cause) && execution != ExecutionNotDispatched {
+		// Later execution states would let a representation failure authorize
+		// replay after provider I/O, risking duplicate execution.
+		panic("incompatible target requires ExecutionNotDispatched")
+	}
+	failure := AttemptFailure{execution: execution, cause: cause}
 	if !failure.valid() {
 		panic("provider attempt failure has invalid execution possibility")
 	}
@@ -84,12 +91,11 @@ func AsAttemptFailure(err error) (AttemptFailure, bool) {
 	return failure, true
 }
 
-// IncompatibleTargetError means one exact target cannot represent a valid
-// canonical request. Exchange may try another candidate with the unchanged
-// request; this type is never a public client error.
+// IncompatibleTargetError means dispatch would violate an explicit hard caller
+// promise. Exchange may try another candidate with the unchanged request only
+// before dispatch; this type is never a public client error.
 type IncompatibleTargetError struct {
 	Reason string
-	cause  error
 }
 
 func (e IncompatibleTargetError) Error() string {
@@ -100,32 +106,15 @@ func (e IncompatibleTargetError) Error() string {
 }
 
 func (IncompatibleTargetError) providerFailure() {}
-func (e IncompatibleTargetError) Unwrap() error  { return e.cause }
 
-// IncompatibleTarget retains a typed cause while marking an exact-target
-// representation failure.
-func IncompatibleTarget(err error) error {
-	if err == nil {
-		return nil
-	}
-	return IncompatibleTargetError{Reason: err.Error(), cause: err}
-}
-
-// NewIncompatibleTarget marks an exact-target representation failure
-// without constructing or wrapping a public Swobu error.
+// NewIncompatibleTarget marks a pre-dispatch hard caller-promise residual.
 func NewIncompatibleTarget(message string) error {
 	return IncompatibleTargetError{Reason: message}
 }
 
-// IncompatibleCapability marks one concrete canonical occurrence that the
-// selected target cannot lower. It preserves bounded human detail without
-// creating a provider support registry or allowing the issue to choose routing.
-func IncompatibleCapability(capability canonical.CapabilityPath, occurrence canonical.Occurrence, detail string) error {
-	unsupported := compat.NewUnsupported(compat.NewIssue(capability, occurrence))
-	if detail == "" {
-		return IncompatibleTarget(unsupported)
-	}
-	return IncompatibleTarget(fmt.Errorf("%s: %w", detail, unsupported))
+func isIncompatibleTarget(err error) bool {
+	var incompatible IncompatibleTargetError
+	return errors.As(err, &incompatible)
 }
 
 // UnavailableError means provider I/O could not produce a usable backend

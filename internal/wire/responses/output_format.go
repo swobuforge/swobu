@@ -6,7 +6,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -74,6 +73,6 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 		}
 		return &responsesTextDTO{Format: dto}, nil
 	default:
-		return nil, provider.IncompatibleCapability(canonical.RequestOutputFormat, canonical.Occurrence{}, "Responses cannot represent the canonical output format")
+		return nil, canonical.InternalError("canonical output format kind is invalid")
 	}
 }

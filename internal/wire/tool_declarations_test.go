@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -72,8 +71,8 @@ func TestPrepareFlatToolSetRejectsResidualMCP(t *testing.T) {
 	_, err := PrepareFlatToolSet([]canonical.ToolDeclaration{mcpDeclaration, function}, func(tool canonical.ToolDeclaration) (string, error) {
 		return tool.Key().Name(), nil
 	})
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want target incompatibility", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal {
+		t.Fatalf("error = %T %v, want INTERNAL_ERROR", err, err)
 	}
 }

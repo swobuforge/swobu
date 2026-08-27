@@ -7,12 +7,12 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -80,9 +80,9 @@ func TestChatRequestRejectsUnsettledWebSearchHistory(t *testing.T) {
 	})
 
 	_, err := EncodeCarrier(request, delivery.BufferedDelivery())
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want typed incompatibility", err, err)
+	var swobuErr canonical.Error
+	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
 	}
 }
 
@@ -190,7 +190,7 @@ func TestChatRequestProjectionPreservesSiblingOrder(t *testing.T) {
 	}
 }
 
-func TestCurrentWebSearchDeclarationRemainsIncompatibleForStandardChat(t *testing.T) {
+func TestCurrentWebSearchDeclarationIsOmittedForStandardChat(t *testing.T) {
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {
 		t.Fatal(err)
@@ -203,10 +203,17 @@ func TestCurrentWebSearchDeclarationRemainsIncompatibleForStandardChat(t *testin
 		},
 	})
 
-	_, err = EncodeCarrier(request, delivery.BufferedDelivery())
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T %v, want typed incompatibility", err, err)
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, nil, delivery.BufferedDelivery(), &changes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(document.RawBytes()), "web_search") {
+		t.Fatalf("web search leaked into request: %s", document.RawBytes())
+	}
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 }
 

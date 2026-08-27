@@ -7,7 +7,6 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	openaiwire "github.com/swobuforge/swobu/internal/wire/openai"
 )
 
@@ -203,7 +202,7 @@ func encodeChatToolResultContent(result canonical.ToolResultItem, itemIndex int)
 		}
 		image, ok := part.Image()
 		if !ok {
-			return "", nil, provider.IncompatibleCapability(canonical.RequestItemsToolResultContent, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(itemIndex), Part: uint32(partIndex)}), "Chat Completions tool results cannot represent this canonical content kind")
+			return "", nil, canonical.NotImplemented("Chat Completions cannot project this canonical tool-result content kind")
 		}
 		occurrence := chatToolResultImageOccurrence{
 			image: image, callID: result.CallID(), item: itemIndex, part: partIndex,
@@ -264,15 +263,11 @@ func encodeChatImage(
 }
 
 func unsupportedToolResultImage(occurrence chatToolResultImageOccurrence, reason string) error {
-	return provider.IncompatibleCapability(
-		canonical.RequestItemsToolResultImage,
-		canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: uint32(occurrence.item), Part: uint32(occurrence.part)}),
-		fmt.Sprintf(
-			"Chat Completions cannot preserve canonical tool-result image at request item %d part %d for call %q: %s",
-			occurrence.item,
-			occurrence.part,
-			occurrence.callID.String(),
-			reason,
-		),
-	)
+	return canonical.NotImplemented(fmt.Sprintf(
+		"Chat Completions cannot preserve canonical tool-result image at request item %d part %d for call %q: %s",
+		occurrence.item,
+		occurrence.part,
+		occurrence.callID.String(),
+		reason,
+	))
 }

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // FlatToolSet carries the flat declaration surface and the number of
@@ -47,7 +46,7 @@ func PrepareFlatToolSet(
 			// Exchange owns MCP source resolution and execution. Reaching a
 			// provider codec with a residual source would otherwise create a
 			// second execution owner or silently erase an available tool surface.
-			return provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()), "provider lowering received an MCP source before Exchange projection")
+			return canonical.InternalError("provider lowering received an MCP source before Exchange projection")
 		}
 		namespace, ok := declaration.Namespace()
 		if !ok {
@@ -75,7 +74,7 @@ func PrepareFlatToolSet(
 		}
 		wireIdentity = strings.TrimSpace(wireIdentity)
 		if _, duplicate := seen[wireIdentity]; duplicate {
-			return FlatToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsName, canonical.Occurrence{}, "flat provider tool declarations require unique target identities")
+			return FlatToolSet{}, canonical.InternalError("attempt-local tool name allocation produced duplicate flat target identities")
 		}
 		seen[wireIdentity] = struct{}{}
 	}

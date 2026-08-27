@@ -3,7 +3,6 @@ package messages
 import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // projectMessagesWebSearchLifecycles removes only completed call/result pairs
@@ -32,9 +31,7 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 			if feature == canonical.ResponseItemsKind {
 				return nil, nil, canonical.NewBackendError("messages", 0, "backend returned an invalid web-search lifecycle: "+err.Error(), "")
 			}
-			return nil, nil, provider.IncompatibleTarget(compat.NewUnsupported(
-				compat.NewIssue(feature, canonical.Occurrence{}),
-			))
+			return nil, nil, canonical.InternalError("canonical web-search lifecycle is malformed: " + err.Error())
 		}
 		if completed != nil {
 			effects = append(effects, *completed)
@@ -51,9 +48,7 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 			continue
 		}
 		if effect.ResultIndex < 0 {
-			return nil, nil, provider.IncompatibleTarget(compat.NewUnsupported(
-				compat.NewIssue(feature, canonical.CallOccurrence(effect.CallID)),
-			))
+			return nil, nil, canonical.NotImplemented("Messages cannot project unresolved canonical web-search history")
 		}
 		drop[effect.CallIndex] = struct{}{}
 		drop[effect.ResultIndex] = struct{}{}

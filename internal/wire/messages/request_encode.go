@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
@@ -93,7 +92,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
-		return ProviderRequestDocument{}, provider.NewIncompatibleTarget("Messages target cannot represent the requested canonical delivery mode")
+		return ProviderRequestDocument{}, canonical.InternalError("Messages received an invalid delivery mode")
 	}
 	contextRejected, contextErr := projectMessagesResponsesReasoningContext(req.Reasoning(), changeLog, exchangeID)
 	if contextErr != nil && !contextRejected {
@@ -161,7 +160,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err := encodeMessagesReasoning(payload, req.Reasoning(), options.OmitAdaptiveThinking, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat())
+	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat(), changeLog)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -290,7 +289,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 	for i := 0; i < len(items); {
 		owner := items[i].Owner()
 		if owner != canonical.TurnOwnerUser && owner != canonical.TurnOwnerAssistant {
-			return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent interleaved canonical system or developer messages")
+			return nil, canonical.NotImplemented("Messages cannot project interleaved canonical system or developer messages")
 		}
 		wire := messageBody{Role: string(owner)}
 		for i < len(items) && items[i].Owner() == owner {
@@ -335,11 +334,11 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 				continue
 			}
 			if owner != canonical.TurnOwnerUser {
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, "Messages accepts canonical image input only in user messages")
+				return nil, canonical.NotImplemented("Messages cannot project image input outside user messages")
 			}
 			image, ok := part.Image()
 			if !ok {
-				return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent this canonical content kind")
+				return nil, canonical.NotImplemented("Messages cannot project this canonical content kind")
 			}
 			block, err := encodeMessagesImage(image, changeLog, exchangeID, canonical.RequestItemsMessageImageDetail)
 			if err != nil {
@@ -408,7 +407,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		}
 		return append(blocks, contentID{opaque: opaque}), nil
 	}
-	return nil, provider.IncompatibleCapability(canonical.RequestItemsKind, canonical.Occurrence{}, "Messages cannot represent this canonical item kind")
+	return nil, canonical.NotImplemented("Messages cannot project this canonical item kind")
 }
 
 func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames) (contentID, error) {
@@ -420,7 +419,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.Tool
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		search, ok := call.Input().WebSearch()
 		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-			return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallInput, canonical.CallOccurrence(call.CallID()), "Messages requires one search query per canonical server-tool call")
+			return contentID{}, canonical.NotImplemented("Messages cannot project multi-query canonical server-tool calls")
 		}
 		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 		if err != nil {
@@ -435,7 +434,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.Tool
 		}
 		object, ok := call.Input().Object()
 		if !ok {
-			return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallInput, canonical.CallOccurrence(call.CallID()), "Messages discovery calls require object input")
+			return contentID{}, canonical.InternalError("canonical discovery call input is not an object")
 		}
 		if executor == canonical.DiscoveryExecutorClient {
 			name, err := wire.EncodeToolName(names, tool)
@@ -455,7 +454,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.Tool
 		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
 	}
 	if tool.Kind() != canonical.ToolKindFunction {
-		return contentID{}, provider.IncompatibleCapability(canonical.RequestItemsToolCallTool, canonical.CallOccurrence(call.CallID()), "Messages cannot represent this canonical tool-call kind")
+		return contentID{}, canonical.NotImplemented("Messages cannot project this canonical tool-call kind")
 	}
 	name, err := wire.EncodeToolName(names, tool)
 	if err != nil {
@@ -473,7 +472,7 @@ func messagesTextOnlyContent(parts []canonical.MessagePart, surface string) (str
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", provider.IncompatibleCapability(canonical.RequestItemsMessageImage, canonical.Occurrence{}, surface+" cannot represent this canonical content kind")
+			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
 		}
 		builder.WriteString(text.Text())
 	}
@@ -494,7 +493,7 @@ func encodeMessagesToolResultContent(parts []canonical.ToolResultPart, changeLog
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, provider.IncompatibleCapability(canonical.RequestItemsToolResultContent, canonical.Occurrence{}, "Messages tool results cannot represent this canonical content kind")
+			return nil, canonical.NotImplemented("Messages cannot project this canonical tool-result content kind")
 		}
 		block, err := encodeMessagesImage(image, changeLog, exchangeID, canonical.RequestItemsToolResultImageDetail)
 		if err != nil {
@@ -609,9 +608,13 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 				})
 				continue
 			}
-			typeName, name, err := messagesProviderDiscoveryTool(discovery)
-			if err != nil {
-				return nil, wire.LoweredToolSet{}, err
+			typeName, name, representable := messagesProviderDiscoveryTool(discovery)
+			if !representable {
+				if changeLog != nil {
+					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+				}
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+				continue
 			}
 			wireTool := ProviderRequestTool{Type: typeName, Name: name}
 			out = append(out, wireTool)
@@ -623,9 +626,16 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 			continue
 		}
 		if tool.Kind() == canonical.ToolKindWebSearch {
-			return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages target does not support canonical hosted web search")
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+			}
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+			continue
 		}
-		return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()), "Messages cannot represent this canonical tool declaration")
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+		}
+		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
 	}
 	if len(out) > 0 && len(deferred) > 0 {
 		allDeferred := true
@@ -636,7 +646,10 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 			}
 		}
 		if allDeferred {
-			return nil, wire.LoweredToolSet{}, provider.IncompatibleCapability(canonical.RequestToolsVisibility, canonical.Occurrence{}, "Messages requires at least one non-deferred tool")
+			out[0].DeferLoading = false
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestToolsVisibility, canonical.RequestTools, canonical.Occurrence{}))
+			}
 		}
 	}
 	return out, lowered, nil
@@ -673,15 +686,15 @@ func messagesDiscoveryDeclaration(tools []canonical.ToolDeclaration) (canonical.
 	return canonical.ToolDiscoveryTool{}, canonical.InternalError("messages discovery declaration is missing")
 }
 
-func messagesProviderDiscoveryTool(discovery canonical.ToolDiscoveryTool) (string, string, error) {
-	name, err := messagesProviderDiscoveryName(discovery)
-	if err != nil {
-		return "", "", err
+func messagesProviderDiscoveryTool(discovery canonical.ToolDiscoveryTool) (string, string, bool) {
+	switch discovery.QueryKind() {
+	case canonical.ToolDiscoveryQueryRegex:
+		return toolSearchRegexType, toolSearchRegexName, true
+	case canonical.ToolDiscoveryQueryNaturalLanguage:
+		return toolSearchNaturalLanguageType, toolSearchNaturalLanguageName, true
+	default:
+		return "", "", false
 	}
-	if discovery.QueryKind() == canonical.ToolDiscoveryQueryRegex {
-		return toolSearchRegexType, name, nil
-	}
-	return toolSearchNaturalLanguageType, name, nil
 }
 
 func messagesProviderDiscoveryName(discovery canonical.ToolDiscoveryTool) (string, error) {
@@ -691,7 +704,7 @@ func messagesProviderDiscoveryName(discovery canonical.ToolDiscoveryTool) (strin
 	case canonical.ToolDiscoveryQueryNaturalLanguage:
 		return toolSearchNaturalLanguageName, nil
 	default:
-		return "", provider.IncompatibleCapability(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.ToolDiscoveryKey()), "Messages provider discovery requires regex or natural-language query semantics")
+		return "", canonical.InternalError("Messages provider discovery lowering admitted an unsupported query kind")
 	}
 }
 

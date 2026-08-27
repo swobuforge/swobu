@@ -42,6 +42,41 @@ type bedrockStructuredFallbackRuntime struct {
 	transport testProviderTransport
 }
 
+type behavioralProofRuntime struct {
+	testRuntimeResolver
+	transport   testProviderTransport
+	clientCodec ClientCodec
+	encode      func(provider.TargetSnapshot, provider.Request) (carrier.Document, []compat.Change, error)
+}
+
+func (r behavioralProofRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	codec := behavioralProofCodec{target: target, encode: r.encode}
+	return provider.Backend{Target: target, Codec: codec, Transport: bindTestProviderTransport(target, r.transport)}, nil
+}
+
+func (r behavioralProofRuntime) ClientCodec(canonical.ClientFamily) ClientCodec {
+	if r.clientCodec != nil {
+		return r.clientCodec
+	}
+	return testClientCodec{}
+}
+
+type behavioralProofCodec struct {
+	target provider.TargetSnapshot
+	encode func(provider.TargetSnapshot, provider.Request) (carrier.Document, []compat.Change, error)
+}
+
+func (c behavioralProofCodec) Encode(request provider.Request) (carrier.Document, []compat.Change, error) {
+	if c.encode != nil {
+		return c.encode(c.target, request)
+	}
+	return (testBackendCodec{}).Encode(request)
+}
+
+func (behavioralProofCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
+	return (testBackendCodec{}).Decode(ctx, request, ingress)
+}
+
 func (r bedrockStructuredFallbackRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	if target.ProviderSpec == "bedrock" {
 		backend, err := bedrock.NewExecutor(nil).ResolveBackend(target)
@@ -1017,7 +1052,7 @@ func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *tes
 	active := activeProviderAttempt(t, started.nextState)
 	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
 		attemptID: active.id,
-		failure:   rejectedBeforeExecution(provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice")),
+		failure:   provider.AttemptNotDispatched(provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice")),
 	}, reducerRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -1081,7 +1116,7 @@ func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
 	}
 }
 
-func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
+func TestBedrockMantleStrictStructuredOutputExecutesWithoutFallback(t *testing.T) {
 	targetID, _ := routing.ParseTargetID("mantle-a")
 	model, _ := routing.ParseUpstreamModel("model-a")
 	region, _ := routing.ParseBedrockRegion("us-east-1")
@@ -1127,18 +1162,20 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 		OutputFormat: canonical.Specify(format),
 	})
 	var transported []string
+	var providerDocument string
 	runner := withRuntime(nil)
 	runner.Runtime = bedrockStructuredFallbackRuntime{transport: func(
 		_ context.Context,
 		target provider.TargetSnapshot,
-		_ carrier.Document,
+		document carrier.Document,
 	) (provider.Ingress, error) {
 		transported = append(transported, target.TargetID)
+		providerDocument = string(document.RawBytes())
 		return provider.DocumentIngress{Document: carrier.NewDocument(
-			protocolkind.Responses,
+			protocolkind.Messages,
 			"application/json",
 			nil,
-			[]byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}`),
+			[]byte(`{"id":"msg_1","model":"m","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}`),
 			carrier.Meta{},
 		)}, nil
 	}}
@@ -1158,12 +1195,15 @@ func TestBedrockMantleStructuredOutputFallsBackBeforeTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(transported, []string{"responses-b"}) {
-		t.Fatalf("transported targets = %v, want only compatible fallback", transported)
+	if !reflect.DeepEqual(transported, []string{targetID.String()}) {
+		t.Fatalf("transported targets = %v, want only Mantle target", transported)
+	}
+	if !strings.Contains(providerDocument, `"output_config"`) || !strings.Contains(providerDocument, `"json_schema"`) {
+		t.Fatalf("Mantle request lost strict structured output: %s", providerDocument)
 	}
 }
 
-func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
+func TestResponsesStopSequenceIsOmittedWithoutRouteFallback(t *testing.T) {
 	slug, _ := routing.ParseWorkspaceSlug("dev")
 	routeName, _ := routing.ParseRouteName("a")
 	responsesTarget := requestpathTargetWithProtocol(t, "responses-a", "responses")
@@ -1197,10 +1237,10 @@ func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
 		transported = append(transported, target.TargetID)
 		providerDocument = string(document.RawBytes())
 		return provider.DocumentIngress{Document: carrier.NewDocument(
-			protocolkind.ChatCompletions,
+			protocolkind.Responses,
 			"application/json",
 			nil,
-			[]byte(`{"id":"chat_1","model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`),
+			[]byte(`{"id":"resp_1","model":"m","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}`),
 			carrier.Meta{},
 		)}, nil
 	}}
@@ -1220,11 +1260,11 @@ func TestResponsesStopSequenceFallsBackToChatBeforeTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(transported, []string{"chat-b"}) {
-		t.Fatalf("transported targets = %v, want only Chat fallback", transported)
+	if !reflect.DeepEqual(transported, []string{"responses-a"}) {
+		t.Fatalf("transported targets = %v, want only Responses target", transported)
 	}
-	if !strings.Contains(providerDocument, `"stop":"END"`) {
-		t.Fatalf("Chat fallback lost canonical stop sequence: %s", providerDocument)
+	if strings.Contains(providerDocument, `"stop"`) {
+		t.Fatalf("Responses request retained unsupported stop sequence: %s", providerDocument)
 	}
 }
 
@@ -1394,5 +1434,93 @@ func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testin
 	}
 	if !reflect.DeepEqual(explicitFirst.route.targets, explicitSecond.route.targets) || explicitFirst.cacheLocality.Key() != "client-key" {
 		t.Fatal("lineage overrode explicit client cache locality")
+	}
+}
+
+func TestExchangeDoesNotExecuteFallbackAfterResponseProjectionFailure(t *testing.T) {
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("a")
+	firstTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "projection-a")})
+	secondTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "projection-b")})
+	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var providerCalls []string
+	runner := withRuntime(nil)
+	runner.Runtime = behavioralProofRuntime{
+		clientCodec: documentFailureClientCodec{},
+		transport: func(ctx context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+			providerCalls = append(providerCalls, target.TargetID)
+			return bufferedProviderTransport(nil)(ctx, target, document)
+		},
+	}
+	response, err := runExchange(context.Background(), runner, "ex_response_projection_terminal", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(ClientTransportForTest(response.Response).Body); err == nil {
+		t.Fatal("expected response projection failure while consuming buffered output")
+	}
+	if !reflect.DeepEqual(providerCalls, []string{"projection-a"}) {
+		t.Fatalf("provider calls = %#v, want only candidate A", providerCalls)
+	}
+}
+
+func TestExchangeFallbackUsesUnchangedFrozenCanonicalRequest(t *testing.T) {
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	routeName, _ := routing.ParseRouteName("a")
+	first := requestpathTarget(t, "frozen-a")
+	second := requestpathTarget(t, "frozen-b")
+	firstTier, _ := routing.NewTier([]routing.Target{first})
+	secondTier, _ := routing.NewTier([]routing.Target{second})
+	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("client-model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonicaltest.FunctionTool(t, "lookup", canonicaltest.Schema(t, `{"type":"object"}`))),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "preserve me"),
+		},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
+	})
+	captured := make(map[string]canonical.CanonicalRequest)
+	providerCalls := 0
+	runner := withRuntime(nil)
+	runner.Runtime = behavioralProofRuntime{
+		transport: func(ctx context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
+			providerCalls++
+			return bufferedProviderTransport(nil)(ctx, target, document)
+		},
+		encode: func(target provider.TargetSnapshot, providerRequest provider.Request) (carrier.Document, []compat.Change, error) {
+			captured[target.TargetID] = providerRequest.Canonical.Clone()
+			if target.TargetID == "frozen-a" {
+				return carrier.Document{}, nil, provider.NewIncompatibleTarget("candidate A cannot preserve required tool policy")
+			}
+			return (testBackendCodec{}).Encode(providerRequest)
+		},
+	}
+	_, err = runExchange(context.Background(), runner, "ex_frozen_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls = %d, want only candidate B", providerCalls)
+	}
+	firstRequest, firstSeen := captured["frozen-a"]
+	secondRequest, secondSeen := captured["frozen-b"]
+	if !firstSeen || !secondSeen {
+		t.Fatalf("captured requests = %#v, want both preparation attempts", captured)
+	}
+	firstRequest = bindRequestToTarget(firstRequest, "same-upstream-model")
+	secondRequest = bindRequestToTarget(secondRequest, "same-upstream-model")
+	if !reflect.DeepEqual(firstRequest, secondRequest) {
+		t.Fatalf("fallback request changed canonical semantics:\nA = %#v\nB = %#v", firstRequest, secondRequest)
 	}
 }

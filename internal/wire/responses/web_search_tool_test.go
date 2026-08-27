@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -324,14 +325,22 @@ func TestDecodeStreamingCompletedWebSearchLifecyclePassesCanonicalValidation(t *
 	}
 }
 
-func TestEncodeRequestLowersStableWebSearchTool_GenericRejectsAndRuleLowers(t *testing.T) {
+func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *testing.T) {
 	declaration := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	declarations, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations}})
-	_, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
-	if err == nil {
-		t.Fatal("expected generic EncodeCarrierWithChanges to reject web search")
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), &changes, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("web_search")) {
+		t.Fatalf("generic web search leaked into request: %s", document.RawBytes())
+	}
+	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key()))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 
 	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
