@@ -3,7 +3,6 @@ package wire
 import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ToolDiscoveryProjection is one attempt-local portable request projection.
@@ -109,7 +108,7 @@ func ProjectToolDiscoveryPolyfill(request canonical.CanonicalRequest) (ToolDisco
 		return ToolDiscoveryProjection{}, err
 	}
 	if err := policy.ValidateForTools(portable); err != nil {
-		return ToolDiscoveryProjection{}, provider.NewIncompatibleTarget("portable tool-discovery projection cannot preserve the canonical tool-selection constraint")
+		return ToolDiscoveryProjection{}, canonical.NotImplemented("portable tool-discovery projection cannot preserve the canonical tool-selection constraint")
 	}
 
 	prelude, history, err := canonical.SplitRequestPrelude(items)

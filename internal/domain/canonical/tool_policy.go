@@ -85,19 +85,6 @@ func (p ToolPolicy) SpecificID() (ToolKey, bool) {
 	return p.Specific.Clone(), true
 }
 
-// Permits reports whether this policy permits one exact declared tool to run.
-func (p ToolPolicy) Permits(key ToolKey) bool {
-	switch p.Mode {
-	case ToolPolicyAuto, ToolPolicyRequired:
-		return true
-	case ToolPolicySpecific:
-		specific, ok := p.SpecificID()
-		return ok && specific == key
-	default:
-		return false
-	}
-}
-
 func (p ToolPolicy) Validate() error {
 	switch p.Mode {
 	case ToolPolicyNone, ToolPolicyAuto, ToolPolicyRequired:

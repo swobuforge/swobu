@@ -114,34 +114,25 @@ func TestAllBackedOffTargetsReturnNoAvailableTarget(t *testing.T) {
 	}
 }
 
-func TestSuppressedAndPreparationIncompatibleTargetsReturnNoAvailableTarget(t *testing.T) {
+func TestSuppressedCandidateDoesNotSkipEligibleProjectedTarget(t *testing.T) {
 	s := reducerTestState(t)
 	prepared := mustBeginSession(t, s.input.request)
 	s.prepared = &prepared
 	a := requestpathTarget(t, "a")
-	b := requestpathTarget(t, "incompatible-a")
+	b := requestpathTarget(t, "b")
 	s.route = routePlan{targets: []routing.Target{a, b}}
 	s.targetBackoff = targetBackoffSnapshot{
 		{targetID: "a", targetVersion: uint64(a.Version())}: {},
 	}
-	runner := withRuntime(func(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error) {
-		panic("preparation-incompatible candidate must never reach provider I/O")
-	})
-	runner.Runtime = candidateSelectiveRuntime{transport: func(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error) {
-		panic("preparation-incompatible candidate must never reach provider I/O")
-	}}
+	runner := withRuntime(bufferedProviderTransport(nil))
 
 	outcome, err := advanceProviderExecution(context.Background(), s, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, ok := outcome.nextState.phase.(failedPhase)
-	if !ok {
-		t.Fatalf("phase = %T, want failedPhase", outcome.nextState.phase)
-	}
-	var canonicalErr canonical.Error
-	if !errors.As(failed.problem, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeNoAvailableTarget {
-		t.Fatalf("failure = %#v, want NO_AVAILABLE_TARGET", failed.problem)
+	attempt := activeProviderAttempt(t, outcome.nextState)
+	if attempt.candidateIndex != 1 || attempt.target.TargetID != "b" {
+		t.Fatalf("attempt = %#v, want eligible target b", attempt)
 	}
 }
 

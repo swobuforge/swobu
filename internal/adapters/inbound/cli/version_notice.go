@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,9 +15,10 @@ import (
 )
 
 const installCommand = "curl -fsSL https://swobu.com/install.sh | sh"
-const latestVersionURL = "https://raw.githubusercontent.com/swobuforge/swobu/refs/heads/master/VERSION"
+const latestVersionURL = "https://api.github.com/repos/swobuforge/swobu/releases/latest"
 
 var fetchLatestVersion = defaultFetchLatestVersion
+var latestVersionHTTPClient = &http.Client{Timeout: 500 * time.Millisecond}
 
 type versionNoticeDecision struct {
 	show bool
@@ -72,8 +74,7 @@ func nonEmptyOr(value string, fallback string) string {
 }
 
 func defaultFetchLatestVersion() (string, error) {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(latestVersionURL)
+	resp, err := latestVersionHTTPClient.Get(latestVersionURL)
 	if err != nil {
 		return "", err
 	}
@@ -81,11 +82,13 @@ func defaultFetchLatestVersion() (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("version fetch status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	var latest struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(body)), nil // swobu:io-string source=boundary
+	return strings.TrimSpace(latest.TagName), nil // swobu:io-string source=boundary
 }
 
 func sanitizeLatestVersion(raw string) string {

@@ -108,6 +108,37 @@ func TestEvaluateVersionNoticePolicy_NoNoticeOnFetchError(t *testing.T) {
 	}
 }
 
+func TestDefaultFetchLatestVersionReadsLatestReleaseTag(t *testing.T) {
+	originalClient := latestVersionHTTPClient
+	latestVersionHTTPClient = &http.Client{
+		Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.String() != latestVersionURL {
+				t.Fatalf("request URL = %q, want %q", request.URL.String(), latestVersionURL)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v9.8.7"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { latestVersionHTTPClient = originalClient })
+
+	version, err := defaultFetchLatestVersion()
+	if err != nil {
+		t.Fatalf("defaultFetchLatestVersion() error = %v", err)
+	}
+	if version != "v9.8.7" {
+		t.Fatalf("version = %q, want v9.8.7", version)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
 func TestEvaluateVersionNoticePolicy_TrimsLatestVersionPayload(t *testing.T) {
 	originalFetch := fetchLatestVersion
 	fetchLatestVersion = func() (string, error) { return "\n  v999.0.0  \nextra-line\n", nil }

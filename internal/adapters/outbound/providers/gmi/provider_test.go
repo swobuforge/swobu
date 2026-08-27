@@ -3,7 +3,6 @@ package gmi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,11 +31,10 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+		doc, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
 		if kind == protocolkind.ChatCompletions || kind == protocolkind.Messages {
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(err, &incompatible) {
-				t.Fatalf("GMI %s error = %T, want IncompatibleTargetError", kind, err)
+			if err != nil || len(doc.RawBytes()) == 0 || len(changes) != 1 {
+				t.Fatalf("GMI %s document=%s changes=%#v err=%v", kind, doc.RawBytes(), changes, err)
 			}
 			continue
 		}

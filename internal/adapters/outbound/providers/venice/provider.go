@@ -133,12 +133,6 @@ func (s *modelSupportStore) ResolveTargetSupport(target provider.TargetSnapshot)
 	return s.byModel[target.Model]
 }
 
-func (s *modelSupportStore) resolveWebSearch(model string) provider.Support {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.searchModel[model]
-}
-
 type backendResolver struct {
 	standard provider.BackendResolver
 	support  *modelSupportStore
@@ -158,22 +152,18 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	}
 	standard.ChatDialect.LowerTool = protocolcodec.ChatOutOfBandHostedSearch()
 	standard.ChatDialect.LowerToolPolicy = protocolcodec.ChatOutOfBandHostedSearchPolicy()
-	backend.Codec = codec{standard: standard, webSearchSupport: r.support.resolveWebSearch(target.Model)}
+	backend.Codec = codec{standard: standard}
 	return backend, backend.Validate()
 }
 
 type codec struct {
-	standard         protocolcodec.Codec
-	webSearchSupport provider.Support
+	standard protocolcodec.Codec
 }
 
 func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
 	searchMode, searchEnabled, err := webSearchMode(req.Canonical)
 	if err != nil {
 		return carrier.Document{}, nil, err
-	}
-	if searchEnabled && searchMode != "auto" && c.webSearchSupport == provider.SupportUnsupported {
-		return carrier.Document{}, nil, provider.NewIncompatibleTarget("Venice model does not support native web search")
 	}
 	projected, projectionChanges, err := projectVeniceHardToolSurface(req.Canonical)
 	if err != nil {
@@ -184,10 +174,6 @@ func (c codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	changes = append(projectionChanges, changes...)
 	if err != nil || !searchEnabled {
 		return document, changes, err
-	}
-	if c.webSearchSupport == provider.SupportUnsupported {
-		changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey())))
-		return document, changes, nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {

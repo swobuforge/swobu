@@ -16,11 +16,13 @@
 // encoding. URL-native codecs preserve locators without invoking it; byte-only
 // codecs resolve through the existing bounded fetch policy, inspection, and
 // cache. Fetched bytes never enter canonical history or checkpoints. Codecs
-// solely own exact target-grammar projection. Successful projection returns non-exact semantic changes as
-// values; target-local incompatibility remains a typed error for exchange.
-// TargetSupport is immutable knowledge for one exact attempt. It answers only
-// whether the target can honor canonical meaning; codecs continue to own how
-// meaning is represented, and exchange continues to own recovery policy.
+// solely own exact target-grammar projection. Successful projection returns
+// non-exact semantic changes as values. Local projection failures retain their
+// owning canonical error and never authorize another provider attempt.
+// TargetSupport is descriptive discovery and diagnostic evidence for one exact
+// attempt. It must not gate target projection, transport, or candidate
+// selection. Codecs continue to own how meaning is represented, and exchange
+// continues to own recovery policy after observed provider outcomes.
 // Provider/protocol identity, encoder availability, model names, backend prose,
 // and choosing a portable projection do not establish support. Provider runtime
 // facets resolve exact-target evidence independently from backend construction.

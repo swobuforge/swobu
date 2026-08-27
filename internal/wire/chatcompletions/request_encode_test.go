@@ -2,7 +2,6 @@ package chatcompletions
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -84,10 +83,13 @@ func TestEncodeCarrier_CurrentHostedSearchRequiresExactTargetLowering(t *testing
 		{name: "streaming", delivery: delivery.StreamingDelivery(delivery.FramingSSE)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := EncodeCarrierWithChanges(req, nil, tc.delivery, nil, "")
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(err, &incompatible) {
-				t.Fatalf("error = %T, want IncompatibleTargetError", err)
+			var changes []compat.Change
+			document, err := EncodeCarrierWithChanges(req, nil, tc.delivery, &changes, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
+				t.Fatalf("document=%s changes=%#v", document.RawBytes(), changes)
 			}
 		})
 	}

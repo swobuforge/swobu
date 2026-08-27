@@ -1,6 +1,7 @@
 package chatgpt
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -378,7 +379,7 @@ func TestExecute_DoesNotEmitCacheCompatibilityDecisions(t *testing.T) {
 	}
 }
 
-func TestExecute_RejectsCurrentWebSearchDeclarationBeforeTransport(t *testing.T) {
+func TestExecute_ProjectsCurrentWebSearchAndReachesTransport(t *testing.T) {
 	t.Parallel()
 
 	rt := &captureRoundTripper{}
@@ -405,13 +406,9 @@ func TestExecute_RejectsCurrentWebSearchDeclarationBeforeTransport(t *testing.T)
 			protocolkind.Responses,
 			"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)),
 	)
-	_, err = executeTestProviderRequest(context.Background(), exec, req)
-	var incompatible provider.IncompatibleTargetError
-	if !errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, want IncompatibleTargetError", err)
-	}
-	if len(rt.lastBody) != 0 {
-		t.Fatalf("current hosted search reached transport: %s", rt.lastBody)
+	_, _ = executeTestProviderRequest(context.Background(), exec, req)
+	if len(rt.lastBody) == 0 || bytes.Contains(rt.lastBody, []byte("web_search")) {
+		t.Fatalf("projected hosted search transport body: %s", rt.lastBody)
 	}
 }
 

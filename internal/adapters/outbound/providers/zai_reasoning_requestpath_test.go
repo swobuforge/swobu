@@ -59,9 +59,6 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), string(canonical.ErrorCodeNoCompatibleTarget)) {
-			t.Fatalf("request reached NO_COMPATIBLE_TARGET: %v", err)
-		}
 		t.Fatalf("HandleRequestWithWorkspace: %v", err)
 	}
 	if calls.Load() != 1 {

@@ -218,7 +218,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool, &policy)
+	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}

@@ -115,9 +115,6 @@ func (r candidateSelectiveRuntime) ResolveBackend(target provider.TargetSnapshot
 	if err != nil {
 		return provider.Backend{}, err
 	}
-	if target.TargetID == "incompatible-a" {
-		backend.Codec = unsupportedTestCodec{}
-	}
 	if target.TargetID == "unmarked-a" {
 		backend.Codec = decisionOnlyRejectCodec{}
 	}
@@ -135,16 +132,6 @@ func (decisionOnlyRejectCodec) Encode(provider.Request) (carrier.Document, []com
 
 func (decisionOnlyRejectCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
 	panic("rejected request must never reach transport")
-}
-
-type unsupportedTestCodec struct{}
-
-func (unsupportedTestCodec) Encode(provider.Request) (carrier.Document, []compat.Change, error) {
-	return carrier.Document{}, nil, provider.NewIncompatibleTarget("candidate cannot represent requested output")
-}
-
-func (unsupportedTestCodec) Decode(context.Context, provider.Request, provider.Ingress) (provider.DecodedResponse, error) {
-	panic("incompatible candidate must never be called")
 }
 
 type decodeUnavailableCodec struct{ provider.Codec }
@@ -933,11 +920,11 @@ func TestPreparationFailureDoesNotAllocateProviderCallAttempt(t *testing.T) {
 	}
 }
 
-func TestFallbackEligiblePreparationFailureSkipsCandidateWithoutConsumingAttemptID(t *testing.T) {
+func TestPreparationNotImplementedDoesNotAdvanceRoute(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{
-		requestpathTarget(t, "incompatible-a"),
-		requestpathTarget(t, "compatible-b"),
+		requestpathTarget(t, "unmarked-a"),
+		requestpathTarget(t, "fallback-b"),
 	}}
 	prepared := mustBeginSession(t, s.input.request)
 	s.prepared = &prepared
@@ -948,9 +935,16 @@ func TestFallbackEligiblePreparationFailureSkipsCandidateWithoutConsumingAttempt
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt := activeProviderAttempt(t, outcome.nextState)
-	if len(outcome.nextState.providerCallAttempts) != 1 || attempt.id != 1 || attempt.candidateIndex != 1 {
-		t.Fatalf("provider execution after local rejection = %#v", outcome.nextState)
+	failed, ok := outcome.nextState.phase.(failedPhase)
+	if !ok {
+		t.Fatalf("phase = %T, want failedPhase", outcome.nextState.phase)
+	}
+	var swobuError canonical.Error
+	if !errors.As(failed.problem, &swobuError) || swobuError.Code != canonical.ErrorCodeNotImplemented {
+		t.Fatalf("problem = %T %v, want NOT_IMPLEMENTED", failed.problem, failed.problem)
+	}
+	if len(outcome.nextState.providerCallAttempts) != 0 || outcome.command != nil {
+		t.Fatalf("local projection failure advanced route: %#v", outcome)
 	}
 }
 
@@ -1042,29 +1036,6 @@ func TestProviderCallRequirementsUseActualAttempt(t *testing.T) {
 	}
 }
 
-func TestUnrelatedUnsupportedFailureDoesNotBecomeNativeObservationOrRetry(t *testing.T) {
-	s := reducerTestState(t)
-	target := requestpathTarget(t, "native-a")
-	s.route = routePlan{targets: []routing.Target{target}}
-	prepared := mustNativeSession(t, s.input.request, target)
-	s.prepared = &prepared
-	started := beginPreparedProviderCall(t, s)
-	active := activeProviderAttempt(t, started.nextState)
-	failed, err := reduce(context.Background(), started.nextState, providerCallFailed{
-		attemptID: active.id,
-		failure:   provider.AttemptNotDispatched(provider.NewIncompatibleTarget("candidate cannot represent canonical tool choice")),
-	}, reducerRuntime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := failed.nextState.phase.(callingProviderPhase); ok {
-		t.Fatal("unrelated unsupported failure selected semantic history")
-	}
-	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
-		t.Fatalf("unrelated unsupported failure emitted native changes: %#v", failed.nextState.effectiveChanges)
-	}
-}
-
 type unsupportedTestCommand struct{}
 
 func (unsupportedTestCommand) isCommand() {}
@@ -1086,33 +1057,6 @@ func TestBackendRejectionStatusesDoNotAdvanceRoute(t *testing.T) {
 				t.Fatalf("status %d was treated as fallback-eligible", status)
 			}
 		})
-	}
-}
-
-func TestBackendLocalUnsupportedAdvancesRoute(t *testing.T) {
-	slug, _ := routing.ParseWorkspaceSlug("dev")
-	routeName, _ := routing.ParseRouteName("a")
-	firstTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "incompatible-a")})
-	secondTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "compatible-b")})
-	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	providerCalls := 0
-	runner := withRuntime(nil)
-	runner.Runtime = candidateSelectiveRuntime{transport: func(ctx context.Context, target provider.TargetSnapshot, doc carrier.Document) (provider.Ingress, error) {
-		providerCalls++
-		return bufferedProviderTransport(nil)(ctx, target, doc)
-	}}
-
-	_, err = runExchange(context.Background(), runner, "ex_codec_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCalls != 1 {
-		t.Fatalf("provider calls = %d, want only compatible candidate B", providerCalls)
 	}
 }
 
@@ -1466,61 +1410,5 @@ func TestExchangeDoesNotExecuteFallbackAfterResponseProjectionFailure(t *testing
 	}
 	if !reflect.DeepEqual(providerCalls, []string{"projection-a"}) {
 		t.Fatalf("provider calls = %#v, want only candidate A", providerCalls)
-	}
-}
-
-func TestExchangeFallbackUsesUnchangedFrozenCanonicalRequest(t *testing.T) {
-	slug, _ := routing.ParseWorkspaceSlug("dev")
-	routeName, _ := routing.ParseRouteName("a")
-	first := requestpathTarget(t, "frozen-a")
-	second := requestpathTarget(t, "frozen-b")
-	firstTier, _ := routing.NewTier([]routing.Target{first})
-	secondTier, _ := routing.NewTier([]routing.Target{second})
-	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("client-model"),
-		Items: []canonical.CanonicalItem{
-			canonicaltest.ToolDeclarations(t, canonicaltest.FunctionTool(t, "lookup", canonicaltest.Schema(t, `{"type":"object"}`))),
-			canonicaltest.Message(t, canonical.MessageRoleUser, "preserve me"),
-		},
-		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
-	})
-	captured := make(map[string]canonical.CanonicalRequest)
-	providerCalls := 0
-	runner := withRuntime(nil)
-	runner.Runtime = behavioralProofRuntime{
-		transport: func(ctx context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
-			providerCalls++
-			return bufferedProviderTransport(nil)(ctx, target, document)
-		},
-		encode: func(target provider.TargetSnapshot, providerRequest provider.Request) (carrier.Document, []compat.Change, error) {
-			captured[target.TargetID] = providerRequest.Canonical.Clone()
-			if target.TargetID == "frozen-a" {
-				return carrier.Document{}, nil, provider.NewIncompatibleTarget("candidate A cannot preserve required tool policy")
-			}
-			return (testBackendCodec{}).Encode(providerRequest)
-		},
-	}
-	_, err = runExchange(context.Background(), runner, "ex_frozen_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCalls != 1 {
-		t.Fatalf("provider calls = %d, want only candidate B", providerCalls)
-	}
-	firstRequest, firstSeen := captured["frozen-a"]
-	secondRequest, secondSeen := captured["frozen-b"]
-	if !firstSeen || !secondSeen {
-		t.Fatalf("captured requests = %#v, want both preparation attempts", captured)
-	}
-	firstRequest = bindRequestToTarget(firstRequest, "same-upstream-model")
-	secondRequest = bindRequestToTarget(secondRequest, "same-upstream-model")
-	if !reflect.DeepEqual(firstRequest, secondRequest) {
-		t.Fatalf("fallback request changed canonical semantics:\nA = %#v\nB = %#v", firstRequest, secondRequest)
 	}
 }

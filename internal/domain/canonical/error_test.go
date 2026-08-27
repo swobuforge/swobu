@@ -51,11 +51,6 @@ func TestRecoveryOwnedSwobuErrors_AreCanonicalAndActionable(t *testing.T) {
 			code: ErrorCodeNotImplemented,
 		},
 		{
-			name: "configured targets exhausted",
-			err:  NoCompatibleTarget("no configured target can represent the canonical request"),
-			code: ErrorCodeNoCompatibleTarget,
-		},
-		{
 			name: "configured targets temporarily unavailable",
 			err:  NoAvailableTarget("no currently available configured target can serve the request"),
 			code: ErrorCodeNoAvailableTarget,

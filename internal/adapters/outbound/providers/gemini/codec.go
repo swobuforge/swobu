@@ -423,7 +423,7 @@ func validateGeminiSearchResultReplay(raw []byte, callID canonical.ToolCallID) e
 func geminiGenerationConfig(request canonical.CanonicalRequest, lowered wire.LoweredToolSet, names wire.ToolNames, changes []compat.Change) (*interactionGenerationConfig, []compat.Change, error) {
 	controls := request.Controls()
 	if compute, specified := request.Reasoning().ComputeField().Get(); specified && compute.Kind() == canonical.ReasoningDisabled {
-		return nil, changes, provider.NewIncompatibleTarget("Gemini Interactions cannot represent hard-off reasoning")
+		changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{}))
 	}
 	config := &interactionGenerationConfig{}
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
@@ -459,11 +459,13 @@ func geminiGenerationConfig(request canonical.CanonicalRequest, lowered wire.Low
 		return nil, changes, err
 	}
 	if lowered.Len() > 0 || request.ToolPolicySpecified() {
-		choice, choiceErr := geminiToolChoice(policy, lowered, names)
+		choice, represented, choiceErr := geminiToolChoice(policy, lowered, names)
 		if choiceErr != nil {
 			return nil, changes, choiceErr
 		}
-		if lowered.TotalFragments() > 0 {
+		if !represented {
+			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+		} else if lowered.TotalFragments() > 0 {
 			config.ToolChoice = &choice
 		}
 	}
@@ -507,29 +509,33 @@ func geminiEffortApproximation() compat.Change {
 	return compat.NewApproximation(canonical.RequestControlsEffort, canonical.RequestControlsEffort, canonical.Occurrence{})
 }
 
-func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (interactionToolChoice, error) {
-	record, err := wire.ResolveLoweredToolPolicy(policy, lowered)
-	if err != nil {
-		return interactionToolChoice{}, err
-	}
+func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (interactionToolChoice, bool, error) {
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
-		return interactionToolChoice{Mode: "none"}, nil
+		return interactionToolChoice{Mode: "none"}, true, nil
 	case canonical.ToolPolicyAuto:
-		return interactionToolChoice{Mode: "auto"}, nil
+		return interactionToolChoice{Mode: "auto"}, true, nil
 	case canonical.ToolPolicyRequired:
-		return interactionToolChoice{Mode: "any"}, nil
+		if lowered.TotalFragments() == 0 {
+			return interactionToolChoice{}, false, nil
+		}
+		return interactionToolChoice{Mode: "any"}, true, nil
 	case canonical.ToolPolicySpecific:
-		if record.Kind != canonical.ToolKindFunction {
-			return interactionToolChoice{}, provider.NewIncompatibleTarget("Gemini specific tool policy requires an ordinary function")
+		key, ok := policy.SpecificID()
+		if !ok {
+			return interactionToolChoice{}, false, canonical.BadRequest("specific tool policy requires a tool id")
+		}
+		record, ok := lowered.FindSource(key)
+		if !ok || record.FragmentCount != 1 || record.Kind != canonical.ToolKindFunction {
+			return interactionToolChoice{}, false, nil
 		}
 		name, err := wire.EncodeToolName(names, record.Key)
 		if err != nil {
-			return interactionToolChoice{}, err
+			return interactionToolChoice{}, false, err
 		}
-		return interactionToolChoice{AllowedTools: &interactionAllowedTools{Mode: "any", Tools: []string{name}}}, nil
+		return interactionToolChoice{AllowedTools: &interactionAllowedTools{Mode: "any", Tools: []string{name}}}, true, nil
 	default:
-		return interactionToolChoice{}, canonical.InternalError("Gemini tool policy is invalid")
+		return interactionToolChoice{}, false, canonical.InternalError("Gemini tool policy is invalid")
 	}
 }
 
@@ -596,7 +602,7 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 			continue
 		}
 		if strict, specified := function.Strict().Get(); specified && strict {
-			return nil, wire.LoweredToolSet{}, changes, provider.NewIncompatibleTarget("Gemini function declarations have no exact strictness carrier")
+			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsSchemaStrict, canonical.ToolOccurrence(declaration.Key())))
 		}
 		name, err := wire.EncodeToolName(names, function.Key())
 		if err != nil {

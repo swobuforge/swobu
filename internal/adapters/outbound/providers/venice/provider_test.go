@@ -223,12 +223,9 @@ func TestVeniceDiscoveryPublishesExactTargetSupport(t *testing.T) {
 	if got := support.Get(canonical.RequestToolsKind); got != provider.SupportUnknown {
 		t.Fatalf("tool-kind support = %v, want unknown", got)
 	}
-	if got := store.resolveWebSearch("capable"); got != provider.SupportSupported {
-		t.Fatalf("Venice web-search support = %v, want supported", got)
-	}
 }
 
-func TestVeniceOmitsOptionalSearchForModelKnownUnsupported(t *testing.T) {
+func TestVeniceModelMetadataDoesNotGateNativeSearchWire(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"no-search","type":"text","model_spec":{"capabilities":{"supportsFunctionCalling":true,"supportsWebSearch":false}}}]}`))
 	}))
@@ -247,25 +244,24 @@ func TestVeniceOmitsOptionalSearchForModelKnownUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(document.RawBytes(), []byte("venice_parameters")) {
-		t.Fatalf("unsupported optional search leaked into payload: %s", document.RawBytes())
+	if !bytes.Contains(document.RawBytes(), []byte("venice_parameters")) {
+		t.Fatalf("native search wire missing despite valid target grammar: %s", document.RawBytes())
 	}
-	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(canonical.WebSearchToolKey()))
-	if len(changes) != 1 || changes[0] != want {
-		t.Fatalf("changes = %#v, want %#v", changes, want)
+	if len(changes) != 0 {
+		t.Fatalf("changes = %#v, want exact native search projection", changes)
 	}
 }
 
-func TestVeniceRejectsRequiredSearchForModelKnownUnsupported(t *testing.T) {
+func TestVeniceRequiredSearchUsesNativeWireWithoutCapabilityPreflight(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:      canonical.Specify("venice-model"),
 		Items:      []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()), canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyRequired, nil)),
 	})
 	backend := resolvedCodec(t).(codec)
-	backend.webSearchSupport = provider.SupportUnsupported
-	if _, _, err := backend.Encode(providerRequest(t, request, delivery.BufferedDelivery())); err == nil {
-		t.Fatal("expected required unsupported Venice web search to fail")
+	document, changes, err := backend.Encode(providerRequest(t, request, delivery.BufferedDelivery()))
+	if err != nil || !bytes.Contains(document.RawBytes(), []byte("venice_parameters")) || len(changes) != 0 {
+		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 }
 

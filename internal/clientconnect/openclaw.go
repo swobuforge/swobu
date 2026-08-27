@@ -184,7 +184,7 @@ func readOptionalString(s *Service, path string) (value string, exists bool, err
 	}
 	trimmed := strings.TrimSpace(string(out))
 	if code != 0 {
-		if code == 1 && trimmed == "" {
+		if openClawPathMissing(code, trimmed, path) {
 			return "", false, nil
 		}
 		if trimmed != "" {
@@ -206,7 +206,7 @@ func readOptionalJSON(s *Service, path string) (value map[string]any, exists boo
 	}
 	trimmed := strings.TrimSpace(string(out))
 	if code != 0 {
-		if code == 1 && trimmed == "" {
+		if openClawPathMissing(code, trimmed, path) {
 			return nil, false, nil
 		}
 		if trimmed != "" {
@@ -225,6 +225,16 @@ func readOptionalJSON(s *Service, path string) (value map[string]any, exists boo
 		return nil, false, nil
 	}
 	return data, true, nil
+}
+
+func openClawPathMissing(code int, output string, path string) bool {
+	if code != 1 {
+		return false
+	}
+	if output == "" {
+		return true
+	}
+	return strings.HasPrefix(output, "Config path not found: "+path+".")
 }
 
 func cloneMap(m map[string]any) map[string]any {

@@ -101,10 +101,9 @@ func TestOpenAIFamilyTargetsRequireExactChatCompletionsWebSearchDialect(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
-			var incompatible provider.IncompatibleTargetError
-			if !errors.As(encodeErr, &incompatible) {
-				t.Fatalf("%s error = %T, want IncompatibleTargetError", tc.name, encodeErr)
+			document, changes, encodeErr := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+			if encodeErr != nil || len(document.RawBytes()) == 0 || len(changes) == 0 {
+				t.Fatalf("%s document=%s changes=%#v error=%v", tc.name, document.RawBytes(), changes, encodeErr)
 			}
 		})
 	}
@@ -526,10 +525,6 @@ func TestSendProviderRequest_ClassifiesConfirmedUnsupportedResponseAsRejected(t 
 	var rejected provider.RejectedError
 	if !errors.As(err, &rejected) {
 		t.Fatalf("error = %T, want provider.RejectedError", err)
-	}
-	var incompatible provider.IncompatibleTargetError
-	if errors.As(err, &incompatible) {
-		t.Fatalf("error = %T, must not be provider.IncompatibleTargetError", err)
 	}
 	failure, ok := provider.AsAttemptFailure(err)
 	if !ok || failure.Execution() != provider.ExecutionRejectedBeforeExecution {

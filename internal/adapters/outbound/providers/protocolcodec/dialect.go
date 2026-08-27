@@ -1,13 +1,10 @@
 package protocolcodec
 
 import (
-	"fmt"
-
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
@@ -95,17 +92,8 @@ func ChatHostedSearchToolPolicy(spelling string) chatcompletions.ToolPolicyLower
 			return nil, false, nil, nil
 		}
 		record, ok := lowered.FindSource(key)
-		if !ok {
-			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
-		}
-		if record.FragmentCount == 0 {
-			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
-		}
-		if record.FragmentCount != 1 {
-			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
-		}
-		if spelling == "" {
-			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
+		if !ok || record.FragmentCount != 1 || spelling == "" {
+			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
 		}
 		return map[string]any{"type": spelling}, true, nil, nil
 	}
@@ -176,17 +164,8 @@ func ResponsesHostedSearchToolPolicy(spelling string) responses.ToolPolicyLoweri
 			return nil, false, nil, nil
 		}
 		record, ok := lowered.FindSource(key)
-		if !ok {
-			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
-		}
-		if record.FragmentCount == 0 {
-			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("target lowering produced 0 fragments for tool %q", key))
-		}
-		if record.FragmentCount != 1 {
-			return nil, true, nil, provider.NewIncompatibleTarget(fmt.Sprintf("1->N lowered tool %q requires explicit provider tool policy lowering rule for specific selection", key))
-		}
-		if spelling == "" {
-			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
+		if !ok || record.FragmentCount != 1 || spelling == "" {
+			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
 		}
 		return map[string]any{"type": spelling}, true, nil, nil
 	}
@@ -223,11 +202,8 @@ func MessagesHostedSearchToolPolicy(typeName string) messages.ToolPolicyLowering
 			return nil, false, nil, nil
 		}
 		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount == 0 {
-			return nil, true, nil, canonical.BadRequest(fmt.Sprintf("tool %q is not present in the tool declaration set", key))
-		}
-		if typeName == "" {
-			return nil, true, nil, provider.NewIncompatibleTarget("target cannot require hosted search specifically")
+		if !ok || record.FragmentCount != 1 || typeName == "" {
+			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
 		}
 		return map[string]any{"type": "tool", "name": canonical.WebSearchToolKey().Name()}, true, nil, nil
 	}
