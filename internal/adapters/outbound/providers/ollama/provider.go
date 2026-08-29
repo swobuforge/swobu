@@ -8,6 +8,8 @@ import (
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -35,8 +37,25 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
 				PrependInstructionsToInput: true,
+				HistoryMessageRole:         lowerHistoryDirectiveRole,
+				Tools: protocolcodec.ResponsesToolLowering{
+					Custom: protocolcodec.ResponsesCustomAsFunction(),
+				},
 			},
 		}
 	}
 	return backend, backend.Validate()
+}
+
+// lowerHistoryDirectiveRole preserves the position and content of a late
+// directive while avoiding Ollama's provider-wide requirement that system
+// messages appear only at the beginning. Hoisting would change activation
+// order, so the exact occurrence becomes a user-role approximation instead.
+func lowerHistoryDirectiveRole(index int, role canonical.MessageRole) (canonical.MessageRole, []compat.Change, error) {
+	if role != canonical.MessageRoleSystem && role != canonical.MessageRoleDeveloper {
+		return role, nil, nil
+	}
+	return canonical.MessageRoleUser, []compat.Change{
+		compat.NewApproximation(canonical.RequestItemsMessageRole, canonical.RequestItemOccurrence(uint32(index))),
+	}, nil
 }

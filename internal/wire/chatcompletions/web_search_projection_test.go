@@ -226,14 +226,14 @@ func TestCompileChatToolsIsIndependentOfToolPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, _, lowered, err := compileChatCompletionsTools(tools, names, nil, "", nil)
+	encoded, _, lowered, err := compileChatCompletionsTools(tools, names, nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(encoded) != 1 || encoded[0].Function.Name != "lookup" {
 		t.Fatalf("tools = %#v, want lookup only", encoded)
 	}
-	record, ok := lowered.FindSource(canonical.WebSearchToolKey())
+	record, ok := lowered.lowered.FindSource(canonical.WebSearchToolKey())
 	if !ok || record.FragmentCount != 0 {
 		t.Fatalf("web search lowering = %#v, present=%v", record, ok)
 	}

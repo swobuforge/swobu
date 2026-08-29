@@ -33,7 +33,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	case protocolkind.Messages:
 		backend.Codec = protocolcodec.Codec{
 			Protocol:        protocolkind.Messages,
-			MessagesDialect: protocolcodec.MessagesDialect{OmitAdaptiveThinking: true},
+			MessagesDialect: protocolcodec.MessagesDialect{Lowering: protocolcodec.MessagesLowering{Reasoning: protocolcodec.MessagesOmitAdaptiveReasoning}},
 		}
 		return backend, backend.Validate()
 	default:

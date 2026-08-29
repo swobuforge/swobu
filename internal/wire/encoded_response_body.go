@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -38,7 +39,7 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 	}
 	for len(b.pending) == 0 {
 		if b.ctx == nil || b.events == nil || b.encode == nil {
-			err := errors.New("encoded response body is incomplete")
+			err := StageResponseFailure("client_stream_encode", errors.New("encoded response body is incomplete"))
 			b.fail(err)
 			return 0, err
 		}
@@ -50,9 +51,16 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 		if err != nil {
 			if errors.Is(err, io.EOF) && b.completion.Snapshot().State == CompletionPending {
 				b.fail(io.ErrUnexpectedEOF)
+			} else if !errors.Is(err, io.EOF) {
+				b.fail(err)
 			}
 			return 0, err
 		}
+		slog.Debug("canonical response event",
+			"component", "httpapi",
+			"event", "canonical_response_event",
+			"kind", string(event.Kind),
+		)
 		if event.Kind == canonical.EventUsage {
 			if payload, ok := event.Payload.(canonical.UsagePayload); ok {
 				b.completion.ObserveUsage(payload.Usage)
@@ -60,6 +68,7 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 		}
 		encoded, err := b.encode(event)
 		if err != nil {
+			err = StageResponseFailure("client_stream_encode", err)
 			b.fail(err)
 			return 0, err
 		}
@@ -75,7 +84,9 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 func (b *EncodedResponseBody) Close() error {
 	b.close.Do(func() {
 		if b.completion.Snapshot().State == CompletionPending {
-			b.fail(io.ErrClosedPipe)
+			// A pending pull body is closed by downstream delivery abandonment.
+			// Preserve that owner instead of inventing an encoder failure.
+			b.fail(context.Canceled)
 		}
 		if b.events != nil {
 			b.closeErr = b.events.Close(b.ctx)

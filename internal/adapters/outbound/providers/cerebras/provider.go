@@ -33,7 +33,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerMessage:      protocolcodec.ChatOpaqueReplayStringMessageRule(ChatReplayScope, "reasoning"),
+			Lowering:          protocolcodec.ChatLowering{Message: protocolcodec.ChatOpaqueReplayStringMessageRule(ChatReplayScope, "reasoning")},
 			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return cerebrasChatReasoningExtractor{} },
 		},
 	}

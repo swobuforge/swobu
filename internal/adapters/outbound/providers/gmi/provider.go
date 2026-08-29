@@ -28,8 +28,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.Responses,
 		ResponsesDialect: protocolcodec.ResponsesDialect{
-			LowerTool:       protocolcodec.ResponsesHostedSearchTool("web_search_preview"),
-			LowerToolPolicy: protocolcodec.ResponsesHostedSearchToolPolicy("web_search_preview"),
+			Tools: protocolcodec.ResponsesToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search_preview")},
 		},
 	}
 	return backend, backend.Validate()

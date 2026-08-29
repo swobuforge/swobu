@@ -1,6 +1,10 @@
 package messages
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+)
 
 func logMessagesEgressBuffered(payload []byte) {
 	slog.Debug("messages buffered egress",
@@ -15,5 +19,13 @@ func logMessagesEgressStreamFrame(raw []byte) {
 		"component", "httpapi",
 		"event", "messages_stream_egress_frame",
 		"frame_bytes", len(raw),
+	)
+}
+
+func logMessagesStreamProjection(kind canonical.EventKind) {
+	slog.Debug("messages stream projection",
+		"component", "httpapi",
+		"event", "messages_stream_projection",
+		"canonical_kind", string(kind),
 	)
 }

@@ -335,13 +335,10 @@ func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *tes
 		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
 
-	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
-		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		return []ProviderRequestTool{{Type: "web_search"}}, true, nil, nil
+	rule := func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		return ToolProjection{Fragments: []ProviderRequestTool{{Type: "web_search"}}, TargetType: "web_search"}, nil, nil
 	}
-	typed, err := CompileProviderRequestDocument(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{LowerTool: rule})
+	typed, err := CompileProviderRequestDocument(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering().Overlay(ToolLowering{WebSearch: rule})})
 	if err != nil {
 		t.Fatalf("unexpected compile error with rule: %v", err)
 	}
@@ -357,7 +354,7 @@ func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *tes
 func TestCompileResponsesToolsIsIndependentOfToolPolicy(t *testing.T) {
 	lookup := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
 	tools := []canonical.ToolDeclaration{canonical.NewWebSearchDeclaration(), lookup}
-	encoded, lowered, err := compileResponsesTools(tools, canonical.ToolVisibilityRefinements{}, nil, nil, "", nil)
+	encoded, lowered, err := compileResponsesTools(tools, canonical.ToolVisibilityRefinements{}, nil, nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,6 +364,51 @@ func TestCompileResponsesToolsIsIndependentOfToolPolicy(t *testing.T) {
 	record, ok := lowered.FindSource(canonical.WebSearchToolKey())
 	if !ok || record.FragmentCount != 0 {
 		t.Fatalf("web search lowering = %#v, present=%v", record, ok)
+	}
+}
+
+func TestOmittedResponsesWebSearchDeclarationRetainsItsHistoryCarrier(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
+	callID, err := canonical.NewToolCallID("search_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := canonical.NewWebSearchToolInput(canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItem(callID, declaration.Key(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultValue, err := canonical.NewWebSearchResult(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewWebSearchResultItem(callID, resultValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, declaration),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+			call,
+			result,
+		},
+	})
+
+	document, err := EncodeCarrierWithChanges(
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
+		delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.RawBytes())
+	if strings.Contains(wire, `"type":"web_search"`) || !strings.Contains(wire, `"type":"web_search_call","status":"completed"`) {
+		t.Fatalf("Responses search projection did not preserve independent history carrier: %s", wire)
 	}
 }
 

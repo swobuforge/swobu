@@ -132,10 +132,11 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 		req.ExchangeID,
 		responses.EncodeOptions{},
 		responses.CompileOptions{
-			LowerTool:                  dialect.LowerTool,
-			LowerToolPolicy:            dialect.LowerToolPolicy,
+			ToolLowering:               responses.ProtocolToolLowering().Overlay(dialect.Tools),
+			HistoryMessageRole:         dialect.HistoryMessageRole,
 			PrependInstructionsToInput: dialect.PrependInstructionsToInput,
 			OmitInclude:                dialect.OmitInclude,
+			OmitMaxOutputTokens:        dialect.OmitMaxOutputTokens,
 			OmitStoreFalse:             dialect.OmitStoreFalse,
 			ForceArrayInput:            dialect.ForceArrayInput,
 			DefaultStore:               dialect.DefaultStore,
@@ -164,10 +165,7 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 		&changes,
 		req.ExchangeID,
 		chatcompletions.CompileOptions{
-			LowerTool:              dialect.LowerTool,
-			LowerToolPolicy:        dialect.LowerToolPolicy,
-			LowerReasoning:         dialect.LowerReasoning,
-			LowerMessage:           dialect.LowerMessage,
+			Lowering:               chatcompletions.ProtocolLowering().Overlay(dialect.Lowering),
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
 			AcceptsMaxCompletionTokens: func() bool {
 				return req.TargetFacts.AcceptsMaxCompletionTokens()
@@ -198,9 +196,7 @@ func CompileMessagesRequest(req provider.Request, dialect MessagesDialect) (mess
 		&changes,
 		req.ExchangeID,
 		messages.CompileOptions{
-			LowerTool:            dialect.LowerTool,
-			LowerToolPolicy:      dialect.LowerToolPolicy,
-			OmitAdaptiveThinking: dialect.OmitAdaptiveThinking,
+			Lowering: messages.ProtocolLowering().Overlay(dialect.Lowering),
 		},
 	)
 	return document, changes, err

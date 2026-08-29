@@ -32,7 +32,7 @@ func TestMessagesEagerlyMaterializesUnrepresentableProviderOwnedDiscovery(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMessagesEagerProviderDiscoverySpecificPolicyRecordsOrdinaryPolicyLoss(t
 		t.Fatal(err)
 	}
 	var changes []compat.Change
-	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}

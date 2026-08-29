@@ -33,8 +33,10 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerReasoning:    applyKimiReasoning,
-			LowerMessage:      protocolcodec.ChatOpaqueReplayStringMessageRule(ChatReplayScope, "reasoning_content"),
+			Lowering: protocolcodec.ChatLowering{
+				Reasoning: applyKimiReasoning,
+				Message:   protocolcodec.ChatOpaqueReplayStringMessageRule(ChatReplayScope, "reasoning_content"),
+			},
 			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return kimiChatReasoningExtractor{} },
 		},
 	}

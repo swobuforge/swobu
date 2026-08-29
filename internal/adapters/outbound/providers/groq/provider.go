@@ -41,9 +41,10 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 		backend.Codec = protocolcodec.Codec{
 			Protocol: protocolkind.ChatCompletions,
 			ChatDialect: protocolcodec.ChatDialect{
-				LowerTool:         protocolcodec.ChatHostedSearchTool(nil, "browser_search"),
-				LowerToolPolicy:   protocolcodec.ChatHostedSearchToolPolicy("browser_search"),
-				LowerReasoning:    applyGroqReasoning,
+				Lowering: protocolcodec.ChatLowering{
+					Tools:     protocolcodec.ChatToolLowering{WebSearch: protocolcodec.ChatHostedSearchTool(nil, "browser_search")},
+					Reasoning: applyGroqReasoning,
+				},
 				DecorateAttempt:   decorateGroqAttempt,
 				ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return groqChatReasoningExtractor{} },
 			},

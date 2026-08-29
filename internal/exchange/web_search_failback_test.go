@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 type capabilityFallbackRuntime struct {
@@ -35,8 +36,7 @@ func (r capabilityFallbackRuntime) ResolveBackend(target provider.TargetSnapshot
 		codec = protocolcodec.Codec{
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
-				LowerTool:       protocolcodec.ResponsesHostedSearchTool("web_search_preview"),
-				LowerToolPolicy: protocolcodec.ResponsesHostedSearchToolPolicy("web_search_preview"),
+				Tools: responses.ToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search_preview")},
 			},
 		}
 	}

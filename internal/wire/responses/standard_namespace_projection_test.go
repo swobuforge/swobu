@@ -36,7 +36,7 @@ func TestFlatResponsesFlattensNamespaceInsteadOfDroppingCallableChildren(t *test
 		nil,
 		"exchange",
 		EncodeOptions{},
-		CompileOptions{},
+		CompileOptions{ToolLowering: DefaultToolLowering()},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestCodex0147EmptyNamespaceWithCustomExecLowersBeforeResponsesDispatch(t *t
 		t.Fatal(err)
 	}
 	document, err := CompileProviderRequestDocument(
-		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), nil, "codex-37380", EncodeOptions{}, CompileOptions{},
+		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), nil, "codex-37380", EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering()},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestOfficialResponsesLoweringKeepsDuplicateNamespaceLeavesDistinct(t *testi
 		nil,
 		"exchange",
 		EncodeOptions{},
-		CompileOptions{},
+		CompileOptions{ToolLowering: DefaultToolLowering()},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndNativeVisibility(t *
 	var changes []compat.Change
 	document, err := CompileProviderRequestDocument(
 		EncodeInput{Request: request, ToolNames: names}, delivery.BufferedDelivery(), &changes, "exchange",
-		EncodeOptions{}, CompileOptions{},
+		EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering()},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -158,8 +158,12 @@ func TestResponsesNormalFormLowersNamespaceToAttemptAliasAndNativeVisibility(t *
 func pointerToToolKey(key canonical.ToolKey) *canonical.ToolKey { return &key }
 
 func hasResponseChange(changes []compat.Change, capability canonical.CapabilityPath) bool {
+	return containsResponseChange(changes, capability, compat.Approximation)
+}
+
+func containsResponseChange(changes []compat.Change, capability canonical.CapabilityPath, kind compat.Kind) bool {
 	for _, change := range changes {
-		if change.Capability == capability && change.Kind == compat.Approximation {
+		if change.Capability == capability && change.Kind == kind {
 			return true
 		}
 	}

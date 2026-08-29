@@ -32,7 +32,7 @@ func TestChatCompletionsEagerlyMaterializesProviderOwnedDiscovery(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestChatCompletionsOmitsSettledProviderOwnedDiscoveryHistoryAtomically(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}

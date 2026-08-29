@@ -103,22 +103,24 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredT
 			}
 			return nil, nil
 		}
-		switch record.Kind {
-		case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
-			name, err := wire.EncodeToolName(names, record.Key)
-			if err != nil {
-				return nil, err
+		if record.TargetType == "tool" || strings.TrimSpace(record.TargetType) != "" {
+			name := record.TargetName
+			if name == "" {
+				var err error
+				name, err = wire.EncodeToolName(names, record.Key)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return map[string]any{
 				"type": "tool",
 				"name": strings.TrimSpace(name),
 			}, nil
-		default:
-			if changeLog != nil {
-				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
-			}
-			return nil, nil
 		}
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
+		}
+		return nil, nil
 	default:
 		return nil, canonical.BadRequest("messages request tool_choice is invalid")
 	}

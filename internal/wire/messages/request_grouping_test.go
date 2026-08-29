@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
@@ -28,7 +29,7 @@ func TestEncodeItemsGroupsMaximalAssistantOwnedSequence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		messages, err := encodeItems(request.Items(), currentTools, names, nil, "")
+		messages, err := encodeItems(request.Items(), currentTools, names, messagesFunctionRecords(t, names, decl), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +66,7 @@ func TestEncodeItemsPreservesMultipleToolCallsBeforeAssistantText(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages, err := encodeItems(request.Items(), nil, names, nil, "")
+	messages, err := encodeItems(request.Items(), nil, names, messagesFunctionRecords(t, names, declA, declB), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestEncodeItemsGroupsToolResultWithFollowingUserText(t *testing.T) {
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("sunny")}, false)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("thanks")})
 
-	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, nil, "")
+	messages, err := encodeItems([]canonical.CanonicalItem{result, message}, nil, nil, compiledToolProjection{}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,11 +100,44 @@ func TestEncodeItemsKeepsHostedWebSearchLifecycleAssistantOwned(t *testing.T) {
 	source, _ := canonical.NewMessagesWebSource(webURL, canonical.Specify("News"), []byte(`{"type":"web_search_result","url":"https://example.com/news","title":"News","encrypted_content":"opaque-result"}`))
 	search, _ := canonical.NewWebSearchResult([]canonical.WebSource{source})
 	result, _ := canonical.NewWebSearchResultItem(callID, search)
-	messages, err := encodeItems([]canonical.CanonicalItem{call, result}, nil, nil, nil, "")
+	webSearchProjection := ToolProjection{
+		ProjectCall: func(canonical.ToolCallItem) (ToolCallProjection, error) {
+			return ToolCallProjection{Type: "server_tool_use", Name: "web_search", Input: json.RawMessage(`{"query":"news"}`)}, nil
+		},
+		ProjectResult: func(canonical.ToolResultItem) (ToolResultProjection, error) {
+			return ToolResultProjection{Type: "web_search_tool_result"}, nil
+		},
+	}
+	messages, err := encodeItems([]canonical.CanonicalItem{call, result}, nil, nil, compiledToolProjection{
+		lowered:     wire.LoweredToolSet{Records: []wire.LoweredToolRecord{{Key: canonical.WebSearchToolKey(), Kind: canonical.ToolKindWebSearch, FragmentCount: 1, TargetType: "web_search_20260209", TargetName: "web_search"}}},
+		occurrences: map[canonical.ToolKey]ToolProjection{canonical.WebSearchToolKey(): webSearchProjection},
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(messages) != 1 || messages[0].Role != "assistant" || len(messages[0].Content) != 2 || messages[0].Content[1].Type != "web_search_tool_result" {
 		t.Fatalf("hosted-search lifecycle split across roles: %#v", messages)
 	}
+}
+
+func messagesFunctionRecords(t *testing.T, names wire.ToolNames, declarations ...canonical.ToolDeclaration) compiledToolProjection {
+	t.Helper()
+	records := make([]wire.LoweredToolRecord, 0, len(declarations))
+	occurrences := make(map[canonical.ToolKey]ToolProjection, len(declarations))
+	for _, declaration := range declarations {
+		name, err := wire.EncodeToolName(names, declaration.Key())
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1, TargetType: "tool", TargetName: name})
+		occurrences[declaration.Key()] = ToolProjection{
+			ProjectCall: func(call canonical.ToolCallItem) (ToolCallProjection, error) {
+				object, _ := call.Input().Object()
+				return ToolCallProjection{Type: "tool_use", Name: name, Input: json.RawMessage(object.Bytes())}, nil
+			},
+			ProjectResult: func(canonical.ToolResultItem) (ToolResultProjection, error) {
+				return ToolResultProjection{Type: "tool_result"}, nil
+			}}
+	}
+	return compiledToolProjection{lowered: wire.LoweredToolSet{Records: records}, occurrences: occurrences}
 }

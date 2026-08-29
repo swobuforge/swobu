@@ -930,12 +930,39 @@ data: {"event_type":"error","error":{"code":"permission_denied","message":"denie
 
 `)
 		bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_error"})
-		closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
-		if err != nil {
-			t.Fatal(err)
+		validated := canonical.NewValidatedResponseStream(bound)
+		for range 2 {
+			if _, err := validated.Next(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if _, err := closed.ProjectResponse(); err == nil || !strings.Contains(err.Error(), "permission_denied") {
-			t.Fatalf("ProjectResponse error = %v, want terminal provider error", err)
+		_, err := validated.Next(context.Background())
+		var backend canonical.BackendError
+		if !errors.As(err, &backend) || backend.Message != "denied" {
+			t.Fatalf("error = %T %v, want pre-semantic backend failure", err, err)
+		}
+	})
+
+	t.Run("api error after creation before output", func(t *testing.T) {
+		stream := decodeGeminiStream(t, `data: {"event_type":"interaction.created","interaction":{"id":"interaction_1","model":"gemini-model","status":"in_progress"}}
+
+data: {"event_type":"error","error":{"code":"api_error","message":"provider-private capacity detail"}}
+
+`)
+		bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_unavailable"})
+		validated := canonical.NewValidatedResponseStream(bound)
+		for range 2 {
+			if _, err := validated.Next(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := validated.Next(context.Background())
+		var unavailable provider.UnavailableError
+		if !errors.As(err, &unavailable) {
+			t.Fatalf("error = %T %v, want typed provider unavailability", err, err)
+		}
+		if strings.Contains(err.Error(), "provider-private") {
+			t.Fatalf("unavailability exposed provider error prose: %v", err)
 		}
 	})
 }

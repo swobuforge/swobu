@@ -8,6 +8,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func decisionRecorded(changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) bool {
@@ -30,7 +31,7 @@ func TestChatCompatibilityRehomesClosedBatchToolResultImage(t *testing.T) {
 	changeLog := &recordingChanges{}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{call, result},
+		Items: []canonical.CanonicalItem{mustChatProjectionDeclaration(t), call, result},
 	})
 	document, err := EncodeCarrierWithChanges(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "exchange_1")
 	if err != nil {
@@ -112,9 +113,9 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 	changeLog := &recordingChanges{}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
-		Items: []canonical.CanonicalItem{callA, callB, resultA, resultB},
+		Items: []canonical.CanonicalItem{mustChatProjectionDeclaration(t), callA, callB, resultA, resultB},
 	})
-	document, err := CompileProviderRequestDocument(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "exchange_parallel", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, testAttemptToolNames(request), delivery.BufferedDelivery(), changeLog, "exchange_parallel", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,13 +140,14 @@ func TestChatCompatibilityProjectsParallelToolImagesAfterAllToolMessages(t *test
 func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testing.T) {
 	image := mustChatProjectionImage(t, canonical.Unspecified[canonical.ImageDetail]())
 	history := []canonical.CanonicalItem{
+		mustChatProjectionDeclaration(t),
 		mustChatProjectionCall(t, "call_prefix"),
 		mustChatProjectionResult(t, "call_prefix", canonical.NewImageToolResultPart(image)),
 	}
 	baseRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"), Items: history,
 	})
-	base, err := CompileProviderRequestDocument(baseRequest, testAttemptToolNames(baseRequest), delivery.BufferedDelivery(), nil, "", CompileOptions{})
+	base, err := CompileProviderRequestDocument(baseRequest, testAttemptToolNames(baseRequest), delivery.BufferedDelivery(), nil, "", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +161,7 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 		Model: canonical.Specify("m"),
 		Items: append(append([]canonical.CanonicalItem(nil), history...), assistant, user),
 	})
-	extended, err := CompileProviderRequestDocument(extendedRequest, testAttemptToolNames(extendedRequest), delivery.BufferedDelivery(), nil, "", CompileOptions{})
+	extended, err := CompileProviderRequestDocument(extendedRequest, testAttemptToolNames(extendedRequest), delivery.BufferedDelivery(), nil, "", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +170,13 @@ func TestChatCompatibilityToolImageProjectionKeepsAcceptedPrefixStable(t *testin
 	if string(basePrefix) != string(extendedPrefix) {
 		t.Fatalf("accepted prefix changed:\nbase: %s\nextended: %s", basePrefix, extendedPrefix)
 	}
+}
+
+func mustChatProjectionDeclaration(t *testing.T) canonical.CanonicalItem {
+	t.Helper()
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "inspect")
+	tool := canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	return canonicaltest.ToolDeclarations(t, tool)
 }
 
 func mustChatProjectionCall(t *testing.T, rawCallID string) canonical.CanonicalItem {

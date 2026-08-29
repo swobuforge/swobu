@@ -149,9 +149,15 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	return nil
 }
 
-func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls, changeLog *[]compat.Change) {
+func encodeResponsesGenerationControls(payload map[string]any, controls canonical.GenerationControls, omitMaxOutputTokens bool, changeLog *[]compat.Change) {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
-		payload["max_output_tokens"] = value
+		if omitMaxOutputTokens {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestControlsMaxOutputTokens, canonical.Occurrence{}))
+			}
+		} else {
+			payload["max_output_tokens"] = value
+		}
 	}
 	if value, ok := controls.Sampling.Temperature.Value(); ok {
 		payload["temperature"] = value

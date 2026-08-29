@@ -237,7 +237,7 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 			names := toolChoiceNames(t, tc.tools)
 			projection := responsesToolProjection{emitted: make(map[canonical.ToolKey][]ProviderRequestTool)}
 			if len(tc.tools) > 0 {
-				projection, _ = compileResponsesToolProjection(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
+				projection, _ = compileResponsesToolProjection(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", DefaultToolLowering())
 			}
 			got, err := encodeToolChoice(tc.policy, projection, names, nil, "")
 			if err != nil {
@@ -253,7 +253,7 @@ func TestEncodeToolChoice_RecordsPolicyLossWithoutProjectedTools(t *testing.T) {
 
 	webSearch := canonical.NewWebSearchDeclaration()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
-	projection, err := compileResponsesToolProjection([]canonical.ToolDeclaration{webSearch}, canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
+	projection, err := compileResponsesToolProjection([]canonical.ToolDeclaration{webSearch}, canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}

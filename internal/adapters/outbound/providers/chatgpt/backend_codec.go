@@ -11,6 +11,7 @@ func newBackendCodec(_ string) protocolcodec.Codec {
 		Protocol: protocolkind.Responses,
 		ResponsesDialect: protocolcodec.ResponsesDialect{
 			ForceArrayInput:     true,
+			OmitMaxOutputTokens: true,
 			DefaultStore:        &falseVal,
 			RequireStreamingSSE: true,
 		},

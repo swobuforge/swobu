@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -29,7 +30,7 @@ func NewEncodedResponseMessages(events canonical.ResponseStream, encode Response
 func (s *EncodedResponseMessages) Next(ctx context.Context) ([]byte, error) {
 	for len(s.pending) == 0 {
 		if s.events == nil || s.encode == nil {
-			err := errors.New("encoded response message stream is incomplete")
+			err := StageResponseFailure("client_stream_encode", errors.New("encoded response message stream is incomplete"))
 			s.fail(err)
 			return nil, err
 		}
@@ -41,9 +42,16 @@ func (s *EncodedResponseMessages) Next(ctx context.Context) ([]byte, error) {
 		if err != nil {
 			if errors.Is(err, io.EOF) && s.completion.Snapshot().State == CompletionPending {
 				s.fail(io.ErrUnexpectedEOF)
+			} else if !errors.Is(err, io.EOF) {
+				s.fail(err)
 			}
 			return nil, err
 		}
+		slog.Debug("canonical response event",
+			"component", "httpapi",
+			"event", "canonical_response_event",
+			"kind", string(event.Kind),
+		)
 		if event.Kind == canonical.EventUsage {
 			if payload, ok := event.Payload.(canonical.UsagePayload); ok {
 				s.completion.ObserveUsage(payload.Usage)
@@ -51,6 +59,7 @@ func (s *EncodedResponseMessages) Next(ctx context.Context) ([]byte, error) {
 		}
 		messages, err := s.encode(event)
 		if err != nil {
+			err = StageResponseFailure("client_stream_encode", err)
 			s.fail(err)
 			return nil, err
 		}
@@ -66,7 +75,7 @@ func (s *EncodedResponseMessages) Next(ctx context.Context) ([]byte, error) {
 func (s *EncodedResponseMessages) Close(ctx context.Context) error {
 	s.close.Do(func() {
 		if s.completion.Snapshot().State == CompletionPending {
-			s.fail(io.ErrClosedPipe)
+			s.fail(context.Canceled)
 		}
 		if s.events != nil {
 			s.closeErr = s.events.Close(ctx)

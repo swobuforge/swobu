@@ -96,13 +96,84 @@ type ToolLoweringContext struct {
 	Names   wire.ToolNames
 }
 
-// ToolLoweringRule returns target fragments for one canonical declaration.
-// handled=false delegates to the standard Chat Completions lowering.
-type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (fragments []any, handled bool, changes []compat.Change, err error)
+// ToolProjection is the complete Chat manifestation selected for one
+// canonical declaration occurrence.
+type ToolProjection struct {
+	Fragments   []ToolFragment
+	TargetType  string
+	TargetName  string
+	ProjectCall func(canonical.ToolCallItem) (toolCallBody, error)
+}
 
-// ToolPolicyLoweringRule compiles policy after the effective target tool set
-// is known. handled=false delegates to the standard protocol rule.
-type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
+// ToolFragment carries one declaration value and, when it uses standard Chat
+// grammar, its typed form. The compiler never inspects an arbitrary value to
+// recover semantic identity.
+type ToolFragment struct {
+	Value    any
+	Standard *ProviderRequestTool
+}
+
+// ToolTransformer totally projects one semantic tool slot occurrence.
+type ToolTransformer func(ToolLoweringContext, canonical.ToolDeclaration) (ToolProjection, []compat.Change, error)
+
+// compiledToolProjection pairs inert emitted provenance with the typed,
+// family-owned behavior selected for each canonical occurrence.
+type compiledToolProjection struct {
+	lowered     wire.LoweredToolSet
+	occurrences map[canonical.ToolKey]ToolProjection
+}
+
+// ToolLowering is the resolved Chat Completions tool algebra.
+type ToolLowering struct {
+	Function  ToolTransformer
+	Custom    ToolTransformer
+	WebSearch ToolTransformer
+	Discovery ToolTransformer
+}
+
+// Lowering is the Chat Completions semantic algebra. Protocol construction
+// overlays sparse provider divergences onto the total protocol baseline before
+// request encoding; compilers accept only the resulting total value.
+type Lowering struct {
+	Tools     ToolLowering
+	Reasoning ReasoningLoweringRule
+	Message   MessageLoweringRule
+}
+
+// Overlay replaces only explicitly supplied semantic slots.
+func (l Lowering) Overlay(override Lowering) Lowering {
+	l.Tools = l.Tools.Overlay(override.Tools)
+	if override.Reasoning != nil {
+		l.Reasoning = override.Reasoning
+	}
+	if override.Message != nil {
+		l.Message = override.Message
+	}
+	return l
+}
+
+// Overlay replaces only explicitly supplied slots.
+func (l ToolLowering) Overlay(override ToolLowering) ToolLowering {
+	if override.Function != nil {
+		l.Function = override.Function
+	}
+	if override.Custom != nil {
+		l.Custom = override.Custom
+	}
+	if override.WebSearch != nil {
+		l.WebSearch = override.WebSearch
+	}
+	if override.Discovery != nil {
+		l.Discovery = override.Discovery
+	}
+	return l
+}
+
+// ProtocolLowering returns the total Chat Completions protocol baseline.
+// Provider construction overlays only proven divergences onto this value.
+func ProtocolLowering() Lowering {
+	return DefaultLowering()
+}
 
 // MessageLoweringRule mutates or annotates one lowered Chat Completions message
 // at its canonical occurrence during traversal.
@@ -140,10 +211,7 @@ func (d ReasoningTargetDialect) ProjectDisabled(changeLog *[]compat.Change) bool
 
 // CompileOptions contains only proven target-dialect extension points.
 type CompileOptions struct {
-	LowerTool                  ToolLoweringRule
-	LowerToolPolicy            ToolPolicyLoweringRule
-	LowerReasoning             ReasoningLoweringRule
-	LowerMessage               MessageLoweringRule
+	Lowering                   Lowering
 	UseMaxCompletionTokens     bool
 	AcceptsMaxCompletionTokens func() bool
 	OmitParallelToolCallsFalse func() bool
@@ -168,7 +236,7 @@ type toolCustomBody struct {
 }
 
 func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{})
+	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -178,6 +246,10 @@ func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNam
 // CompileProviderRequestDocument lowers canonical semantics for one exact
 // target, preserving source order and resolving dependent policy afterward.
 func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options CompileOptions) (ProviderRequestDocument, error) {
+	lowering := options.Lowering
+	if !lowering.resolved() {
+		return ProviderRequestDocument{}, canonical.InternalError("Chat Completions compile requires resolved lowering")
+	}
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -243,38 +315,23 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		}
 		conversation = append(conversation, item)
 	}
-	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID, options.LowerMessage)
+	policy, err := req.EffectiveToolPolicy()
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	wireTools, compiledTools, toolProjection, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, lowering.Tools)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	// Declarations resolve emitted identity before history and dependent policy.
+	wireMessages, err := encodeItems(conversation, tools, names, toolProjection, changeLog, exchangeID, lowering.Message)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if contextErr != nil {
 		return ProviderRequestDocument{}, contextErr
 	}
-	policy, err := req.EffectiveToolPolicy()
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	wireTools, compiledTools, loweredTools, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, options.LowerTool)
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	var choice any
-	if options.LowerToolPolicy != nil {
-		var handled bool
-		var policyChanges []compat.Change
-		choice, handled, policyChanges, err = options.LowerToolPolicy(policy, loweredTools, names)
-		if changeLog != nil {
-			*changeLog = append(*changeLog, policyChanges...)
-		}
-		if err != nil {
-			return ProviderRequestDocument{}, err
-		}
-		if !handled {
-			choice, err = encodeChatCompletionsToolChoice(policy, loweredTools, names, changeLog, exchangeID)
-		}
-	} else {
-		choice, err = encodeChatCompletionsToolChoice(policy, loweredTools, names, changeLog, exchangeID)
-	}
+	choice, err := encodeChatCompletionsToolChoice(policy, toolProjection.lowered, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -284,7 +341,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
-	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0, options.OmitParallelToolCallsFalse, changeLog); err != nil {
+	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), toolProjection.lowered.TotalFragments() > 0, options.OmitParallelToolCallsFalse, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
@@ -303,7 +360,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		payload["max_tokens"] = *maxTokens
 	}
 	var providerTools any
-	if loweredTools.TotalFragments() > 0 {
+	if toolProjection.lowered.TotalFragments() > 0 {
 		providerTools = compiledTools
 	}
 	document := ProviderRequestDocument{
@@ -326,23 +383,25 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if _, err := projectChatResponsesReasoningContext(req.Reasoning(), changeLog, exchangeID); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if options.LowerReasoning != nil {
-		fields, err := options.LowerReasoning(req, options.ReasoningTarget, changeLog, exchangeID)
-		if err != nil {
-			return ProviderRequestDocument{}, err
-		}
-		if err := applyReasoningFields(payload, fields); err != nil {
-			return ProviderRequestDocument{}, err
-		}
-	} else {
-		if err := encodeChatCompletionsReasoning(payload, req, options.ReasoningTarget, changeLog); err != nil {
-			return ProviderRequestDocument{}, err
-		}
+	fields, err := lowering.Reasoning(req, options.ReasoningTarget, changeLog, exchangeID)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if err := applyReasoningFields(payload, fields); err != nil {
+		return ProviderRequestDocument{}, err
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
 	}
 	return document, nil
+}
+
+func (l Lowering) resolved() bool {
+	return l.Tools.resolved() && l.Reasoning != nil && l.Message != nil
+}
+
+func (l ToolLowering) resolved() bool {
+	return l.Function != nil && l.Custom != nil && l.WebSearch != nil && l.Discovery != nil
 }
 
 func hasProviderDiscovery(tools []canonical.ToolDeclaration) bool {
@@ -534,7 +593,7 @@ func chatCompletionsWireToolChoiceShape(choice any) string {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical tool-call kinds.
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, lowerMessage MessageLoweringRule) ([]ProviderRequestMessage, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, projection compiledToolProjection, changeLog *[]compat.Change, exchangeID string, lowerMessage MessageLoweringRule) ([]ProviderRequestMessage, error) {
 	var err error
 	items, err = projectChatResponsesItems(items, changeLog, exchangeID)
 	if err != nil {
@@ -594,7 +653,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			callIDs := make([]canonical.ToolCallID, 0)
 			for i < len(items) && items[i].Kind() == canonical.ItemKindToolCall {
 				call, _ := items[i].ToolCall()
-				encoded, err := encodeChatToolCall(call, names)
+				encoded, err := encodeChatToolCall(call, projection)
 				if err != nil {
 					return nil, err
 				}
@@ -610,10 +669,8 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			}
 		}
 		wire.SourceEnd = i
-		if lowerMessage != nil {
-			if err := lowerMessage(&wire, items); err != nil {
-				return nil, err
-			}
+		if err := lowerMessage(&wire, items); err != nil {
+			return nil, err
 		}
 		out = append(out, wire)
 	}
@@ -674,28 +731,23 @@ func appendChatRequestChange(changeLog *[]compat.Change, exchangeID string, feat
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into chat-completions wire variants.
-func encodeChatToolCall(call canonical.ToolCallItem, names wire.ToolNames) (toolCallBody, error) {
-	tool := call.Tool()
-	name, err := wire.EncodeToolName(names, tool)
+func encodeChatToolCall(call canonical.ToolCallItem, projection compiledToolProjection) (toolCallBody, error) {
+	record, ok := projection.lowered.FindSource(call.Tool())
+	if !ok {
+		return toolCallBody{}, canonical.InternalError("Chat tool-call history lost emitted declaration identity")
+	}
+	if record.FragmentCount != 1 {
+		return toolCallBody{}, canonical.InternalError("Chat tool-call history has no singular emitted identity")
+	}
+	occurrence, ok := projection.occurrences[call.Tool()]
+	if !ok || occurrence.ProjectCall == nil {
+		return toolCallBody{}, canonical.InternalError("Chat tool-call history has no projected call behavior")
+	}
+	projected, err := occurrence.ProjectCall(call)
 	if err != nil {
 		return toolCallBody{}, err
 	}
-	switch tool.Kind() {
-	case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
-		object, ok := call.Input().Object()
-		if !ok {
-			return toolCallBody{}, canonical.BadRequest("chat completions function calls require object input")
-		}
-		return toolCallBody{ID: call.CallID().String(), Type: "function", Function: &toolFunctionBody{Name: name, Arguments: object.String()}}, nil
-	case canonical.ToolKindCustom:
-		text, ok := call.Input().Text()
-		if !ok {
-			return toolCallBody{}, canonical.BadRequest("chat completions custom calls require text input")
-		}
-		return toolCallBody{ID: call.CallID().String(), Type: "custom", Custom: &toolCustomBody{Name: name, Input: text}}, nil
-	default:
-		return toolCallBody{}, canonical.InternalError("Chat Completions received an invalid canonical tool-call kind")
-	}
+	return projected, nil
 }
 
 func encodeChatDiscoveryResult(result canonical.ToolDiscoveryResultItem) (string, error) {

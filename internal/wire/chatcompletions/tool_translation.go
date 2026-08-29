@@ -88,68 +88,145 @@ func chatCompletionsToolParametersFromWire(raw json.RawMessage) (canonical.ToolS
 }
 
 func encodeChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, nil)
+	typed, _, _, err := compileChatCompletionsTools(tools, names, changeLog, exchangeID, ToolLowering{})
 	return typed, err
 }
 
-func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, []any, wire.LoweredToolSet, error) {
+// DefaultToolLowering returns official Chat Completions semantics.
+func DefaultToolLowering() ToolLowering {
+	function := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		encoded, err := encodeChatCompletionsTool(tool, ctx.Names)
+		if err != nil {
+			return ToolProjection{}, nil, err
+		}
+		return chatFunctionProjection(encoded, func(call canonical.ToolCallItem) (string, error) {
+			object, ok := call.Input().Object()
+			if !ok {
+				return "", canonical.BadRequest("chat completions function projection requires object input")
+			}
+			return object.String(), nil
+		}), nil, nil
+	}
+	custom := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		encoded, err := encodeChatCompletionsTool(tool, ctx.Names)
+		if err != nil {
+			return ToolProjection{}, nil, err
+		}
+		return chatCustomProjection(encoded), nil, nil
+	}
+	discovery := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		decl, ok := tool.Discovery()
+		if !ok || decl.Executor() != canonical.DiscoveryExecutorClient {
+			return ToolProjection{}, []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
+		}
+		encoded, err := encodeChatCompletionsDiscoveryTool(tool, decl, ctx.Names)
+		if err != nil {
+			return ToolProjection{}, nil, err
+		}
+		return chatFunctionProjection(encoded, func(call canonical.ToolCallItem) (string, error) {
+			object, ok := call.Input().Object()
+			if !ok {
+				return "", canonical.BadRequest("chat completions discovery projection requires object input")
+			}
+			return object.String(), nil
+		}), nil, nil
+	}
+	omit := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		return ToolProjection{}, []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
+	}
+	return ToolLowering{Function: function, Custom: custom, WebSearch: omit, Discovery: discovery}
+}
+
+func chatFunctionProjection(encoded ProviderRequestTool, arguments func(canonical.ToolCallItem) (string, error)) ToolProjection {
+	return ToolProjection{Fragments: []ToolFragment{{Value: encoded, Standard: &encoded}}, TargetType: "function", TargetName: encoded.Function.Name,
+		ProjectCall: func(call canonical.ToolCallItem) (toolCallBody, error) {
+			value, err := arguments(call)
+			if err != nil {
+				return toolCallBody{}, err
+			}
+			return toolCallBody{ID: call.CallID().String(), Type: "function", Function: &toolFunctionBody{Name: encoded.Function.Name, Arguments: value}}, nil
+		},
+	}
+}
+
+func chatCustomProjection(encoded ProviderRequestTool) ToolProjection {
+	return ToolProjection{Fragments: []ToolFragment{{Value: encoded, Standard: &encoded}}, TargetType: "custom", TargetName: encoded.Custom.Name,
+		ProjectCall: func(call canonical.ToolCallItem) (toolCallBody, error) {
+			text, ok := call.Input().Text()
+			if !ok {
+				return toolCallBody{}, canonical.BadRequest("chat completions custom calls require text input")
+			}
+			return toolCallBody{ID: call.CallID().String(), Type: "custom", Custom: &toolCustomBody{Name: encoded.Custom.Name, Input: text}}, nil
+		},
+	}
+}
+
+// FunctionProjection returns a complete Chat Function manifestation using the
+// supplied argument projector. Provider construction can therefore replace a
+// semantic slot without teaching history serialization the new argument shape.
+func FunctionProjection(encoded ProviderRequestTool, arguments func(canonical.ToolCallItem) (string, error)) ToolProjection {
+	return chatFunctionProjection(encoded, arguments)
+}
+
+// DefaultLowering returns total official Chat Completions semantics.
+func DefaultLowering() Lowering {
+	return Lowering{
+		Tools: DefaultToolLowering(),
+		Reasoning: func(req canonical.CanonicalRequest, target ReasoningTargetDialect, changeLog *[]compat.Change, _ string) (map[string]any, error) {
+			fields := make(map[string]any)
+			if err := encodeChatCompletionsReasoning(fields, req, target, changeLog); err != nil {
+				return nil, err
+			}
+			return fields, nil
+		},
+		Message: func(*ProviderRequestMessage, []canonical.CanonicalItem) error { return nil },
+	}
+}
+
+func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, lowering ToolLowering) ([]ProviderRequestTool, []any, compiledToolProjection, error) {
 	if len(tools) == 0 {
-		return nil, nil, wire.LoweredToolSet{}, nil
+		return nil, nil, compiledToolProjection{occurrences: make(map[canonical.ToolKey]ToolProjection)}, nil
 	}
 	typed := make([]ProviderRequestTool, 0, len(tools))
 	out := make([]any, 0, len(tools))
-	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
-	for ordinal, tool := range tools {
-		if rule != nil {
-			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
-			if changeLog != nil {
-				*changeLog = append(*changeLog, changes...)
-			}
-			if err != nil {
-				return nil, nil, wire.LoweredToolSet{}, err
-			}
-			if handled {
-				out = append(out, fragments...)
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-					Key:           tool.Key(),
-					Kind:          tool.Kind(),
-					FragmentCount: len(fragments),
-				})
-				continue
-			}
-		}
-		if _, function := tool.Function(); !function {
-			if _, custom := tool.Custom(); !custom {
-				if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorClient {
-					wireTool, err := encodeChatCompletionsDiscoveryTool(tool, discovery, names)
-					if err != nil {
-						return nil, nil, wire.LoweredToolSet{}, err
-					}
-					typed = append(typed, wireTool)
-					out = append(out, wireTool)
-					lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind(), FragmentCount: 1})
-					continue
-				}
-				if changeLog != nil {
-					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
-				}
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
-				continue
-			}
-		}
-		wireTool, err := encodeChatCompletionsTool(tool, names)
-		if err != nil {
-			return nil, nil, wire.LoweredToolSet{}, err
-		}
-		typed = append(typed, wireTool)
-		out = append(out, wireTool)
-		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-			Key:           tool.Key(),
-			Kind:          tool.Kind(),
-			FragmentCount: 1,
-		})
+	projectionSet := compiledToolProjection{lowered: wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}, occurrences: make(map[canonical.ToolKey]ToolProjection, len(tools))}
+	if !lowering.resolved() {
+		return nil, nil, compiledToolProjection{}, canonical.InternalError("Chat tool compilation requires resolved lowering")
 	}
-	return typed, out, lowered, nil
+	for ordinal, tool := range tools {
+		var transformer ToolTransformer
+		switch tool.Kind() {
+		case canonical.ToolKindFunction:
+			transformer = lowering.Function
+		case canonical.ToolKindCustom:
+			transformer = lowering.Custom
+		case canonical.ToolKindWebSearch:
+			transformer = lowering.WebSearch
+		case canonical.ToolKindDiscovery:
+			transformer = lowering.Discovery
+		}
+		if transformer == nil {
+			return nil, nil, compiledToolProjection{}, canonical.InternalError("Chat lowering contains an unresolved tool slot")
+		}
+		projection, changes, err := transformer(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
+		if changeLog != nil {
+			*changeLog = append(*changeLog, changes...)
+		}
+		if err != nil {
+			return nil, nil, compiledToolProjection{}, err
+		}
+		for _, fragment := range projection.Fragments {
+			out = append(out, fragment.Value)
+			if fragment.Standard != nil {
+				typed = append(typed, *fragment.Standard)
+			}
+		}
+		projectionSet.lowered.Records = append(projectionSet.lowered.Records, wire.LoweredToolRecord{
+			Key: tool.Key(), Kind: tool.Kind(), FragmentCount: len(projection.Fragments), TargetType: projection.TargetType, TargetName: projection.TargetName,
+		})
+		projectionSet.occurrences[tool.Key()] = projection
+	}
+	return typed, out, projectionSet, nil
 }
 
 func encodeChatCompletionsTool(tool canonical.ToolDeclaration, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -363,6 +440,12 @@ func cloneBoolPointer(ptr *bool) *bool {
 
 // swobu:lint ignore string-switch because=protocol boundary encodes specific tool-choice variants.
 func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+	// Out-of-band projections have a real emitted identity but intentionally no
+	// inline declaration fragment. Their owning provider projects policy through
+	// its top-level request fields, so Chat must not report policy omission.
+	if allChatToolsOutOfBand(lowered) {
+		return nil, nil
+	}
 	if lowered.TotalFragments() == 0 {
 		if policy.Mode == canonical.ToolPolicyRequired || policy.Mode == canonical.ToolPolicySpecific {
 			if changeLog != nil {
@@ -392,11 +475,15 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 			}
 			return nil, nil
 		}
-		switch record.Kind {
-		case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
-			name, err := wire.EncodeToolName(names, record.Key)
-			if err != nil {
-				return nil, err
+		switch record.TargetType {
+		case "function":
+			name := record.TargetName
+			if name == "" {
+				var err error
+				name, err = wire.EncodeToolName(names, record.Key)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return map[string]any{
 				"type": "function",
@@ -404,10 +491,14 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 					"name": strings.TrimSpace(name),
 				},
 			}, nil
-		case canonical.ToolKindCustom:
-			name, err := wire.EncodeToolName(names, record.Key)
-			if err != nil {
-				return nil, err
+		case "custom":
+			name := record.TargetName
+			if name == "" {
+				var err error
+				name, err = wire.EncodeToolName(names, record.Key)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return map[string]any{
 				"type": "custom",
@@ -416,6 +507,12 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 				},
 			}, nil
 		default:
+			if record.TargetType == "out_of_band" {
+				return nil, nil
+			}
+			if strings.TrimSpace(record.TargetType) != "" {
+				return map[string]any{"type": strings.TrimSpace(record.TargetType)}, nil
+			}
 			if changeLog != nil {
 				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
 			}
@@ -424,4 +521,16 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 	default:
 		return nil, canonical.BadRequest("chat completions request tool_choice is invalid")
 	}
+}
+
+func allChatToolsOutOfBand(lowered wire.LoweredToolSet) bool {
+	if lowered.Len() == 0 {
+		return false
+	}
+	for _, record := range lowered.Records {
+		if record.FragmentCount != 0 || record.TargetType != "out_of_band" {
+			return false
+		}
+	}
+	return true
 }

@@ -55,15 +55,15 @@ func TestDeferredWebSearchRoundTripsNatively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
+			return ToolProjection{}, nil, canonical.InternalError("Messages WebSearch slot received a non-WebSearch declaration")
 		}
-		return []ProviderRequestTool{{
+		return HostedSearchProjection(ProviderRequestTool{
 			Type:           "web_search_20260209",
 			Name:           canonical.WebSearchToolKey().Name(),
 			AllowedCallers: []string{"direct"},
-		}}, true, nil, nil
+		}), nil, nil
 	}
 	doc, err := CompileProviderRequestDocument(
 		decoded.Request.Request,
@@ -71,7 +71,7 @@ func TestDeferredWebSearchRoundTripsNatively(t *testing.T) {
 		delivery.BufferedDelivery(),
 		nil,
 		"exchange",
-		CompileOptions{LowerTool: rule},
+		CompileOptions{Lowering: DefaultLowering().Overlay(Lowering{Tools: ToolLowering{WebSearch: rule}})},
 	)
 	if err != nil {
 		t.Fatal(err)

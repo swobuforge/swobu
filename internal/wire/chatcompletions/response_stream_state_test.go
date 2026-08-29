@@ -173,7 +173,7 @@ func TestChatStreamDoesNotEraseKnownCustomToolCall(t *testing.T) {
 
 func TestChatStreamingCustomDeclarationReachesExactFragmentedCall(t *testing.T) {
 	request := chatStreamCustomRequest(t)
-	document, err := CompileProviderRequestDocument(request, testAttemptToolNames(request), delivery.StreamingDelivery(delivery.FramingSSE), nil, "ex", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, testAttemptToolNames(request), delivery.StreamingDelivery(delivery.FramingSSE), nil, "ex", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}

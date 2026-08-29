@@ -87,11 +87,14 @@ func TestChatStreamingClientDoesNotProjectResponsesFailureAsStop(t *testing.T) {
 	handler.ServeHTTP(response, request)
 
 	raw := response.Body.Bytes()
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want uncommitted backend 502: %s", response.Code, raw)
+	}
 	if bytes.Contains(raw, []byte(`"finish_reason":"stop"`)) {
 		t.Fatalf("failed Responses stream became Chat success: %s", raw)
 	}
-	if !bytes.Contains(raw, []byte(`"error"`)) {
-		t.Fatalf("failed Responses stream lacks Chat error: status=%d body=%s", response.Code, raw)
+	if !bytes.Contains(raw, []byte("backend_failed")) {
+		t.Fatalf("failed Responses stream lacks uncommitted backend error: status=%d body=%s", response.Code, raw)
 	}
 }
 

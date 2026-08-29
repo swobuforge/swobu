@@ -197,11 +197,11 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 		if !ok || call.Tool().Kind() == canonical.ToolKindWebSearch {
 			continue
 		}
-		name, nameErr := request.ToolNames.WireName(call.Tool())
-		if nameErr != nil {
-			return interactionRequest{}, changes, nameErr
+		record, found := loweredTools.FindSource(call.Tool())
+		if !found || record.FragmentCount != 1 || strings.TrimSpace(record.TargetName) == "" {
+			return interactionRequest{}, changes, canonical.InternalError("Gemini retained callable history has no emitted target identity")
 		}
-		functionNames[call.CallID()] = name
+		functionNames[call.CallID()] = record.TargetName
 	}
 	projectedProviderRequest := request
 	projectedProviderRequest.Canonical = inputRequest
@@ -209,7 +209,7 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 	if err != nil {
 		return interactionRequest{}, changes, err
 	}
-	if encoded.GenerationConfig, changes, err = geminiGenerationConfig(canonicalRequest, loweredTools, request.ToolNames, changes); err != nil {
+	if encoded.GenerationConfig, changes, err = geminiGenerationConfig(canonicalRequest, loweredTools, changes); err != nil {
 		return interactionRequest{}, changes, err
 	}
 	if encoded.ResponseFormat, changes, err = geminiResponseFormat(canonicalRequest.OutputFormat(), changes); err != nil {
@@ -272,12 +272,11 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 			} else {
 				return interactionRequest{}, changes, canonical.InternalError("Gemini historical callable has invalid input")
 			}
-			name, nameErr := wire.EncodeToolName(request.ToolNames, call.Tool())
-			if nameErr != nil {
-				return interactionRequest{}, changes, nameErr
+			if strings.TrimSpace(record.TargetName) == "" {
+				return interactionRequest{}, changes, canonical.InternalError("Gemini retained callable history has no emitted target name")
 			}
-			functionNames[call.CallID()] = name
-			encoded.Input = append(encoded.Input, interactionInputStep{Type: "function_call", ID: call.CallID().String(), Name: name, Arguments: wireArguments})
+			functionNames[call.CallID()] = record.TargetName
+			encoded.Input = append(encoded.Input, interactionInputStep{Type: "function_call", ID: call.CallID().String(), Name: record.TargetName, Arguments: wireArguments})
 			continue
 		}
 		if result, ok := item.ToolResult(); ok {
@@ -577,7 +576,7 @@ func validateGeminiSearchResultReplay(raw []byte, callID canonical.ToolCallID) e
 	return nil
 }
 
-func geminiGenerationConfig(request canonical.CanonicalRequest, lowered wire.LoweredToolSet, names wire.ToolNames, changes []compat.Change) (*interactionGenerationConfig, []compat.Change, error) {
+func geminiGenerationConfig(request canonical.CanonicalRequest, lowered wire.LoweredToolSet, changes []compat.Change) (*interactionGenerationConfig, []compat.Change, error) {
 	controls := request.Controls()
 	if compute, specified := request.Reasoning().ComputeField().Get(); specified && compute.Kind() == canonical.ReasoningDisabled {
 		changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{}))
@@ -616,7 +615,7 @@ func geminiGenerationConfig(request canonical.CanonicalRequest, lowered wire.Low
 		return nil, changes, err
 	}
 	if lowered.Len() > 0 || request.ToolPolicySpecified() {
-		choice, represented, choiceErr := geminiToolChoice(policy, lowered, names)
+		choice, represented, choiceErr := geminiToolChoice(policy, lowered)
 		if choiceErr != nil {
 			return nil, changes, choiceErr
 		}
@@ -666,7 +665,7 @@ func geminiEffortApproximation() compat.Change {
 	return compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{})
 }
 
-func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (interactionToolChoice, bool, error) {
+func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet) (interactionToolChoice, bool, error) {
 	switch policy.Mode {
 	case canonical.ToolPolicyNone:
 		return interactionToolChoice{Mode: "none"}, true, nil
@@ -686,11 +685,10 @@ func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, 
 		if !ok || record.FragmentCount != 1 {
 			return interactionToolChoice{}, false, nil
 		}
-		name, err := wire.EncodeToolName(names, record.Key)
-		if err != nil {
-			return interactionToolChoice{}, false, err
+		if strings.TrimSpace(record.TargetName) == "" {
+			return interactionToolChoice{}, false, canonical.InternalError("Gemini specific tool policy has no emitted target name")
 		}
-		return interactionToolChoice{AllowedTools: &interactionAllowedTools{Mode: "any", Tools: []string{name}}}, true, nil
+		return interactionToolChoice{AllowedTools: &interactionAllowedTools{Mode: "any", Tools: []string{record.TargetName}}}, true, nil
 	default:
 		return interactionToolChoice{}, false, canonical.InternalError("Gemini tool policy is invalid")
 	}
@@ -749,7 +747,7 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 			// Canonical owns web search only. Explicitly selecting the provider's
 			// web mode avoids silently enabling image or enterprise search.
 			tools = append(tools, interactionTool{Type: "google_search", SearchTypes: []string{"web_search"}})
-			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1})
+			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1, TargetType: "google_search"})
 			continue
 		}
 		function, ok := declaration.Function()
@@ -764,7 +762,7 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 					return nil, wire.LoweredToolSet{}, changes, canonical.InternalError("Gemini discovery declaration has no schema")
 				}
 				tools = append(tools, interactionTool{Type: "function", Name: name, Description: discovery.Description(), Parameters: json.RawMessage(parameters)})
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1})
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1, TargetType: "function", TargetName: name})
 				continue
 			}
 			if _, providerDiscovery := declaration.Discovery(); providerDiscovery {
@@ -787,7 +785,7 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 			return nil, wire.LoweredToolSet{}, changes, canonical.InternalError("Gemini function declaration has no schema")
 		}
 		tools = append(tools, interactionTool{Type: "function", Name: name, Description: function.Description(), Parameters: json.RawMessage(parameters)})
-		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1})
+		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1, TargetType: "function", TargetName: name})
 	}
 	return tools, lowered, changes, nil
 }

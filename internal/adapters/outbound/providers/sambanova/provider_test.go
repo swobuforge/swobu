@@ -32,7 +32,7 @@ func TestRuntimeComposesAllSharedProtocolsAndMessagesRefinement(t *testing.T) {
 		}
 		if kind == protocolkind.Messages {
 			codec, ok := backend.Codec.(protocolcodec.Codec)
-			if !ok || !codec.MessagesDialect.OmitAdaptiveThinking {
+			if !ok || codec.MessagesDialect.Lowering.Reasoning == nil {
 				t.Fatalf("Messages codec = %#v", backend.Codec)
 			}
 		}

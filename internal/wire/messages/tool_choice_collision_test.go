@@ -28,7 +28,7 @@ func TestMessagesTreatsPostAllocationWireNameCollisionAsInternalInvariant(t *tes
 		t.Fatal(err)
 	}
 
-	_, err = CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "", CompileOptions{})
+	_, err = CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "", CompileOptions{Lowering: DefaultLowering()})
 	var canonicalError canonical.Error
 	if !errors.As(err, &canonicalError) || canonicalError.Code != canonical.ErrorCodeInternal {
 		t.Fatalf("error = %T %v, want internal allocator invariant failure", err, err)

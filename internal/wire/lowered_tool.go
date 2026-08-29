@@ -8,6 +8,11 @@ type LoweredToolRecord struct {
 	Key           canonical.ToolKey
 	Kind          canonical.ToolKind
 	FragmentCount int
+	// TargetType and TargetName are the emitted identity selected by lowering.
+	// History and policy consume these fields instead of re-deriving target
+	// semantics from the canonical kind.
+	TargetType string
+	TargetName string
 }
 
 // LoweredToolSet records the sequence of lowered canonical tool declarations.

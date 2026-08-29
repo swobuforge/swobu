@@ -19,8 +19,8 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
-	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
 func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
@@ -637,7 +637,7 @@ func (b *blockingReadCloser) Close() error {
 	return nil
 }
 
-func TestCompileChatRequest_ToolPolicyLoweringRule(t *testing.T) {
+func TestCompileChatRequest_ToolPolicyConsumesEmittedProjection(t *testing.T) {
 	webSearch := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearch})
 	searchKey := webSearch.Key()
@@ -654,33 +654,14 @@ func TestCompileChatRequest_ToolPolicyLoweringRule(t *testing.T) {
 		Delivery: delivery.BufferedDelivery(),
 	}
 
-	// Without LowerToolPolicy, the tool remains serialized while specific choice is omitted.
-	dialectWithoutPolicy := ChatDialect{
-		LowerTool: func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
-			if tool.Kind() == canonical.ToolKindWebSearch {
-				return []any{map[string]any{"type": "browser_search"}}, true, nil, nil
-			}
-			return nil, false, nil, nil
-		},
+	dialect := ChatDialect{
+		Lowering: chatcompletions.Lowering{Tools: chatcompletions.ToolLowering{WebSearch: func(_ chatcompletions.ToolLoweringContext, _ canonical.ToolDeclaration) (chatcompletions.ToolProjection, []compat.Change, error) {
+			return chatcompletions.ToolProjection{Fragments: []chatcompletions.ToolFragment{{Value: map[string]any{"type": "browser_search"}}}, TargetType: "browser_search"}, nil, nil
+		}}},
 	}
-	docWithoutPolicy, changes, err := CompileChatRequest(request, dialectWithoutPolicy)
-	if err != nil || len(changes) != 1 || changes[0].Kind != compat.Omission {
-		t.Fatalf("without LowerToolPolicy document=%#v changes=%#v err=%v", docWithoutPolicy, changes, err)
-	}
-
-	// 2. With LowerToolPolicy, provider produces target-aware tool choice
-	dialectWithPolicy := ChatDialect{
-		LowerTool: dialectWithoutPolicy.LowerTool,
-		LowerToolPolicy: func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (any, bool, []compat.Change, error) {
-			if policy.Mode == canonical.ToolPolicySpecific {
-				return map[string]any{"type": "browser_search"}, true, nil, nil
-			}
-			return nil, false, nil, nil
-		},
-	}
-	doc, _, err := CompileChatRequest(request, dialectWithPolicy)
+	doc, _, err := CompileChatRequest(request, dialect)
 	if err != nil {
-		t.Fatalf("with LowerToolPolicy failed: %v", err)
+		t.Fatalf("compile failed: %v", err)
 	}
 	encoded, err := chatcompletions.EncodeProviderRequestDocument(doc)
 	if err != nil {
@@ -798,7 +779,7 @@ func TestResponsesCustomAsFunctionUsesOneEmittedCallableForDeclarationHistoryAnd
 	}
 	document, changes, err := (Codec{
 		Protocol:         protocolkind.Responses,
-		ResponsesDialect: ResponsesDialect{LowerTool: ResponsesCustomAsFunction()},
+		ResponsesDialect: ResponsesDialect{Tools: responses.ToolLowering{Custom: ResponsesCustomAsFunction()}},
 	}).Encode(provider.Request{
 		Canonical: request, Delivery: delivery.BufferedDelivery(), ToolNames: names,
 		TargetFacts: provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
@@ -828,5 +809,51 @@ func TestResponsesCustomAsFunctionUsesOneEmittedCallableForDeclarationHistoryAnd
 	}
 	if strings.Contains(wire, "custom_tool_call") || strings.Contains(wire, `"type":"custom"`) {
 		t.Fatalf("wrapped custom request leaked native Custom syntax: %s", wire)
+	}
+}
+
+func TestResponsesCustomSlotAloneOwnsAWeirdCompleteProjection(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "canonical-shell")
+	tool := canonicaltest.MustCustomTool(key, "Run raw text", canonical.EmptyToolFormat())
+	call := canonicaltest.ToolCall(t, "call_weird", key, canonical.NewTextToolInput("abc"))
+	callValue, _ := call.ToolCall()
+	result, err := canonical.NewToolResultItem(callValue.CallID(), []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      canonical.Specify("model"),
+		Items:      []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, tool), call, result},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key)),
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weirdCustom := func(_ responses.ToolLoweringContext, _ canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
+		encoded := responses.ProviderRequestTool{
+			Type: "function", Name: "x", Parameters: map[string]any{
+				"type": "object", "properties": map[string]any{"payload": map[string]any{"type": "string"}}, "required": []string{"payload"},
+			},
+		}
+		return responses.CustomAsFunctionProjection(encoded, "payload"), nil, nil
+	}
+	document, _, err := (Codec{
+		Protocol:         protocolkind.Responses,
+		ResponsesDialect: ResponsesDialect{Tools: responses.ToolLowering{Custom: weirdCustom}},
+	}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), ToolNames: names})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.RawBytes())
+	for _, want := range []string{
+		`"tools":[{"type":"function","name":"x"`,
+		`"tool_choice":{"name":"x","type":"function"}`,
+		`"type":"function_call","call_id":"call_weird","name":"x","arguments":"{\"payload\":\"abc\"}"`,
+		`"type":"function_call_output","call_id":"call_weird"`,
+	} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("weird Custom projection = %s, want %s", wire, want)
+		}
 	}
 }

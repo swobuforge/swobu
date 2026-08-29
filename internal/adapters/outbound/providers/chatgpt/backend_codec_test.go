@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -69,6 +70,79 @@ func TestBackendCodecNormalizesCodexPayload(t *testing.T) {
 	first, ok := input[0].(map[string]any)
 	if !ok || first["type"] != "message" || first["role"] != "user" || first["content"] != "hello" {
 		t.Fatalf("input[0]=%#v, want canonical user message", input[0])
+	}
+}
+
+func TestBackendCodecOmitsUnsupportedMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	maxOutputTokens := 64000
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxOutputTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, changes, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model:    canonical.Specify("gpt-5.6-sol"),
+			Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
+			Controls: controls,
+		}),
+		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, ok := payload["max_output_tokens"]; ok {
+		t.Fatalf("max_output_tokens reached ChatGPT Codex: %s", doc.RawBytes())
+	}
+	found := false
+	for _, change := range changes {
+		if change.Capability == canonical.RequestControlsMaxOutputTokens && change.Kind == compat.Omission {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("changes = %#v, want max-output omission", changes)
+	}
+}
+
+func TestBackendCodecKeepsInstructionsOutOfSystemInput(t *testing.T) {
+	t.Parallel()
+
+	doc, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("gpt-5.6-sol"),
+			Items: []canonical.CanonicalItem{
+				canonicaltest.MustInstruction(canonical.MessageRoleSystem, "You are a coding agent."),
+				canonicaltest.Message(t, canonical.MessageRoleUser, "hello"),
+			},
+		}),
+		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var payload struct {
+		Instructions string `json:"instructions"`
+		Input        []struct {
+			Role string `json:"role"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Instructions != "You are a coding agent." {
+		t.Fatalf("instructions = %q", payload.Instructions)
+	}
+	for index, item := range payload.Input {
+		if item.Role == "system" {
+			t.Fatalf("input[%d] carries forbidden system role: %s", index, doc.RawBytes())
+		}
 	}
 }
 

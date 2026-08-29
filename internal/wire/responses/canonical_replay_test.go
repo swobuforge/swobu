@@ -294,11 +294,11 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(decoded.Request.Request), nil, "", nil)
+	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(decoded.Request.Request), nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
-	segment, err := encodeConversation(items[2:], decoded.Request.Request.Items(), nil, testAttemptToolNames(decoded.Request.Request), nil, nil, "", &projection)
+	segment, err := encodeConversation(items[2:], decoded.Request.Request.Items(), nil, testAttemptToolNames(decoded.Request.Request), nil, nil, nil, "", &projection)
 	if err != nil {
 		t.Fatalf("encode result-only segment: %v", err)
 	}
@@ -382,15 +382,16 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 		tools        string
 		wantKind     canonical.ItemKind
 		wantToolKind canonical.ToolKind
+		wantOmitted  bool
 	}{
 		{name: "message", input: `{"type":"message","role":"assistant","content":"hello"}`, wantKind: canonical.ItemKindMessage},
 		{name: "function call", input: `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}`, tools: `,"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindFunction},
 		{name: "custom tool call", input: `{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""}`, tools: `,"tools":[{"type":"custom","name":"shell","format":{"type":"text"}}]`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindCustom},
 		{name: "function call output", input: `{"type":"function_call_output","call_id":"call_1","output":"done"}`, wantKind: canonical.ItemKindToolResult},
 		{name: "reasoning", input: `{"type":"reasoning","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"cipher"}`, wantKind: canonical.ItemKindReasoning},
-		{name: "tool search call", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":{"query":"files"}}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
-		{name: "tool search call stringified arguments", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":"{\"query\":\"files\"}"}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
-		{name: "tool search output", input: `{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"client","tools":[]}`, wantKind: canonical.ItemKindToolDiscoveryResult},
+		{name: "tool search call", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":{"query":"files"}}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery, wantOmitted: true},
+		{name: "tool search call stringified arguments", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":"{\"query\":\"files\"}"}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery, wantOmitted: true},
+		{name: "tool search output", input: `{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"client","tools":[]}`, wantKind: canonical.ItemKindToolDiscoveryResult, wantOmitted: true},
 	}
 
 	for _, tc := range tests {
@@ -414,9 +415,10 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 				}
 			}
 
+			var changes []compat.Change
 			document, err := EncodeCarrierWithChanges(
 				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
-				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
+				delivery.BufferedDelivery(), &changes, "", EncodeOptions{},
 			)
 			if tc.name == "function call output" {
 				if err == nil || !strings.Contains(err.Error(), "tool result has no pending call") {
@@ -440,6 +442,12 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 			}
 			if err := json.Unmarshal([]byte(tc.input), &source); err != nil {
 				t.Fatalf("decode source item: %v", err)
+			}
+			if tc.wantOmitted {
+				if len(payload.Input) != 0 || !containsResponseChange(changes, canonical.RequestItemsKind, compat.Omission) {
+					t.Fatalf("declaration-free replay input=%#v changes=%#v, want atomic omission", payload.Input, changes)
+				}
+				return
 			}
 			if len(payload.Input) != 1 || payload.Input[0].Type != source.Type {
 				t.Fatalf("replay item types = %#v, want %q", payload.Input, source.Type)
@@ -500,11 +508,11 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
+	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := encodeConversation(items, request.Items(), nil, testAttemptToolNames(request), nil, nil, "", &projection)
+	encoded, err := encodeConversation(items, request.Items(), nil, testAttemptToolNames(request), nil, nil, nil, "", &projection)
 	if err != nil {
 		t.Fatal(err)
 	}

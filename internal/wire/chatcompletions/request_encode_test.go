@@ -137,7 +137,7 @@ func TestCompileProviderRequestDocument_RejectsReasoningMutatingNonReasoningFiel
 				return map[string]any{field: "override"}, nil
 			}
 			_, err := CompileProviderRequestDocument(req, nil, delivery.BufferedDelivery(), nil, "", CompileOptions{
-				LowerReasoning: badReasoning,
+				Lowering: DefaultLowering().Overlay(Lowering{Reasoning: badReasoning}),
 			})
 			if err == nil {
 				t.Fatalf("expected error when LowerReasoning mutates non-reasoning field %q", field)
@@ -154,7 +154,7 @@ func TestCompileProviderRequestDocument_RejectsReasoningMutatingNonReasoningFiel
 		}, nil
 	}
 	doc, err := CompileProviderRequestDocument(req, nil, delivery.BufferedDelivery(), nil, "", CompileOptions{
-		LowerReasoning: allowedReasoning,
+		Lowering: DefaultLowering().Overlay(Lowering{Reasoning: allowedReasoning}),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error with valid reasoning fields: %v", err)

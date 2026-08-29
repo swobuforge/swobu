@@ -48,17 +48,17 @@ func TestEncodeMessagesWebSearch_GenericOmitsAndRuleLowers(t *testing.T) {
 	if err != nil || len(tools) != 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
 		t.Fatalf("tools=%#v changes=%#v err=%v", tools, changes, err)
 	}
-	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]ProviderRequestTool, bool, []compat.Change, error) {
+	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
+			return ToolProjection{}, nil, canonical.InternalError("Messages WebSearch slot received a non-WebSearch declaration")
 		}
-		return []ProviderRequestTool{{
+		return HostedSearchProjection(ProviderRequestTool{
 			Type:           "web_search_20260209",
 			Name:           canonical.WebSearchToolKey().Name(),
 			AllowedCallers: []string{"direct"},
-		}}, true, nil, nil
+		}), nil, nil
 	}
-	tools, _, err = compileMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "", rule)
+	tools, _, err = compileMessagesTools([]canonical.ToolDeclaration{declaration}, nil, nil, nil, "", DefaultToolLowering().Overlay(ToolLowering{WebSearch: rule}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,14 +76,14 @@ func TestCompileMessagesToolsIsIndependentOfToolPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, lowered, err := compileMessagesTools(tools, nil, names, nil, "", nil)
+	encoded, lowered, err := compileMessagesTools(tools, nil, names, nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(encoded) != 1 || encoded[0].Name != "lookup" {
 		t.Fatalf("tools = %#v, want lookup only", encoded)
 	}
-	record, ok := lowered.FindSource(canonical.WebSearchToolKey())
+	record, ok := lowered.lowered.FindSource(canonical.WebSearchToolKey())
 	if !ok || record.FragmentCount != 0 {
 		t.Fatalf("web search lowering = %#v, present=%v", record, ok)
 	}
