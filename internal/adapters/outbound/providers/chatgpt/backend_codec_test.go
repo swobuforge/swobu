@@ -146,6 +146,45 @@ func TestBackendCodecKeepsInstructionsOutOfSystemInput(t *testing.T) {
 	}
 }
 
+func TestBackendCodecLowersClaudeHistorySystemRoleForChatGPTCodex(t *testing.T) {
+	t.Parallel()
+
+	doc, changes, err := newBackendCodec("chatgpt").Encode(provider.Request{
+		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("gpt-5.6-sol"),
+			Items: []canonical.CanonicalItem{
+				canonicaltest.Message(t, canonical.MessageRoleSystem, "Claude history directive."),
+				canonicaltest.Message(t, canonical.MessageRoleUser, "hello"),
+			},
+		}),
+		Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var payload struct {
+		Input []struct {
+			Role string `json:"role"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(doc.RawBytes(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.Input) != 2 || payload.Input[0].Role != "developer" || payload.Input[1].Role != "user" {
+		t.Fatalf("input roles = %#v, want developer then user: %s", payload.Input, doc.RawBytes())
+	}
+	found := false
+	for _, change := range changes {
+		if change.Capability == canonical.RequestItemsMessageRole && change.Kind == compat.Approximation {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("changes = %#v, want history-role approximation", changes)
+	}
+}
+
 func TestBackendCodecRejectsBufferedProviderDelivery(t *testing.T) {
 	_, _, err := newBackendCodec("chatgpt").Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
