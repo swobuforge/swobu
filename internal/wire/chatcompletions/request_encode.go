@@ -259,8 +259,8 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if contextErr != nil && !contextRejected {
 		return ProviderRequestDocument{}, contextErr
 	}
-	items := req.Items()
-	items, historyChanges, err := projectChatCompletionsRequestHistory(items)
+	semanticItems := req.Items()
+	items, historyChanges, err := projectChatCompletionsRequestHistory(semanticItems)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -272,7 +272,11 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 			return ProviderRequestDocument{}, err
 		}
 	}
-	environment, err := canonical.ToolEnvironmentAt(items, len(items))
+	// Provider-owned discovery lifecycle has no Chat history carrier, but its
+	// result still contributes declarations used by later historical calls.
+	// Resolve the environment from semantic history before omitting that
+	// lifecycle from the wire conversation.
+	environment, err := canonical.ToolEnvironmentAt(semanticItems, len(semanticItems))
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
