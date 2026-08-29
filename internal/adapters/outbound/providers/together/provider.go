@@ -36,7 +36,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerReasoning: func(req canonical.CanonicalRequest, target protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+			Lowering: protocolcodec.ChatLowering{Reasoning: func(req canonical.CanonicalRequest, target protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 				fields := make(map[string]any)
 				compute, computeSet := req.Reasoning().ComputeField().Get()
 				if computeSet {
@@ -53,7 +53,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 					fields["reasoning_effort"] = string(target.ProjectEffort(effort, changeLog))
 				}
 				return fields, nil
-			},
+			}},
 			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return togetherChatReasoningExtractor{} },
 		},
 	}

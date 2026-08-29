@@ -79,8 +79,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	if !ok {
 		return provider.Backend{}, fmt.Errorf("Venice Chat backend has codec %T, want protocolcodec.Codec", backend.Codec)
 	}
-	standard.ChatDialect.LowerTool = protocolcodec.ChatOutOfBandHostedSearch()
-	standard.ChatDialect.LowerToolPolicy = protocolcodec.ChatOutOfBandHostedSearchPolicy()
+	standard.ChatDialect.Lowering.Tools.WebSearch = protocolcodec.ChatOutOfBandHostedSearch()
 	backend.Codec = codec{standard: standard}
 	return backend, backend.Validate()
 }

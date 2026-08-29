@@ -58,17 +58,90 @@ type ToolLoweringContext struct {
 	Names   wire.ToolNames
 }
 
-// ToolLoweringRule replaces one semantic occurrence with zero or more target fragments.
-type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (fragments []ProviderRequestTool, handled bool, changes []compat.Change, err error)
+// ToolTransformer totally projects one semantic tool slot.
+type ToolProjection struct {
+	Fragments     []ProviderRequestTool
+	TargetType    string
+	TargetName    string
+	ProjectCall   func(canonical.ToolCallItem) (ToolCallProjection, error)
+	ProjectResult func(canonical.ToolResultItem) (ToolResultProjection, error)
+}
 
-// ToolPolicyLoweringRule resolves target policy after tool lowering.
-type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
+// ToolCallProjection is a complete Messages call block selected by one tool
+// slot. History serialization copies this value; it does not choose a carrier
+// or reinterpret canonical tool kinds.
+type ToolCallProjection struct {
+	Type  string
+	Name  string
+	Input json.RawMessage
+}
+
+// ToolResultProjection is the closed Messages result carrier selected by the
+// same occurrence projection as its declaration and call.
+type ToolResultProjection struct {
+	Type string
+}
+
+type ToolTransformer func(ToolLoweringContext, canonical.ToolDeclaration) (ToolProjection, []compat.Change, error)
+
+// compiledToolProjection pairs inert emitted provenance with typed Messages
+// behavior retained for each declaration occurrence.
+type compiledToolProjection struct {
+	lowered     wire.LoweredToolSet
+	occurrences map[canonical.ToolKey]ToolProjection
+}
+
+// ToolLowering is the resolved Messages tool algebra.
+type ToolLowering struct {
+	Function, Custom, WebSearch, Discovery ToolTransformer
+}
+
+// ReasoningTransformer totally projects canonical reasoning controls into the
+// Messages request payload.
+type ReasoningTransformer func(payload map[string]any, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error
+
+// Lowering is the resolved Messages semantic algebra. Every slot is total
+// before request encoding begins.
+type Lowering struct {
+	Tools     ToolLowering
+	Reasoning ReasoningTransformer
+}
+
+// Overlay replaces only explicitly supplied semantic slots.
+func (l Lowering) Overlay(override Lowering) Lowering {
+	l.Tools = l.Tools.Overlay(override.Tools)
+	if override.Reasoning != nil {
+		l.Reasoning = override.Reasoning
+	}
+	return l
+}
+
+// Overlay replaces only explicitly supplied slots.
+func (l ToolLowering) Overlay(override ToolLowering) ToolLowering {
+	if override.Function != nil {
+		l.Function = override.Function
+	}
+	if override.Custom != nil {
+		l.Custom = override.Custom
+	}
+	if override.WebSearch != nil {
+		l.WebSearch = override.WebSearch
+	}
+	if override.Discovery != nil {
+		l.Discovery = override.Discovery
+	}
+	return l
+}
+
+// ProtocolLowering returns the total Messages protocol baseline. Provider
+// construction overlays only proven divergences onto this value.
+func ProtocolLowering() Lowering {
+	return DefaultLowering()
+}
 
 // CompileOptions contains proven target-dialect extension points for Messages.
 type CompileOptions struct {
-	LowerTool            ToolLoweringRule
-	LowerToolPolicy      ToolPolicyLoweringRule
-	OmitAdaptiveThinking bool
+	Lowering Lowering
 }
 
 // ProviderRequestDocument is the standard Messages lowering before any
@@ -79,7 +152,7 @@ type ProviderRequestDocument struct {
 }
 
 func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string) (carrier.Document, error) {
-	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{})
+	document, err := CompileProviderRequestDocument(req, names, d, changeLog, exchangeID, CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -89,6 +162,10 @@ func EncodeCarrierWithChanges(req canonical.CanonicalRequest, names wire.ToolNam
 // CompileProviderRequestDocument lowers one exact target dialect before the
 // single serialization boundary.
 func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.ToolNames, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options CompileOptions) (ProviderRequestDocument, error) {
+	lowering := options.Lowering
+	if !lowering.resolved() {
+		return ProviderRequestDocument{}, canonical.InternalError("Messages compile requires resolved lowering")
+	}
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
 	default:
@@ -134,11 +211,15 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 			return ProviderRequestDocument{}, err
 		}
 	}
-	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool)
+	wireTools, toolProjection, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, lowering.Tools)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	items, historyChanges, err := projectMessagesUnloweredToolHistory(items, loweredTools)
+	toolProjection, err = projectMessagesHistoricalTools(items, toolProjection, lowering.Tools, names)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	items, historyChanges, err := projectMessagesUnloweredToolHistory(items, toolProjection.lowered)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -149,7 +230,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireMessages, err := encodeItems(conversation, tools, names, changeLog, exchangeID)
+	wireMessages, err := encodeItems(conversation, tools, names, toolProjection, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -174,7 +255,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning()); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if err := encodeMessagesReasoning(payload, req.Reasoning(), options.OmitAdaptiveThinking, changeLog); err != nil {
+	if err := lowering.Reasoning(payload, req.Reasoning(), changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat(), changeLog)
@@ -196,27 +277,11 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 			return ProviderRequestDocument{}, err
 		}
 	}
-	var choice any
-	if options.LowerToolPolicy != nil {
-		var handled bool
-		var policyChanges []compat.Change
-		choice, handled, policyChanges, err = options.LowerToolPolicy(policy, loweredTools, names)
-		if changeLog != nil {
-			*changeLog = append(*changeLog, policyChanges...)
-		}
-		if err != nil {
-			return ProviderRequestDocument{}, err
-		}
-		if !handled {
-			choice, err = encodeMessagesToolChoice(policy, loweredTools, names, changeLog, exchangeID)
-		}
-	} else {
-		choice, err = encodeMessagesToolChoice(policy, loweredTools, names, changeLog, exchangeID)
-	}
+	choice, err := encodeMessagesToolChoice(policy, toolProjection.lowered, names, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), loweredTools.TotalFragments() > 0)
+	choice, err = encodeMessagesToolCallBatch(choice, req.ToolCallBatch(), toolProjection.lowered.TotalFragments() > 0)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -227,6 +292,44 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		payload["stream"] = true
 	}
 	return ProviderRequestDocument{Payload: payload, Tools: wireTools}, nil
+}
+
+func (l Lowering) resolved() bool {
+	return l.Tools.resolved() && l.Reasoning != nil
+}
+
+func (l ToolLowering) resolved() bool {
+	return l.Function != nil && l.Custom != nil && l.WebSearch != nil && l.Discovery != nil
+}
+
+// projectMessagesHistoricalTools executes the selected semantic slot for the
+// one declaration-free tool kind admitted by Messages replay. It never repairs
+// or reinterprets an existing projection; ordinary callable history still
+// requires retained declaration provenance.
+func projectMessagesHistoricalTools(items []canonical.CanonicalItem, compiled compiledToolProjection, lowering ToolLowering, names wire.ToolNames) (compiledToolProjection, error) {
+	for _, item := range items {
+		call, ok := item.ToolCall()
+		if !ok || call.Tool().Kind() != canonical.ToolKindWebSearch {
+			continue
+		}
+		if _, found := compiled.lowered.FindSource(call.Tool()); found {
+			continue
+		}
+		declaration := canonical.NewWebSearchDeclaration()
+		projection, _, err := lowering.WebSearch(ToolLoweringContext{Names: names}, declaration)
+		if err != nil {
+			return compiledToolProjection{}, err
+		}
+		compiled.lowered.Records = append(compiled.lowered.Records, wire.LoweredToolRecord{
+			Key: call.Tool(), Kind: call.Tool().Kind(), FragmentCount: len(projection.Fragments),
+			TargetType: projection.TargetType, TargetName: projection.TargetName,
+		})
+		if compiled.occurrences == nil {
+			compiled.occurrences = make(map[canonical.ToolKey]ToolProjection)
+		}
+		compiled.occurrences[call.Tool()] = projection
+	}
+	return compiled, nil
 }
 
 // projectMessagesUnloweredToolHistory keeps declaration and history projection
@@ -337,7 +440,7 @@ func EncodeProviderRequestDocument(document ProviderRequestDocument) (carrier.Do
 	), nil
 }
 
-func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]messageBody, error) {
+func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, projection compiledToolProjection, changeLog *[]compat.Change, exchangeID string) ([]messageBody, error) {
 	if len(items) == 0 {
 		return nil, canonical.BadRequest("messages protocol requires at least one canonical item")
 	}
@@ -346,6 +449,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 	if err != nil {
 		return nil, err
 	}
+	resultRecords := messagesResultProjectionQueues(items, projection)
 	out := make([]messageBody, 0, len(items))
 	for i := 0; i < len(items); {
 		owner := items[i].Owner()
@@ -355,7 +459,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		wire := messageBody{Role: string(owner)}
 		for i < len(items) && items[i].Owner() == owner {
 			var err error
-			wire.Content, err = appendMessagesItemBlocks(wire.Content, items[i], tools, names, owner, changeLog, exchangeID)
+			wire.Content, err = appendMessagesItemBlocks(wire.Content, items[i], tools, names, projection, resultRecords, owner, changeLog, exchangeID)
 			if err != nil {
 				return nil, err
 			}
@@ -366,6 +470,36 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		}
 	}
 	return out, nil
+}
+
+func messagesResultProjectionQueues(items []canonical.CanonicalItem, projection compiledToolProjection) map[canonical.ToolCallID][]ToolProjection {
+	queues := make(map[canonical.ToolCallID][]ToolProjection)
+	effects, err := canonical.MatchToolEffects(items)
+	if err != nil {
+		return queues
+	}
+	for _, effect := range effects {
+		if effect.ResultIndex < 0 {
+			continue
+		}
+		call, ok := items[effect.CallIndex].ToolCall()
+		if !ok {
+			continue
+		}
+		if occurrence, found := projection.occurrences[call.Tool()]; found {
+			queues[effect.CallID] = append(queues[effect.CallID], occurrence)
+		}
+	}
+	return queues
+}
+
+func popMessagesResultProjection(queues map[canonical.ToolCallID][]ToolProjection, callID canonical.ToolCallID) (ToolProjection, bool) {
+	records := queues[callID]
+	if len(records) == 0 {
+		return ToolProjection{}, false
+	}
+	queues[callID] = records[1:]
+	return records[0], true
 }
 
 func projectMessagesResponsesItems(items []canonical.CanonicalItem, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
@@ -383,7 +517,7 @@ func projectMessagesResponsesItems(items []canonical.CanonicalItem, changeLog *[
 	return projected, nil
 }
 
-func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, owner canonical.TurnOwner, changeLog *[]compat.Change, exchangeID string) ([]contentID, error) {
+func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, projection compiledToolProjection, resultRecords map[canonical.ToolCallID][]ToolProjection, owner canonical.TurnOwner, changeLog *[]compat.Change, exchangeID string) ([]contentID, error) {
 	if message, ok := item.Message(); ok {
 		for _, part := range message.Content() {
 			if text, ok := part.Text(); ok {
@@ -410,19 +544,40 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		return blocks, nil
 	}
 	if item.Kind() == canonical.ItemKindToolCall {
-		block, err := encodeMessagesToolCall(item, tools, names)
+		block, err := encodeMessagesToolCall(item, projection)
 		if err != nil {
 			return nil, err
 		}
 		return append(blocks, block), nil
 	}
 	if result, ok := item.ToolResult(); ok {
+		record, projected := popMessagesResultProjection(resultRecords, result.CallID())
+		resultType := "tool_result"
+		if projected {
+			if record.ProjectResult == nil {
+				return nil, canonical.InternalError("Messages tool result has no emitted target carrier")
+			}
+			value, err := record.ProjectResult(result)
+			if err != nil {
+				return nil, err
+			}
+			resultType = value.Type
+			if resultType == "" {
+				return nil, canonical.InternalError("Messages tool result projection returned an invalid carrier")
+			}
+		}
 		if search, ok := result.WebSearch(); ok {
+			if resultType != "web_search_tool_result" {
+				return nil, canonical.InternalError("Messages web-search result has no emitted target carrier")
+			}
 			content, err := encodeMessagesWebSearchResult(search)
 			if err != nil {
 				return nil, err
 			}
 			return append(blocks, contentID{Type: "web_search_tool_result", ToolUseID: result.CallID().String(), Content: content}), nil
+		}
+		if resultType != "tool_result" {
+			return nil, canonical.InternalError("Messages tool result has no emitted target carrier")
 		}
 		content, err := encodeMessagesToolResultContent(result.Content(), changeLog, exchangeID)
 		if err != nil {
@@ -431,9 +586,27 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content, IsError: result.IsError()}), nil
 	}
 	if result, ok := item.ToolDiscoveryResult(); ok {
+		record, projected := popMessagesResultProjection(resultRecords, result.CallID())
+		resultType := "tool_result"
+		if projected {
+			if record.ProjectResult == nil {
+				return nil, canonical.InternalError("Messages discovery result has no emitted target carrier")
+			}
+			value, err := record.ProjectResult(canonical.ToolResultItem{})
+			if err != nil {
+				return nil, err
+			}
+			resultType = value.Type
+			if resultType == "" {
+				return nil, canonical.InternalError("Messages discovery result projection returned an invalid carrier")
+			}
+		}
+		if resultType != "tool_result" && resultType != "tool_search_tool_result" {
+			return nil, canonical.InternalError("Messages discovery result has no emitted target carrier")
+		}
 		if failure, failed := result.Failure(); failed {
-			if result.Executor() == canonical.DiscoveryExecutorClient {
-				return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: failure.Message(), IsError: true}), nil
+			if resultType == "tool_result" {
+				return append(blocks, contentID{Type: resultType, ToolUseID: result.CallID().String(), Content: failure.Message(), IsError: true}), nil
 			}
 			code, _ := failure.Code().Get()
 			return append(blocks, contentID{Type: "tool_search_tool_result", ToolUseID: result.CallID().String(), Content: map[string]any{
@@ -448,8 +621,8 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 			}
 			content = append(content, map[string]string{"type": "tool_reference", "tool_name": name})
 		}
-		if result.Executor() == canonical.DiscoveryExecutorClient {
-			return append(blocks, contentID{Type: "tool_result", ToolUseID: result.CallID().String(), Content: content}), nil
+		if resultType == "tool_result" {
+			return append(blocks, contentID{Type: resultType, ToolUseID: result.CallID().String(), Content: content}), nil
 		}
 		return append(blocks, contentID{Type: "tool_search_tool_result", ToolUseID: result.CallID().String(), Content: map[string]any{
 			"type": "tool_search_tool_search_result", "tool_references": content,
@@ -471,61 +644,25 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 	return nil, canonical.InternalError("Messages received an invalid canonical item kind")
 }
 
-func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames) (contentID, error) {
+func encodeMessagesToolCall(item canonical.CanonicalItem, compiled compiledToolProjection) (contentID, error) {
 	call, ok := item.ToolCall()
 	if !ok {
 		return contentID{}, canonical.InternalError("messages tool-call item is invalid")
 	}
 	tool := call.Tool()
-	if tool.Kind() == canonical.ToolKindWebSearch {
-		search, ok := call.Input().WebSearch()
-		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-			return contentID{}, canonical.InternalError("Messages received an invalid canonical multi-query server-tool item")
-		}
-		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
-		if err != nil {
-			return contentID{}, canonical.InternalError("messages web-search call could not be encoded")
-		}
-		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: "web_search", Input: input}, nil
+	_, found := compiled.lowered.FindSource(tool)
+	projection, foundProjection := compiled.occurrences[tool]
+	if !found || !foundProjection || projection.ProjectCall == nil {
+		return contentID{}, canonical.InternalError("Messages tool-call history has no emitted target identity")
 	}
-	if tool.Kind() == canonical.ToolKindDiscovery {
-		executor, ok := call.DiscoveryExecutor()
-		if !ok {
-			return contentID{}, canonical.InternalError("messages discovery call is missing execution owner")
-		}
-		object, ok := call.Input().Object()
-		if !ok {
-			return contentID{}, canonical.InternalError("canonical discovery call input is not an object")
-		}
-		if executor == canonical.DiscoveryExecutorClient {
-			name, err := wire.EncodeToolName(names, tool)
-			if err != nil {
-				return contentID{}, err
-			}
-			return contentID{Type: "tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
-		}
-		discovery, err := messagesDiscoveryDeclaration(tools)
-		if err != nil {
-			return contentID{}, err
-		}
-		name, err := messagesProviderDiscoveryName(discovery)
-		if err != nil {
-			return contentID{}, err
-		}
-		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
-	}
-	if tool.Kind() != canonical.ToolKindFunction {
-		return contentID{}, canonical.InternalError("Messages received an invalid canonical tool-call kind")
-	}
-	name, err := wire.EncodeToolName(names, tool)
+	projected, err := projection.ProjectCall(call)
 	if err != nil {
 		return contentID{}, err
 	}
-	object, ok := call.Input().Object()
-	if !ok {
-		return contentID{}, canonical.BadRequest("messages function tool calls require object input")
+	if projected.Type == "" {
+		return contentID{}, canonical.InternalError("Messages tool-call projection returned an invalid carrier")
 	}
-	return contentID{Type: "tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
+	return contentID{Type: projected.Type, ID: call.CallID().String(), Name: projected.Name, Input: projected.Input}, nil
 }
 
 func messagesTextOnlyContent(parts []canonical.MessagePart, surface string) (string, error) {
@@ -591,98 +728,172 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 }
 
 func encodeMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, nil)
+	typed, _, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, DefaultToolLowering())
 	return typed, err
 }
 
-func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
+// DefaultToolLowering returns official Messages semantics for every slot.
+func DefaultToolLowering() ToolLowering {
+	function := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		decl, ok := tool.Function()
+		if !ok {
+			return ToolProjection{}, nil, canonical.InternalError("Messages Function slot received a non-Function declaration")
+		}
+		encoded, err := encodeMessagesFunctionTool(tool, decl, ctx.Names)
+		if err != nil {
+			return ToolProjection{}, nil, err
+		}
+		return messagesCallableProjection(encoded, "tool_use", "tool_result"), nil, nil
+	}
+	discovery := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		decl, ok := tool.Discovery()
+		if !ok {
+			return ToolProjection{}, nil, canonical.InternalError("Messages Discovery slot received a non-Discovery declaration")
+		}
+		if decl.Executor() == canonical.DiscoveryExecutorClient {
+			schema, err := messagesToolSchema(decl.InputSchema())
+			if err != nil {
+				return ToolProjection{}, nil, err
+			}
+			name, err := wire.EncodeToolName(ctx.Names, tool.Key())
+			if err != nil {
+				return ToolProjection{}, nil, err
+			}
+			return messagesCallableProjection(ProviderRequestTool{Name: name, Description: decl.Description(), InputSchema: schema}, "tool_use", "tool_result"), nil, nil
+		}
+		typeName, name, ok := messagesProviderDiscoveryTool(decl)
+		if !ok {
+			return ToolProjection{}, []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
+		}
+		return messagesCallableProjection(ProviderRequestTool{Type: typeName, Name: name}, "server_tool_use", "tool_search_tool_result"), nil, nil
+	}
+	omit := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		return ToolProjection{}, []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
+	}
+	return ToolLowering{
+		Function: function, Custom: omit,
+		WebSearch: func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+			return messagesHostedSearchProjection(nil), []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
+		},
+		Discovery: discovery,
+	}
+}
+
+func messagesCallableProjection(fragment ProviderRequestTool, callType, resultType string) ToolProjection {
+	targetType := fragment.Type
+	if targetType == "" {
+		targetType = "tool"
+	}
+	return ToolProjection{Fragments: []ProviderRequestTool{fragment}, TargetType: targetType, TargetName: fragment.Name,
+		ProjectCall: func(call canonical.ToolCallItem) (ToolCallProjection, error) {
+			object, ok := call.Input().Object()
+			if !ok {
+				return ToolCallProjection{}, canonical.BadRequest("messages callable tool calls require object input")
+			}
+			return ToolCallProjection{Type: callType, Name: fragment.Name, Input: json.RawMessage(object.Bytes())}, nil
+		},
+		ProjectResult: func(canonical.ToolResultItem) (ToolResultProjection, error) {
+			return ToolResultProjection{Type: resultType}, nil
+		}}
+}
+
+func messagesHostedSearchProjection(fragment *ProviderRequestTool) ToolProjection {
+	p := ToolProjection{TargetName: "web_search", ProjectCall: func(call canonical.ToolCallItem) (ToolCallProjection, error) {
+		search, ok := call.Input().WebSearch()
+		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
+			return ToolCallProjection{}, canonical.InternalError("Messages received an invalid canonical multi-query server-tool item")
+		}
+		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
+		if err != nil {
+			return ToolCallProjection{}, canonical.InternalError("messages web-search call could not be encoded")
+		}
+		return ToolCallProjection{Type: "server_tool_use", Name: "web_search", Input: input}, nil
+	}, ProjectResult: func(canonical.ToolResultItem) (ToolResultProjection, error) {
+		return ToolResultProjection{Type: "web_search_tool_result"}, nil
+	}}
+	if fragment != nil {
+		p.Fragments = []ProviderRequestTool{*fragment}
+		p.TargetType = fragment.Type
+	}
+	return p
+}
+
+// HostedSearchProjection returns the complete Messages hosted-search
+// manifestation selected by a provider WebSearch override.
+func HostedSearchProjection(fragment ProviderRequestTool) ToolProjection {
+	return messagesHostedSearchProjection(&fragment)
+}
+
+// CallableProjection returns a complete Messages callable manifestation for a
+// slot that intentionally maps another canonical semantic onto tool_use.
+func CallableProjection(fragment ProviderRequestTool) ToolProjection {
+	return messagesCallableProjection(fragment, "tool_use", "tool_result")
+}
+
+// DefaultLowering returns total official Messages semantics.
+func DefaultLowering() Lowering {
+	return Lowering{
+		Tools: DefaultToolLowering(),
+		Reasoning: func(payload map[string]any, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error {
+			return encodeMessagesReasoning(payload, reasoning, false, changeLog)
+		},
+	}
+}
+
+// OmitAdaptiveReasoning is a sparse target override for Messages providers
+// whose grammar cannot accept adaptive or budget reasoning controls.
+func OmitAdaptiveReasoning(payload map[string]any, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error {
+	return encodeMessagesReasoning(payload, reasoning, true, changeLog)
+}
+
+func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, lowering ToolLowering) ([]ProviderRequestTool, compiledToolProjection, error) {
 	if len(tools) == 0 {
-		return nil, wire.LoweredToolSet{}, nil
+		return nil, compiledToolProjection{occurrences: make(map[canonical.ToolKey]ToolProjection)}, nil
 	}
 	for _, tool := range tools {
 		if decl, ok := tool.Function(); ok {
 			if strict, specified := decl.Strict().Get(); specified && strict {
 				if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsSchemaStrict, compat.Omission); err != nil {
-					return nil, wire.LoweredToolSet{}, err
+					return nil, compiledToolProjection{}, err
 				}
 				break
 			}
 		}
 	}
 	out := make([]ProviderRequestTool, 0, len(tools))
-	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
+	compiled := compiledToolProjection{lowered: wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}, occurrences: make(map[canonical.ToolKey]ToolProjection, len(tools))}
+	if !lowering.resolved() {
+		return nil, compiledToolProjection{}, canonical.InternalError("Messages tool compilation requires resolved lowering")
+	}
 	for ordinal, tool := range tools {
-		if rule != nil {
-			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
-			if changeLog != nil {
-				*changeLog = append(*changeLog, changes...)
-			}
-			if err != nil {
-				return nil, wire.LoweredToolSet{}, err
-			}
-			if handled {
-				for _, fragment := range fragments {
-					_, fragment.DeferLoading = deferred[tool.Key()]
-					out = append(out, fragment)
-				}
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-					Key:           tool.Key(),
-					Kind:          tool.Kind(),
-					FragmentCount: len(fragments),
-				})
-				continue
-			}
+		var transformer ToolTransformer
+		switch tool.Kind() {
+		case canonical.ToolKindFunction:
+			transformer = lowering.Function
+		case canonical.ToolKindCustom:
+			transformer = lowering.Custom
+		case canonical.ToolKindWebSearch:
+			transformer = lowering.WebSearch
+		case canonical.ToolKindDiscovery:
+			transformer = lowering.Discovery
 		}
-		if decl, ok := tool.Function(); ok {
-			wireTool, err := encodeMessagesFunctionTool(tool, decl, names)
-			if err != nil {
-				return nil, wire.LoweredToolSet{}, err
-			}
-			_, wireTool.DeferLoading = deferred[tool.Key()]
-			out = append(out, wireTool)
-			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-				Key:           tool.Key(),
-				Kind:          tool.Kind(),
-				FragmentCount: 1,
-			})
-			continue
+		if transformer == nil {
+			return nil, compiledToolProjection{}, canonical.InternalError("Messages lowering contains an unresolved tool slot")
 		}
-		if discovery, ok := tool.Discovery(); ok {
-			if discovery.Executor() == canonical.DiscoveryExecutorClient {
-				schema, err := messagesToolSchema(discovery.InputSchema())
-				if err != nil {
-					return nil, wire.LoweredToolSet{}, err
-				}
-				name, err := wire.EncodeToolName(names, tool.Key())
-				if err != nil {
-					return nil, wire.LoweredToolSet{}, err
-				}
-				wireTool := ProviderRequestTool{Name: name, Description: discovery.Description(), InputSchema: schema}
-				out = append(out, wireTool)
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-					Key:           tool.Key(),
-					Kind:          tool.Kind(),
-					FragmentCount: 1,
-				})
-				continue
-			}
-			typeName, name, representable := messagesProviderDiscoveryTool(discovery)
-			if !representable {
-				continue
-			}
-			wireTool := ProviderRequestTool{Type: typeName, Name: name}
-			out = append(out, wireTool)
-			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
-				Key:           tool.Key(),
-				Kind:          tool.Kind(),
-				FragmentCount: 1,
-			})
-			continue
-		}
+		projection, changes, err := transformer(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
 		if changeLog != nil {
-			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
+			*changeLog = append(*changeLog, changes...)
 		}
-		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
+		if err != nil {
+			return nil, compiledToolProjection{}, err
+		}
+		for index := range projection.Fragments {
+			_, projection.Fragments[index].DeferLoading = deferred[tool.Key()]
+		}
+		out = append(out, projection.Fragments...)
+		record := wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind(), FragmentCount: len(projection.Fragments), TargetType: projection.TargetType, TargetName: projection.TargetName}
+		compiled.lowered.Records = append(compiled.lowered.Records, record)
+		compiled.occurrences[tool.Key()] = projection
 	}
 	if len(out) > 0 && len(deferred) > 0 {
 		allDeferred := true
@@ -699,7 +910,7 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 			}
 		}
 	}
-	return out, lowered, nil
+	return out, compiled, nil
 }
 
 func hasEagerProviderDiscovery(tools []canonical.ToolDeclaration) bool {

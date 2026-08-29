@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 
@@ -11,25 +10,11 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
-type responseProcessingError struct {
-	stage string
-	err   error
-}
-
-func (e responseProcessingError) Error() string { return e.err.Error() }
-func (e responseProcessingError) Unwrap() error { return e.err }
-
 func responseFailure(stage string, err error) error {
-	if err == nil {
-		return nil
-	}
-	var staged responseProcessingError
-	if errors.As(err, &staged) {
-		return err
-	}
-	return responseProcessingError{stage: stage, err: err}
+	return wire.StageResponseFailure(stage, err)
 }
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
@@ -188,10 +173,11 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	if err != nil {
 		return nil, nil, compatibility, responseFailure("provider_stream_decode", err)
 	}
-	var events canonical.ResponseStream = decoded.Stream
+	var events canonical.ResponseStream = newStagedResponseStream(decoded.Stream, "provider_stream_decode")
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
+	events = newStagedResponseStream(events, "canonical_response_validation")
 	if call.delayClientHandoff {
 		defer events.Close(ctx)
 		envelope, err := canonical.ReadClosedEnvelope(ctx, events, canonical.EnvResponse)
@@ -210,6 +196,12 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 		compatibility.progressive = nil
 		return nil, &cloned, compatibility, nil
 	}
+	prefetched, err := prefetchSemanticHandoff(ctx, events)
+	if err != nil {
+		_ = events.Close(ctx)
+		return nil, nil, compatibility, responseFailure("provider_stream_decode", err)
+	}
+	events = prefetched
 	events = newTerminalResponseStream(events)
 	response, err := handoffResponseStream(ctx, call, events, binding, incremental, runner)
 	return response, nil, compatibility, responseFailure("client_stream_encode", err)

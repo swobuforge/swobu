@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestCodecEncodesNativeTextHistoryAndPortableStoreIntent(t *testing.T) {
@@ -602,6 +603,22 @@ func TestCodecLowersEveryNativeFunctionPolicy(t *testing.T) {
 				t.Fatalf("tool choice = %#v, want %q", choice, tc.wantMode)
 			}
 		})
+	}
+}
+
+func TestGeminiSpecificPolicyConsumesEmittedProjectionIdentity(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "canonical-name")
+	policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key)
+	lowered := wire.LoweredToolSet{Records: []wire.LoweredToolRecord{{
+		Key: key, Kind: key.Kind(), FragmentCount: 1, TargetType: "function", TargetName: "emitted-name",
+	}}}
+
+	choice, represented, err := geminiToolChoice(policy, lowered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !represented || choice.AllowedTools == nil || len(choice.AllowedTools.Tools) != 1 || choice.AllowedTools.Tools[0] != "emitted-name" {
+		t.Fatalf("specific choice = %#v represented=%t, want emitted projection identity", choice, represented)
 	}
 }
 

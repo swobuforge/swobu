@@ -30,3 +30,21 @@ func TestEncodedResponseMessagesPreservesEveryEncodedMessageBoundary(t *testing.
 		t.Fatalf("terminal error = %v, want EOF", err)
 	}
 }
+
+func TestEncodedResponseMessagesSettlesCompletionWithUpstreamFailureBeforeClose(t *testing.T) {
+	cause := StageResponseFailure("canonical_response_validation", errors.New("invalid canonical event"))
+	completion, _, fail := NewResponseCompletion()
+	stream := NewEncodedResponseMessages(failingResponseStream{err: cause},
+		func(canonical.Event) ([][]byte, error) { return nil, nil }, completion, fail)
+
+	if _, err := stream.Next(context.Background()); !errors.Is(err, cause) {
+		t.Fatalf("next error = %v, want canonical cause", err)
+	}
+	if err := stream.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	stage, ok := ResponseFailureStage(completion.Snapshot().Err)
+	if !ok || stage != "canonical_response_validation" {
+		t.Fatalf("stage = %q, ok=%v", stage, ok)
+	}
+}

@@ -30,10 +30,11 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 		backend.Codec = protocolcodec.Codec{
 			Protocol: protocolkind.ChatCompletions,
 			ChatDialect: protocolcodec.ChatDialect{
-				LowerTool:         protocolcodec.ChatHostedSearchTool(nil, "openrouter:web_search"),
-				LowerToolPolicy:   protocolcodec.ChatHostedSearchToolPolicy("openrouter:web_search"),
-				LowerReasoning:    applyOpenRouterReasoning,
-				LowerMessage:      protocolcodec.ChatOpaqueReplayJSONMessageRule(ChatReplayScope, "reasoning_details"),
+				Lowering: protocolcodec.ChatLowering{
+					Tools:     protocolcodec.ChatToolLowering{WebSearch: protocolcodec.ChatHostedSearchTool(nil, "openrouter:web_search")},
+					Reasoning: applyOpenRouterReasoning,
+					Message:   protocolcodec.ChatOpaqueReplayJSONMessageRule(ChatReplayScope, "reasoning_details"),
+				},
 				DecorateAttempt:   decorateOpenRouterAttempt,
 				ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return &openRouterReasoningExtractor{} },
 			},
@@ -42,8 +43,7 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 		backend.Codec = protocolcodec.Codec{
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
-				LowerTool:       protocolcodec.ResponsesHostedSearchTool("openrouter:web_search"),
-				LowerToolPolicy: protocolcodec.ResponsesHostedSearchToolPolicy("openrouter:web_search"),
+				Tools:           protocolcodec.ResponsesToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("openrouter:web_search")},
 				DecorateAttempt: decorateOpenRouterAttempt,
 			},
 		}

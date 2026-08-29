@@ -233,7 +233,7 @@ func TestEncodeMessagesToolChoice_RecordsPolicyLossWithoutProjectedTools(t *test
 
 	webSearch := canonical.NewWebSearchDeclaration()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
-	_, lowered, err := compileMessagesTools([]canonical.ToolDeclaration{webSearch}, nil, testAttemptToolNames(request), nil, "", nil)
+	_, lowered, err := compileMessagesTools([]canonical.ToolDeclaration{webSearch}, nil, testAttemptToolNames(request), nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestEncodeMessagesToolChoice_RecordsPolicyLossWithoutProjectedTools(t *test
 		t.Run(string(policy.Mode), func(t *testing.T) {
 			t.Parallel()
 			var changes []compat.Change
-			choice, err := encodeMessagesToolChoice(policy, lowered, nil, &changes, "")
+			choice, err := encodeMessagesToolChoice(policy, lowered.lowered, nil, &changes, "")
 			want := compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})
 			if err != nil || choice != nil || len(changes) != 1 || changes[0] != want {
 				t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)

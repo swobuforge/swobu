@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
@@ -18,6 +20,7 @@ func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
 	logMessagesEgressBuffered([]byte(`{"content":[{"type":"text","text":"` + canary + `"}]}`))
 	logMessagesEgressStreamFrame([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"" + canary + "\"}}\n\n"))
 	logMessagesEgressStreamFrame([]byte("event: " + canary + "\nmalformed\n\n"))
+	logMessagesStreamProjection(canonical.EventTextDelta)
 
 	got := logs.String()
 	if strings.Contains(got, canary) {
@@ -28,6 +31,8 @@ func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
 		"payload_bytes=",
 		"event=messages_stream_egress_frame",
 		"frame_bytes=",
+		"event=messages_stream_projection",
+		"canonical_kind=text.delta",
 	} {
 		if !strings.Contains(got, structural) {
 			t.Fatalf("logs missing structural field %q: %s", structural, got)

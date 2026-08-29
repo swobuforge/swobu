@@ -121,8 +121,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExchangeID:      requestID,
 	})
 	if err != nil {
-		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, err)
 		deliveryResult := exchangeFailureDeliveryResult(err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, deliveryResult)
 		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
@@ -136,7 +136,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
 	if deliveryResult.Kind != delivery.Succeeded {
 		err := deliveryResult.Err
-		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, deliveryResult)
 		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
@@ -158,7 +158,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
-	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, nil)
+	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, delivery.Result{Kind: delivery.Succeeded})
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 }
 
@@ -270,8 +270,9 @@ func logRequestOutcome(
 	normalizedPath canonical.NormalizedPath,
 	targetID string,
 	attemptCount int,
-	err error,
+	deliveryResult delivery.Result,
 ) {
+	err := deliveryResult.Err
 	result := "success"
 	statusCode := http.StatusOK
 	errorOrigin := ""
@@ -282,7 +283,7 @@ func logRequestOutcome(
 	if err != nil {
 		result = "swobu_error"
 		errorOrigin = string(canonical.ErrorOriginSwobu)
-		if errors.Is(err, context.Canceled) {
+		if deliveryResult.Kind == delivery.ClientCancelled || errors.Is(err, context.Canceled) {
 			result = "canceled"
 			statusCode = clientClosedRequestStatus
 			errorOrigin = "client"
@@ -322,7 +323,7 @@ func logRequestOutcome(
 	}
 	attrs = append(attrs, "attempt_count", attemptCount)
 	level := slog.LevelDebug
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if err != nil && deliveryResult.Kind != delivery.ClientCancelled && !errors.Is(err, context.Canceled) {
 		var backendErr canonical.BackendError
 		if errors.As(err, &backendErr) || errorCode != string(canonical.ErrorCodeInternal) {
 			level = slog.LevelWarn

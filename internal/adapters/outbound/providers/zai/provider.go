@@ -40,11 +40,12 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerTool: protocolcodec.ChatHostedSearchTool(func() any {
-				return requestTool{Type: canonical.ToolTypeWebSearch, WebSearch: &webSearchOptions{Enable: true}}
-			}, canonical.ToolTypeWebSearch),
-			LowerToolPolicy: protocolcodec.ChatHostedSearchToolPolicy(canonical.ToolTypeWebSearch),
-			LowerReasoning:  applyReasoning,
+			Lowering: protocolcodec.ChatLowering{
+				Tools: protocolcodec.ChatToolLowering{WebSearch: protocolcodec.ChatHostedSearchTool(func() any {
+					return requestTool{Type: canonical.ToolTypeWebSearch, WebSearch: &webSearchOptions{Enable: true}}
+				}, canonical.ToolTypeWebSearch)},
+				Reasoning: applyReasoning,
+			},
 		},
 	}
 	return backend, backend.Validate()

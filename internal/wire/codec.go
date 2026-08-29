@@ -20,6 +20,7 @@ package wire
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -166,6 +167,50 @@ type ResponseCompletionSnapshot struct {
 	Usage               canonical.TokenUsage
 }
 
+// responseProcessingError preserves the first response-processing boundary
+// that caught a streamed terminal error. Later wrappers must not replace that
+// owner, and cancellation must remain owned by downstream delivery.
+type responseProcessingError struct {
+	stage string
+	err   error
+}
+
+func (e responseProcessingError) Error() string { return e.err.Error() }
+func (e responseProcessingError) Unwrap() error { return e.err }
+
+// StageResponseFailure attaches a stable diagnostic stage exactly once.
+// Stages are observability values, not a public error taxonomy.
+func StageResponseFailure(stage string, err error) error {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return err
+	}
+	var staged responseProcessingError
+	if errors.As(err, &staged) {
+		return err
+	}
+	return responseProcessingError{stage: stage, err: err}
+}
+
+// ResponseFailureStage reports the exact boundary attached by
+// StageResponseFailure. An absent stage is deliberately unknown.
+func ResponseFailureStage(err error) (string, bool) {
+	var staged responseProcessingError
+	if !errors.As(err, &staged) {
+		return "", false
+	}
+	return staged.stage, true
+}
+
+// ResponseFailureCause removes the private diagnostic-stage wrapper so logs
+// can name the safe concrete owner type without exposing arbitrary prose.
+func ResponseFailureCause(err error) error {
+	var staged responseProcessingError
+	if errors.As(err, &staged) {
+		return staged.err
+	}
+	return err
+}
+
 func (s ResponseCompletionSnapshot) clone() ResponseCompletionSnapshot {
 	s.Changes = compat.CloneChanges(s.Changes)
 	return s
@@ -275,7 +320,7 @@ func (c *ResponseCompletion) complete(fingerprint *historyfingerprint.Response, 
 	}
 	allChanges = append(allChanges, changes...)
 	if err := compat.ValidateChanges(allChanges); err != nil {
-		c.snapshot = ResponseCompletionSnapshot{State: CompletionFailed, Err: err}
+		c.snapshot = ResponseCompletionSnapshot{State: CompletionFailed, Err: StageResponseFailure("canonical_response_validation", err)}
 		terminal := c.onTerminal
 		c.onTerminal = nil
 		snapshot := c.snapshot.clone()

@@ -59,7 +59,7 @@ func TestDeferredFunctionRefinementRemainsNativeFromEveryRequestDeclarationCarri
 	}
 }
 
-func TestDeferredFunctionRefinementRemainsNativeFromDiscoveryResult(t *testing.T) {
+func TestStandaloneDiscoveryResultWithoutDeclarationProjectionIsOmitted(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "loaded")
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	tool, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
@@ -80,10 +80,10 @@ func TestDeferredFunctionRefinementRemainsNativeFromDiscoveryResult(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded.RawBytes()), `"defer_loading":true`) {
-		t.Fatalf("native lowering omitted discovery-result deferred visibility: %s", encoded.RawBytes())
+	if strings.Contains(string(encoded.RawBytes()), `"tool_search_output"`) || strings.Contains(string(encoded.RawBytes()), `"defer_loading":true`) {
+		t.Fatalf("standalone discovery result invented replay projection: %s", encoded.RawBytes())
 	}
-	if hasResponseChange(changes, canonical.RequestToolsVisibility) {
-		t.Fatalf("native lowering reported discovery-result visibility approximation: %#v", changes)
+	if !containsResponseChange(changes, canonical.RequestItemsKind, compat.Omission) {
+		t.Fatalf("standalone discovery omission was not recorded: %#v", changes)
 	}
 }

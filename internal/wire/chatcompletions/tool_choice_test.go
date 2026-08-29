@@ -141,7 +141,8 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 				set, _ := canonical.NewToolSet(tc.tools)
 				item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 				names = testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
-				_, _, lowered, _ = compileChatCompletionsTools(tc.tools, names, nil, "", nil)
+				_, _, projection, _ := compileChatCompletionsTools(tc.tools, names, nil, "", DefaultToolLowering())
+				lowered = projection.lowered
 			}
 			got, err := encodeChatCompletionsToolChoice(tc.policy, lowered, names, nil, "")
 			if err != nil {
@@ -152,26 +153,24 @@ func TestEncodeChatCompletionsToolChoice_WiresExplicitModes(t *testing.T) {
 	}
 }
 
-func TestEncodeChatCompletionsToolChoice_OmitsSemanticToolWithoutProviderPolicy(t *testing.T) {
+func TestEncodeChatCompletionsToolChoice_UsesEmittedSemanticIdentity(t *testing.T) {
 	t.Parallel()
 	webSearchTool := canonical.NewWebSearchDeclaration()
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearchTool})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	names := testAttemptToolNames(canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{item}}))
-	rule := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
-		if tool.Kind() == canonical.ToolKindWebSearch {
-			return []any{ProviderRequestTool{Type: "web_search"}}, true, nil, nil
-		}
-		return nil, false, nil, nil
+	rule := func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		standard := ProviderRequestTool{Type: "web_search"}
+		return ToolProjection{Fragments: []ToolFragment{{Value: standard, Standard: &standard}}, TargetType: "web_search"}, nil, nil
 	}
-	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearchTool}, names, nil, "", rule)
+	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearchTool}, names, nil, "", DefaultToolLowering().Overlay(ToolLowering{WebSearch: rule}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := specificToolPolicy(webSearchTool.Key(), canonical.ToolTypeWebSearch)
 	var changes []compat.Change
-	choice, err := encodeChatCompletionsToolChoice(policy, lowered, names, &changes, "")
-	if err != nil || choice != nil || len(changes) != 1 || changes[0].Kind != compat.Omission {
+	choice, err := encodeChatCompletionsToolChoice(policy, lowered.lowered, names, &changes, "")
+	if err != nil || !reflect.DeepEqual(choice, map[string]any{"type": "web_search"}) || len(changes) != 0 {
 		t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)
 	}
 }
@@ -181,7 +180,7 @@ func TestEncodeChatCompletionsToolChoice_RecordsPolicyLossWithoutProjectedTools(
 
 	webSearch := canonical.NewWebSearchDeclaration()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
-	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearch}, testAttemptToolNames(request), nil, "", nil)
+	_, _, lowered, err := compileChatCompletionsTools([]canonical.ToolDeclaration{webSearch}, testAttemptToolNames(request), nil, "", DefaultToolLowering())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +193,7 @@ func TestEncodeChatCompletionsToolChoice_RecordsPolicyLossWithoutProjectedTools(
 		t.Run(string(policy.Mode), func(t *testing.T) {
 			t.Parallel()
 			var changes []compat.Change
-			choice, err := encodeChatCompletionsToolChoice(policy, lowered, nil, &changes, "")
+			choice, err := encodeChatCompletionsToolChoice(policy, lowered.lowered, nil, &changes, "")
 			want := compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})
 			if err != nil || choice != nil || len(changes) != 1 || changes[0] != want {
 				t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)

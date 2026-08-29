@@ -67,8 +67,7 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 		Codec: protocolcodec.Codec{
 			Protocol: protocolkind.Messages,
 			MessagesDialect: protocolcodec.MessagesDialect{
-				LowerTool:       protocolcodec.MessagesHostedSearchTool("web_search_20260209", "direct"),
-				LowerToolPolicy: protocolcodec.MessagesHostedSearchToolPolicy("web_search_20260209"),
+				Lowering: protocolcodec.MessagesLowering{Tools: protocolcodec.MessagesToolLowering{WebSearch: protocolcodec.MessagesHostedSearchTool("web_search_20260209", "direct")}},
 			},
 		},
 		Transport: provider.BindTransport(target, e.Send),

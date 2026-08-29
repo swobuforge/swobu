@@ -3,14 +3,17 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -130,6 +133,9 @@ func (s *interactionsStream) Next(ctx context.Context) (canonical.Event, error) 
 			}
 			if err == io.EOF && !s.started {
 				return canonical.Event{}, canonical.NewBackendError("gemini", 0, "Gemini Interactions stream ended before interaction.created", "")
+			}
+			if err != io.EOF && !errors.Is(err, context.Canceled) {
+				return canonical.Event{}, provider.Unavailable(err)
 			}
 			return canonical.Event{}, err
 		}
@@ -908,10 +914,22 @@ func (s *interactionsStream) hasCompletedFunctionCall() bool {
 }
 
 func (s *interactionsStream) handleError(frame interactionSSEFrame) error {
+	code := strings.TrimSpace(frame.Error.Code) // swobu:io-string source=provider-wire
+	slog.Debug("Gemini interaction error",
+		"component", "provider.gemini",
+		"event", "gemini_interaction_error",
+		"error_code", code,
+		"semantic_output_started", len(s.steps) > 0,
+	)
+	if len(s.steps) == 0 && code == "api_error" {
+		return provider.Unavailable(canonical.NewBackendError("gemini", 0, "Gemini Interactions service is unavailable", ""))
+	}
 	if !s.started {
 		return canonical.NewBackendError("gemini", 0, strings.TrimSpace(frame.Error.Message), "")
 	}
-	code := strings.TrimSpace(frame.Error.Code) // swobu:io-string source=provider-wire
+	if len(s.steps) == 0 {
+		return canonical.NewBackendError("gemini", 0, strings.TrimSpace(frame.Error.Message), "")
+	}
 	if code == "" {
 		code = "gemini_error"
 	}

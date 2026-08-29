@@ -33,6 +33,46 @@ func newTestHandler(ingress requestIngress) Handler {
 	return NewHandler(ingress, nil)
 }
 
+func TestLogRequestOutcomeUsesDeliveryOwnedClientCancellation(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	logRequestOutcome("request-a", "personal", canonical.ClientFamilyMessages,
+		canonical.NormalizedPathMessages, "target-a", 1,
+		delivery.Result{Kind: delivery.ClientCancelled, Err: errors.New("private downstream write error")})
+
+	entries := decodeHTTPLogEntries(t, logs.Bytes())
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %#v, want one", entries)
+	}
+	entry := entries[0]
+	if entry["result"] != "canceled" || entry["status_code"] != float64(clientClosedRequestStatus) || entry["error_origin"] != "client" {
+		t.Fatalf("client cancellation log = %#v", entry)
+	}
+	if _, ok := entry["error_code"]; ok {
+		t.Fatalf("client cancellation acquired error_code: %#v", entry)
+	}
+	if strings.Contains(logs.String(), "private downstream write error") {
+		t.Fatalf("request outcome exposed downstream error prose: %s", logs.String())
+	}
+}
+
+func decodeHTTPLogEntries(t *testing.T, raw []byte) []map[string]any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var entries []map[string]any
+	for decoder.More() {
+		var entry map[string]any
+		if err := decoder.Decode(&entry); err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)

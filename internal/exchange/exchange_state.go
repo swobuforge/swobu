@@ -447,7 +447,7 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		response, canonicalResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		changes := providerCompatibility.completedChanges()
 		if completionErr != nil {
-			logProviderAttemptAbortedAfterHandoff(s, phase.attemptID, attempt, completionErr)
+			logProviderAttemptFailedBeforeHandoff(s, phase.attemptID, attempt, completionErr)
 			var err error
 			s, err = failProviderCallAttempt(s, phase.attemptID, provider.AttemptMayHaveExecuted(completionErr))
 			if err != nil {

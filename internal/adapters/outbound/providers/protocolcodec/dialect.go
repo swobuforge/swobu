@@ -33,13 +33,25 @@ type AttemptDecorator func(ctx AttemptContext) (AttemptDecoration, error)
 // context, re-exported for exact-provider lowering rules.
 type ReasoningTargetDialect = chatcompletions.ReasoningTargetDialect
 
+// ChatToolLowering, ResponsesToolLowering, and MessagesToolLowering expose the
+// typed sparse slot sets at the provider-construction boundary. Provider
+// packages select slots here without importing protocol serializer packages.
+type ChatToolLowering = chatcompletions.ToolLowering
+type ChatLowering = chatcompletions.Lowering
+type ResponsesToolLowering = responses.ToolLowering
+type ResponsesHistoryMessageRoleTransformer = responses.HistoryMessageRoleTransformer
+type MessagesToolLowering = messages.ToolLowering
+type MessagesLowering = messages.Lowering
+type MessagesReasoningTransformer = messages.ReasoningTransformer
+
+// MessagesOmitAdaptiveReasoning is the sparse semantic override for targets
+// whose Messages grammar cannot accept adaptive or budget reasoning controls.
+var MessagesOmitAdaptiveReasoning MessagesReasoningTransformer = messages.OmitAdaptiveReasoning
+
 // ChatDialect contains executable target rules for semantic occurrences that
 // differ from standard Chat Completions. Zero values use standard lowering.
 type ChatDialect struct {
-	LowerTool              chatcompletions.ToolLoweringRule
-	LowerToolPolicy        chatcompletions.ToolPolicyLoweringRule
-	LowerReasoning         chatcompletions.ReasoningLoweringRule
-	LowerMessage           chatcompletions.MessageLoweringRule
+	Lowering               chatcompletions.Lowering
 	UseMaxCompletionTokens bool
 	ResponseReasoning      func() ChatReasoningExtractor
 	DecorateAttempt        AttemptDecorator
@@ -48,10 +60,11 @@ type ChatDialect struct {
 // ResponsesDialect contains executable target rules for semantic occurrences
 // that differ from official Responses. Zero values use standard lowering.
 type ResponsesDialect struct {
-	LowerTool                    responses.ToolLoweringRule
-	LowerToolPolicy              responses.ToolPolicyLoweringRule
+	Tools                        responses.ToolLowering
+	HistoryMessageRole           responses.HistoryMessageRoleTransformer
 	PrependInstructionsToInput   bool
 	OmitInclude                  bool
+	OmitMaxOutputTokens          bool
 	OmitStoreFalse               bool
 	ForceArrayInput              bool
 	DefaultStore                 *bool
@@ -63,112 +76,55 @@ type ResponsesDialect struct {
 // MessagesDialect contains executable target rules for semantic occurrences
 // that differ from standard Messages. Zero values use standard lowering.
 type MessagesDialect struct {
-	LowerTool            messages.ToolLoweringRule
-	LowerToolPolicy      messages.ToolPolicyLoweringRule
-	OmitAdaptiveThinking bool
-	DecorateAttempt      AttemptDecorator
+	Lowering        messages.Lowering
+	DecorateAttempt AttemptDecorator
 }
 
 // ChatHostedSearchTool lowers canonical hosted search for Chat Completions.
-func ChatHostedSearchTool(fragment func() any, spelling string) chatcompletions.ToolLoweringRule {
-	return func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
-		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
+func ChatHostedSearchTool(fragment func() any, spelling string) chatcompletions.ToolTransformer {
+	return func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) (chatcompletions.ToolProjection, []compat.Change, error) {
 		if fragment != nil {
-			return []any{fragment()}, true, nil, nil
+			return chatcompletions.ToolProjection{Fragments: []chatcompletions.ToolFragment{{Value: fragment()}}, TargetType: spelling}, nil, nil
 		}
 		if spelling == "" {
-			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
+			return chatcompletions.ToolProjection{}, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
-		return []any{chatcompletions.ProviderRequestTool{Type: spelling}}, true, nil, nil
-	}
-}
-
-// ChatHostedSearchToolPolicy resolves a specific hosted-search policy for Chat Completions.
-func ChatHostedSearchToolPolicy(spelling string) chatcompletions.ToolPolicyLoweringRule {
-	return func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, _ wire.ToolNames) (any, bool, []compat.Change, error) {
-		if policy.Mode != canonical.ToolPolicySpecific {
-			return nil, false, nil, nil
-		}
-		key, ok := policy.SpecificID()
-		if !ok || key.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount != 1 || spelling == "" {
-			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
-		}
-		return map[string]any{"type": spelling}, true, nil, nil
+		standard := chatcompletions.ProviderRequestTool{Type: spelling}
+		return chatcompletions.ToolProjection{Fragments: []chatcompletions.ToolFragment{{Value: standard, Standard: &standard}}, TargetType: spelling}, nil, nil
 	}
 }
 
 // ChatOutOfBandHostedSearch consumes the canonical hosted-search declaration
 // when a provider enables search through top-level request parameters rather
 // than a Chat tool fragment.
-func ChatOutOfBandHostedSearch() chatcompletions.ToolLoweringRule {
-	return func(_ chatcompletions.ToolLoweringContext, tool canonical.ToolDeclaration) ([]any, bool, []compat.Change, error) {
-		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		return nil, true, nil, nil
-	}
-}
-
-// ChatOutOfBandHostedSearchPolicy consumes specific hosted-search selection
-// after proving the corresponding canonical declaration was lowered.
-func ChatOutOfBandHostedSearchPolicy() chatcompletions.ToolPolicyLoweringRule {
-	return func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, _ wire.ToolNames) (any, bool, []compat.Change, error) {
-		if policy.Mode == canonical.ToolPolicyRequired {
-			if lowered.Len() == 0 {
-				return nil, false, nil, nil
-			}
-			for _, record := range lowered.Records {
-				if record.Kind != canonical.ToolKindWebSearch || record.FragmentCount != 0 {
-					return nil, false, nil, nil
-				}
-			}
-			return nil, true, nil, nil
-		}
-		if policy.Mode != canonical.ToolPolicySpecific {
-			return nil, false, nil, nil
-		}
-		key, ok := policy.SpecificID()
-		if !ok || key.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		if _, ok := lowered.FindSource(key); !ok {
-			return nil, true, nil, canonical.BadRequest("specific web-search tool is not declared")
-		}
-		return nil, true, nil, nil
+func ChatOutOfBandHostedSearch() chatcompletions.ToolTransformer {
+	return func(_ chatcompletions.ToolLoweringContext, _ canonical.ToolDeclaration) (chatcompletions.ToolProjection, []compat.Change, error) {
+		return chatcompletions.ToolProjection{TargetType: "out_of_band"}, nil, nil
 	}
 }
 
 // ResponsesHostedSearchTool lowers canonical hosted search for Responses.
-func ResponsesHostedSearchTool(spelling string) responses.ToolLoweringRule {
-	return func(_ responses.ToolLoweringContext, tool canonical.ToolDeclaration) ([]responses.ProviderRequestTool, bool, []compat.Change, error) {
-		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
+func ResponsesHostedSearchTool(spelling string) responses.ToolTransformer {
+	return func(_ responses.ToolLoweringContext, tool canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
 		if spelling == "" {
-			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
+			return responses.ToolProjection{}, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
-		return []responses.ProviderRequestTool{{Type: spelling}}, true, nil, nil
+		return responses.HostedSearchProjection(responses.ProviderRequestTool{Type: spelling}), nil, nil
 	}
 }
 
 // ResponsesCustomAsFunction lowers one canonical Custom declaration through
 // the ordinary Responses function carrier. Exact targets may opt into this
 // rule only after their native and wrapper history carriers are characterized.
-func ResponsesCustomAsFunction() responses.ToolLoweringRule {
-	return func(ctx responses.ToolLoweringContext, tool canonical.ToolDeclaration) ([]responses.ProviderRequestTool, bool, []compat.Change, error) {
+func ResponsesCustomAsFunction() responses.ToolTransformer {
+	return func(ctx responses.ToolLoweringContext, tool canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
 		custom, ok := tool.Custom()
 		if !ok {
-			return nil, false, nil, nil
+			return responses.ToolProjection{}, nil, canonical.InternalError("Responses Custom slot received a non-Custom declaration")
 		}
 		name, err := wire.EncodeToolName(ctx.Names, tool.Key())
 		if err != nil {
-			return nil, true, nil, err
+			return responses.ToolProjection{}, nil, err
 		}
 		parameters := map[string]any{
 			"type": "object",
@@ -182,38 +138,18 @@ func ResponsesCustomAsFunction() responses.ToolLoweringRule {
 		if !custom.Format().IsEmpty() {
 			changes = []compat.Change{compat.NewApproximation(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}
 		}
-		return []responses.ProviderRequestTool{{
+		encoded := responses.ProviderRequestTool{
 			Type: "function", Name: name, Description: custom.Description(), Parameters: parameters,
-		}}, true, changes, nil
-	}
-}
-
-// ResponsesHostedSearchToolPolicy resolves a specific hosted-search policy for Responses.
-func ResponsesHostedSearchToolPolicy(spelling string) responses.ToolPolicyLoweringRule {
-	return func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, _ wire.ToolNames) (any, bool, []compat.Change, error) {
-		if policy.Mode != canonical.ToolPolicySpecific {
-			return nil, false, nil, nil
 		}
-		key, ok := policy.SpecificID()
-		if !ok || key.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount != 1 || spelling == "" {
-			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
-		}
-		return map[string]any{"type": spelling}, true, nil, nil
+		return responses.CustomAsFunctionProjection(encoded, "input"), changes, nil
 	}
 }
 
 // MessagesHostedSearchTool lowers canonical hosted search for Messages (e.g. Anthropic).
-func MessagesHostedSearchTool(typeName string, allowedCallers ...string) messages.ToolLoweringRule {
-	return func(_ messages.ToolLoweringContext, tool canonical.ToolDeclaration) ([]messages.ProviderRequestTool, bool, []compat.Change, error) {
-		if tool.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
+func MessagesHostedSearchTool(typeName string, allowedCallers ...string) messages.ToolTransformer {
+	return func(_ messages.ToolLoweringContext, tool canonical.ToolDeclaration) (messages.ToolProjection, []compat.Change, error) {
 		if typeName == "" {
-			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
+			return messages.ToolProjection{}, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
 		toolDTO := messages.ProviderRequestTool{
 			Type: typeName,
@@ -222,25 +158,7 @@ func MessagesHostedSearchTool(typeName string, allowedCallers ...string) message
 		if len(allowedCallers) > 0 {
 			toolDTO.AllowedCallers = allowedCallers
 		}
-		return []messages.ProviderRequestTool{toolDTO}, true, nil, nil
-	}
-}
-
-// MessagesHostedSearchToolPolicy resolves a specific hosted-search policy for Messages.
-func MessagesHostedSearchToolPolicy(typeName string) messages.ToolPolicyLoweringRule {
-	return func(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, _ wire.ToolNames) (any, bool, []compat.Change, error) {
-		if policy.Mode != canonical.ToolPolicySpecific {
-			return nil, false, nil, nil
-		}
-		key, ok := policy.SpecificID()
-		if !ok || key.Kind() != canonical.ToolKindWebSearch {
-			return nil, false, nil, nil
-		}
-		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount != 1 || typeName == "" {
-			return nil, true, []compat.Change{compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})}, nil
-		}
-		return map[string]any{"type": "tool", "name": canonical.WebSearchToolKey().Name()}, true, nil, nil
+		return messages.HostedSearchProjection(toolDTO), nil, nil
 	}
 }
 

@@ -44,14 +44,14 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerReasoning: func(req canonical.CanonicalRequest, _ protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+			Lowering: protocolcodec.ChatLowering{Reasoning: func(req canonical.CanonicalRequest, _ protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 				fields := make(map[string]any)
 				if disclosure, set := req.Reasoning().DisclosureField().Get(); set && disclosure == canonical.ReasoningDisclosureNone {
 					fields["parse_reasoning"] = true
 					fields["include_reasoning"] = false
 				}
 				return fields, nil
-			},
+			}},
 			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return friendliChatReasoningExtractor{} },
 		},
 	}

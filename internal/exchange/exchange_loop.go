@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -158,44 +159,78 @@ func observeProviderAttemptTerminal(state exchangeState, attemptID providerCallA
 			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt finished", anyAttrs(attrs)...)
 			return
 		}
-		stage := "client_stream_encode"
-		var staged responseProcessingError
-		if errors.As(snapshot.Err, &staged) {
-			stage = staged.stage
+		stage := "unknown"
+		if exact, ok := wire.ResponseFailureStage(snapshot.Err); ok {
+			stage = exact
 		}
 		attrs = append(attrs,
 			"outcome", "aborted_after_handoff",
-			"error_origin", "swobu",
-			"error_code", canonical.TerminalErrorCode(snapshot.Err),
-			"error_message", safeCanonicalErrorMessage(snapshot.Err),
 			"failure_stage", stage,
+			"error_type", safeErrorType(snapshot.Err),
 		)
-		slog.LogAttrs(context.Background(), slog.LevelError, "provider attempt aborted after handoff", anyAttrs(attrs)...)
+		attrs, level := appendTypedTerminalError(attrs, snapshot.Err)
+		slog.LogAttrs(context.Background(), level, "provider attempt aborted after handoff", anyAttrs(attrs)...)
 	})
 }
 
-func logProviderAttemptAbortedAfterHandoff(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, err error) {
-	stage := "canonical_response_validation"
-	var staged responseProcessingError
-	if errors.As(err, &staged) {
-		stage = staged.stage
+func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, err error) {
+	stage := "unknown"
+	if exact, ok := wire.ResponseFailureStage(err); ok {
+		stage = exact
 	}
-	slog.Error("provider attempt aborted after handoff",
+	failureClass, level := providerFailureLogClassification(err)
+	canceled := errors.Is(err, context.Canceled)
+	if canceled {
+		failureClass, level = "canceled", slog.LevelDebug
+	}
+	attrs := []any{
 		"component", "exchange", "event", "provider_attempt_finished",
 		"request_id", state.input.exchangeID, "attempt", int(attemptID),
 		"target_id", attempt.target.TargetID, "provider", attempt.target.ProviderSpec,
-		"model", attempt.target.Model, "outcome", "aborted_after_handoff",
-		"error_origin", "swobu", "error_code", canonical.TerminalErrorCode(err),
-		"error_message", safeCanonicalErrorMessage(err), "failure_stage", stage,
-	)
+		"model", attempt.target.Model, "outcome", "failed_before_handoff",
+		"failure_class", failureClass, "failure_stage", stage, "error_type", safeErrorType(err),
+	}
+	if canceled {
+		attrs = append(attrs, "error_origin", "client")
+	}
+	if level == slog.LevelDebug {
+		slog.LogAttrs(context.Background(), level, "provider attempt canceled before handoff", anyAttrs(attrs)...)
+		return
+	}
+	slog.LogAttrs(context.Background(), level, "provider attempt failed before handoff", anyAttrs(attrs)...)
 }
 
-func safeCanonicalErrorMessage(err error) string {
+func appendTypedTerminalError(attrs []any, err error) ([]any, slog.Level) {
+	if errors.Is(err, context.Canceled) {
+		return append(attrs, "error_origin", "client"), slog.LevelDebug
+	}
+	var backendErr canonical.BackendError
+	if errors.As(err, &backendErr) {
+		return append(attrs,
+			"error_origin", string(canonical.ErrorOriginBackend),
+			"status_code", backendErr.StatusCode,
+		), slog.LevelWarn
+	}
 	var canonicalErr canonical.Error
 	if errors.As(err, &canonicalErr) {
-		return canonicalErr.Message
+		return append(attrs,
+			"error_origin", string(canonicalErr.Origin),
+			"error_code", string(canonicalErr.Code),
+			"error_message", canonicalErr.Message,
+		), slog.LevelError
 	}
-	return canonical.InternalError("response processing failed").Message
+	return attrs, slog.LevelError
+}
+
+func safeErrorType(err error) string {
+	err = wire.ResponseFailureCause(err)
+	if errors.Is(err, context.Canceled) {
+		return "context.Canceled"
+	}
+	if err == nil {
+		return "<nil>"
+	}
+	return reflect.TypeOf(err).String()
 }
 
 // providerFailureLogClassification maps the adapter-owned typed failure fact

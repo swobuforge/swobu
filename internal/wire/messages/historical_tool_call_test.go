@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestEncodeHistoricalToolCallUsesStoredNamespacedKeyWithoutCurrentTools(t *testing.T) {
@@ -20,7 +22,14 @@ func TestEncodeHistoricalToolCallUsesStoredNamespacedKeyWithoutCurrentTools(t *t
 	names := testAttemptToolNames(request)
 	want, _ := names.WireName(key)
 
-	got, err := encodeMessagesToolCall(item, nil, names)
+	projection := ToolProjection{ProjectCall: func(call canonical.ToolCallItem) (ToolCallProjection, error) {
+		object, _ := call.Input().Object()
+		return ToolCallProjection{Type: "tool_use", Name: want, Input: json.RawMessage(object.Bytes())}, nil
+	}}
+	got, err := encodeMessagesToolCall(item, compiledToolProjection{
+		lowered:     wire.LoweredToolSet{Records: []wire.LoweredToolRecord{{Key: key, Kind: key.Kind(), FragmentCount: 1, TargetType: "tool", TargetName: want}}},
+		occurrences: map[canonical.ToolKey]ToolProjection{key: projection},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +73,52 @@ func TestMessagesOmitsUnloweredCustomCallAndResultAtomically(t *testing.T) {
 	wantEffect := compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(2))
 	if !containsChange(changes, wantTool) || !containsChange(changes, wantEffect) {
 		t.Fatalf("changes = %#v, want tool %#v and effect %#v", changes, wantTool, wantEffect)
+	}
+}
+
+func TestCustomSlotAloneOwnsWeirdMessagesDeclarationCallResultAndPolicy(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "canonical-shell")
+	tool := canonicaltest.MustCustomTool(key, "Run raw text", canonical.EmptyToolFormat())
+	call := canonicaltest.ToolCall(t, "call_weird", key, canonical.NewTextToolInput("abc"))
+	callValue, _ := call.ToolCall()
+	result, err := canonical.NewToolResultItem(callValue.CallID(), []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool), call, result,
+		}, ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key)),
+	})
+	weirdCustom := func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		fragment := ProviderRequestTool{Name: "x", InputSchema: json.RawMessage(`{"type":"object","properties":{"payload":{"type":"string"}},"required":["payload"]}`)}
+		projection := CallableProjection(fragment)
+		projection.ProjectCall = func(call canonical.ToolCallItem) (ToolCallProjection, error) {
+			text, ok := call.Input().Text()
+			if !ok {
+				return ToolCallProjection{}, canonical.BadRequest("weird Custom requires text")
+			}
+			raw, err := json.Marshal(map[string]string{"payload": text})
+			return ToolCallProjection{Type: "tool_use", Name: "x", Input: raw}, err
+		}
+		return projection, nil, nil
+	}
+	names := testAttemptToolNames(request)
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "", CompileOptions{
+		Lowering: DefaultLowering().Overlay(Lowering{Tools: ToolLowering{Custom: weirdCustom}}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeProviderRequestDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(encoded.RawBytes())
+	for _, want := range []string{`"name":"x"`, `"input":{"payload":"abc"}`, `"type":"tool_result"`, `"tool_choice":{"name":"x","type":"tool"}`} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("weird Messages Custom projection = %s, want %s", wire, want)
+		}
 	}
 }
 

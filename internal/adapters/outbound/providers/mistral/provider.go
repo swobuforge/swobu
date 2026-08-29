@@ -58,8 +58,10 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerReasoning:    applyMistralReasoning,
-			LowerMessage:      applyMistralMessage,
+			Lowering: protocolcodec.ChatLowering{
+				Reasoning: applyMistralReasoning,
+				Message:   applyMistralMessage,
+			},
 			ResponseReasoning: func() protocolcodec.ChatReasoningExtractor { return mistralChatReasoningExtractor{} },
 		},
 	}

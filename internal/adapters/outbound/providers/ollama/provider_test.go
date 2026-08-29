@@ -2,9 +2,12 @@ package ollama
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	openaifamily "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -12,6 +15,82 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
+
+func TestResponsesLowersLateDirectiveRoleWithoutReorderingHistory(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "Hello World"),
+			canonicaltest.Message(t, canonical.MessageRoleSystem, "late Claude directive"),
+		},
+	})
+
+	document, changes := encodeResponsesRequestWithChanges(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request)
+	var payload struct {
+		Input []struct {
+			Role    string `json:"role"`
+			Content any    `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(document, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 2 || payload.Input[0].Role != "user" || payload.Input[1].Role != "user" {
+		t.Fatalf("Ollama input roles = %#v, want user then lowered user", payload.Input)
+	}
+	if fmt.Sprint(payload.Input[0].Content) != "Hello World" || fmt.Sprint(payload.Input[1].Content) != "late Claude directive" {
+		t.Fatalf("Ollama input content or order changed: %#v", payload.Input)
+	}
+	want := compat.NewApproximation(canonical.RequestItemsMessageRole, canonical.RequestItemOccurrence(1))
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("Ollama changes = %#v, want %#v", changes, []compat.Change{want})
+	}
+
+	standardDocument := encodeResponsesRequest(t, openaifamily.NewRuntime(nil, nil, openaifamily.StandardBearerPolicy(profile.ProviderSpecOpenAI)).BackendResolver, profile.ProviderSpecOpenAI, request)
+	var standardPayload struct {
+		Input []struct {
+			Role string `json:"role"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(standardDocument, &standardPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(standardPayload.Input) != 2 || standardPayload.Input[1].Role != "system" {
+		t.Fatalf("standard Responses input changed: %s", standardDocument)
+	}
+}
+
+func TestResponsesResumeLowersHistoricalCustomThroughPortableFunction(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell")
+	declaration := canonicaltest.MustCustomTool(key, "Run shell text", canonicaltest.MustToolFormat(`{"type":"text"}`))
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewTextToolInput("echo exact"))
+	callValue, _ := call.ToolCall()
+	result, err := canonical.NewToolResultItem(callValue.CallID(), []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, declaration),
+			call,
+			result,
+			canonicaltest.Message(t, canonical.MessageRoleUser, "continue"),
+		},
+	})
+
+	wire := string(encodeResponsesRequest(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request))
+	for _, forbidden := range []string{`"type":"custom"`, `"type":"custom_tool_call"`, `"type":"custom_tool_call_output"`} {
+		if strings.Contains(wire, forbidden) {
+			t.Fatalf("Ollama resume leaked native Responses Custom syntax %s: %s", forbidden, wire)
+		}
+	}
+	for _, want := range []string{`"type":"function"`, `"type":"function_call"`, `"type":"function_call_output"`, `"arguments":"{\"input\":\"echo exact\"}"`} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("Ollama resume = %s, want portable Custom projection %s", wire, want)
+		}
+	}
+}
 
 func TestHistoricalSearchDoesNotRequireCurrentSearchAndInstructionsStayFirst(t *testing.T) {
 	request := historicalSearchRequest(t)
@@ -82,15 +161,25 @@ func historicalSearchRequest(t *testing.T) canonical.CanonicalRequest {
 
 func encodeResponsesRequest(t *testing.T, resolver provider.BackendResolver, providerID profile.ProviderID, request canonical.CanonicalRequest) []byte {
 	t.Helper()
+	document, _ := encodeResponsesRequestWithChanges(t, resolver, providerID, request)
+	return document
+}
+
+func encodeResponsesRequestWithChanges(t *testing.T, resolver provider.BackendResolver, providerID profile.ProviderID, request canonical.CanonicalRequest) ([]byte, []compat.Change) {
+	t.Helper()
 	target := provider.NewTargetSnapshot("target", string(providerID), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = request.Model()
 	backend, err := resolver.ResolveBackend(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	names, _, err := provider.BuildAttemptToolNames(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return document.RawBytes()
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), ToolNames: names})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document.RawBytes(), changes
 }

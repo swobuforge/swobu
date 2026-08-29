@@ -26,9 +26,13 @@ func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, request
 	streamState := state.(*messagesEnvelopeStreamEncoder)
 	streamState.request = request.Clone()
 	completion, complete, fail := wire.NewResponseCompletion()
-	encoder := messagesFingerprintingEncoder(request, state.EncodeEnvelopeEvent, func(fingerprint *historyfingerprint.Response) {
+	project := messagesFingerprintingEncoder(request, state.EncodeEnvelopeEvent, func(fingerprint *historyfingerprint.Response) {
 		complete(fingerprint, streamState.Changes())
 	}, fail)
+	encoder := func(event canonical.Event) ([][]byte, error) {
+		logMessagesStreamProjection(event.Kind)
+		return project(event)
+	}
 	body := wire.NewEncodedResponseBody(ctx, events, encoder, completion, fail)
 	return wire.ClientByteStreamResult{
 		Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: body}, Completion: completion,

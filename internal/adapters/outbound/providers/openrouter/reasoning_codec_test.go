@@ -388,6 +388,7 @@ func TestOpenRouterOpaqueReplayFollowsMixedAssistantTextAndToolTurns(t *testing.
 	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())),
 			reasoningOne, messageItem(t, canonical.MessageRoleAssistant, "first answer"), call,
 			result, reasoningTwo, messageItem(t, canonical.MessageRoleAssistant, "second answer"),
 		},

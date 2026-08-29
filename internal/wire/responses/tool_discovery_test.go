@@ -6,12 +6,40 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
+
+func TestHistoricalDiscoveryWithoutDeclarationProvenanceDoesNotRunTransformer(t *testing.T) {
+	object, _ := canonical.ParseJSONObject([]byte(`{"query":"files"}`))
+	callID, _ := canonical.NewToolCallID("search_without_declaration")
+	item, err := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(object), canonical.DiscoveryExecutorClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, _ := item.ToolCall()
+	invoked := false
+	lowering := DefaultToolLowering().Overlay(ToolLowering{Discovery: func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		invoked = true
+		return ToolProjection{}, nil, nil
+	}})
+	projection := responsesToolProjection{lowered: wire.LoweredToolSet{}, lowering: lowering}
+	occurrence, err := projection.historicalProjection(call, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invoked {
+		t.Fatal("historical Discovery fabricated a declaration and ran the selected transformer")
+	}
+	if occurrence.ProjectCall != nil || occurrence.ProjectResult != nil {
+		t.Fatalf("history without declaration provenance recovered executable projection: %#v", occurrence)
+	}
+}
 
 func TestToolDiscoveryLifecycleLoadsDeclarationsInOrder(t *testing.T) {
 	raw := []byte(`{

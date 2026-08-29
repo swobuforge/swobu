@@ -22,10 +22,11 @@ type EncodeOptions struct {
 // CompileOptions contains the occurrence-local target rules used while the
 // shared Responses compiler still owns traversal and dependent policy order.
 type CompileOptions struct {
-	LowerTool                  ToolLoweringRule
-	LowerToolPolicy            ToolPolicyLoweringRule
+	ToolLowering               ToolLowering
+	HistoryMessageRole         HistoryMessageRoleTransformer
 	PrependInstructionsToInput bool
 	OmitInclude                bool
+	OmitMaxOutputTokens        bool
 	OmitStoreFalse             bool
 	ForceArrayInput            bool
 	DefaultStore               *bool
@@ -34,6 +35,10 @@ type CompileOptions struct {
 	AcceptsReasoningDisabled   func() bool
 	AcceptsFunctionOutputArray func() bool
 }
+
+// HistoryMessageRoleTransformer lowers one history message role at its exact
+// occurrence. It may not reorder or rewrite message content.
+type HistoryMessageRoleTransformer func(index int, role canonical.MessageRole) (canonical.MessageRole, []compat.Change, error)
 
 type inputMessageItem struct {
 	Type    string `json:"type"`
@@ -84,7 +89,7 @@ type ProviderRequestDocument struct {
 
 // swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithChanges(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	document, err := CompileProviderRequestDocument(input, d, changeLog, exchangeID, options, CompileOptions{})
+	document, err := CompileProviderRequestDocument(input, d, changeLog, exchangeID, options, CompileOptions{ToolLowering: DefaultToolLowering()})
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -138,12 +143,12 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	toolProjection, err := compileResponsesToolProjection(tools, fullVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
+	toolProjection, err := compileResponsesToolProjection(tools, fullVisibility, input.ToolNames, changeLog, exchangeID, compile.ToolLowering)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	wireTools := toolProjection.fragmentsFor(requestTools)
-	payloadInput, err := encodeInput(inputRequest, req.Items(), input.ToolNames, compile.AcceptsFunctionOutputArray, changeLog, exchangeID, &toolProjection)
+	payloadInput, err := encodeInput(inputRequest, req.Items(), input.ToolNames, compile.HistoryMessageRole, compile.AcceptsFunctionOutputArray, changeLog, exchangeID, &toolProjection)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -158,23 +163,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		wireTools = []ProviderRequestTool{}
 	}
 
-	var choice any
-	if compile.LowerToolPolicy != nil {
-		var handled bool
-		var changes []compat.Change
-		choice, handled, changes, err = compile.LowerToolPolicy(policy, toolProjection.lowered, input.ToolNames)
-		if changeLog != nil {
-			*changeLog = append(*changeLog, changes...)
-		}
-		if err != nil {
-			return ProviderRequestDocument{}, err
-		}
-		if !handled {
-			choice, err = encodeToolChoice(policy, toolProjection, input.ToolNames, changeLog, exchangeID)
-		}
-	} else {
-		choice, err = encodeToolChoice(policy, toolProjection, input.ToolNames, changeLog, exchangeID)
-	}
+	choice, err := encodeToolChoice(policy, toolProjection, input.ToolNames, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -218,7 +207,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && toolProjection.lowered.TotalFragments() > 0 {
 		payload["parallel_tool_calls"] = true
 	}
-	encodeResponsesGenerationControls(payload, req.Controls(), changeLog)
+	encodeResponsesGenerationControls(payload, req.Controls(), compile.OmitMaxOutputTokens, changeLog)
 	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -409,7 +398,7 @@ func responsesWireToolChoiceShape(choice any) string {
 	return "other"
 }
 
-func encodeInput(req canonical.CanonicalRequest, correlationItems []canonical.CanonicalItem, names wire.ToolNames, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, correlationItems []canonical.CanonicalItem, names wire.ToolNames, historyMessageRole HistoryMessageRoleTransformer, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) (any, error) {
 	items := req.Items()
 	_, history, err := canonical.SplitRequestPrelude(items)
 	if err != nil {
@@ -426,7 +415,7 @@ func encodeInput(req canonical.CanonicalRequest, correlationItems []canonical.Ca
 		if err != nil {
 			return nil, err
 		}
-		return encodeConversation(items, correlationItems, environment.Declarations(), names, acceptsFunctionOutputArray, changeLog, exchangeID, projection)
+		return encodeConversation(items, correlationItems, environment.Declarations(), names, historyMessageRole, acceptsFunctionOutputArray, changeLog, exchangeID, projection)
 	}
 }
 
@@ -473,15 +462,15 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) ([]any, error) {
+func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, historyMessageRole HistoryMessageRoleTransformer, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
-	pendingContentCalls := make(map[canonical.ToolCallID]string)
-	omittedContentCalls := make(map[canonical.ToolCallID]int)
-	contentResultKinds, err := contentResultKindsByOccurrence(correlationItems)
+	projectedEffects, err := projectedResponsesEffects(correlationItems, names, projection)
 	if err != nil {
 		return nil, err
 	}
+	callRecords := projectedEffects.callQueues()
+	resultRecords := projectedEffects.resultQueues()
 	for itemIndex, current := range items {
 		switch current.Kind() {
 		case canonical.ItemKindMessage:
@@ -489,13 +478,24 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			if message.Scope() == canonical.ContextScopeRequest {
 				continue
 			}
-			content, err := encodeResponsesMessageContent(message.Role(), message.Content())
+			role := message.Role()
+			if historyMessageRole != nil {
+				var roleChanges []compat.Change
+				role, roleChanges, err = historyMessageRole(itemIndex, role)
+				if err != nil {
+					return nil, err
+				}
+				if changeLog != nil {
+					*changeLog = append(*changeLog, roleChanges...)
+				}
+			}
+			content, err := encodeResponsesMessageContent(role, message.Content())
 			if err != nil {
 				return nil, err
 			}
 			item := inputMessageItem{
 				Type:    "message",
-				Role:    string(message.Role()),
+				Role:    string(role),
 				Content: content,
 			}
 			if message.Role() == canonical.MessageRoleAssistant {
@@ -511,98 +511,33 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			encoded = append(encoded, map[string]any{"type": "additional_tools", "role": "developer", "tools": wireTools})
 		case canonical.ItemKindToolCall:
 			call, _ := current.ToolCall()
-			tool := call.Tool()
-			if tool.Kind() == canonical.ToolKindFunction || tool.Kind() == canonical.ToolKindCustom {
-				if _, exists := pendingContentCalls[call.CallID()]; exists {
-					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
+			occurrence, found := popProjectedOccurrence(callRecords, call.CallID())
+			if !found {
+				return nil, canonical.InternalError("Responses tool-call history lost emitted declaration identity")
+			}
+			if occurrence.ProjectCall == nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+					return nil, err
 				}
-				fragments := projection.emittedFor(tool)
-				if len(fragments) == 0 {
-					if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
-						return nil, err
-					}
-					omittedContentCalls[call.CallID()]++
-					continue
-				}
-				if len(fragments) != 1 {
-					return nil, canonical.InternalError("Responses callable projection emitted multiple target identities")
-				}
-				fragment := fragments[0]
-				switch fragment.Type {
-				case "function":
-					arguments := ""
-					if object, ok := call.Input().Object(); ok {
-						arguments = object.String()
-					} else if text, ok := call.Input().Text(); ok && tool.Kind() == canonical.ToolKindCustom {
-						wrapped, err := json.Marshal(map[string]string{"input": text})
-						if err != nil {
-							return nil, canonical.InternalError("Responses custom function wrapper encoding failed")
-						}
-						arguments = string(wrapped)
-					} else {
-						return nil, canonical.BadRequest("responses function projection requires object input")
-					}
-					encoded = append(encoded, functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: fragment.Name, Arguments: arguments})
-				case "custom":
-					text, ok := call.Input().Text()
-					if !ok {
-						return nil, canonical.BadRequest("responses custom projection requires text input")
-					}
-					encoded = append(encoded, customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: fragment.Name, Input: text})
-				default:
-					return nil, canonical.InternalError("Responses callable projection emitted a non-callable target fragment")
-				}
-				pendingContentCalls[call.CallID()] = fragment.Type
 				continue
 			}
-			switch tool.Kind() {
-			case canonical.ToolKindWebSearch:
+			projectedCall, err := occurrence.ProjectCall(call)
+			if err != nil {
+				return nil, err
+			}
+			switch value := projectedCall.(type) {
+			case functionCallItem, customToolCallItem:
+				encoded = append(encoded, value)
+			case webSearchCallProjection:
 				if _, exists := pendingWebSearch[call.CallID()]; exists {
 					return nil, canonical.BadRequest("responses web-search history contains a duplicate unresolved call")
 				}
-				search, ok := call.Input().WebSearch()
-				if !ok {
-					return nil, canonical.BadRequest("responses web-search calls require typed input")
-				}
-				action, err := encodeResponsesWebSearchAction(search)
-				if err != nil {
-					return nil, canonical.BadRequest("responses web-search action could not be encoded")
-				}
 				pendingWebSearch[call.CallID()] = len(encoded)
-				searchItem := responsesWireOutputItemDTO{
-					Type:   "web_search_call",
-					Status: "in_progress",
-					Action: action,
-				}
-				// A Responses item id is provider-owned identity, not canonical
-				// correlation. It is emitted only when an exact refinement was
-				// preserved (client- or provider-supplied ws id); an idless replay
-				// (e.g. Codex under store:false) re-encodes with no id rather than
-				// minting the call's correlation token into item.id.
-				if refinement, ok := call.ResponsesWebSearch(); ok {
-					searchItem.ID = refinement.ItemID().String()
-				}
-				encoded = append(encoded, searchItem)
-			case canonical.ToolKindDiscovery:
-				object, ok := call.Input().Object()
-				if !ok {
-					return nil, canonical.BadRequest("responses tool discovery calls require object input")
-				}
-				executor, ok := call.DiscoveryExecutor()
-				if !ok {
-					return nil, canonical.InternalError("responses tool discovery call lost execution ownership")
-				}
-				execution := "client"
-				if executor == canonical.DiscoveryExecutorProvider {
-					execution = "server"
-				}
-				var wireCallID any = call.CallID().String()
-				if call.ResponsesCallIDNull() {
-					wireCallID = nil
-				}
-				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": wireCallID, "execution": execution, "arguments": json.RawMessage(object.String())})
+				encoded = append(encoded, value.item)
+			case toolSearchCallProjection:
+				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": value.callID, "execution": value.execution, "arguments": value.arguments})
 			default:
-				return nil, canonical.InternalError("Responses received an invalid canonical tool-call kind")
+				return nil, canonical.InternalError("Responses projection emitted an unsupported history call carrier")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := current.ToolResult()
@@ -622,49 +557,31 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 				delete(pendingWebSearch, result.CallID())
 				continue
 			}
-			if omittedContentCalls[result.CallID()] > 0 {
-				omittedContentCalls[result.CallID()]--
-				occurrences := contentResultKinds[result.CallID()]
-				if len(occurrences) == 0 {
-					return nil, canonical.InternalError("responses omitted tool-result occurrence pairing is inconsistent")
-				}
-				contentResultKinds[result.CallID()] = occurrences[1:]
+			occurrence, found := popProjectedOccurrence(resultRecords, result.CallID())
+			if !found {
+				return nil, canonical.InternalError("Responses tool-result history lost emitted declaration identity")
+			}
+			if occurrence.ProjectResult == nil {
 				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
 					return nil, err
 				}
 				continue
+			}
+			projectedResult, err := occurrence.ProjectResult(result)
+			if err != nil {
+				return nil, err
+			}
+			resultType := projectedResult.Type
+			if resultType == "" {
+				return nil, canonical.InternalError("Responses projection emitted an invalid history result carrier")
 			}
 			if result.IsError() {
 				if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestItemsToolResultIsError, compat.Approximation); err != nil {
 					return nil, err
 				}
 			}
-			outputType := "function_call_output"
-			wireType, found := pendingContentCalls[result.CallID()]
-			if !found {
-				occurrences := contentResultKinds[result.CallID()]
-				if len(occurrences) == 0 {
-					return nil, canonical.InternalError("responses tool result lost canonical call provenance")
-				} else {
-					if occurrences[0] == canonical.ToolKindCustom {
-						wireType = "custom"
-					} else {
-						wireType = "function"
-					}
-					contentResultKinds[result.CallID()] = occurrences[1:]
-				}
-			} else {
-				occurrences := contentResultKinds[result.CallID()]
-				if len(occurrences) == 0 {
-					return nil, canonical.InternalError("responses tool-result occurrence pairing is inconsistent")
-				}
-				contentResultKinds[result.CallID()] = occurrences[1:]
-			}
-			if wireType == "custom" {
-				outputType = "custom_tool_call_output"
-			}
 			var outputArrayFact func() bool
-			if wireType == "function" {
+			if resultType == "function_call_output" {
 				outputArrayFact = acceptsFunctionOutputArray
 			} else {
 				outputArrayFact = func() bool { return false }
@@ -673,9 +590,8 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			if err != nil {
 				return nil, err
 			}
-			delete(pendingContentCalls, result.CallID())
 			item := toolCallOutputItem{
-				Type:   outputType,
+				Type:   resultType,
 				CallID: result.CallID().String(),
 				Output: content,
 			}
@@ -683,6 +599,27 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			encoded = append(encoded, rehomed...)
 		case canonical.ItemKindToolDiscoveryResult:
 			result, _ := current.ToolDiscoveryResult()
+			occurrence, found := popProjectedOccurrence(resultRecords, result.CallID())
+			if !found {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if occurrence.ProjectResult == nil {
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			projectedResult, err := occurrence.ProjectResult(canonical.ToolResultItem{})
+			if err != nil {
+				return nil, err
+			}
+			resultType := projectedResult.Type
+			if resultType == "" {
+				return nil, canonical.InternalError("Responses discovery result projection is invalid")
+			}
 			if _, failed := result.Failure(); failed {
 				return nil, canonical.InternalError("Responses received an invalid canonical failed-discovery item")
 			}
@@ -695,7 +632,7 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			if result.ResponsesCallIDNull() {
 				wireCallID = nil
 			}
-			encoded = append(encoded, map[string]any{"type": "tool_search_output", "call_id": wireCallID, "status": "completed", "execution": execution, "tools": wireTools})
+			encoded = append(encoded, map[string]any{"type": resultType, "call_id": wireCallID, "status": "completed", "execution": execution, "tools": wireTools})
 		case canonical.ItemKindReasoning:
 			reasoning, _ := current.Reasoning()
 			item := map[string]any{"type": "reasoning"}
@@ -748,28 +685,66 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 	return encoded, nil
 }
 
-func contentResultKindsByOccurrence(items []canonical.CanonicalItem) (map[canonical.ToolCallID][]canonical.ToolKind, error) {
-	kinds := make(map[canonical.ToolCallID][]canonical.ToolKind)
-	var matcher canonical.ToolEffectMatcher
-	for index, item := range items {
-		if call, ok := item.ToolCall(); ok {
-			if call.Tool().Kind() != canonical.ToolKindFunction && call.Tool().Kind() != canonical.ToolKindCustom {
-				continue
-			}
-		} else if result, ok := item.ToolResult(); !ok {
-			continue
-		} else if _, webSearch := result.WebSearch(); webSearch {
-			continue
-		}
-		completed, err := matcher.Accept(index, item)
-		if err != nil {
-			return nil, canonical.BadRequest("responses history has invalid tool-effect correlation: " + err.Error())
-		}
-		if completed != nil {
-			kinds[completed.CallID] = append(kinds[completed.CallID], completed.Kind)
+type projectedResponsesEffect struct {
+	callID     canonical.ToolCallID
+	projection ToolProjection
+	result     bool
+}
+
+type projectedResponsesEffectSet []projectedResponsesEffect
+
+func (s projectedResponsesEffectSet) callQueues() map[canonical.ToolCallID][]ToolProjection {
+	queues := make(map[canonical.ToolCallID][]ToolProjection)
+	for _, effect := range s {
+		queues[effect.callID] = append(queues[effect.callID], effect.projection)
+	}
+	return queues
+}
+
+func (s projectedResponsesEffectSet) resultQueues() map[canonical.ToolCallID][]ToolProjection {
+	queues := make(map[canonical.ToolCallID][]ToolProjection)
+	for _, effect := range s {
+		if effect.result {
+			queues[effect.callID] = append(queues[effect.callID], effect.projection)
 		}
 	}
-	return kinds, nil
+	return queues
+}
+
+func popProjectedOccurrence(queues map[canonical.ToolCallID][]ToolProjection, callID canonical.ToolCallID) (ToolProjection, bool) {
+	occurrences := queues[callID]
+	if len(occurrences) == 0 {
+		return ToolProjection{}, false
+	}
+	queues[callID] = occurrences[1:]
+	return occurrences[0], true
+}
+
+func projectedResponsesEffects(items []canonical.CanonicalItem, names wire.ToolNames, projection *responsesToolProjection) (projectedResponsesEffectSet, error) {
+	effects, err := canonical.MatchToolEffects(items)
+	if err != nil {
+		standaloneDiscoveryResults := len(items) > 0
+		for _, item := range items {
+			if _, ok := item.ToolDiscoveryResult(); !ok {
+				standaloneDiscoveryResults = false
+				break
+			}
+		}
+		if standaloneDiscoveryResults {
+			return nil, nil
+		}
+		return nil, canonical.BadRequest("responses history has invalid tool-effect correlation: " + err.Error())
+	}
+	projected := make(projectedResponsesEffectSet, 0, len(effects))
+	for _, effect := range effects {
+		call, _ := items[effect.CallIndex].ToolCall()
+		occurrence, err := projection.historicalProjection(call, names)
+		if err != nil {
+			return nil, err
+		}
+		projected = append(projected, projectedResponsesEffect{callID: effect.CallID, projection: occurrence, result: effect.ResultIndex >= 0})
+	}
+	return projected, nil
 }
 
 func appendResponsesRequestChange(changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, outcome compat.Kind) error {

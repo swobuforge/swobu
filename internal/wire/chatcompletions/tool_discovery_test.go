@@ -28,7 +28,7 @@ func TestChatCompletionsLowersClientDiscoveryThroughFunctionLifecycle(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "exchange", CompileOptions{})
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), nil, "exchange", CompileOptions{Lowering: DefaultLowering()})
 	if err != nil {
 		t.Fatal(err)
 	}
