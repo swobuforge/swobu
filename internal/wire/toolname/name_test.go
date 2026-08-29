@@ -17,6 +17,17 @@ func TestGeneratedIsStableBoundedAndIdentitySensitive(t *testing.T) {
 	}
 }
 
+func TestGeneratedStaysBelowSixtyFourCharacterProviderBoundary(t *testing.T) {
+	name := Generated(
+		"mcp/microsoft_docs/function/microsoft_docs_search",
+		[]string{"mcp", "microsoft_docs"},
+		"microsoft_docs_search",
+	)
+	if len(name) != MaxLength || len(name) >= 64 {
+		t.Fatalf("generated name length = %d, want %d below provider boundary: %q", len(name), MaxLength, name)
+	}
+}
+
 func TestGeneratedDistinguishesNormalizedReadableCollision(t *testing.T) {
 	left := Generated("tool:v1/a-b/function/same", []string{"a-b"}, "same")
 	right := Generated("tool:v1/a_b/function/same", []string{"a_b"}, "same")

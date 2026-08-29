@@ -152,7 +152,7 @@ func TestResumeDoesNotInheritReasoningControlsAndPreservesOpaqueThinking(t *test
 	}
 }
 
-func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
+func TestResumeKeepsCurrentReasoningControlsForMatchingToolResults(t *testing.T) {
 	previousReasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute())})
 	if err != nil {
 		t.Fatal(err)
@@ -165,13 +165,42 @@ func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
 	previousRequest := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: makeItems("one"), Controls: previousControls, Reasoning: previousReasoning})
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
 	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
-	record := checkpoint("resp_previous", previousRequest, makeResponse(call), nil)
+	opaque, err := canonical.NewMessagesOpaqueThinking([]byte(`{"type":"thinking","signature":"tool-turn-signature"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoningPart, err := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "tool reasoning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoningItem, err := canonical.NewReasoningItem([]canonical.ReasoningPart{reasoningPart}, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpoint("resp_previous", previousRequest, makeResponse(reasoningItem, call), nil)
 	callID, _ := canonical.NewToolCallID("call_1")
 	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"}})
+	currentCompute, err := canonical.NewBudgetReasoningCompute(2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentEffort := canonical.InferenceEffortLow
+	currentControls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &currentEffort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentReasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(currentCompute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+		Controls:         currentControls, Reasoning: currentReasoning,
+	})
 
 	resolved, err := Resume(current, record)
 	if err != nil {
@@ -180,8 +209,32 @@ func TestResumeResolvesComputeOnlyForMatchingToolResults(t *testing.T) {
 	request := resolved.Request()
 	compute, computeSet := request.Reasoning().ComputeField().Get()
 	gotEffort, effortSet := request.Controls().Effort.Get()
-	if !computeSet || compute.Kind() != canonical.ReasoningAutomatic || !effortSet || gotEffort != effort {
-		t.Fatal("resolved request did not carry effective unfinished-turn compute")
+	if !computeSet || compute != currentCompute || !effortSet || gotEffort != currentEffort {
+		t.Fatal("resolved request did not retain current request controls")
+	}
+	items := request.Items()
+	if len(items) < 3 || items[1].Kind() != canonical.ItemKindReasoning {
+		t.Fatalf("resolved history = %#v, want preserved opaque reasoning", items)
+	}
+	restoredReasoning, _ := items[1].Reasoning()
+	restoredOpaque, ok := restoredReasoning.Opaque().Messages()
+	if !ok || !strings.Contains(string(restoredOpaque), "tool-turn-signature") {
+		t.Fatal("tool continuation lost opaque reasoning state")
+	}
+
+	omitted := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result},
+		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
+	})
+	resolvedOmitted, err := Resume(omitted, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, set := resolvedOmitted.Request().Reasoning().ComputeField().Get(); set {
+		t.Fatal("tool continuation inherited checkpoint reasoning compute")
+	}
+	if _, set := resolvedOmitted.Request().Controls().Effort.Get(); set {
+		t.Fatal("tool continuation inherited checkpoint inference effort")
 	}
 
 	unrelatedID, _ := canonical.NewToolCallID("call_other")

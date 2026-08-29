@@ -163,22 +163,50 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 	if strings.TrimSpace(canonicalRequest.Model()) == "" { // swobu:io-string source=boundary
 		return interactionRequest{}, nil, canonical.BadRequest("Gemini model is required")
 	}
-	previousInteractionID, inputRequest, err := geminiPreviousInteraction(request)
-	if err != nil {
-		return interactionRequest{}, nil, err
-	}
+	inputRequest := canonicalRequest
+	var err error
 	inputRequest, changes, err := projectSettledPortableSearchHistory(inputRequest)
 	if err != nil {
 		return interactionRequest{}, nil, err
 	}
+	inputRequest, discoveryChanges, err := projectGeminiProviderDiscoveryHistory(inputRequest)
+	if err != nil {
+		return interactionRequest{}, nil, err
+	}
+	changes = append(changes, discoveryChanges...)
 
-	encoded := interactionRequest{Model: canonicalRequest.Model(), PreviousInteractionID: previousInteractionID, Stream: true}
+	encoded := interactionRequest{Model: canonicalRequest.Model(), Stream: true}
 	if store, specified := canonicalRequest.Store(); specified {
 		encoded.Store = &store
 	}
 
 	var loweredTools wire.LoweredToolSet
 	if encoded.Tools, loweredTools, changes, err = geminiTools(inputRequest, request.ToolNames, changes); err != nil {
+		return interactionRequest{}, changes, err
+	}
+	inputRequest, historyChanges, err := projectGeminiUnloweredToolHistory(inputRequest, loweredTools)
+	if err != nil {
+		return interactionRequest{}, changes, err
+	}
+	changes = append(changes, historyChanges...)
+	// Correlation is established against complete canonical history before a
+	// native continuation handle compresses its represented prefix.
+	functionNames := make(map[canonical.ToolCallID]string)
+	for _, item := range inputRequest.Items() {
+		call, ok := item.ToolCall()
+		if !ok || call.Tool().Kind() == canonical.ToolKindWebSearch {
+			continue
+		}
+		name, nameErr := request.ToolNames.WireName(call.Tool())
+		if nameErr != nil {
+			return interactionRequest{}, changes, nameErr
+		}
+		functionNames[call.CallID()] = name
+	}
+	projectedProviderRequest := request
+	projectedProviderRequest.Canonical = inputRequest
+	encoded.PreviousInteractionID, inputRequest, err = geminiPreviousInteraction(projectedProviderRequest)
+	if err != nil {
 		return interactionRequest{}, changes, err
 	}
 	if encoded.GenerationConfig, changes, err = geminiGenerationConfig(canonicalRequest, loweredTools, request.ToolNames, changes); err != nil {
@@ -216,7 +244,7 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 				}
 				raw, exact := search.InteractionsReplay()
 				if !exact {
-					return interactionRequest{}, changes, canonical.NotImplemented("Gemini cannot project portable Google Search call history")
+					return interactionRequest{}, changes, canonical.InternalError("Gemini received an invalid portable Google Search call")
 				}
 				if err := validateGeminiSearchCallReplay(raw, call.CallID()); err != nil {
 					return interactionRequest{}, changes, err
@@ -224,25 +252,39 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 				encoded.Input = append(encoded.Input, interactionInputStep{raw: raw})
 				continue
 			}
-			if call.Tool().Kind() != canonical.ToolKindFunction {
-				return interactionRequest{}, changes, canonical.NotImplemented("Gemini non-function tool-call history is not implemented yet")
+			record, found := loweredTools.FindSource(call.Tool())
+			if !found || record.FragmentCount != 1 {
+				return interactionRequest{}, changes, canonical.InternalError("Gemini retained callable history has no unique lowered identity")
 			}
 			arguments, ok := call.Input().Object()
-			if !ok {
-				return interactionRequest{}, changes, canonical.InternalError("Gemini historical function call has invalid input")
+			var wireArguments json.RawMessage
+			if ok {
+				wireArguments = json.RawMessage(arguments.Bytes())
+			} else if text, textInput := call.Input().Text(); textInput {
+				wireArguments, err = json.Marshal(map[string]string{"input": text})
+				if err != nil {
+					return interactionRequest{}, changes, canonical.InternalError("Gemini historical callable input encoding failed")
+				}
+				changes = compat.AppendUnique(changes, compat.NewApproximation(
+					canonical.RequestItemsToolCallInput,
+					canonical.RequestItemOccurrence(uint32(itemIndex)),
+				))
+			} else {
+				return interactionRequest{}, changes, canonical.InternalError("Gemini historical callable has invalid input")
 			}
 			name, nameErr := wire.EncodeToolName(request.ToolNames, call.Tool())
 			if nameErr != nil {
 				return interactionRequest{}, changes, nameErr
 			}
-			encoded.Input = append(encoded.Input, interactionInputStep{Type: "function_call", ID: call.CallID().String(), Name: name, Arguments: json.RawMessage(arguments.Bytes())})
+			functionNames[call.CallID()] = name
+			encoded.Input = append(encoded.Input, interactionInputStep{Type: "function_call", ID: call.CallID().String(), Name: name, Arguments: wireArguments})
 			continue
 		}
 		if result, ok := item.ToolResult(); ok {
 			if search, isSearch := result.WebSearch(); isSearch {
 				raw, exact := search.InteractionsReplay()
 				if !exact {
-					return interactionRequest{}, changes, canonical.NotImplemented("Gemini cannot project portable Google Search result history")
+					return interactionRequest{}, changes, canonical.InternalError("Gemini received an invalid portable Google Search result")
 				}
 				if err := validateGeminiSearchResultReplay(raw, result.CallID()); err != nil {
 					return interactionRequest{}, changes, err
@@ -250,7 +292,11 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 				encoded.Input = append(encoded.Input, interactionInputStep{raw: raw})
 				continue
 			}
-			step, stepChanges, stepErr := geminiFunctionResult(result, uint32(itemIndex))
+			name, found := functionNames[result.CallID()]
+			if !found {
+				return interactionRequest{}, changes, canonical.InternalError("Gemini function result has no retained lowered call")
+			}
+			step, stepChanges, stepErr := geminiFunctionResult(result, name, uint32(itemIndex))
 			changes = append(changes, stepChanges...)
 			if stepErr != nil {
 				return interactionRequest{}, changes, stepErr
@@ -258,8 +304,17 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 			encoded.Input = append(encoded.Input, step)
 			continue
 		}
-		if _, discovery := item.ToolDiscoveryResult(); discovery {
-			return interactionRequest{}, changes, canonical.NotImplemented("Gemini tool-discovery history is not implemented yet")
+		if result, discovery := item.ToolDiscoveryResult(); discovery {
+			name, found := functionNames[result.CallID()]
+			if !found {
+				return interactionRequest{}, changes, canonical.InternalError("Gemini discovery result has no retained lowered call")
+			}
+			step, stepErr := geminiDiscoveryResult(result, name)
+			if stepErr != nil {
+				return interactionRequest{}, changes, stepErr
+			}
+			encoded.Input = append(encoded.Input, step)
+			continue
 		}
 		message, ok := item.Message()
 		if !ok {
@@ -273,12 +328,12 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 			for _, part := range message.Content() {
 				text, ok := part.Text()
 				if !ok {
-					return interactionRequest{}, changes, canonical.NotImplemented("Gemini cannot project image directives")
+					return interactionRequest{}, changes, canonical.InternalError("Gemini received an invalid canonical image directive")
 				}
 				instructions.WriteString(text.Text())
 			}
 			if message.Role() != canonical.MessageRoleSystem || instructionCount > 0 || historyStarted {
-				changes = compat.AppendUnique(changes, compat.NewChange(canonical.RequestInstructions, compat.Approximation, canonical.Occurrence{}))
+				changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestInstructions, canonical.Occurrence{}))
 			}
 			instructionCount++
 		case canonical.MessageRoleUser, canonical.MessageRoleAssistant:
@@ -306,9 +361,59 @@ func encodeTextRequest(request provider.Request) (interactionRequest, []compat.C
 	return encoded, changes, nil
 }
 
-// projectSettledPortableSearchHistory omits only completed foreign Search
-// effects that have no exact Gemini replay on either occurrence. Active or
-// partially exact effects remain for the strict item encoder to reject.
+// projectGeminiUnloweredToolHistory makes historical callable effects obey the
+// exact declaration lowering used for this request. A call and its result are
+// one correlation unit: zero-fragment sources are omitted atomically, while a
+// multi-fragment source cannot provide the single identity history requires.
+func projectGeminiUnloweredToolHistory(request canonical.CanonicalRequest, lowered wire.LoweredToolSet) (canonical.CanonicalRequest, []compat.Change, error) {
+	items := request.Items()
+	effects, err := canonical.MatchToolEffects(items)
+	if err != nil {
+		return canonical.CanonicalRequest{}, nil, canonical.InternalError("canonical tool history contains an orphan result")
+	}
+	drop := make(map[int]struct{})
+	changes := make([]compat.Change, 0)
+	for _, effect := range effects {
+		call, ok := items[effect.CallIndex].ToolCall()
+		if !ok {
+			return canonical.CanonicalRequest{}, nil, canonical.InternalError("canonical tool history contains an invalid call effect")
+		}
+		record, found := lowered.FindSource(call.Tool())
+		fragments := 0
+		if found {
+			fragments = record.FragmentCount
+		}
+		switch {
+		case fragments == 1:
+			continue
+		case fragments > 1:
+			return canonical.CanonicalRequest{}, nil, canonical.InternalError("Gemini callable history source lowered to multiple wire call identities")
+		default:
+			drop[effect.CallIndex] = struct{}{}
+			if effect.ResultIndex >= 0 {
+				drop[effect.ResultIndex] = struct{}{}
+			}
+			changes = append(changes, compat.NewOmission(
+				canonical.RequestItemsKind,
+				canonical.RequestItemOccurrence(uint32(effect.CallIndex)),
+			))
+		}
+	}
+	if len(drop) == 0 {
+		return request, nil, nil
+	}
+	projected := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
+	for index, item := range items {
+		if _, omitted := drop[index]; !omitted {
+			projected = append(projected, item)
+		}
+	}
+	return request.WithItems(projected), changes, nil
+}
+
+// projectSettledPortableSearchHistory keeps only complete effects whose call
+// and result both carry exact Gemini replay. Every other valid Search effect is
+// omitted atomically at its call occurrence.
 func projectSettledPortableSearchHistory(request canonical.CanonicalRequest) (canonical.CanonicalRequest, []compat.Change, error) {
 	items := request.Items()
 	drop := make(map[int]struct{})
@@ -337,30 +442,40 @@ func projectSettledPortableSearchHistory(request canonical.CanonicalRequest) (ca
 		}
 	}
 	effects = append(effects, matcher.Pending()...)
-	for _, completed := range effects {
-		if completed.Kind != canonical.ToolKindWebSearch {
+	for _, effect := range effects {
+		if effect.Kind != canonical.ToolKindWebSearch {
 			continue
 		}
-		if completed.ResultIndex < 0 {
-			return request, nil, canonical.NotImplemented("Gemini Interactions cannot project unresolved web-search history")
-		}
-		call, _ := items[completed.CallIndex].ToolCall()
+		call, _ := items[effect.CallIndex].ToolCall()
 		search, _ := call.Input().WebSearch()
-		_, callExact := search.InteractionsReplay()
-		result, _ := items[completed.ResultIndex].ToolResult()
-		searchResult, _ := result.WebSearch()
-		_, resultExact := searchResult.InteractionsReplay()
-		if callExact != resultExact {
-			return request, nil, canonical.InternalError("Gemini Interactions web-search replay is partially exact")
-		}
+		callReplay, callExact := search.InteractionsReplay()
 		if callExact {
+			if err := validateGeminiSearchCallReplay(callReplay, call.CallID()); err != nil {
+				return request, nil, err
+			}
+		}
+		resultExact := false
+		if effect.ResultIndex >= 0 {
+			result, _ := items[effect.ResultIndex].ToolResult()
+			searchResult, _ := result.WebSearch()
+			resultReplay, exact := searchResult.InteractionsReplay()
+			resultExact = exact
+			if resultExact {
+				if err := validateGeminiSearchResultReplay(resultReplay, result.CallID()); err != nil {
+					return request, nil, err
+				}
+			}
+		}
+		if callExact && (effect.ResultIndex < 0 || resultExact) {
 			continue
 		}
-		drop[completed.CallIndex] = struct{}{}
-		drop[completed.ResultIndex] = struct{}{}
+		drop[effect.CallIndex] = struct{}{}
+		if effect.ResultIndex >= 0 {
+			drop[effect.ResultIndex] = struct{}{}
+		}
 		changes = append(changes, compat.NewOmission(
 			canonical.RequestItemsKind,
-			canonical.RequestItemOccurrence(uint32(completed.CallIndex)),
+			canonical.RequestItemOccurrence(uint32(effect.CallIndex)),
 		))
 	}
 	if len(drop) == 0 {
@@ -374,6 +489,48 @@ func projectSettledPortableSearchHistory(request canonical.CanonicalRequest) (ca
 		projected = append(projected, item)
 	}
 	return request.WithItems(projected), changes, nil
+}
+
+// projectGeminiProviderDiscoveryHistory replaces a settled provider-owned
+// search with eager tool visibility. Client discovery remains a generic
+// function call/result pair and is not changed here.
+func projectGeminiProviderDiscoveryHistory(request canonical.CanonicalRequest) (canonical.CanonicalRequest, []compat.Change, error) {
+	drop := map[int]struct{}{}
+	var matcher canonical.ToolEffectMatcher
+	for index, item := range request.Items() {
+		if call, ok := item.ToolCall(); ok && call.Tool().Kind() != canonical.ToolKindDiscovery {
+			continue
+		}
+		if _, call := item.ToolCall(); !call {
+			result, ok := item.ToolDiscoveryResult()
+			if !ok || result.Executor() != canonical.DiscoveryExecutorProvider {
+				continue
+			}
+		}
+		completed, err := matcher.Accept(index, item)
+		if err != nil {
+			return request, nil, canonical.InternalError("canonical tool history cannot be correlated for Gemini")
+		}
+		if completed == nil || completed.Kind != canonical.ToolKindDiscovery {
+			continue
+		}
+		executor, _ := completed.Executor.Get()
+		if executor == canonical.DiscoveryExecutorProvider {
+			drop[completed.CallIndex] = struct{}{}
+			drop[completed.ResultIndex] = struct{}{}
+		}
+	}
+	if len(drop) == 0 {
+		return request, nil, nil
+	}
+	items := request.Items()
+	projected := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
+	for index, item := range items {
+		if _, remove := drop[index]; !remove {
+			projected = append(projected, item)
+		}
+	}
+	return request.WithItems(projected), []compat.Change{compat.NewApproximation(canonical.RequestItemsKind, canonical.Occurrence{})}, nil
 }
 
 func validateGeminiThoughtReplay(raw []byte) error {
@@ -506,7 +663,7 @@ func geminiThinkingLevel(request canonical.CanonicalRequest) (string, []compat.C
 }
 
 func geminiEffortApproximation() compat.Change {
-	return compat.NewApproximation(canonical.RequestControlsEffort, canonical.RequestControlsEffort, canonical.Occurrence{})
+	return compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{})
 }
 
 func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames) (interactionToolChoice, bool, error) {
@@ -526,7 +683,7 @@ func geminiToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, 
 			return interactionToolChoice{}, false, canonical.BadRequest("specific tool policy requires a tool id")
 		}
 		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount != 1 || record.Kind != canonical.ToolKindFunction {
+		if !ok || record.FragmentCount != 1 {
 			return interactionToolChoice{}, false, nil
 		}
 		name, err := wire.EncodeToolName(names, record.Key)
@@ -553,7 +710,7 @@ func geminiResponseFormat(format canonical.OutputFormat, changes []compat.Change
 	case canonical.OutputFormatJSONSchema:
 		responseFormat.Schema = json.RawMessage(format.Schema.RawObject())
 		if !format.Strict {
-			changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestOutputFormatSchema, canonical.RequestOutputFormat, canonical.Occurrence{}))
+			changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestOutputFormatSchema, canonical.Occurrence{}))
 		}
 		return responseFormat, changes, nil
 	default:
@@ -580,7 +737,7 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 		return nil, wire.LoweredToolSet{}, changes, err
 	}
 	if flat.RemovedNamespaces > 0 {
-		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestTools, canonical.RequestTools, canonical.Occurrence{}))
+		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestTools, canonical.Occurrence{}))
 	}
 	if len(flat.Declarations) == 0 {
 		return nil, wire.LoweredToolSet{}, changes, nil
@@ -597,6 +754,23 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 		}
 		function, ok := declaration.Function()
 		if !ok {
+			if discovery, client := declaration.Discovery(); client && discovery.Executor() == canonical.DiscoveryExecutorClient {
+				name, err := wire.EncodeToolName(names, declaration.Key())
+				if err != nil {
+					return nil, wire.LoweredToolSet{}, changes, err
+				}
+				parameters := strings.TrimSpace(discovery.InputSchema().RawObject())
+				if parameters == "" {
+					return nil, wire.LoweredToolSet{}, changes, canonical.InternalError("Gemini discovery declaration has no schema")
+				}
+				tools = append(tools, interactionTool{Type: "function", Name: name, Description: discovery.Description(), Parameters: json.RawMessage(parameters)})
+				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind(), FragmentCount: 1})
+				continue
+			}
+			if _, providerDiscovery := declaration.Discovery(); providerDiscovery {
+				changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestToolsVisibility, canonical.Occurrence{}))
+				continue
+			}
 			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(declaration.Key())))
 			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind()})
 			continue
@@ -628,7 +802,7 @@ func geminiMessageContent(parts []canonical.MessagePart, item uint32) ([]interac
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, changes, canonical.NotImplemented("Gemini cannot project this canonical message content")
+			return nil, changes, canonical.InternalError("Gemini received an invalid canonical message-content variant")
 		}
 		encoded, imageChanges, err := geminiImageContent(image, canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: item, Part: uint32(partIndex)}), canonical.RequestItemsMessageImageDetail)
 		changes = append(changes, imageChanges...)
@@ -640,26 +814,55 @@ func geminiMessageContent(parts []canonical.MessagePart, item uint32) ([]interac
 	return content, changes, nil
 }
 
-func geminiFunctionResult(result canonical.ToolResultItem, item uint32) (interactionInputStep, []compat.Change, error) {
+func geminiFunctionResult(result canonical.ToolResultItem, functionName string, item uint32) (interactionInputStep, []compat.Change, error) {
 	if _, webSearch := result.WebSearch(); webSearch {
-		return interactionInputStep{}, nil, canonical.NotImplemented("Gemini native Google Search results are not implemented yet")
+		return interactionInputStep{}, nil, canonical.InternalError("Gemini received an invalid native Google Search result")
 	}
 	contents := make([]interactionContent, 0, len(result.Content()))
+	changes := make([]compat.Change, 0)
 	for _, part := range result.Content() {
-		text, ok := part.Text()
-		if !ok {
-			return interactionInputStep{}, nil, canonical.NotImplemented("Gemini function-result image replay is not implemented yet")
+		if text, ok := part.Text(); ok {
+			contents = append(contents, interactionContent{Type: "text", Text: text.Text()})
+			continue
 		}
-		contents = append(contents, interactionContent{Type: "text", Text: text.Text()})
+		image, ok := part.Image()
+		if !ok {
+			return interactionInputStep{}, changes, canonical.InternalError("Gemini function result contains an invalid canonical part")
+		}
+		occurrence := canonical.RequestItemOccurrence(item)
+		encoded, imageChanges, err := geminiImageContent(image, occurrence, canonical.RequestItemsToolResultImageDetail)
+		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestItemsToolResultImage, occurrence))
+		changes = append(changes, imageChanges...)
+		if err != nil {
+			return interactionInputStep{}, changes, err
+		}
+		contents = append(contents, encoded)
 	}
 	isError := result.IsError()
-	return interactionInputStep{Type: "function_result", CallID: result.CallID().String(), Result: contents, IsError: &isError}, nil, nil
+	return interactionInputStep{Type: "function_result", Name: functionName, CallID: result.CallID().String(), Result: contents, IsError: &isError}, changes, nil
+}
+
+func geminiDiscoveryResult(result canonical.ToolDiscoveryResultItem, functionName string) (interactionInputStep, error) {
+	if failure, failed := result.Failure(); failed {
+		isError := true
+		return interactionInputStep{Type: "function_result", Name: functionName, CallID: result.CallID().String(), Result: []interactionContent{{Type: "text", Text: failure.Message()}}, IsError: &isError}, nil
+	}
+	loaded := make([]string, 0, len(result.Tools().Declarations()))
+	for _, declaration := range result.Tools().Declarations() {
+		loaded = append(loaded, declaration.Key().String())
+	}
+	raw, err := json.Marshal(map[string]any{"loaded_tools": loaded})
+	if err != nil {
+		return interactionInputStep{}, canonical.InternalError("Gemini discovery result could not be encoded")
+	}
+	isError := false
+	return interactionInputStep{Type: "function_result", Name: functionName, CallID: result.CallID().String(), Result: []interactionContent{{Type: "text", Text: string(raw)}}, IsError: &isError}, nil
 }
 
 func geminiImageContent(image canonical.ImagePart, occurrence canonical.Occurrence, detailCapability canonical.CapabilityPath) (interactionContent, []compat.Change, error) {
 	var changes []compat.Change
 	if image.Detail().IsSpecified() {
-		changes = append(changes, compat.NewApproximation(detailCapability, canonical.RequestItemsMessageImage, occurrence))
+		changes = append(changes, compat.NewApproximation(detailCapability, occurrence))
 	}
 	if url, ok := image.Source().URL(); ok {
 		return interactionContent{Type: "image", URI: url.String()}, changes, nil

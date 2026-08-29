@@ -513,11 +513,11 @@ func (s *responsesResponseStream) completeToolState(frame streamFrame, toolType 
 		if toolType == canonical.ToolTypeCustom {
 			input = canonical.NewTextToolInput(state.input)
 		} else {
-			object, parseErr := canonical.ParseJSONObject([]byte(state.input))
+			decoded, parseErr := decodeResponsesCallableInput(state.tool, json.RawMessage(state.input))
 			if parseErr != nil {
-				return false, canonical.InternalError("responses streamed tool arguments are invalid")
+				return false, parseErr
 			}
-			input = canonical.NewJSONObjectToolInput(object)
+			input = decoded
 		}
 		item, itemErr := canonical.NewToolCallItem(state.callID, state.tool, input)
 		if itemErr != nil {

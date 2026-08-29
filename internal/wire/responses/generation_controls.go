@@ -106,7 +106,7 @@ func decodeResponsesReasoningInclude(raw json.RawMessage, changeLog *[]compat.Ch
 	return includeEncrypted, nil
 }
 
-func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], changeLog *[]compat.Change) error {
+func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], acceptsEffortMax, acceptsDisabled func() bool, changeLog *[]compat.Change) error {
 	wireReasoning := map[string]any{}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
@@ -117,9 +117,20 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 	projection := reasoningprojection.ProjectOrdinalReasoning(reasoning, effortField)
 	switch projection.Kind {
 	case reasoningprojection.OrdinalDisabled:
-		wireReasoning["effort"] = "none"
+		if acceptsDisabled == nil || acceptsDisabled() {
+			wireReasoning["effort"] = "none"
+		} else if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{}))
+		}
 	case reasoningprojection.OrdinalEffort:
-		wireReasoning["effort"] = string(projection.Effort)
+		effort := projection.Effort
+		if effort == canonical.InferenceEffortMax && acceptsEffortMax != nil && !acceptsEffortMax() {
+			effort = canonical.InferenceEffortXHigh
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{}))
+			}
+		}
+		wireReasoning["effort"] = string(effort)
 	}
 	if changeLog != nil {
 		for _, change := range projection.Changes {

@@ -13,7 +13,6 @@ type Discovery = provider.Discovery
 type ProviderRuntimeBundle struct {
 	ProviderID         profile.ProviderID
 	BackendResolver    provider.BackendResolver
-	TargetSupport      provider.TargetSupportResolver
 	CredentialProvider CredentialProvider
 	Discovery          Discovery
 }

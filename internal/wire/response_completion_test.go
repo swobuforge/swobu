@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
@@ -65,5 +66,65 @@ func TestResponseCompletionCanCompleteWithoutFingerprintCapability(t *testing.T)
 	got := cell.Snapshot()
 	if got.State != CompletionCompleted || got.ResponseFingerprint != nil || got.Err != nil {
 		t.Fatalf("completed snapshot without capability = %#v", got)
+	}
+}
+
+func TestResponseCompletionRunsLearningOnlyAfterSuccess(t *testing.T) {
+	completed, complete, _ := NewResponseCompletion()
+	completedCalls := 0
+	completed.OnComplete(func() { completedCalls++ })
+	if completedCalls != 0 {
+		t.Fatal("completion callback ran before terminal success")
+	}
+	complete(nil, nil)
+	complete(nil, nil)
+	if completedCalls != 1 {
+		t.Fatalf("completion callbacks = %d, want one", completedCalls)
+	}
+
+	failed, _, fail := NewResponseCompletion()
+	failedCalls := 0
+	failed.OnComplete(func() { failedCalls++ })
+	fail(errors.New("failed"))
+	if failedCalls != 0 {
+		t.Fatal("completion callback ran after failure")
+	}
+}
+
+func TestResponseCompletionTerminalObserverRunsOnceForSuccessAndFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		settle    func(func(*historyfingerprint.Response, []compat.Change), func(error))
+		wantState CompletionState
+	}{
+		{
+			name: "completed",
+			settle: func(complete func(*historyfingerprint.Response, []compat.Change), _ func(error)) {
+				complete(nil, nil)
+				complete(nil, nil)
+			},
+			wantState: CompletionCompleted,
+		},
+		{
+			name: "failed",
+			settle: func(_ func(*historyfingerprint.Response, []compat.Change), fail func(error)) {
+				fail(errors.New("encode failed"))
+				fail(errors.New("late failure"))
+			},
+			wantState: CompletionFailed,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cell, complete, fail := NewResponseCompletion()
+			var snapshots []ResponseCompletionSnapshot
+			cell.OnTerminal(func(snapshot ResponseCompletionSnapshot) {
+				snapshots = append(snapshots, snapshot)
+			})
+			tt.settle(complete, fail)
+			if len(snapshots) != 1 || snapshots[0].State != tt.wantState {
+				t.Fatalf("terminal snapshots = %#v, want one state %v", snapshots, tt.wantState)
+			}
+		})
 	}
 }

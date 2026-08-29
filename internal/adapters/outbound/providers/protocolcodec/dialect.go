@@ -29,6 +29,10 @@ type AttemptContext struct {
 // after semantic lowering and before the single serialization boundary.
 type AttemptDecorator func(ctx AttemptContext) (AttemptDecoration, error)
 
+// ReasoningTargetDialect is the wire compiler's narrow empirical reasoning
+// context, re-exported for exact-provider lowering rules.
+type ReasoningTargetDialect = chatcompletions.ReasoningTargetDialect
+
 // ChatDialect contains executable target rules for semantic occurrences that
 // differ from standard Chat Completions. Zero values use standard lowering.
 type ChatDialect struct {
@@ -150,6 +154,37 @@ func ResponsesHostedSearchTool(spelling string) responses.ToolLoweringRule {
 			return nil, true, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
 		return []responses.ProviderRequestTool{{Type: spelling}}, true, nil, nil
+	}
+}
+
+// ResponsesCustomAsFunction lowers one canonical Custom declaration through
+// the ordinary Responses function carrier. Exact targets may opt into this
+// rule only after their native and wrapper history carriers are characterized.
+func ResponsesCustomAsFunction() responses.ToolLoweringRule {
+	return func(ctx responses.ToolLoweringContext, tool canonical.ToolDeclaration) ([]responses.ProviderRequestTool, bool, []compat.Change, error) {
+		custom, ok := tool.Custom()
+		if !ok {
+			return nil, false, nil, nil
+		}
+		name, err := wire.EncodeToolName(ctx.Names, tool.Key())
+		if err != nil {
+			return nil, true, nil, err
+		}
+		parameters := map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{"type": "string"},
+			},
+			"required":             []string{"input"},
+			"additionalProperties": false,
+		}
+		var changes []compat.Change
+		if !custom.Format().IsEmpty() {
+			changes = []compat.Change{compat.NewApproximation(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}
+		}
+		return []responses.ProviderRequestTool{{
+			Type: "function", Name: name, Description: custom.Description(), Parameters: parameters,
+		}}, true, changes, nil
 	}
 }
 

@@ -79,9 +79,6 @@ func TestResponsesProjectsOrdinalReasoningCompute(t *testing.T) {
 			if len(result.Changes) != 1 || result.Changes[0].Capability != test.wantChange || result.Changes[0].Kind != test.wantKind {
 				t.Fatalf("changes = %#v", result.Changes)
 			}
-			if test.wantKind == compat.Approximation && result.Changes[0].Preserved != canonical.RequestControlsEffort {
-				t.Fatalf("approximation = %#v, want effort preservation", result.Changes[0])
-			}
 		})
 	}
 }

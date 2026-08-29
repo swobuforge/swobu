@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -10,8 +11,26 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/wire"
 )
+
+type responseProcessingError struct {
+	stage string
+	err   error
+}
+
+func (e responseProcessingError) Error() string { return e.err.Error() }
+func (e responseProcessingError) Unwrap() error { return e.err }
+
+func responseFailure(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var staged responseProcessingError
+	if errors.As(err, &staged) {
+		return err
+	}
+	return responseProcessingError{stage: stage, err: err}
+}
 
 // prepareProviderCall is a reducer-owned deterministic edge. It resolves one
 // exact backend and lowers one final wire document without external I/O.
@@ -34,13 +53,12 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	if !backend.Target.Equal(path.target) {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("resolved provider backend changed target execution projection")
 	}
-	targetSupport := runner.Runtime.ResolveTargetSupport(path.target)
 	clientCodec := runner.Runtime.ClientCodec(s.input.clientFamily)
 	if clientCodec == nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.InternalError("required client codec not resolved")
 	}
 	resolved := *s.prepared
-	if selection.requestChoice != providerRequestPreferred && selection.requestChoice != providerRequestFullHistory {
+	if selection.requestChoice != providerRequestPreferred && selection.requestChoice != providerRequestFullHistory && selection.requestChoice != providerRequestReprojected {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, fmt.Errorf("exchange invariant: unsupported provider request choice %d", selection.requestChoice)
 	}
 	fetchCache := cloneMediaFetchCache(s.mediaFetchCache)
@@ -51,7 +69,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 			return providerCall{}, path.target, nil, s.mediaFetchCache, err
 		}
 	}
-	projectedRequest, replayChanges, err := projectOpaqueReplayForTarget(attemptRequest, path.target.TargetID, path.target.TargetVersion)
+	projectedRequest, replayChanged, replayChanges, err := projectOpaqueReplayForTarget(attemptRequest, path.target.TargetID, path.target.TargetVersion)
 	if err != nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
@@ -59,25 +77,19 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 
 	projectionChanges := []compat.Change(nil)
 	projectionChanges = append(projectionChanges, replayChanges...)
-	structuralProjection := len(replayChanges) > 0
-	if targetSupport.Get(canonical.RequestToolsDiscovery) != provider.SupportSupported {
-		projection, projectionErr := wire.ProjectToolDiscoveryPolyfill(attemptRequest)
-		if projectionErr != nil {
-			return providerCall{}, path.target, nil, s.mediaFetchCache, projectionErr
-		}
-		attemptRequest = projection.Request
-		projectionChanges = append(projectionChanges, projection.Changes...)
-		structuralProjection = structuralProjection || projection.StructuralHistoryChange
-	}
 	toolNames, namingChanges, err := provider.BuildAttemptToolNames(attemptRequest)
 	if err != nil {
 		return providerCall{}, path.target, nil, s.mediaFetchCache, err
 	}
+	generation := targetExceptionGeneration{
+		workspace: s.input.workspace.Slug().String(), targetID: path.target.TargetID, targetVersion: path.target.TargetVersion,
+	}
+	targetFacts := targetFactsForAttempt(runner.TargetExceptions, generation)
 	providerRequest := provider.Request{
 		ExchangeID:    s.input.exchangeID,
 		CacheLocality: s.cacheLocality,
 		Canonical:     bindRequestToTarget(attemptRequest, path.target.Model),
-		TargetSupport: targetSupport,
+		TargetFacts:   targetFacts,
 		Delivery:      path.delivery,
 		ToolNames:     toolNames,
 	}
@@ -92,7 +104,10 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		ResolveImage:          newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
 		HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
 	}
-	if selection.requestChoice == providerRequestPreferred && !structuralProjection {
+	// Native continuation is exact only while the target-bound replay sequence
+	// still matches the canonical sequence represented by that handle. Semantic
+	// loss evidence is deliberately irrelevant to this execution choice.
+	if providerHistoryHandleEligible(selection.requestChoice, replayChanged) {
 		if previous, ok := resolved.PreviousHistory(path.target.TargetID, path.target.TargetVersion); ok {
 			providerRequest.PreviousHistory = &previous
 		}
@@ -108,6 +123,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		return providerCall{}, path.target, nil, s.mediaFetchCache, canonical.BadRequest("execution contract is invalid: " + err.Error())
 	}
 	doc, changes, err := backend.Codec.Encode(providerRequest)
+	factReads := targetFacts.Reads()
 	requestChanges = append(requestChanges, changes...)
 	if err != nil {
 		return providerCall{}, path.target, requestChanges, fetchCache, fmt.Errorf("provider request encoding: %w", err)
@@ -118,12 +134,21 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: resolved.Request(),
 		historyScheme:      s.input.requestFingerprint.Scheme(),
+		targetGeneration:   generation,
+		factReads:          factReads,
 		advance:            s.advance,
 		sessionID:          s.sessionID,
 		expectedHead:       s.expectedHead,
 		delayClientHandoff: delayClientHandoffFor(s.mcp),
 		providerRound:      len(s.providerUsage),
 	}, path.target, requestChanges, fetchCache, nil
+}
+
+// providerHistoryHandleEligible depends only on whether target-bound replay still
+// has the structure represented by the provider handle. Compatibility evidence
+// cannot recover or alter that structural fact.
+func providerHistoryHandleEligible(choice providerRequestChoice, replayChanged bool) bool {
+	return choice != providerRequestFullHistory && !replayChanged
 }
 
 // hasNextRouteCandidate exposes route order only as request-scoped encoding
@@ -154,14 +179,14 @@ func (c providerCompatibility) completedChanges() []compat.Change {
 
 func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, *canonical.CanonicalResponse, providerCompatibility, error) {
 	if err := provider.ValidateIngress(ingress); err != nil {
-		return nil, nil, providerCompatibility{}, canonical.InternalError("provider ingress shape is invalid")
+		return nil, nil, providerCompatibility{}, responseFailure("provider_stream_decode", canonical.InternalError("provider ingress shape is invalid"))
 	}
 	decoded, incremental, err := decodeProviderIngress(ctx, call, ingress, call.backend)
 	compatibility := providerCompatibility{
 		initial: compat.CloneChanges(decoded.Changes), progressive: decoded.ProgressiveChanges,
 	}
 	if err != nil {
-		return nil, nil, compatibility, err
+		return nil, nil, compatibility, responseFailure("provider_stream_decode", err)
 	}
 	var events canonical.ResponseStream = decoded.Stream
 	binding := canonical.ResponseBinding{SwobuID: swobuResponseID, TargetID: call.backend.Target.TargetID, TargetVersion: call.backend.Target.TargetVersion}
@@ -174,11 +199,11 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 			if err == io.EOF {
 				err = canonical.InternalError("provider response ended before a complete tool round")
 			}
-			return nil, nil, compatibility, err
+			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
 		}
 		response, err := envelope.ProjectResponse()
 		if err != nil {
-			return nil, nil, compatibility, err
+			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
 		}
 		cloned := response.Clone()
 		compatibility.initial = compatibility.completedChanges()
@@ -187,7 +212,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	}
 	events = newTerminalResponseStream(events)
 	response, err := handoffResponseStream(ctx, call, events, binding, incremental, runner)
-	return response, nil, compatibility, err
+	return response, nil, compatibility, responseFailure("client_stream_encode", err)
 }
 
 func handoffCompletedProviderResponse(ctx context.Context, call providerCall, response canonical.CanonicalResponse, runner runtimeBundle) (ClientResponse, error) {

@@ -38,7 +38,7 @@ func flattenInstructionsForResponses(items []canonical.CanonicalItem) loweredRes
 	exact = exact && count <= 1
 	lowered := loweredResponsesInstructions{Text: out.String(), Exact: exact}
 	if !exact && count > 0 {
-		lowered.Changes = []compat.Change{compat.NewChange(canonical.RequestInstructions, compat.Approximation, canonical.Occurrence{})}
+		lowered.Changes = []compat.Change{compat.NewApproximation(canonical.RequestInstructions, canonical.Occurrence{})}
 	}
 	return lowered
 }

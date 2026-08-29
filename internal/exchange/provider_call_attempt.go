@@ -32,6 +32,8 @@ type providerCallAttempt struct {
 	requestChoice          providerRequestChoice
 	providerRound          int
 	nativePreviousResponse bool
+	targetGeneration       targetExceptionGeneration
+	factReads              map[provider.TargetFact]bool
 	requestChanges         []compat.Change
 	status                 providerCallAttemptStatus
 	failure                *providerCallFailure
@@ -108,6 +110,8 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 		candidateIndex: selection.candidateIndex, target: call.backend.Target,
 		requestChoice: selection.requestChoice, providerRound: call.providerRound,
 		nativePreviousResponse: nativePreviousResponseSent(call.request),
+		targetGeneration:       call.targetGeneration,
+		factReads:              cloneFactReads(call.factReads),
 		requestChanges:         compat.CloneChanges(requestChanges),
 		status:                 providerCallAttemptCalling,
 	}

@@ -36,19 +36,21 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			LowerReasoning: func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+			LowerReasoning: func(req canonical.CanonicalRequest, target protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 				fields := make(map[string]any)
 				compute, computeSet := req.Reasoning().ComputeField().Get()
 				if computeSet {
 					switch compute.Kind() {
 					case canonical.ReasoningDisabled:
-						fields["reasoning"] = map[string]bool{"enabled": false}
+						if target.ProjectDisabled(changeLog) {
+							fields["reasoning"] = map[string]bool{"enabled": false}
+						}
 					case canonical.ReasoningAutomatic, canonical.ReasoningBudget:
 						fields["reasoning"] = map[string]bool{"enabled": true}
 					}
 				}
 				if effort, effortSet := req.Controls().Effort.Get(); effortSet {
-					fields["reasoning_effort"] = string(effort)
+					fields["reasoning_effort"] = string(target.ProjectEffort(effort, changeLog))
 				}
 				return fields, nil
 			},

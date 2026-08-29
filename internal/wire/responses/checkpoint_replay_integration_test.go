@@ -154,10 +154,10 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.PreviousResponseID != "" || len(payload.Input) != 7 {
+	if payload.PreviousResponseID != "" || len(payload.Input) != 5 {
 		t.Fatalf("stateless payload shape = %#v: %s", payload, raw)
 	}
-	wantTypes := []string{"message", "reasoning", "message", "function_call", "web_search_call", "custom_tool_call", "message"}
+	wantTypes := []string{"message", "reasoning", "message", "web_search_call", "message"}
 	for index, want := range wantTypes {
 		var header struct {
 			Type string `json:"type"`
@@ -168,11 +168,8 @@ func assertReplayFixtureWireOrder(t *testing.T, raw []byte) {
 	}
 	for _, token := range []string{
 		`"encrypted_content":"cipher"`,
-		`"call_id":"call_1"`,
 		`"id":"ws_lifecycle"`,
 		`"query":"deadline"`,
-		`"call_id":"call_custom"`,
-		`"input":"echo exact"`,
 		`turn two`,
 	} {
 		if !strings.Contains(string(raw), token) {

@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
@@ -77,6 +78,9 @@ func TestEncodeResponsesImages_PreservesUserSourcesAndToolResultPlacement(t *tes
 		t.Fatal(err)
 	}
 	callID, _ := canonical.NewToolCallID("call_image")
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "image_tool")
+	declarations := canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
 	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
 		canonical.NewTextToolResultPart("before"),
 		canonical.NewImageToolResultPart(urlImage),
@@ -88,7 +92,7 @@ func TestEncodeResponsesImages_PreservesUserSourcesAndToolResultPlacement(t *tes
 	}
 
 	doc, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{message, result},
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations, message, call, result},
 	}), delivery.BufferedDelivery())
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +107,8 @@ func TestEncodeResponsesImages_PreservesUserSourcesAndToolResultPlacement(t *tes
 	if err := json.Unmarshal(doc.Raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Input) != 2 {
-		t.Fatalf("input len = %d, want 2", len(payload.Input))
+	if len(payload.Input) != 3 {
+		t.Fatalf("input len = %d, want 3", len(payload.Input))
 	}
 	if got := payload.Input[0].Content[0]; got["type"] != "input_image" || got["image_url"] != "https://example.test/user.png" || got["detail"] != "original" {
 		t.Fatalf("user image = %#v", got)
@@ -112,7 +116,7 @@ func TestEncodeResponsesImages_PreservesUserSourcesAndToolResultPlacement(t *tes
 	if rawURL, _ := payload.Input[0].Content[1]["image_url"].(string); !strings.HasPrefix(rawURL, "data:image/png;base64,") {
 		t.Fatalf("user inline image_url = %#v", payload.Input[0].Content[1]["image_url"])
 	}
-	output := payload.Input[1].Output
+	output := payload.Input[2].Output
 	if len(output) != 4 || output[0]["type"] != "input_text" || output[1]["image_url"] != "https://example.test/user.png" || output[2]["type"] != "input_image" || output[3]["type"] != "input_text" {
 		t.Fatalf("tool-result output = %#v", output)
 	}
@@ -146,14 +150,17 @@ func TestDecodeResponsesImages_PreservesToolResultArrayOrder(t *testing.T) {
 	}
 }
 
-func TestEncodeResponsesToolResult_MultipleTextPartsUseNormalFormString(t *testing.T) {
+func TestEncodeResponsesToolResult_MultipleTextPartsUsePreferredArray(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("call_texts")
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "text_tool")
+	declarations := canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
 	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
 		canonical.NewTextToolResultPart("one"),
 		canonical.NewTextToolResultPart("two"),
 	}, false)
 	doc, err := EncodeCarrier(canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{result},
+		Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations, call, result},
 	}), delivery.BufferedDelivery())
 	if err != nil {
 		t.Fatal(err)
@@ -166,8 +173,9 @@ func TestEncodeResponsesToolResult_MultipleTextPartsUseNormalFormString(t *testi
 	if err := json.Unmarshal(doc.Raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Input[0].Output != "onetwo" {
-		t.Fatalf("multiple text parts = %#v, want official string representation", payload.Input[0].Output)
+	output, ok := payload.Input[1].Output.([]any)
+	if !ok || len(output) != 2 {
+		t.Fatalf("multiple text parts = %#v, want preferred array representation", payload.Input[1].Output)
 	}
 }
 
@@ -177,15 +185,18 @@ func TestEncodeResponsesNormalFormToolResult_MultipleTextPartsBecomeString(t *te
 		canonical.NewTextToolResultPart("two"),
 	}
 	var changes []compat.Change
-	output, err := encodeResponsesToolResultContent(parts, &changes, "exchange")
+	output, rehomed, err := encodeResponsesToolResultContent(parts, nil, &changes, "exchange")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output != "onetwo" {
-		t.Fatalf("lowered output = %#v, want concatenated string", output)
+	if len(rehomed) != 0 {
+		t.Fatalf("rehomed output = %#v, want none", rehomed)
 	}
-	if len(changes) != 1 || changes[0].Capability != canonical.RequestItemsToolResultContent || changes[0].Kind != compat.Approximation {
-		t.Fatalf("flat output changes = %#v", changes)
+	if parts, ok := output.([]any); !ok || len(parts) != 2 {
+		t.Fatalf("lowered output = %#v, want two text array parts", output)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("array output changes = %#v", changes)
 	}
 }
 

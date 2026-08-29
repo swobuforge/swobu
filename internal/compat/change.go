@@ -20,14 +20,13 @@ type Change struct {
 	Capability canonical.CapabilityPath
 	Occurrence canonical.Occurrence
 	Kind       Kind
-	Preserved  canonical.CapabilityPath
 }
 
-func NewApproximation(capability, preserved canonical.CapabilityPath, occurrence canonical.Occurrence) Change {
-	if capability == "" || preserved == "" {
-		panic("compatibility approximation requires changed and preserved capabilities")
+func NewApproximation(capability canonical.CapabilityPath, occurrence canonical.Occurrence) Change {
+	if capability == "" {
+		panic("compatibility approximation requires a capability")
 	}
-	return Change{Capability: capability, Occurrence: occurrence, Kind: Approximation, Preserved: preserved}
+	return Change{Capability: capability, Occurrence: occurrence, Kind: Approximation}
 }
 
 func NewOmission(capability canonical.CapabilityPath, occurrence canonical.Occurrence) Change {
@@ -37,31 +36,13 @@ func NewOmission(capability canonical.CapabilityPath, occurrence canonical.Occur
 	return Change{Capability: capability, Occurrence: occurrence, Kind: Omission}
 }
 
-// NewChange constructs one non-exact change for traversal helpers.
-func NewChange(capability canonical.CapabilityPath, kind Kind, occurrence canonical.Occurrence) Change {
-	switch kind {
-	case Approximation:
-		return NewApproximation(capability, capability, occurrence)
-	case Omission:
-		return NewOmission(capability, occurrence)
-	default:
-		panic("compatibility change requires approximation or omission")
-	}
-}
-
 func (c Change) Validate() error {
 	if c.Capability == "" {
 		return fmt.Errorf("compatibility change capability is empty")
 	}
 	switch c.Kind {
 	case Approximation:
-		if c.Preserved == "" {
-			return fmt.Errorf("compatibility approximation preserved capability is empty")
-		}
 	case Omission:
-		if c.Preserved != "" {
-			return fmt.Errorf("compatibility omission cannot declare preserved capability")
-		}
 	default:
 		return fmt.Errorf("compatibility change kind is invalid")
 	}
@@ -88,8 +69,7 @@ func AppendUnique(changes []Change, change Change) []Change {
 	for _, existing := range changes {
 		if existing.Capability == change.Capability &&
 			existing.Occurrence.Key() == change.Occurrence.Key() &&
-			existing.Kind == change.Kind &&
-			existing.Preserved == change.Preserved {
+			existing.Kind == change.Kind {
 			return changes
 		}
 	}

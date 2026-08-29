@@ -80,7 +80,6 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAzure,
 		BackendResolver:    router,
-		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery: azureProviderModelCatalogClient{
 			client:      client,

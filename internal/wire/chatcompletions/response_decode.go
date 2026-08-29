@@ -406,8 +406,14 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		default:
 			return canonical.NewBackendError("", 0, "chat completions streamed tool kind is invalid", "")
 		}
-		item, err := canonical.NewToolCallItem(state.CallID, state.Tool, input)
-		if err != nil {
+		var item canonical.CanonicalItem
+		var itemErr error
+		if state.Tool.Kind() == canonical.ToolKindDiscovery {
+			item, itemErr = canonical.NewToolDiscoveryCallItem(state.CallID, input, canonical.DiscoveryExecutorClient)
+		} else {
+			item, itemErr = canonical.NewToolCallItem(state.CallID, state.Tool, input)
+		}
+		if itemErr != nil {
 			return canonical.NewBackendError("", 0, "chat completions streamed tool call is invalid", "")
 		}
 		ordinal := uint32(position)
@@ -606,7 +612,12 @@ func (s *chatCompletionsEventReader) queueToolCallDelta(call streamToolCallBody)
 		if err != nil {
 			return canonical.InternalError("chat completions streamed tool environment is ambiguous")
 		}
-		key, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKind(state.Kind), state.WireName)
+		var key canonical.ToolKey
+		if canonical.ToolKind(state.Kind) == canonical.ToolKindFunction {
+			key, err = wire.DecodeCallableKey(s.toolNames, environment, state.WireName)
+		} else {
+			key, err = wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKind(state.Kind), state.WireName)
+		}
 		if err != nil {
 			return canonical.NewBackendError("", 0, "chat completions streamed tool name cannot be resolved against the effective request", "")
 		}

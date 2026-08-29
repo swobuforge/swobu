@@ -1,6 +1,7 @@
 package zai
 
 import (
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/wire/reasoningprojection"
@@ -14,6 +15,7 @@ type thinkingOptions struct {
 // Chat Completions dialect established by the committed live contract.
 func applyReasoning(
 	request canonical.CanonicalRequest,
+	target protocolcodec.ReasoningTargetDialect,
 	changes *[]compat.Change,
 	exchangeID string,
 ) (map[string]any, error) {
@@ -22,7 +24,9 @@ func applyReasoning(
 	effort, effortSpecified := request.Controls().Effort.Get()
 
 	if computeSpecified && compute.Kind() == canonical.ReasoningDisabled {
-		fields["thinking"] = thinkingOptions{Type: "disabled"}
+		if target.ProjectDisabled(changes) {
+			fields["thinking"] = thinkingOptions{Type: "disabled"}
+		}
 		if effortSpecified {
 			appendReasoningChange(changes, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
 		}
@@ -33,7 +37,7 @@ func applyReasoning(
 		fields["thinking"] = thinkingOptions{Type: "enabled"}
 	}
 	if effortSpecified {
-		fields["reasoning_effort"] = string(effort)
+		fields["reasoning_effort"] = string(target.ProjectEffort(effort, changes))
 		if computeSpecified && compute.Kind() == canonical.ReasoningBudget {
 			appendReasoningChange(changes, reasoningBudgetApproximation())
 		}
@@ -52,9 +56,9 @@ func applyReasoning(
 func reasoningBudgetApproximation() compat.Change {
 	return compat.NewApproximation(
 		canonical.RequestReasoning,
-		canonical.RequestControlsEffort,
-		canonical.Occurrence{},
-	)
+
+		canonical.Occurrence{})
+
 }
 
 func appendReasoningChange(changes *[]compat.Change, change compat.Change) {

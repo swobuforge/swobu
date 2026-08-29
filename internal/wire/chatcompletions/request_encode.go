@@ -109,15 +109,45 @@ type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire
 type MessageLoweringRule func(msg *ProviderRequestMessage, items []canonical.CanonicalItem) error
 
 // ReasoningLoweringRule compiles provider-specific reasoning request fields.
-type ReasoningLoweringRule func(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error)
+type ReasoningLoweringRule func(req canonical.CanonicalRequest, target ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error)
+
+// ReasoningTargetDialect exposes only empirical branches an ordinal reasoning
+// lowerer can execute. Nil callbacks retain preferred official wire.
+type ReasoningTargetDialect struct {
+	AcceptsEffortMax func() bool
+	AcceptsDisabled  func() bool
+}
+
+func (d ReasoningTargetDialect) ProjectEffort(effort canonical.InferenceEffort, changeLog *[]compat.Change) canonical.InferenceEffort {
+	if effort != canonical.InferenceEffortMax || d.AcceptsEffortMax == nil || d.AcceptsEffortMax() {
+		return effort
+	}
+	if changeLog != nil {
+		*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{}))
+	}
+	return canonical.InferenceEffortXHigh
+}
+
+func (d ReasoningTargetDialect) ProjectDisabled(changeLog *[]compat.Change) bool {
+	if d.AcceptsDisabled == nil || d.AcceptsDisabled() {
+		return true
+	}
+	if changeLog != nil {
+		*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{}))
+	}
+	return false
+}
 
 // CompileOptions contains only proven target-dialect extension points.
 type CompileOptions struct {
-	LowerTool              ToolLoweringRule
-	LowerToolPolicy        ToolPolicyLoweringRule
-	LowerReasoning         ReasoningLoweringRule
-	LowerMessage           MessageLoweringRule
-	UseMaxCompletionTokens bool
+	LowerTool                  ToolLoweringRule
+	LowerToolPolicy            ToolPolicyLoweringRule
+	LowerReasoning             ReasoningLoweringRule
+	LowerMessage               MessageLoweringRule
+	UseMaxCompletionTokens     bool
+	AcceptsMaxCompletionTokens func() bool
+	OmitParallelToolCallsFalse func() bool
+	ReasoningTarget            ReasoningTargetDialect
 }
 
 type toolCallBody struct {
@@ -175,6 +205,12 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		return ProviderRequestDocument{}, err
 	}
 	tools := environment.Declarations()
+	if hasProviderDiscovery(tools) {
+		tools = removeProviderDiscovery(tools)
+		if err := appendChatRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
 	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
 		if tool.Kind() == canonical.ToolKindDiscovery {
 			return string(tool.Kind()) + "\x00" + tool.Key().Name(), nil
@@ -248,7 +284,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		"model":    req.Model(),
 		"messages": wireMessages,
 	}
-	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0); err != nil {
+	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0, options.OmitParallelToolCallsFalse, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
@@ -259,8 +295,12 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		maxTokens = &value
 	}
 	delete(payload, "max_tokens")
-	if options.UseMaxCompletionTokens && maxTokens != nil {
+	useMaxCompletionTokens := options.UseMaxCompletionTokens && maxTokens != nil &&
+		(options.AcceptsMaxCompletionTokens == nil || options.AcceptsMaxCompletionTokens())
+	if useMaxCompletionTokens {
 		payload["max_completion_tokens"] = *maxTokens
+	} else if maxTokens != nil {
+		payload["max_tokens"] = *maxTokens
 	}
 	var providerTools any
 	if loweredTools.TotalFragments() > 0 {
@@ -274,7 +314,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		MaxTokens:     maxTokens,
 		providerTools: providerTools,
 	}
-	if options.UseMaxCompletionTokens && maxTokens != nil {
+	if useMaxCompletionTokens {
 		document.MaxCompletionTokens = maxTokens
 		document.MaxTokens = nil
 	}
@@ -287,7 +327,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		return ProviderRequestDocument{}, err
 	}
 	if options.LowerReasoning != nil {
-		fields, err := options.LowerReasoning(req, changeLog, exchangeID)
+		fields, err := options.LowerReasoning(req, options.ReasoningTarget, changeLog, exchangeID)
 		if err != nil {
 			return ProviderRequestDocument{}, err
 		}
@@ -295,7 +335,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 			return ProviderRequestDocument{}, err
 		}
 	} else {
-		if err := encodeChatCompletionsReasoning(payload, req, changeLog); err != nil {
+		if err := encodeChatCompletionsReasoning(payload, req, options.ReasoningTarget, changeLog); err != nil {
 			return ProviderRequestDocument{}, err
 		}
 	}
@@ -303,6 +343,26 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		payload["stream"] = true
 	}
 	return document, nil
+}
+
+func hasProviderDiscovery(tools []canonical.ToolDeclaration) bool {
+	for _, tool := range tools {
+		if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorProvider {
+			return true
+		}
+	}
+	return false
+}
+
+func removeProviderDiscovery(tools []canonical.ToolDeclaration) []canonical.ToolDeclaration {
+	projected := make([]canonical.ToolDeclaration, 0, len(tools))
+	for _, tool := range tools {
+		if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorProvider {
+			continue
+		}
+		projected = append(projected, tool)
+	}
+	return projected
 }
 
 // projectChatResponsesReasoningContext makes protocol loss target-local.
@@ -501,6 +561,21 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 			i = next
 			continue
 		}
+		if result, ok := item.ToolDiscoveryResult(); ok {
+			if activeBatch == nil || !activeBatch.resolve(result.CallID()) {
+				return nil, canonical.InternalError("tool-discovery result does not close an active tool-call batch")
+			}
+			content, err := encodeChatDiscoveryResult(result)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ProviderRequestMessage{Role: "tool", Content: content, ToolCallID: result.CallID().String(), SourceStart: i, SourceEnd: i + 1})
+			if activeBatch.closed() {
+				activeBatch = nil
+			}
+			i++
+			continue
+		}
 		wire := ProviderRequestMessage{SourceStart: sourceStart}
 		if message, ok := item.Message(); ok {
 			wire.Role = string(message.Role())
@@ -513,7 +588,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 		} else if item.Kind() == canonical.ItemKindToolCall {
 			wire.Role = "assistant"
 		} else {
-			return nil, canonical.NotImplemented("Chat Completions cannot project this canonical item kind")
+			return nil, canonical.InternalError("Chat Completions received an invalid canonical item kind")
 		}
 		if wire.Role == "assistant" {
 			callIDs := make([]canonical.ToolCallID, 0)
@@ -574,7 +649,7 @@ func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.Me
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, canonical.NotImplemented("Chat Completions cannot project image input outside user messages")
+				return nil, canonical.InternalError("Chat Completions received an invalid canonical image variant")
 			}
 			imagePart, _ := part.Image()
 			encoded, err := encodeChatImage(imagePart, canonical.RequestItemsMessageImageDetail, changeLog, exchangeID)
@@ -584,7 +659,7 @@ func encodeChatMessageContent(author canonical.MessageRole, parts []canonical.Me
 			out = append(out, encoded)
 			continue
 		}
-		return nil, canonical.NotImplemented("Chat Completions cannot project this canonical content kind")
+		return nil, canonical.InternalError("Chat Completions received an invalid canonical content variant")
 	}
 	return out, nil
 }
@@ -594,9 +669,6 @@ func appendChatRequestChange(changeLog *[]compat.Change, exchangeID string, feat
 		return nil
 	}
 	change := compat.Change{Capability: feature, Kind: outcome}
-	if outcome == compat.Approximation {
-		change.Preserved = feature
-	}
 	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
@@ -609,7 +681,7 @@ func encodeChatToolCall(call canonical.ToolCallItem, names wire.ToolNames) (tool
 		return toolCallBody{}, err
 	}
 	switch tool.Kind() {
-	case canonical.ToolKindFunction:
+	case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
 		object, ok := call.Input().Object()
 		if !ok {
 			return toolCallBody{}, canonical.BadRequest("chat completions function calls require object input")
@@ -622,8 +694,23 @@ func encodeChatToolCall(call canonical.ToolCallItem, names wire.ToolNames) (tool
 		}
 		return toolCallBody{ID: call.CallID().String(), Type: "custom", Custom: &toolCustomBody{Name: name, Input: text}}, nil
 	default:
-		return toolCallBody{}, canonical.NotImplemented("Chat Completions cannot project this canonical tool-call kind")
+		return toolCallBody{}, canonical.InternalError("Chat Completions received an invalid canonical tool-call kind")
 	}
+}
+
+func encodeChatDiscoveryResult(result canonical.ToolDiscoveryResultItem) (string, error) {
+	if failure, failed := result.Failure(); failed {
+		return failure.Message(), nil
+	}
+	loaded := make([]string, 0, len(result.Tools().Declarations()))
+	for _, declaration := range result.Tools().Declarations() {
+		loaded = append(loaded, declaration.Key().String())
+	}
+	raw, err := json.Marshal(map[string]any{"loaded_tools": loaded})
+	if err != nil {
+		return "", canonical.InternalError("chat completions discovery result could not be encoded")
+	}
+	return string(raw), nil
 }
 
 func chatClientTextContent(parts []canonical.MessagePart, surface string) (string, error) {
@@ -648,7 +735,7 @@ func toolResultTextOnlyContent(parts []canonical.ToolResultPart, surface string)
 	for _, part := range parts {
 		value, ok := part.Text()
 		if !ok {
-			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
+			return "", canonical.InternalError(surface + " received an invalid canonical content variant")
 		}
 		text.WriteString(value.Text())
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -37,24 +36,6 @@ func TestRuntimeAdmitsOnlyExactGeminiInteractionsTarget(t *testing.T) {
 	otherProvider.Model = "operator-selected-model"
 	if _, err := bundle.BackendResolver.ResolveBackend(otherProvider); err == nil {
 		t.Fatal("Gemini runtime accepted another provider's target")
-	}
-}
-
-func TestRuntimeDoesNotClaimProviderNativeMCPAuthority(t *testing.T) {
-	bundle := NewRuntime(nil, credentialResolver{})
-	if got := bundle.TargetSupport.ResolveTargetSupport(geminiTarget()); got.Get(canonical.RequestToolsDiscovery) != provider.SupportUnknown {
-		t.Fatalf("Gemini target support = %#v, want unknown", got)
-	}
-	falseProtocol := geminiTarget()
-	falseProtocol.ProtocolKind = protocolkind.Responses
-	falseProtocol.ProviderProtocol = "responses"
-	if got := bundle.TargetSupport.ResolveTargetSupport(falseProtocol); got.Get(canonical.RequestToolsDiscovery) != provider.SupportUnknown {
-		t.Fatalf("false protocol support = %#v, want unknown", got)
-	}
-	otherProvider := geminiTarget()
-	otherProvider.ProviderSpec = "openai"
-	if got := bundle.TargetSupport.ResolveTargetSupport(otherProvider); got.Get(canonical.RequestToolsDiscovery) != provider.SupportUnknown {
-		t.Fatalf("other provider support = %#v, want unknown", got)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"reflect"
 	"testing"
@@ -72,17 +71,23 @@ func TestChatRequestProjectionDoesNotMutateCanonicalRequest(t *testing.T) {
 	}
 }
 
-func TestChatRequestRejectsUnsettledWebSearchHistory(t *testing.T) {
+func TestChatRequestOmitsUnsettledWebSearchHistory(t *testing.T) {
 	items := chatWebSearchResponse(t).Items()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("local"),
 		Items: []canonical.CanonicalItem{items[0], canonicaltest.Message(t, canonical.MessageRoleAssistant, "Still searching")},
 	})
 
-	_, err := EncodeCarrier(request, delivery.BufferedDelivery())
-	var swobuErr canonical.Error
-	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
+	var changes []compat.Change
+	document, err := EncodeCarrierWithChanges(request, nil, delivery.BufferedDelivery(), &changes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0] != compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(0)) {
+		t.Fatalf("changes = %#v", changes)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("web_search")) || !bytes.Contains(document.RawBytes(), []byte("Still searching")) {
+		t.Fatalf("projected wire = %s", document.RawBytes())
 	}
 }
 

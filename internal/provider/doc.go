@@ -19,13 +19,13 @@
 // solely own exact target-grammar projection. Successful projection returns
 // non-exact semantic changes as values. Local projection failures retain their
 // owning canonical error and never authorize another provider attempt.
-// TargetSupport is descriptive discovery and diagnostic evidence for one exact
-// attempt. It must not gate target projection, transport, or candidate
-// selection. Codecs continue to own how meaning is represented, and exchange
-// continues to own recovery policy after observed provider outcomes.
 // Provider/protocol identity, encoder availability, model names, backend prose,
 // and choosing a portable projection do not establish support. Provider runtime
 // facets resolve exact-target evidence independently from backend construction.
+// TargetFacts is the narrow exception for empirically learned wire dialect: an
+// attempt-private typed getter selects between two codec-owned projections,
+// records every value used, and defaults unknown to the preferred form. It is
+// never capability metadata, admission, routing, or recovery policy.
 // AttemptToolNames owns one immutable canonical-key to wire-name bijection for
 // an attempt. It preserves safe request-level literals and gives every generated
 // alias a readable semantic prefix plus a stable digest of the complete canonical

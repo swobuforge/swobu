@@ -75,7 +75,7 @@ func TestBedrockMantleMessagesApproximatesStrictStructuredOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{})
+	want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{})
 	if len(changes) != 1 || changes[0] != want {
 		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}

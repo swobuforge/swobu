@@ -180,7 +180,6 @@ func declarationFromSDKTool(source canonical.MCPToolSource, tool *mcp.Tool) (can
 			Capability: canonical.RequestTools,
 			Kind:       compat.Approximation,
 			Occurrence: canonical.ToolOccurrence(key),
-			Preserved:  canonical.RequestTools,
 		})
 	}
 	return declaration, changes, nil

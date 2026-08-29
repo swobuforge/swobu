@@ -48,10 +48,6 @@ func (r toolDiscoveryResponsesRuntime) ResolveBackend(target provider.TargetSnap
 	}, nil
 }
 
-func (nativeMessagesDiscoveryRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.NewTargetSupport(map[canonical.CapabilityPath]provider.Support{canonical.RequestToolsDiscovery: provider.SupportSupported})
-}
-
 func TestMCPPreparationRetainsIngressAccessForLocalOpen(t *testing.T) {
 	source, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	access, err := (mcp.Access{}).WithBearer(source, "incident-secret-bearer")
@@ -99,7 +95,7 @@ func TestMCPAccessIsOpaqueInsideExchangeContainers(t *testing.T) {
 	}
 }
 
-func TestProviderPreparationProjectsClaudeDiscoveryHistoryBeforeResponsesEncoding(t *testing.T) {
+func TestProviderPreparationPreservesNativeClaudeDiscoveryHistoryForResponsesEncoding(t *testing.T) {
 	raw := []byte(`{
 		"model":"claude",
 		"tools":[
@@ -140,57 +136,18 @@ func TestProviderPreparationProjectsClaudeDiscoveryHistoryBeforeResponsesEncodin
 		t.Fatal(err)
 	}
 	providerWire := call.document.RawBytes()
-	if bytes.Contains(providerWire, []byte("tool_search")) {
-		t.Fatalf("Responses provider wire retained unsupported discovery lifecycle: %s", providerWire)
+	if !bytes.Contains(providerWire, []byte("tool_search")) {
+		t.Fatalf("Responses provider wire lost native discovery lifecycle: %s", providerWire)
 	}
 	if !bytes.Contains(providerWire, []byte(`"name":"weather"`)) {
 		t.Fatalf("Responses provider wire lost the discovered function: %s", providerWire)
 	}
-	if len(changes) == 0 {
-		t.Fatal("discovery projection did not record compatibility evidence")
+	if len(changes) != 0 {
+		t.Fatalf("native discovery generated compatibility evidence: %#v", changes)
 	}
 }
 
-func TestStructuralProjectionSuppressesApplicableNativePrefix(t *testing.T) {
-	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"), "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
-	declarations := canonicaltest.ToolDeclarations(t, discovery, loaded)
-	callID, _ := canonical.NewToolCallID("discover_weather")
-	input, _ := canonical.ParseJSONObject([]byte(`{}`))
-	call, _ := canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(input), canonical.DiscoveryExecutorProvider)
-	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{loaded})
-	result, _ := canonical.NewToolDiscoveryResultItem(callID, set, canonical.DiscoveryExecutorProvider)
-	previous := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{declarations, call, result}})
-	current := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "continue")}})
-	target := requestpathTarget(t, "structural-prefix")
-	prepared := mustResumeSession(t, previous, nil, current, target)
-	path, err := resolveProviderPath(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := prepared.PreviousHistory(path.target.TargetID, path.target.TargetVersion); !ok {
-		t.Fatal("test setup has no applicable native prefix before projection")
-	}
-	state := reducerTestState(t)
-	state.input.request = current
-	state.prepared = &prepared
-	state.route = routePlan{targets: []routing.Target{target}}
-	runner := withRuntime(bufferedProviderTransport(nil))
-	runner.Runtime = toolDiscoveryResponsesRuntime{transport: bufferedProviderTransport(nil)}
-
-	providerCall, _, _, _, err := prepareProviderCall(context.Background(), state, providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if providerCall.request.PreviousHistory != nil || bytes.Contains(providerCall.document.RawBytes(), []byte("previous_response_id")) {
-		t.Fatal("structurally rewritten history retained native prefix authority")
-	}
-}
-
-func TestProviderPreparationOmitsUnrepresentableNativeDiscoverySubtype(t *testing.T) {
+func TestProviderPreparationEagerlyMaterializesUnrepresentableProviderDiscoverySubtype(t *testing.T) {
 	discovery, err := canonical.NewToolDiscoveryTool("find tools", canonicaltest.Schema(t, `{"type":"object"}`), canonical.DiscoveryExecutorProvider)
 	if err != nil {
 		t.Fatal(err)
@@ -221,16 +178,12 @@ func TestProviderPreparationOmitsUnrepresentableNativeDiscoverySubtype(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := call.request.TargetSupport.Get(canonical.RequestToolsDiscovery); got != provider.SupportSupported {
-		t.Fatalf("provider request discovery support=%v want supported", got)
-	}
 	wireRequest := call.document.RawBytes()
 	if bytes.Contains(wireRequest, []byte("tool_search")) || !bytes.Contains(wireRequest, []byte(`"name":"weather"`)) {
-		t.Fatalf("native omission wire=%s", wireRequest)
+		t.Fatalf("provider discovery was not eagerly materialized: %s", wireRequest)
 	}
-	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(discovery.Key()))
-	if len(changes) != 1 || changes[0] != want {
-		t.Fatalf("changes = %#v, want [%#v]", changes, want)
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestToolsVisibility || changes[0].Kind != compat.Approximation {
+		t.Fatalf("changes=%#v, want one visibility approximation", changes)
 	}
 }
 

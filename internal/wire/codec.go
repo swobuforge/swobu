@@ -12,6 +12,10 @@
 //	wire/* → domain/historyfingerprint (for opaque codec-owned leaves)
 //	exchange → wire (for codec interfaces)
 //	wire does NOT import exchange.
+//
+// ResponseCompletion is the shared write-once client-encoding lifecycle cell.
+// Exchange may observe its terminal transition, but wire owns settlement and
+// never imports attempt policy or logging concepts.
 package wire
 
 import (
@@ -96,7 +100,7 @@ type RebasedRequest struct {
 // encode and initial decode boundaries.
 type ToolNames interface {
 	WireName(canonical.ToolKey) (string, error)
-	CanonicalKey(canonical.ToolKind, string) (canonical.ToolKey, bool)
+	CanonicalKey(string) (canonical.ToolKey, bool)
 }
 
 // EncodeToolName projects one model-referenceable callable at the wire edge.
@@ -113,15 +117,29 @@ func EncodeToolName(names ToolNames, key canonical.ToolKey) (string, error) {
 // DecodeToolKey resolves one provider-returned callable label and validates
 // that the referenced declaration is available in the semantic decode context.
 func DecodeToolKey(names ToolNames, environment canonical.ToolEnvironment, kind canonical.ToolKind, name string) (canonical.ToolKey, error) {
+	key, err := DecodeCallableKey(names, environment, name)
+	if err != nil {
+		return canonical.ToolKey{}, err
+	}
+	if key.Kind() != kind {
+		return canonical.ToolKey{}, canonical.NewBackendError("", 0, "provider response references a tool unavailable in the decode context", "")
+	}
+	return key, nil
+}
+
+// DecodeCallableKey resolves a generic callable wire spelling through the
+// attempt's unique provenance map. Protocols with one function spelling use
+// this instead of guessing a canonical kind from that spelling.
+func DecodeCallableKey(names ToolNames, environment canonical.ToolEnvironment, name string) (canonical.ToolKey, error) {
 	if names == nil {
 		return canonical.ToolKey{}, canonical.InternalError("provider wire decoder is missing attempt tool names")
 	}
-	key, ok := names.CanonicalKey(kind, name)
+	key, ok := names.CanonicalKey(name)
 	if !ok {
 		return canonical.ToolKey{}, canonical.NewBackendError("", 0, "provider response references an unknown tool name", "")
 	}
-	declaration, ok := environment.Lookup(key)
-	if !ok || declaration.Kind() != kind {
+	_, ok = environment.Lookup(key)
+	if !ok {
 		return canonical.ToolKey{}, canonical.NewBackendError("", 0, "provider response references a tool unavailable in the decode context", "")
 	}
 	return key, nil
@@ -145,8 +163,12 @@ type ResponseCompletionSnapshot struct {
 	Err                 error
 	ResponseFingerprint *historyfingerprint.Response
 	Changes             []compat.Change
-	Compatibility       compat.Summary
 	Usage               canonical.TokenUsage
+}
+
+func (s ResponseCompletionSnapshot) clone() ResponseCompletionSnapshot {
+	s.Changes = compat.CloneChanges(s.Changes)
+	return s
 }
 
 // ObserveUsage records the final canonical provider accounting carried through
@@ -170,7 +192,26 @@ type ResponseCompletion struct {
 	snapshot           ResponseCompletionSnapshot
 	baseChanges        []compat.Change
 	progressiveChanges func() []compat.Change
-	polyfilled         bool
+	onComplete         func()
+	onTerminal         func(ResponseCompletionSnapshot)
+}
+
+// OnTerminal registers the lifecycle observer for the response's write-once
+// terminal transition. Unlike OnComplete, it observes both completion and
+// failure and carries no Exchange-specific policy.
+func (c *ResponseCompletion) OnTerminal(fn func(ResponseCompletionSnapshot)) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.snapshot.State != CompletionPending {
+		snapshot := c.snapshot.clone()
+		c.mu.Unlock()
+		fn(snapshot)
+		return
+	}
+	c.onTerminal = fn
+	c.mu.Unlock()
 }
 
 // NewResponseCompletion returns a read-only observation plus codec-private
@@ -182,7 +223,7 @@ func NewResponseCompletion() (*ResponseCompletion, func(*historyfingerprint.Resp
 
 // ConfigureCompatibility installs reducer-owned winning-path facts before
 // terminal consumption. Progressive changes are read only while completing.
-func (c *ResponseCompletion) ConfigureCompatibility(base []compat.Change, progressive func() []compat.Change, polyfilled bool) {
+func (c *ResponseCompletion) ConfigureCompatibility(base []compat.Change, progressive func() []compat.Change) {
 	if c == nil {
 		return
 	}
@@ -193,7 +234,24 @@ func (c *ResponseCompletion) ConfigureCompatibility(base []compat.Change, progre
 	}
 	c.baseChanges = compat.CloneChanges(base)
 	c.progressiveChanges = progressive
-	c.polyfilled = polyfilled
+}
+
+// OnComplete registers attempt learning at the full response-completion
+// boundary. It never runs for a failed or abandoned response.
+func (c *ResponseCompletion) OnComplete(fn func()) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.snapshot.State == CompletionCompleted {
+		c.mu.Unlock()
+		fn()
+		return
+	}
+	if c.snapshot.State == CompletionPending {
+		c.onComplete = fn
+	}
+	c.mu.Unlock()
 }
 
 // Complete records the only successful terminal response fingerprint.
@@ -202,8 +260,8 @@ func (c *ResponseCompletion) complete(fingerprint *historyfingerprint.Response, 
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.snapshot.State != CompletionPending {
+		c.mu.Unlock()
 		return
 	}
 	var cloned *historyfingerprint.Response
@@ -218,13 +276,31 @@ func (c *ResponseCompletion) complete(fingerprint *historyfingerprint.Response, 
 	allChanges = append(allChanges, changes...)
 	if err := compat.ValidateChanges(allChanges); err != nil {
 		c.snapshot = ResponseCompletionSnapshot{State: CompletionFailed, Err: err}
+		terminal := c.onTerminal
+		c.onTerminal = nil
+		snapshot := c.snapshot.clone()
+		c.mu.Unlock()
+		if terminal != nil {
+			terminal(snapshot)
+		}
 		return
 	}
-	summary := compat.Summarize(allChanges, c.polyfilled)
 	c.snapshot = ResponseCompletionSnapshot{
 		State: CompletionCompleted, ResponseFingerprint: cloned,
-		Changes: compat.CloneChanges(allChanges), Compatibility: summary,
-		Usage: c.snapshot.Usage,
+		Changes: compat.CloneChanges(allChanges),
+		Usage:   c.snapshot.Usage,
+	}
+	callback := c.onComplete
+	terminal := c.onTerminal
+	c.onComplete = nil
+	c.onTerminal = nil
+	snapshot := c.snapshot.clone()
+	c.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
+	if terminal != nil {
+		terminal(snapshot)
 	}
 }
 
@@ -234,11 +310,18 @@ func (c *ResponseCompletion) fail(err error) {
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.snapshot.State != CompletionPending {
+		c.mu.Unlock()
 		return
 	}
 	c.snapshot = ResponseCompletionSnapshot{State: CompletionFailed, Err: err}
+	terminal := c.onTerminal
+	c.onTerminal = nil
+	snapshot := c.snapshot.clone()
+	c.mu.Unlock()
+	if terminal != nil {
+		terminal(snapshot)
+	}
 }
 
 func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
@@ -247,10 +330,7 @@ func (c *ResponseCompletion) Snapshot() ResponseCompletionSnapshot {
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	snapshot := c.snapshot
-	snapshot.Changes = compat.CloneChanges(snapshot.Changes)
-	snapshot.Compatibility = snapshot.Compatibility.Clone()
-	return snapshot
+	return c.snapshot.clone()
 }
 
 // ProviderEncodeInput is the declarative canonical input for provider encoders.

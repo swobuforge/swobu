@@ -133,6 +133,65 @@ data: {"event_type":"interaction.completed","interaction":{"id":"interaction_1",
 	}
 }
 
+func TestInteractionsStreamProjectsClientDiscoveryThroughGenericFunctionGrammar(t *testing.T) {
+	discovery, err := canonical.NewToolDiscoveryTool(
+		"load tools",
+		canonicaltest.Schema(t, `{"type":"object","properties":{"query":{"type":"string"}}}`),
+		canonical.DiscoveryExecutorClient,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gemini-model"),
+		Store: canonical.Specify(false),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, discovery),
+		},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerName, err := names.WireName(discovery.Key())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `data: {"event_type":"interaction.created","interaction":{"id":"","model":"gemini-model","status":"in_progress"}}
+
+data: {"event_type":"interaction.status_update","interaction_id":"","status":"in_progress"}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_search","name":"%s","arguments":{}}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"arguments_delta","arguments":"{\"query\":\"azure\"}"}}
+
+data: {"event_type":"step.stop","index":0}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"","status":"requires_action"}}
+
+`
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "gemini-discovery", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, fmt.Sprintf(raw, providerName))
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_discovery"})), canonical.EnvResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := response.Items()
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+	call, ok := items[0].ToolCall()
+	if !ok || call.CallID().String() != "call_search" || call.Tool() != discovery.Key() {
+		t.Fatalf("call = %#v", items[0])
+	}
+	if executor, ok := call.DiscoveryExecutor(); !ok || executor != canonical.DiscoveryExecutorClient {
+		t.Fatalf("discovery executor = (%v, %v), want client", executor, ok)
+	}
+}
+
 func TestInteractionsStreamRetainsSignatureOnlyThoughtAsOpaqueReplay(t *testing.T) {
 	raw := `data: {"event_type":"interaction.created","interaction":{"id":"interaction_1","model":"gemini-model","status":"in_progress"}}
 
@@ -367,9 +426,9 @@ func TestInteractionsStreamRejectsResidualKnownUnsupportedSemantics(t *testing.T
 			for {
 				_, err := stream.Next(context.Background())
 				if err != nil {
-					var notImplemented canonical.Error
-					if !errors.As(err, &notImplemented) || notImplemented.Code != canonical.ErrorCodeNotImplemented {
-						t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
+					var backend canonical.BackendError
+					if !errors.As(err, &backend) {
+						t.Fatalf("error = %T %v, want backend protocol error", err, err)
 					}
 					break
 				}
@@ -793,9 +852,9 @@ data: {"event_type":"step.start","index":0,"step":{"type":"mcp_server_tool_call"
 					continue
 				}
 				if name == "image search" || name == "provider MCP lifecycle" {
-					var notImplemented canonical.Error
-					if !errors.As(err, &notImplemented) || notImplemented.Code != canonical.ErrorCodeNotImplemented {
-						t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
+					var backend canonical.BackendError
+					if !errors.As(err, &backend) {
+						t.Fatalf("error = %T %v, want backend protocol error", err, err)
 					}
 				} else {
 					var backend canonical.BackendError

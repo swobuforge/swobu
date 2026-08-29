@@ -9,19 +9,13 @@ import (
 )
 
 type toolNamesStub struct {
-	byKindAndName map[struct {
-		kind canonical.ToolKind
-		name string
-	}]canonical.ToolKey
+	byName map[string]canonical.ToolKey
 }
 
 func (s toolNamesStub) WireName(canonical.ToolKey) (string, error) { return "", nil }
 
-func (s toolNamesStub) CanonicalKey(kind canonical.ToolKind, name string) (canonical.ToolKey, bool) {
-	key, ok := s.byKindAndName[struct {
-		kind canonical.ToolKind
-		name string
-	}{kind: kind, name: name}]
+func (s toolNamesStub) CanonicalKey(name string) (canonical.ToolKey, bool) {
+	key, ok := s.byName[name]
 	return key, ok
 }
 
@@ -35,11 +29,8 @@ func TestDecodeToolKeyRejectsProviderNameAbsentFromAttemptDictionary(t *testing.
 
 func TestDecodeToolKeyRejectsHistoricalAliasWhenDeclarationIsNoLongerEffective(t *testing.T) {
 	historical, _ := canonical.NewToolKey("history/tools", canonical.ToolKindFunction, "lookup")
-	names := toolNamesStub{byKindAndName: map[struct {
-		kind canonical.ToolKind
-		name string
-	}]canonical.ToolKey{
-		{kind: canonical.ToolKindFunction, name: "s__history__lookup"}: historical,
+	names := toolNamesStub{byName: map[string]canonical.ToolKey{
+		"s__history__lookup": historical,
 	}}
 	current := canonicaltest.MustFunctionTool(
 		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "current"),

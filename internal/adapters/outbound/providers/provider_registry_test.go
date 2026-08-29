@@ -8,6 +8,7 @@ import (
 
 	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -46,13 +47,10 @@ func TestProviderRegistry_BuildsFacetRegistriesForSupportedSpecs(t *testing.T) {
 		if discovery, ok := registry.Discovery(providerID); !ok || discovery == nil {
 			t.Fatalf("discovery lookup failed for %q", spec)
 		}
-		if resolver, ok := registry.TargetSupportResolver(providerID); !ok || resolver == nil {
-			t.Fatalf("target support resolver lookup failed for %q", spec)
-		}
 	}
 }
 
-func TestProviderRegistryRejectsRuntimeWithoutTargetSupportFacet(t *testing.T) {
+func TestProviderRegistryRejectsRuntimeWithoutBackendFacet(t *testing.T) {
 	var manifest profile.Profile
 	for _, candidate := range profile.All() {
 		if candidate.ProviderID == profile.ProviderSpecOpenAI {
@@ -61,10 +59,10 @@ func TestProviderRegistryRejectsRuntimeWithoutTargetSupportFacet(t *testing.T) {
 		}
 	}
 	runtime := openaiadapter.NewRuntime(http.DefaultClient, testCredentialResolver{})
-	runtime.TargetSupport = nil
+	runtime.BackendResolver = nil
 	_, err := newProviderRegistry([]profile.Profile{manifest}, []providersruntime.ProviderRuntimeBundle{runtime})
 	if err == nil {
-		t.Fatal("runtime without target support facet must fail composition")
+		t.Fatal("runtime without backend facet must fail composition")
 	}
 }
 
@@ -113,15 +111,22 @@ func TestProviderBackendMatchesCandidateTarget(t *testing.T) {
 	}
 }
 
-func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionContext(t *testing.T) {
+func TestAdvertisedProviderCodecsAreTotalWithValidLossForCanonicalBasis(t *testing.T) {
 	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
-	request := canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: canonical.Specify("model"),
-		Items: []canonical.CanonicalItem{
-			canonicaltest.Message(t, canonical.MessageRoleUser, "one"),
-			canonicaltest.Message(t, canonical.MessageRoleAssistant, "two"),
-		},
-	})
+	basis := canonicaltest.ProjectionBasis(t, "model")
+	for _, witness := range basis {
+		t.Run(witness.Name, func(t *testing.T) {
+			assertAdvertisedProviderProjection(t, registry, witness.Request)
+		})
+	}
+}
+
+// assertAdvertisedProviderProjection uses the production registry as the sole
+// provider membership authority. It proves total definedness, valid loss
+// evidence, and cache-stable rendering; owning codecs prove structural
+// conservation for the relations they encode.
+func assertAdvertisedProviderProjection(t *testing.T, registry ProviderRegistry, request canonical.CanonicalRequest) {
+	t.Helper()
 	for _, manifest := range profile.All() {
 		for _, protocol := range manifest.ProviderProtocols {
 			name := string(manifest.ProviderID) + "/" + protocol.Name
@@ -132,14 +137,22 @@ func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionC
 					t.Fatalf("resolve advertised backend: %v", err)
 				}
 				project := func(exchangeID, locality string, mode delivery.Delivery) []byte {
-					document, _, err := backend.Codec.Encode(provider.Request{
-						ExchangeID:    exchangeID,
-						Canonical:     request,
-						CacheLocality: cachelocality.Explicit(locality),
-						Delivery:      mode,
+					names, nameChanges, err := provider.BuildAttemptToolNames(request)
+					if err != nil {
+						t.Fatalf("build attempt tool names: %v", err)
+					}
+					document, changes, err := backend.Codec.Encode(provider.Request{
+						ExchangeID: exchangeID, Canonical: request,
+						CacheLocality: cachelocality.Explicit(locality), Delivery: mode, ToolNames: names,
+						EncodeContext: provider.EncodeContext{Context: context.Background(), ResolveImage: func(context.Context, canonical.URLImage) (provider.InspectedImage, error) {
+							return provider.InspectedImage{MediaType: canonical.ImageMediaPNG, Bytes: []byte("PNG"), Width: 1, Height: 1}, nil
+						}},
 					})
 					if err != nil {
 						t.Fatalf("encode advertised backend: %v", err)
+					}
+					if err := compat.ValidateChanges(append(nameChanges, changes...)); err != nil {
+						t.Fatalf("invalid semantic-loss evidence: %v", err)
 					}
 					projection, err := providertest.CacheSensitiveProjection(document)
 					if err != nil {
@@ -159,21 +172,6 @@ func TestAdvertisedProviderCodecsPreserveCacheSensitiveRenderingAcrossExecutionC
 					}
 				}
 			})
-		}
-	}
-}
-
-func TestAdvertisedProviderProtocolsLeaveDiscoverySupportUnknownWithoutExactTargetEvidence(t *testing.T) {
-	registry := mustProviderRegistry(t, http.DefaultClient, testCredentialResolver{})
-	for _, manifest := range profile.All() {
-		for _, protocol := range manifest.ProviderProtocols {
-			key := string(manifest.ProviderID) + "/" + protocol.Name
-			target := advertisedProtocolTarget(manifest.ProviderID, protocol)
-			got := registry.ResolveTargetSupport(target).Get(canonical.RequestToolsDiscovery)
-			want := provider.SupportUnknown
-			if got != want {
-				t.Fatalf("%s tool discovery support = %v, want %v", key, got, want)
-			}
 		}
 	}
 }

@@ -44,7 +44,6 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 			s.phase = failedPhase{problem: started.err, target: phase.target}
 			return reducerOutcome{nextState: s}, nil
 		}
-		s.polyfilled = true
 		return beginMCPCall(s, phase)
 	}
 	returned, ok := event.(mcpToolReturned)

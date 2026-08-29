@@ -3,12 +3,14 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
 func TestCanonicalResponsesReplayRetainsOnlyAdmittedBehavioralState(t *testing.T) {
@@ -225,7 +227,7 @@ func TestCanonicalResponsesReplayKeepsReasoningIDPairedWithEncryptedContent(t *t
 }
 
 func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T) {
-	raw := []byte(`{"model":"m","input":[{"type":"custom_tool_call","id":"ctc_1","call_id":"call_1","name":"apply_patch","input":"patch text"},{"type":"custom_tool_call_output","id":"ctco_1","call_id":"call_1","output":"Done"}]}`)
+	raw := []byte(`{"model":"m","tools":[{"type":"custom","name":"apply_patch","format":{"type":"text"}}],"input":[{"type":"custom_tool_call","id":"ctc_1","call_id":"call_1","name":"apply_patch","input":"patch text"},{"type":"custom_tool_call_output","id":"ctco_1","call_id":"call_1","output":"Done"}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
 		carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}),
 	)
@@ -233,14 +235,14 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
 	items := decoded.Request.Request.Items()
-	if len(items) != 2 {
-		t.Fatalf("canonical items len = %d, want 2", len(items))
+	if len(items) != 3 {
+		t.Fatalf("canonical items len = %d, want declaration plus call/result", len(items))
 	}
-	call, ok := items[0].ToolCall()
+	call, ok := items[1].ToolCall()
 	if !ok || call.Tool().Kind() != canonical.ToolKindCustom || call.CallID().String() != "call_1" {
 		t.Fatalf("canonical call = %#v, want correlated custom call_1", call)
 	}
-	result, ok := items[1].ToolResult()
+	result, ok := items[2].ToolResult()
 	if !ok || result.CallID() != call.CallID() {
 		t.Fatalf("canonical result = %#v, want existing ToolResultItem correlated to call_1", result)
 	}
@@ -288,7 +290,15 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 		t.Fatal("custom output did not participate in the Responses history fingerprint")
 	}
 
-	segment, err := encodeConversation(decoded.Request.Request, items[1:], nil, testAttemptToolNames(decoded.Request.Request), nil, "")
+	environment, err := canonical.EffectiveTools(decoded.Request.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(decoded.Request.Request), nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment, err := encodeConversation(items[2:], decoded.Request.Request.Items(), nil, testAttemptToolNames(decoded.Request.Request), nil, nil, "", &projection)
 	if err != nil {
 		t.Fatalf("encode result-only segment: %v", err)
 	}
@@ -299,14 +309,14 @@ func TestCanonicalResponsesReplayPreservesCustomToolCallResultPair(t *testing.T)
 }
 
 func TestCanonicalResponsesReplayPreservesEmptyCustomToolOutput(t *testing.T) {
-	raw := []byte(`{"model":"m","input":[{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""},{"type":"custom_tool_call_output","call_id":"call_1","output":""}]}`)
+	raw := []byte(`{"model":"m","tools":[{"type":"custom","name":"shell","format":{"type":"text"}}],"input":[{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""},{"type":"custom_tool_call_output","call_id":"call_1","output":""}]}`)
 	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
 		carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}),
 	)
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
-	result, ok := decoded.Request.Request.Items()[1].ToolResult()
+	result, ok := decoded.Request.Request.Items()[2].ToolResult()
 	if !ok {
 		t.Fatal("custom output did not decode through ToolResultItem")
 	}
@@ -324,16 +334,19 @@ func TestCanonicalResponsesReplayPreservesEmptyCustomToolOutput(t *testing.T) {
 	}
 	var payload struct {
 		Input []struct {
-			Type   string  `json:"type"`
-			Output *string `json:"output"`
+			Type   string `json:"type"`
+			Output any    `json:"output"`
 		} `json:"input"`
 	}
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
 		t.Fatalf("decode replay document: %v", err)
 	}
 	if len(payload.Input) != 2 || payload.Input[1].Type != "custom_tool_call_output" ||
-		payload.Input[1].Output == nil || *payload.Input[1].Output != "" {
+		payload.Input[1].Output == nil {
 		t.Fatalf("replay input = %#v, want present empty custom output", payload.Input)
+	}
+	if payload.Input[1].Output != "" {
+		t.Fatalf("replay output = %#v, want explicit empty string", payload.Input[1].Output)
 	}
 }
 
@@ -366,12 +379,13 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 	tests := []struct {
 		name         string
 		input        string
+		tools        string
 		wantKind     canonical.ItemKind
 		wantToolKind canonical.ToolKind
 	}{
 		{name: "message", input: `{"type":"message","role":"assistant","content":"hello"}`, wantKind: canonical.ItemKindMessage},
-		{name: "function call", input: `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindFunction},
-		{name: "custom tool call", input: `{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindCustom},
+		{name: "function call", input: `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}`, tools: `,"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindFunction},
+		{name: "custom tool call", input: `{"type":"custom_tool_call","call_id":"call_1","name":"shell","input":""}`, tools: `,"tools":[{"type":"custom","name":"shell","format":{"type":"text"}}]`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindCustom},
 		{name: "function call output", input: `{"type":"function_call_output","call_id":"call_1","output":"done"}`, wantKind: canonical.ItemKindToolResult},
 		{name: "reasoning", input: `{"type":"reasoning","summary":[{"type":"summary_text","text":"brief"}],"encrypted_content":"cipher"}`, wantKind: canonical.ItemKindReasoning},
 		{name: "tool search call", input: `{"type":"tool_search_call","call_id":"search_1","execution":"client","arguments":{"query":"files"}}`, wantKind: canonical.ItemKindToolCall, wantToolKind: canonical.ToolKindDiscovery},
@@ -381,7 +395,7 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := []byte(`{"model":"m","input":[` + tc.input + `]}`)
+			raw := []byte(`{"model":"m"` + tc.tools + `,"input":[` + tc.input + `]}`)
 			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(
 				carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}),
 			)
@@ -389,11 +403,12 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 				t.Fatalf("DecodeClientRequest returned err=%v", err)
 			}
 			items := decoded.Request.Request.Items()
-			if len(items) != 1 || items[0].Kind() != tc.wantKind {
-				t.Fatalf("canonical items = %#v, want one %q item", items, tc.wantKind)
+			current := items[len(items)-1]
+			if current.Kind() != tc.wantKind {
+				t.Fatalf("canonical items = %#v, want terminal %q item", items, tc.wantKind)
 			}
 			if tc.wantToolKind != "" {
-				call, ok := items[0].ToolCall()
+				call, ok := current.ToolCall()
 				if !ok || call.Tool().Kind() != tc.wantToolKind {
 					t.Fatalf("canonical tool call = %#v, want kind %q", call, tc.wantToolKind)
 				}
@@ -403,6 +418,12 @@ func TestReplayableResponsesItemKindsHaveIngressAndReplayCoverage(t *testing.T) 
 				EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)},
 				delivery.BufferedDelivery(), nil, "", EncodeOptions{},
 			)
+			if tc.name == "function call output" {
+				if err == nil || !strings.Contains(err.Error(), "tool result has no pending call") {
+					t.Fatalf("result-only delta projection err=%v, want explicit missing provenance", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("EncodeCarrierWithChanges returned err=%v", err)
 			}
@@ -468,10 +489,22 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 		[]canonical.ToolResultPart{canonical.NewTextToolResultPart("custom result")},
 		false,
 	)
-	items := []canonical.CanonicalItem{functionCall, functionResult, customCall, customResult}
+	declarations := canonicaltest.ToolDeclarations(t,
+		canonicaltest.MustFunctionTool(functionKey, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()),
+		canonicaltest.MustCustomTool(customKey, "", canonical.NewToolFormatObject(canonicaltest.Object(t, `{"type":"text"}`))),
+	)
+	items := []canonical.CanonicalItem{declarations, functionCall, functionResult, customCall, customResult}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: items})
 
-	encoded, err := encodeConversation(request, items, nil, testAttemptToolNames(request), nil, "")
+	environment, err := canonical.EffectiveTools(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := compileResponsesToolProjection(environment.Declarations(), canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := encodeConversation(items, request.Items(), nil, testAttemptToolNames(request), nil, nil, "", &projection)
 	if err != nil {
 		t.Fatal(err)
 	}

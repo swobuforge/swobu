@@ -100,12 +100,12 @@ func TestProjectOrdinalReasoningLaw(t *testing.T) {
 		{
 			name: "budget derives effort", compute: &budget,
 			wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortMedium,
-			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})},
+			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.Occurrence{})},
 		},
 		{
 			name: "effort dominates budget", compute: &budget, effort: low,
 			wantKind: OrdinalEffort, wantEffort: canonical.InferenceEffortLow,
-			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})},
+			wantChanges: []compat.Change{compat.NewApproximation(canonical.RequestReasoning, canonical.Occurrence{})},
 		},
 	}
 
@@ -165,8 +165,7 @@ func TestProjectOrdinalReasoningPreservesEveryExplicitEffort(t *testing.T) {
 			}
 			if len(projection.Changes) != 1 ||
 				projection.Changes[0].Capability != canonical.RequestReasoning ||
-				projection.Changes[0].Kind != compat.Approximation ||
-				projection.Changes[0].Preserved != canonical.RequestControlsEffort {
+				projection.Changes[0].Kind != compat.Approximation {
 				t.Fatalf("changes = %#v, want one compute approximation through explicit effort", projection.Changes)
 			}
 		})

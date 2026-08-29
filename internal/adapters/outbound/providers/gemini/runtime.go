@@ -48,7 +48,6 @@ func newRuntime(client *http.Client, credentialProvider providersruntime.Credent
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecGemini,
 		BackendResolver:    backendResolver{runtime: runtime},
-		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentialProvider,
 		Discovery:          discovery{runtime: runtime},
 	}

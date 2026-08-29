@@ -337,10 +337,6 @@ func (r runtimeWithProviderIngress) ResolveBackend(target provider.TargetSnapsho
 	return newTestBackend(target, r.providerTransport)
 }
 
-func (runtimeWithProviderIngress) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
-
 func (r Runner) WithCheckpointStore(store session.Store) Runner {
 	r.CheckpointStore = store
 	return r
@@ -378,10 +374,6 @@ func (r testExecutionRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 }
 
 type testRuntimeResolver struct{}
-
-func (testRuntimeResolver) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
 
 func (testRuntimeResolver) ClientCodec(f canonical.ClientFamily) ClientCodec {
 	return testClientCodec{}

@@ -198,7 +198,7 @@ func TestMessagesStructuredOutputStrictnessControlsHardness(t *testing.T) {
 				}
 				return
 			}
-			want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{})
+			want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{})
 			if len(changes) != 1 || changes[0] != want {
 				t.Fatalf("changes = %#v, want %#v", changes, want)
 			}

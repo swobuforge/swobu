@@ -9,6 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -66,6 +67,38 @@ func TestKimiCodecReplaysOpaqueThinkingAndQuantizesEffort(t *testing.T) {
 	}
 	if payload.Messages[1]["reasoning_content"] != "private reasoning" {
 		t.Fatalf("messages = %#v, want Kimi reasoning replay", payload.Messages)
+	}
+}
+
+func TestKimiMaxEffortUsesEmpiricalFallback(t *testing.T) {
+	max := canonical.InferenceEffortMax
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &max})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("kimi"), Controls: controls,
+		Items: []canonical.CanonicalItem{message(t, canonical.MessageRoleUser, "question")},
+	})
+	target := provider.NewTargetSnapshot(
+		"kimi", string(profile.ProviderSpecKimi), "https://api.moonshot.ai/v1", "env:MOONSHOT_API_KEY",
+		protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery(),
+	)
+	target.Model = "kimi"
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+		return false, fact == provider.AcceptsReasoningEffortMax
+	})
+	document, changes, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{})
+	if !bytes.Contains(document.RawBytes(), []byte(`"reasoning_effort":"xhigh"`)) || len(changes) != 1 || changes[0] != want || facts.Reads()[provider.AcceptsReasoningEffortMax] {
+		t.Fatalf("document=%s changes=%#v reads=%#v", document.RawBytes(), changes, facts.Reads())
 	}
 }
 

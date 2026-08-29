@@ -3,7 +3,6 @@ package messages
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"testing"
 
@@ -291,7 +290,7 @@ func mustWebSearchToolInput(t *testing.T, call canonical.WebSearchCall) canonica
 	return input
 }
 
-func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.T) {
+func TestMessagesRequestHistoryOmitsSettledAndOpenEffects(t *testing.T) {
 	callID, _ := canonical.NewToolCallID("search_original")
 	unrepresentable, _ := canonical.NewToolCallItem(callID, canonical.WebSearchToolKey(), mustWebSearchToolInput(t, canonical.WebSearchCall{Action: canonical.WebSearchActionSearch, Queries: []string{"one", "two"}}))
 	result, _ := canonical.NewWebSearchResult(nil)
@@ -312,11 +311,17 @@ func TestMessagesRequestHistoryOmitsPairOnceAndRejectsUnresolvedCall(t *testing.
 		t.Fatalf("changes = %#v", changes)
 	}
 
-	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable}})
-	_, err = EncodeCarrierWithChanges(unresolved, nil, delivery.BufferedDelivery(), nil, "")
-	var swobuErr canonical.Error
-	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("error = %T %v, want NOT_IMPLEMENTED", err, err)
+	unresolved := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{unrepresentable, message}})
+	changes = nil
+	document, err := EncodeCarrierWithChanges(unresolved, nil, delivery.BufferedDelivery(), &changes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0] != compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(0)) {
+		t.Fatalf("changes = %#v", changes)
+	}
+	if bytes.Contains(document.RawBytes(), []byte("search_original")) || !bytes.Contains(document.RawBytes(), []byte("continue")) {
+		t.Fatalf("projected wire = %s", document.RawBytes())
 	}
 }
 

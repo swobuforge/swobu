@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -22,7 +23,7 @@ func decodeResponsesToolCallBatch(raw json.RawMessage) (canonical.ToolCallBatchP
 	return canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne), nil
 }
 
-func encodeResponsesToolCallBatch(payload map[string]any, policy canonical.ToolCallBatchPolicy, hasTools bool) error {
+func encodeResponsesToolCallBatch(payload map[string]any, policy canonical.ToolCallBatchPolicy, hasTools bool, rejectsFalse func() bool, changeLog *[]compat.Change) error {
 	if policy.IsZero() {
 		return nil
 	}
@@ -34,7 +35,13 @@ func encodeResponsesToolCallBatch(payload map[string]any, policy canonical.ToolC
 		return nil
 	}
 	if policy.Mode == canonical.ToolCallBatchAtMostOne {
-		payload["parallel_tool_calls"] = false
+		if rejectsFalse != nil && rejectsFalse() {
+			if changeLog != nil {
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{}))
+			}
+		} else {
+			payload["parallel_tool_calls"] = false
+		}
 	}
 	return nil
 }

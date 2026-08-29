@@ -13,7 +13,7 @@ import (
 // ChatReplayScope owns Mistral's exact Chat ThinkChunk replay state.
 const ChatReplayScope canonical.ProviderChatReplayScope = "mistral-chat"
 
-func applyMistralReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+func applyMistralReasoning(req canonical.CanonicalRequest, _ protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 	projection := reasoningprojection.ProjectOrdinalReasoning(req.Reasoning(), req.Controls().Effort)
 	if changeLog != nil {
 		*changeLog = append(*changeLog, projection.Changes...)
@@ -30,9 +30,8 @@ func applyMistralReasoning(req canonical.CanonicalRequest, changeLog *[]compat.C
 		if changeLog != nil {
 			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(
 				canonical.RequestControlsEffort,
-				canonical.RequestControlsEffort,
-				canonical.Occurrence{},
-			))
+
+				canonical.Occurrence{}))
 		}
 	}
 	return map[string]any{"reasoning_effort": value}, nil

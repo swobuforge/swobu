@@ -377,10 +377,6 @@ func (r testExecutionRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 
 type testRuntimeResolver struct{}
 
-func (testRuntimeResolver) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
-
 func (testRuntimeResolver) ClientCodec(f canonical.ClientFamily) ClientCodec {
 	switch f {
 	case canonical.ClientFamilyChatCompletions:

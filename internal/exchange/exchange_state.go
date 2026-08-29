@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -40,7 +41,6 @@ type exchangeState struct {
 	cacheLocality           cachelocality.Key
 	reusablePrefix          trafficevidence.ReusablePrefixEvidence
 	previousRequest         *canonical.CanonicalRequest
-	polyfilled              bool
 	targetBackoff           targetBackoffSnapshot
 }
 
@@ -108,6 +108,13 @@ type callingProviderPhase struct {
 	attemptID providerCallAttemptID
 	call      providerCall
 }
+
+type resolvingTargetFactsPhase struct {
+	attemptID providerCallAttemptID
+	backend   provider.Backend
+}
+
+func (resolvingTargetFactsPhase) isPhase() {}
 
 type callingMCPPhase struct {
 	selection providerCallSelection
@@ -177,6 +184,14 @@ type providerCallFailed struct {
 	failure   provider.AttemptFailure
 }
 
+type targetFactsCharacterized struct {
+	attemptID   providerCallAttemptID
+	generation  targetExceptionGeneration
+	resolutions map[provider.TargetFact]bool
+}
+
+func (targetFactsCharacterized) isExchangeEvent() {}
+
 type mcpToolReturned struct {
 	result canonical.CanonicalItem
 	err    error
@@ -214,6 +229,16 @@ type callProviderCommand struct {
 	document  carrier.Document
 }
 
+type characterizeTargetFactsCommand struct {
+	attemptID  providerCallAttemptID
+	target     provider.TargetSnapshot
+	generation targetExceptionGeneration
+	facts      []provider.TargetFact
+	backend    provider.Backend
+}
+
+func (characterizeTargetFactsCommand) isCommand() {}
+
 type callMCPCommand struct {
 	run  *mcp.Run
 	call canonical.ToolCallItem
@@ -249,6 +274,8 @@ type providerCall struct {
 	expectedHead       canonical.SwobuResponseID
 	delayClientHandoff bool
 	providerRound      int
+	targetGeneration   targetExceptionGeneration
+	factReads          map[provider.TargetFact]bool
 }
 
 type reducerOutcome struct {
@@ -266,6 +293,8 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reducePreparingMCP(ctx, s, event, runner)
 	case callingProviderPhase:
 		return reduceCallingProvider(ctx, s, p, event, runner)
+	case resolvingTargetFactsPhase:
+		return reduceResolvingTargetFacts(ctx, s, p, event, runner)
 	case callingMCPPhase:
 		return reduceCallingMCP(ctx, s, p, event, runner)
 	case completedPhase, failedPhase:
@@ -400,6 +429,14 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if err != nil {
 			return reducerOutcome{}, err
 		}
+		if targetFactCharacterizationAdmitted(attempt, result.failure) {
+			facts := sortedTargetFacts(attempt.factReads)
+			s.phase = resolvingTargetFactsPhase{attemptID: phase.attemptID, backend: phase.call.backend}
+			return reducerOutcome{nextState: s, command: characterizeTargetFactsCommand{
+				attemptID: phase.attemptID, target: phase.call.backend.Target,
+				generation: attempt.targetGeneration, backend: phase.call.backend, facts: facts,
+			}}, nil
+		}
 		outcome, err := advanceProviderExecution(ctx, s, runner)
 		return outcome, err
 
@@ -410,6 +447,7 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		response, canonicalResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		changes := providerCompatibility.completedChanges()
 		if completionErr != nil {
+			logProviderAttemptAbortedAfterHandoff(s, phase.attemptID, attempt, completionErr)
 			var err error
 			s, err = failProviderCallAttempt(s, phase.attemptID, provider.AttemptMayHaveExecuted(completionErr))
 			if err != nil {
@@ -454,9 +492,9 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			effective = append(effective, attempt.requestChanges...)
 			effective = append(effective, providerCompatibility.initial...)
 		}
-		effective = append(effective, previousResponseHandoffEvidence(*s.prepared, attempt)...)
 		if completion := responseCompletion(response); completion != nil {
-			completion.ConfigureCompatibility(effective, providerCompatibility.progressive, s.polyfilled)
+			completion.ConfigureCompatibility(effective, providerCompatibility.progressive)
+			observeProviderAttemptTerminal(s, phase.attemptID, attempt, completion)
 		}
 		s.phase = completedPhase{response: response, target: attempt.target}
 		return reducerOutcome{nextState: s}, nil
@@ -465,11 +503,39 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 	}
 }
 
+func reduceResolvingTargetFacts(ctx context.Context, s exchangeState, phase resolvingTargetFactsPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
+	resolved, ok := event.(targetFactsCharacterized)
+	if !ok || resolved.attemptID != phase.attemptID {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: resolving target facts for attempt %d received %T", phase.attemptID, event)
+	}
+	attempt, ok := findProviderCallAttempt(s, phase.attemptID)
+	if !ok || attempt.failure == nil {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: target fact resolution attempt %d is not failed", phase.attemptID)
+	}
+	if resolved.generation != attempt.targetGeneration {
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: characterized target generation changed")
+	}
+	changed := false
+	for fact, value := range resolved.resolutions {
+		runner.TargetExceptions.observe(resolved.generation, fact, value)
+		if used, read := attempt.factReads[fact]; read && used != value {
+			changed = true
+		}
+	}
+	if changed && candidateRoundDispatchCount(s.providerCallAttempts, attempt.candidateIndex, attempt.providerRound) < 2 {
+		return advanceProviderExecutionFrom(ctx, s, runner, providerCallSelection{
+			candidateIndex: attempt.candidateIndex, requestChoice: providerRequestReprojected,
+		})
+	}
+	return advanceProviderExecution(ctx, s, runner)
+}
+
 type providerRequestChoice uint8
 
 const (
 	providerRequestPreferred providerRequestChoice = iota
 	providerRequestFullHistory
+	providerRequestReprojected
 )
 
 type providerCallSelection struct {
@@ -576,6 +642,35 @@ func nativePreviousResponseSent(request provider.Request) bool {
 	return request.PreviousHistory != nil
 }
 
+func targetFactCharacterizationAdmitted(attempt providerCallAttempt, failure provider.AttemptFailure) bool {
+	failed := attempt
+	failed.failure = &providerCallFailure{Attempt: failure}
+	if !providerRecoveryPermitted(failed) || len(attempt.factReads) == 0 {
+		return false
+	}
+	var rejected provider.RejectedError
+	return errors.As(failure.Cause(), &rejected)
+}
+
+func sortedTargetFacts(reads map[provider.TargetFact]bool) []provider.TargetFact {
+	facts := make([]provider.TargetFact, 0, len(reads))
+	for fact := range reads {
+		facts = append(facts, fact)
+	}
+	slices.Sort(facts)
+	return facts
+}
+
+func candidateRoundDispatchCount(attempts []providerCallAttempt, candidateIndex, providerRound int) int {
+	count := 0
+	for _, attempt := range attempts {
+		if attempt.candidateIndex == candidateIndex && attempt.providerRound == providerRound {
+			count++
+		}
+	}
+	return count
+}
+
 // selectSameTargetAlternative maps the issued call facts to one concrete
 // transient request choice. Requirements prove the same fallback cannot recur.
 func selectSameTargetAlternative(attempts []providerCallAttempt) (providerCallSelection, bool) {
@@ -583,6 +678,9 @@ func selectSameTargetAlternative(attempts []providerCallAttempt) (providerCallSe
 		return providerCallSelection{}, false
 	}
 	last := attempts[len(attempts)-1]
+	if candidateRoundDispatchCount(attempts, last.candidateIndex, last.providerRound) >= 2 {
+		return providerCallSelection{}, false
+	}
 	if nativeReferenceFailureAdmitsFullHistory(last) {
 		return providerCallSelection{candidateIndex: last.candidateIndex, requestChoice: providerRequestFullHistory}, true
 	}
@@ -629,17 +727,4 @@ func providerFailureAdvancesCandidate(err error) bool {
 	var unavailable provider.UnavailableError
 	return errors.As(err, &unavailable) ||
 		errors.As(err, &rejected)
-}
-
-// previousResponseHandoffEvidence describes only the winning representation.
-// Failed and preparation paths do not call this function.
-func previousResponseHandoffEvidence(prepared session.ResolvedRequest, winner providerCallAttempt) []compat.Change {
-	if !prepared.HasPreviousHistory() || winner.nativePreviousResponse {
-		return nil
-	}
-	return []compat.Change{compat.NewApproximation(
-		canonical.RequestPreviousResponseResponses,
-		canonical.RequestPreviousResponse,
-		canonical.Occurrence{},
-	)}
 }

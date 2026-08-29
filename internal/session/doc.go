@@ -15,8 +15,8 @@
 // Resolution receives either one complete genesis request or one codec-rebased
 // current invocation plus an already selected checkpoint. It never receives a
 // full replay witness together with the current invocation and never compares
-// canonical prefixes. Resume restores opaque checkpoint history, unfinished
-// tool-turn context, and records the exact complete-request item range that an
+// canonical prefixes. Resume restores opaque checkpoint history and unfinished
+// tool-turn context, while preserving current invocation controls, and records the exact complete-request item range that an
 // applicable OpenAI Responses previous_response_id may replace. The resolved
 // request remains complete and immutable; provider lowering data is derived
 // separately for the exact target generation that produced it.

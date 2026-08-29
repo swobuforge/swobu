@@ -21,4 +21,9 @@
 // losses are explicit. Tool-result images use a backend-only synthetic user
 // message only after the active call batch is closed; the projection never
 // becomes trusted client history and therefore has no inverse carrier.
+// Client-owned tool discovery uses the ordinary function declaration, call,
+// and result grammar. Attempt tool names retain provenance so decoding restores
+// the canonical discovery lifecycle and its loaded declarations.
+// Provider-owned discovery is an eager-visibility approximation here: known
+// declarations remain callable while the search/deferral optimization is not.
 package chatcompletions

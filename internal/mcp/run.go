@@ -174,7 +174,6 @@ func openWith(
 				Capability: canonical.RequestTools,
 				Kind:       compat.Approximation,
 				Occurrence: canonical.ToolOccurrence(key),
-				Preserved:  canonical.RequestTools,
 			})
 		}
 	}
@@ -333,7 +332,6 @@ func bindingsForCatalog(catalog canonical.MCPToolSource) (
 			Capability: canonical.RequestTools,
 			Kind:       compat.Approximation,
 			Occurrence: canonical.ToolOccurrence(catalog.Key()),
-			Preserved:  canonical.RequestTools,
 		})
 	}
 	return bindings, attemptTools, changes, nil

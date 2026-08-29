@@ -43,8 +43,10 @@ func TestMCPExecutionRecordsPolyfillTruth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !outcome.nextState.polyfilled {
-		t.Fatal("MCP execution did not record polyfill truth")
+	// Starting the local execution mechanism must not create compatibility
+	// evidence; only semantic loss in a later projection may do that.
+	if len(outcome.nextState.effectiveChanges) != 0 {
+		t.Fatalf("MCP start changes = %#v, want exact", outcome.nextState.effectiveChanges)
 	}
 	if len(outcome.nextState.effectiveChanges) != 0 {
 		t.Fatalf("MCP execution invented semantic changes = %#v", outcome.nextState.effectiveChanges)

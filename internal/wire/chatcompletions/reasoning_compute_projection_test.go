@@ -24,18 +24,16 @@ func TestChatCompletionsProjectsOrdinalReasoningCompute(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		compute       canonical.ReasoningCompute
-		effort        *canonical.InferenceEffort
-		want          string
-		wantChange    canonical.CapabilityPath
-		wantKind      compat.Kind
-		wantPreserved canonical.CapabilityPath
+		name       string
+		compute    canonical.ReasoningCompute
+		effort     *canonical.InferenceEffort
+		want       string
+		wantChange canonical.CapabilityPath
+		wantKind   compat.Kind
 	}{
 		{
 			name: "budget", compute: budget, want: "medium",
 			wantChange: canonical.RequestReasoning, wantKind: compat.Approximation,
-			wantPreserved: canonical.RequestControlsEffort,
 		},
 		{
 			name: "automatic", compute: automatic,
@@ -44,7 +42,6 @@ func TestChatCompletionsProjectsOrdinalReasoningCompute(t *testing.T) {
 		{
 			name: "budget with effort", compute: budget, effort: effortPointer(canonical.InferenceEffortLow), want: "low",
 			wantChange: canonical.RequestReasoning, wantKind: compat.Approximation,
-			wantPreserved: canonical.RequestControlsEffort,
 		},
 		{
 			name: "disabled with effort", compute: disabled, effort: effortPointer(canonical.InferenceEffortHigh), want: "none",
@@ -92,7 +89,7 @@ func TestChatCompletionsProjectsOrdinalReasoningCompute(t *testing.T) {
 				t.Fatalf("changes = %#v, want one", result.Changes)
 			}
 			change := result.Changes[0]
-			if change.Capability != test.wantChange || change.Kind != test.wantKind || change.Preserved != test.wantPreserved {
+			if change.Capability != test.wantChange || change.Kind != test.wantKind {
 				t.Fatalf("change = %#v", change)
 			}
 		})

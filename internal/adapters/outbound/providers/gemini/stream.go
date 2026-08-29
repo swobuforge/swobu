@@ -265,7 +265,7 @@ func (s *interactionsStream) handleCreated(frame interactionSSEFrame) error {
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions stream received a second interaction.created", "")
 	}
 	interactionID := strings.TrimSpace(frame.Interaction.ID) // swobu:io-string source=provider-wire
-	if interactionID == "" {
+	if interactionID == "" && s.request.PersistenceEligible() {
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions created event is missing interaction id", "")
 	}
 	if strings.TrimSpace(frame.Interaction.Status) != "in_progress" { // swobu:io-string source=provider-wire
@@ -368,7 +368,7 @@ func (s *interactionsStream) handleStepStart(frame interactionSSEFrame) error {
 		return nil
 	}
 	if isKnownNonTextStep(stepType) {
-		return canonical.NotImplemented("Gemini Interactions " + stepType + " steps are not implemented yet")
+		return canonical.NewBackendError("gemini", 0, "Gemini Interactions stream returned an unsupported step type", "")
 	}
 	// The published Step oneOf is closed. A new type is a provider contract
 	// contradiction, not safely discardable additive output.
@@ -473,7 +473,7 @@ func (s *interactionsStream) handleStepDelta(frame interactionSSEFrame) error {
 		}
 	}
 	if isKnownNonTextDelta(deltaType) {
-		return canonical.NotImplemented("Gemini Interactions " + deltaType + " output is not implemented yet")
+		return canonical.NewBackendError("gemini", 0, "Gemini Interactions stream returned an unsupported delta type", "")
 	}
 	return canonical.NewBackendError("gemini", 0, "Gemini Interactions text output received an unknown delta", "")
 }
@@ -554,7 +554,23 @@ func (s *interactionsStream) handleStepStop(frame interactionSSEFrame) error {
 		if len(typed.payload.Arguments.Bytes()) == 0 {
 			return canonical.NewBackendError("gemini", 0, "Gemini Interactions function call arguments are incomplete", "")
 		}
-		item, err := canonical.NewToolCallItem(typed.callID, typed.tool, canonical.NewJSONObjectToolInput(typed.payload.Arguments))
+		input := canonical.NewJSONObjectToolInput(typed.payload.Arguments)
+		var item canonical.CanonicalItem
+		var err error
+		if typed.tool.Kind() == canonical.ToolKindDiscovery {
+			declaration, available := canonical.EffectiveTools(s.request)
+			if available != nil {
+				return canonical.InternalError("Gemini Interactions function environment is ambiguous")
+			}
+			discoveryDeclaration, ok := declaration.Lookup(typed.tool)
+			discovery, declared := discoveryDeclaration.Discovery()
+			if !ok || !declared {
+				return canonical.InternalError("Gemini Interactions discovery call lost its declaration")
+			}
+			item, err = canonical.NewToolDiscoveryCallItem(typed.callID, input, discovery.Executor())
+		} else {
+			item, err = canonical.NewToolCallItem(typed.callID, typed.tool, input)
+		}
 		if err != nil {
 			return canonical.InternalError("Gemini Interactions function call is invalid")
 		}
@@ -600,7 +616,7 @@ func (s *interactionsStream) handleCompleted(frame interactionSSEFrame) error {
 	if len(s.steps) != 0 {
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions completed with unfinished steps", "")
 	}
-	if interactionID := strings.TrimSpace(frame.Interaction.ID); interactionID == "" || canonical.NewInteractionID(interactionID) != s.interactionID { // swobu:io-string source=provider-wire
+	if interactionID := strings.TrimSpace(frame.Interaction.ID); !s.matchesInteractionID(interactionID) { // swobu:io-string source=provider-wire
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions completed event has an invalid interaction id", "")
 	}
 	s.usage = mergeInteractionUsage(s.usage, frame.Interaction.Usage)
@@ -633,7 +649,7 @@ func (s *interactionsStream) handleCompleted(frame interactionSSEFrame) error {
 
 func (s *interactionsStream) handleStatusUpdate(frame interactionSSEFrame) error {
 	interactionID := strings.TrimSpace(frame.InteractionID) // swobu:io-string source=provider-wire
-	if interactionID == "" || canonical.NewInteractionID(interactionID) != s.interactionID {
+	if !s.matchesInteractionID(interactionID) {
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions status update has an invalid interaction id", "")
 	}
 	status := strings.TrimSpace(frame.Status) // swobu:io-string source=provider-wire
@@ -647,6 +663,14 @@ func (s *interactionsStream) handleStatusUpdate(frame interactionSSEFrame) error
 	default:
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions status update has an unknown status", "")
 	}
+}
+
+func (s *interactionsStream) matchesInteractionID(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if s.interactionID == "" {
+		return !s.request.PersistenceEligible() && raw == ""
+	}
+	return canonical.NewInteractionID(raw) == s.interactionID
 }
 
 func (s *interactionsStream) installFunctionCall(step *functionCallStep, payload interactionFunctionCall) error {
@@ -663,7 +687,10 @@ func (s *interactionsStream) installFunctionCall(step *functionCallStep, payload
 	if err != nil {
 		return canonical.InternalError("Gemini Interactions function environment is ambiguous")
 	}
-	tool, err := wire.DecodeToolKey(s.toolNames, environment, canonical.ToolKindFunction, payload.Name)
+	// Gemini has one function-call grammar for every ordinary callable. Its
+	// wire spelling does not distinguish canonical function and client-owned
+	// discovery calls, so attempt provenance is the sole inverse authority.
+	tool, err := wire.DecodeCallableKey(s.toolNames, environment, payload.Name)
 	if err != nil {
 		return canonical.NewBackendError("gemini", 0, "Gemini Interactions function call references an unknown tool name", "")
 	}
@@ -680,7 +707,10 @@ func (s *interactionsStream) installFunctionCall(step *functionCallStep, payload
 	step.tool = tool
 	step.started = true
 	s.enqueue(canonical.Event{Kind: canonical.EventItemStart, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: step.ordinal}, Payload: start}})
-	if len(payload.Arguments.Bytes()) > 0 {
+	// Gemini may put an empty object on step.start as a placeholder before
+	// sending the complete JSON object through arguments_delta. It carries no
+	// argument bytes and must not prefix the later delta with "{}".
+	if !payload.Arguments.IsEmpty() {
 		s.enqueue(canonical.Event{Kind: canonical.EventArgsDelta, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: step.ordinal}, Payload: canonical.ArgsDeltaPayload{Args: payload.Arguments.String()}}})
 	}
 	return nil
@@ -738,7 +768,7 @@ func (step *googleSearchCallStep) finish() (canonical.WebSearchCall, []byte, err
 		return canonical.WebSearchCall{}, nil, canonical.NewBackendError("gemini", 0, "Gemini Interactions Google Search call signature is missing", "")
 	}
 	if step.searchType != "" && strings.TrimSpace(step.searchType) != "web_search" {
-		return canonical.WebSearchCall{}, nil, canonical.NotImplemented("Gemini Interactions Google Search subtype is not implemented")
+		return canonical.WebSearchCall{}, nil, canonical.NewBackendError("gemini", 0, "Gemini Interactions Google Search subtype is unsupported", "")
 	}
 	var arguments struct {
 		Queries []string `json:"queries"`
@@ -808,7 +838,7 @@ func newGoogleSearchCallStep(ordinal uint32, frame interactionSSEFrame) (*google
 		return nil, canonical.NewBackendError("gemini", 0, "Gemini Interactions Google Search call is missing its id", "")
 	}
 	if frame.Step.SearchType != "" && strings.TrimSpace(frame.Step.SearchType) != "web_search" {
-		return nil, canonical.NotImplemented("Gemini Interactions Google Search subtype is not implemented")
+		return nil, canonical.NewBackendError("gemini", 0, "Gemini Interactions Google Search subtype is unsupported", "")
 	}
 	return &googleSearchCallStep{ordinal: ordinal, callID: callID, searchType: frame.Step.SearchType, arguments: append([]byte(nil), frame.Step.Arguments...), signature: frame.Step.Signature}, nil
 }
@@ -843,7 +873,7 @@ func (s *interactionsStream) newGoogleSearchResultStep(ordinal uint32, frame int
 
 func geminiURLCitation(kind, rawURL, rawTitle, snippet string, start, end *uint32, text string) (canonical.WebCitation, error) {
 	if strings.TrimSpace(kind) != "url_citation" {
-		return canonical.WebCitation{}, canonical.NotImplemented("Gemini Interactions text annotation subtype is not implemented")
+		return canonical.WebCitation{}, canonical.NewBackendError("gemini", 0, "Gemini Interactions text annotation subtype is unsupported", "")
 	}
 	webURL, err := canonical.NewWebURL(strings.TrimSpace(rawURL))
 	if err != nil {

@@ -82,7 +82,7 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, names wire.To
 			if functionName == "" {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function tool call is missing a name", "")
 			}
-			key, err := wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, functionName)
+			key, err := decodeChatCallableKey(names, environment, functionName)
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response references an unknown or ambiguous function tool", "")
 			}
@@ -90,7 +90,12 @@ func decodeResponseOutputItems(request canonical.CanonicalRequest, names wire.To
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function arguments are invalid", "")
 			}
-			item, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
+			var item canonical.CanonicalItem
+			if key.Kind() == canonical.ToolKindDiscovery {
+				item, err = canonical.NewToolDiscoveryCallItem(callID, canonical.NewJSONObjectToolInput(object), canonical.DiscoveryExecutorClient)
+			} else {
+				item, err = canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(object))
+			}
 			if err != nil {
 				return nil, canonical.NewBackendError("", 0, "chat completions response function call is invalid", "")
 			}

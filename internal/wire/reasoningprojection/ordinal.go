@@ -103,7 +103,7 @@ func ProjectOrdinalReasoning(
 func reasoningApproximation() compat.Change {
 	return compat.NewApproximation(
 		canonical.RequestReasoning,
-		canonical.RequestControlsEffort,
-		canonical.Occurrence{},
-	)
+
+		canonical.Occurrence{})
+
 }

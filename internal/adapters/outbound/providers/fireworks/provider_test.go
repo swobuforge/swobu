@@ -48,18 +48,6 @@ func TestRuntimeLeavesFireworksModelDiscoveryManual(t *testing.T) {
 	}
 }
 
-func TestRuntimeDoesNotClaimProviderNativeMCPAuthority(t *testing.T) {
-	bundle := NewRuntime(nil, credentialResolver{})
-	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
-		target := fireworksTarget(kind)
-		got := bundle.TargetSupport.ResolveTargetSupport(target).Get(canonical.RequestToolsDiscovery)
-		want := provider.SupportUnknown
-		if got != want {
-			t.Errorf("%s tools discovery support = %v, want %v", kind, got, want)
-		}
-	}
-}
-
 func TestModelIdentitiesPassThroughWithoutFireworksClassification(t *testing.T) {
 	for _, model := range []string{
 		"accounts/fireworks/models/model-1",

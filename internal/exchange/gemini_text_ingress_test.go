@@ -303,10 +303,6 @@ func (r geminiTextRuntime) ResolveBackend(target provider.TargetSnapshot) (provi
 	return r.registry.ResolveBackend(target)
 }
 
-func (r geminiTextRuntime) ResolveTargetSupport(target provider.TargetSnapshot) provider.TargetSupport {
-	return r.registry.ResolveTargetSupport(target)
-}
-
 type geminiTextWorkspaceLookup struct{ workspace routing.Workspace }
 
 func (l geminiTextWorkspaceLookup) GetWorkspace(context.Context, routing.WorkspaceSlug) (routing.Workspace, error) {

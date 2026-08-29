@@ -13,7 +13,7 @@ func TestBufferedHandler_BuffersAndFlushes(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	base := slog.New(NewCommonLineHandler(&out, slog.LevelInfo))
+	base := slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	handler := NewBufferedHandler(base.Handler())
 	logger := slog.New(handler)
 
@@ -33,7 +33,7 @@ func TestBufferedHandler_WithAttrsAndGroups_PreservedAcrossFlush(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	base := slog.New(NewCommonLineHandler(&out, slog.LevelInfo))
+	base := slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	handler := NewBufferedHandler(base.Handler())
 	record := slog.NewRecord(time.Now(), slog.LevelInfo, "msg", 0)
 	record.AddAttrs(slog.String("event", "probe"))

@@ -139,6 +139,12 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 			OmitStoreFalse:             dialect.OmitStoreFalse,
 			ForceArrayInput:            dialect.ForceArrayInput,
 			DefaultStore:               dialect.DefaultStore,
+			OmitParallelToolCallsFalse: func() bool {
+				return !req.TargetFacts.AcceptsParallelToolCallsFalse()
+			},
+			AcceptsReasoningEffortMax:  req.TargetFacts.AcceptsReasoningEffortMax,
+			AcceptsReasoningDisabled:   req.TargetFacts.AcceptsReasoningDisabled,
+			AcceptsFunctionOutputArray: req.TargetFacts.AcceptsFunctionCallOutputArray,
 		},
 	)
 	return document, changes, err
@@ -163,6 +169,16 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 			LowerReasoning:         dialect.LowerReasoning,
 			LowerMessage:           dialect.LowerMessage,
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
+			AcceptsMaxCompletionTokens: func() bool {
+				return req.TargetFacts.AcceptsMaxCompletionTokens()
+			},
+			OmitParallelToolCallsFalse: func() bool {
+				return !req.TargetFacts.AcceptsParallelToolCallsFalse()
+			},
+			ReasoningTarget: chatcompletions.ReasoningTargetDialect{
+				AcceptsEffortMax: req.TargetFacts.AcceptsReasoningEffortMax,
+				AcceptsDisabled:  req.TargetFacts.AcceptsReasoningDisabled,
+			},
 		},
 	)
 	return document, changes, err

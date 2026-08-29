@@ -14,14 +14,15 @@ import (
 
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
-	Runtime         ExecutionRuntime
-	TrafficEvidence observation.TrafficEventSink
-	CheckpointStore session.Store
-	ResponseIDs     ResponseIDGenerator
-	Policy          WorkspacePolicy
-	ImageFetcher    provider.ImageFetcher
-	PolicyResolver  WorkspacePolicyResolver
-	TargetBackoff   *targetBackoffLedger
+	Runtime          ExecutionRuntime
+	TrafficEvidence  observation.TrafficEventSink
+	CheckpointStore  session.Store
+	ResponseIDs      ResponseIDGenerator
+	Policy           WorkspacePolicy
+	ImageFetcher     provider.ImageFetcher
+	PolicyResolver   WorkspacePolicyResolver
+	TargetBackoff    *targetBackoffLedger
+	TargetExceptions *targetExceptions
 }
 
 func allocateResponseID(ctx context.Context, exchangeID string, gen ResponseIDGenerator) (canonical.SwobuResponseID, error) {

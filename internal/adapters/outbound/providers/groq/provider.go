@@ -61,7 +61,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	return backend, backend.Validate()
 }
 
-func applyGroqReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+func applyGroqReasoning(req canonical.CanonicalRequest, _ protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 	controls := req.Controls()
 	reasoning := req.Reasoning()
 	fields := make(map[string]any)
