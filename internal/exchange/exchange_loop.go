@@ -2,8 +2,10 @@ package exchange
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -92,13 +94,152 @@ func runExchange(
 		var observation targetObservation
 		if providerCall {
 			observation = runner.TargetBackoff.begin(workspace.Slug().String(), call.backend.Target)
+			logProviderAttemptStarted(s, call)
 		}
+		started := time.Now()
 		current = executeCommand(ctx, tr.command)
 		if providerCall {
+			logProviderAttemptHandoff(s, call, current, time.Since(started))
 			runner.TargetBackoff.observe(observation, current)
 		}
 	}
 	return RequestOutput{}, canonical.InternalError("exchange transition limit reached")
+}
+
+func logProviderAttemptStarted(state exchangeState, call callProviderCommand) {
+	attempt, _ := findProviderCallAttempt(state, call.attemptID)
+	slog.Debug("provider attempt started",
+		"component", "exchange", "event", "provider_attempt_started",
+		"request_id", state.input.exchangeID, "attempt", int(call.attemptID),
+		"target_id", call.backend.Target.TargetID, "provider", call.backend.Target.ProviderSpec,
+		"model", call.backend.Target.Model, "provider_round", attempt.providerRound,
+		"candidate_index", attempt.candidateIndex, "native_previous_response", attempt.nativePreviousResponse,
+	)
+}
+
+func logProviderAttemptHandoff(state exchangeState, call callProviderCommand, event exchangeEvent, duration time.Duration) {
+	attrs := []any{"component", "exchange",
+		"request_id", state.input.exchangeID, "attempt", int(call.attemptID),
+		"target_id", call.backend.Target.TargetID, "provider", call.backend.Target.ProviderSpec,
+		"model", call.backend.Target.Model, "duration", duration}
+	if failed, ok := event.(providerCallFailed); ok {
+		attrs = append(attrs, "event", "provider_attempt_finished")
+		failureClass, level := providerFailureLogClassification(failed.failure.Cause())
+		attrs = append(attrs, "outcome", "failed_before_handoff", "execution", executionValue(failed.failure.Execution()),
+			"failure_class", failureClass, "failure_stage", "provider_transport")
+		var backendErr canonical.BackendError
+		if errors.As(failed.failure.Cause(), &backendErr) {
+			attrs = append(attrs, "status_code", backendErr.StatusCode)
+		}
+		if level == slog.LevelDebug {
+			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt canceled", anyAttrs(attrs)...)
+			return
+		}
+		slog.LogAttrs(context.Background(), level, "provider attempt failed", anyAttrs(attrs)...)
+		return
+	}
+	attrs = append(attrs, "event", "provider_attempt_handoff_ready")
+	slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt handoff ready", anyAttrs(attrs)...)
+}
+
+func observeProviderAttemptTerminal(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, completion *wire.ResponseCompletion) {
+	if completion == nil {
+		return
+	}
+	completion.OnTerminal(func(snapshot wire.ResponseCompletionSnapshot) {
+		attrs := []any{
+			"component", "exchange", "event", "provider_attempt_finished",
+			"request_id", state.input.exchangeID, "attempt", int(attemptID),
+			"target_id", attempt.target.TargetID, "provider", attempt.target.ProviderSpec,
+			"model", attempt.target.Model,
+		}
+		if snapshot.State == wire.CompletionCompleted {
+			attrs = append(attrs, "outcome", "completed")
+			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt finished", anyAttrs(attrs)...)
+			return
+		}
+		stage := "client_stream_encode"
+		var staged responseProcessingError
+		if errors.As(snapshot.Err, &staged) {
+			stage = staged.stage
+		}
+		attrs = append(attrs,
+			"outcome", "aborted_after_handoff",
+			"error_origin", "swobu",
+			"error_code", canonical.TerminalErrorCode(snapshot.Err),
+			"error_message", safeCanonicalErrorMessage(snapshot.Err),
+			"failure_stage", stage,
+		)
+		slog.LogAttrs(context.Background(), slog.LevelError, "provider attempt aborted after handoff", anyAttrs(attrs)...)
+	})
+}
+
+func logProviderAttemptAbortedAfterHandoff(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, err error) {
+	stage := "canonical_response_validation"
+	var staged responseProcessingError
+	if errors.As(err, &staged) {
+		stage = staged.stage
+	}
+	slog.Error("provider attempt aborted after handoff",
+		"component", "exchange", "event", "provider_attempt_finished",
+		"request_id", state.input.exchangeID, "attempt", int(attemptID),
+		"target_id", attempt.target.TargetID, "provider", attempt.target.ProviderSpec,
+		"model", attempt.target.Model, "outcome", "aborted_after_handoff",
+		"error_origin", "swobu", "error_code", canonical.TerminalErrorCode(err),
+		"error_message", safeCanonicalErrorMessage(err), "failure_stage", stage,
+	)
+}
+
+func safeCanonicalErrorMessage(err error) string {
+	var canonicalErr canonical.Error
+	if errors.As(err, &canonicalErr) {
+		return canonicalErr.Message
+	}
+	return canonical.InternalError("response processing failed").Message
+}
+
+// providerFailureLogClassification maps the adapter-owned typed failure fact
+// directly to the logging severity contract. Do not reclassify cancellation
+// from raw causes: provider.CancelledError is the single failure authority.
+func providerFailureLogClassification(err error) (string, slog.Level) {
+	var unavailable provider.UnavailableError
+	if errors.As(err, &unavailable) {
+		return "unavailable", slog.LevelWarn
+	}
+	var rejected provider.RejectedError
+	if errors.As(err, &rejected) {
+		return "rejected", slog.LevelWarn
+	}
+	var invalid provider.InvalidRequestError
+	if errors.As(err, &invalid) {
+		return "invalid_request", slog.LevelWarn
+	}
+	var canceled provider.CancelledError
+	if errors.As(err, &canceled) {
+		return "canceled", slog.LevelDebug
+	}
+	return "internal", slog.LevelError
+}
+
+func executionValue(execution provider.ExecutionPossibility) string {
+	switch execution {
+	case provider.ExecutionNotDispatched:
+		return "not_dispatched"
+	case provider.ExecutionRejectedBeforeExecution:
+		return "rejected_before_execution"
+	case provider.ExecutionMayHaveOccurred:
+		return "may_have_occurred"
+	default:
+		return "unknown"
+	}
+}
+
+func anyAttrs(values []any) []slog.Attr {
+	attrs := make([]slog.Attr, 0, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		attrs = append(attrs, slog.Any(values[i].(string), values[i+1]))
+	}
+	return attrs
 }
 
 func appendProviderInflightEvidence(ctx context.Context, sink observation.TrafficEventSink, state exchangeState) {
@@ -183,6 +324,15 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 			return providerCallFailed{attemptID: c.attemptID, failure: failure}
 		}
 		return providerIngressReceived{attemptID: c.attemptID, ingress: ingress}
+	case characterizeTargetFactsCommand:
+		resolutions := make(map[provider.TargetFact]bool, len(c.facts))
+		for _, fact := range c.facts {
+			resolution := c.backend.CharacterizeTargetFact(ctx, fact)
+			if resolution.Conclusive {
+				resolutions[fact] = resolution.Value
+			}
+		}
+		return targetFactsCharacterized{attemptID: c.attemptID, generation: c.generation, resolutions: resolutions}
 	case callMCPCommand:
 		result, err := c.run.Call(ctx, c.call)
 		return mcpToolReturned{result: result, err: err}
@@ -227,7 +377,7 @@ func terminalRequestOutput(input exchangeInput, response ClientResponse, target 
 	if target.TargetID != "" {
 		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
 	}
-	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response)}
+	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response), AttemptCount: routing.providerCallCount}
 }
 
 func terminalReusablePrefix(state exchangeState) trafficevidence.ReusablePrefixEvidence {

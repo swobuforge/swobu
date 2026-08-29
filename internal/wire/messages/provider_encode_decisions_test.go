@@ -98,7 +98,7 @@ func TestMessagesApproximatesAllDeferredToolsWithOneEagerTool(t *testing.T) {
 	if strings.Contains(string(result.Document.RawBytes()), `"defer_loading":true`) {
 		t.Fatalf("all-deferred visibility leaked unchanged: %s", result.Document.RawBytes())
 	}
-	want := compat.NewApproximation(canonical.RequestToolsVisibility, canonical.RequestTools, canonical.Occurrence{})
+	want := compat.NewApproximation(canonical.RequestToolsVisibility, canonical.Occurrence{})
 	if len(result.Changes) != 1 || result.Changes[0] != want {
 		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
 	}

@@ -11,7 +11,7 @@ import (
 // ChatReplayScope owns the exact Kimi Chat opaque reasoning replay dialect.
 const ChatReplayScope canonical.ProviderChatReplayScope = "kimi-chat"
 
-func applyKimiReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+func applyKimiReasoning(req canonical.CanonicalRequest, target protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 	controls := req.Controls()
 	reasoning := req.Reasoning()
 	effort, set := controls.Effort.Get()
@@ -27,8 +27,10 @@ func applyKimiReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Chan
 		fields["reasoning_effort"] = "low"
 	case canonical.InferenceEffortMedium, canonical.InferenceEffortHigh:
 		fields["reasoning_effort"] = "high"
-	case canonical.InferenceEffortXHigh, canonical.InferenceEffortMax:
+	case canonical.InferenceEffortXHigh:
 		fields["reasoning_effort"] = "max"
+	case canonical.InferenceEffortMax:
+		fields["reasoning_effort"] = string(target.ProjectEffort(effort, changeLog))
 	}
 	return fields, nil
 }

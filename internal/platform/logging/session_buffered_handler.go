@@ -13,7 +13,7 @@ import (
 // same call-site scoping they had when emitted.
 func NewBufferedHandler(base slog.Handler) *BufferedHandler {
 	if base == nil {
-		base = NewCommonLineHandler(&bytes.Buffer{}, slog.LevelInfo)
+		base = slog.NewTextHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelInfo})
 	}
 	return &BufferedHandler{
 		base:  base,

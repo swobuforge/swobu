@@ -36,29 +36,60 @@ type ToolLoweringRule func(ToolLoweringContext, canonical.ToolDeclaration) (frag
 // ToolPolicyLoweringRule resolves target policy after tool lowering.
 type ToolPolicyLoweringRule func(canonical.ToolPolicy, wire.LoweredToolSet, wire.ToolNames) (choice any, handled bool, changes []compat.Change, err error)
 
+type responsesToolProjection struct {
+	tools   []ProviderRequestTool
+	lowered wire.LoweredToolSet
+	emitted map[canonical.ToolKey][]ProviderRequestTool
+}
+
+func (p responsesToolProjection) fragmentsFor(tools []canonical.ToolDeclaration) []ProviderRequestTool {
+	var fragments []ProviderRequestTool
+	for _, tool := range tools {
+		if namespace, ok := tool.Namespace(); ok {
+			fragments = append(fragments, p.fragmentsFor(namespace.Tools())...)
+			continue
+		}
+		fragments = append(fragments, p.emitted[tool.Key()]...)
+	}
+	return fragments
+}
+
+func (p responsesToolProjection) emittedFor(key canonical.ToolKey) []ProviderRequestTool {
+	if fragments, ok := p.emitted[key]; ok {
+		return append([]ProviderRequestTool(nil), fragments...)
+	}
+	return nil
+}
+
 func encodeResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]ProviderRequestTool, error) {
-	typed, _, err := compileResponsesTools(tools, visibility, names, changeLog, exchangeID, nil)
-	return typed, err
+	projection, err := compileResponsesToolProjection(tools, visibility, names, changeLog, exchangeID, nil)
+	return projection.tools, err
 }
 
 func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) ([]ProviderRequestTool, wire.LoweredToolSet, error) {
+	projection, err := compileResponsesToolProjection(tools, visibility, names, changeLog, exchangeID, rule)
+	return projection.tools, projection.lowered, err
+}
+
+func compileResponsesToolProjection(tools []canonical.ToolDeclaration, visibility canonical.ToolVisibilityRefinements, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, rule ToolLoweringRule) (responsesToolProjection, error) {
 	if len(tools) == 0 {
-		return nil, wire.LoweredToolSet{}, nil
+		return responsesToolProjection{emitted: make(map[canonical.ToolKey][]ProviderRequestTool)}, nil
 	}
 	flattened, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {
 		return responsesFlatToolIdentity(tool, names)
 	})
 	if err != nil {
-		return nil, wire.LoweredToolSet{}, err
+		return responsesToolProjection{}, err
 	}
 	if flattened.RemovedNamespaces > 0 {
 		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestTools, compat.Approximation); err != nil {
-			return nil, wire.LoweredToolSet{}, err
+			return responsesToolProjection{}, err
 		}
 	}
 	tools = flattened.Declarations
 	out := make([]ProviderRequestTool, 0, len(tools))
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}
+	emitted := make(map[canonical.ToolKey][]ProviderRequestTool, len(tools))
 	for ordinal, tool := range tools {
 		if rule != nil {
 			fragments, handled, changes, err := rule(ToolLoweringContext{Ordinal: uint32(ordinal), Names: names}, tool)
@@ -66,10 +97,11 @@ func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonic
 				*changeLog = append(*changeLog, changes...)
 			}
 			if err != nil {
-				return nil, wire.LoweredToolSet{}, err
+				return responsesToolProjection{}, err
 			}
 			if handled {
 				out = append(out, fragments...)
+				emitted[tool.Key()] = append([]ProviderRequestTool(nil), fragments...)
 				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
 					Key:           tool.Key(),
 					Kind:          tool.Kind(),
@@ -90,20 +122,21 @@ func compileResponsesTools(tools []canonical.ToolDeclaration, visibility canonic
 		}
 		wireTool, err := encodeResponsesTool(tool, names)
 		if err != nil {
-			return nil, wire.LoweredToolSet{}, err
+			return responsesToolProjection{}, err
 		}
 		if visibility.Deferred(tool.Key()) {
 			deferred := true
 			wireTool.DeferLoading = &deferred
 		}
 		out = append(out, wireTool)
+		emitted[tool.Key()] = []ProviderRequestTool{wireTool}
 		lowered.Records = append(lowered.Records, wire.LoweredToolRecord{
 			Key:           tool.Key(),
 			Kind:          tool.Kind(),
 			FragmentCount: 1,
 		})
 	}
-	return out, lowered, nil
+	return responsesToolProjection{tools: out, lowered: lowered, emitted: emitted}, nil
 }
 
 func responsesFlatToolIdentity(tool canonical.ToolDeclaration, names wire.ToolNames) (string, error) {
@@ -266,7 +299,8 @@ func responsesToolFormatFromCanonical(format canonical.ToolFormat) (any, error) 
 	return json.RawMessage(raw), nil
 }
 
-func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeToolChoice(policy canonical.ToolPolicy, projection responsesToolProjection, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+	lowered := projection.lowered
 	if lowered.TotalFragments() == 0 {
 		if policy.Mode == canonical.ToolPolicyRequired || policy.Mode == canonical.ToolPolicySpecific {
 			if changeLog != nil {
@@ -287,32 +321,19 @@ func encodeToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredToolSet, 
 		if !ok {
 			return nil, canonical.BadRequest("specific tool policy requires a tool id")
 		}
-		record, ok := lowered.FindSource(key)
-		if !ok || record.FragmentCount != 1 {
+		fragments := projection.emitted[key]
+		if len(fragments) != 1 {
 			if changeLog != nil {
 				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))
 			}
 			return nil, nil
 		}
-		switch record.Kind {
-		case canonical.ToolKindFunction:
-			name, err := wire.EncodeToolName(names, record.Key)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{
-				"type": "function",
-				"name": strings.TrimSpace(name),
-			}, nil
-		case canonical.ToolKindCustom:
-			name, err := wire.EncodeToolName(names, record.Key)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{
-				"type": "custom",
-				"name": strings.TrimSpace(name),
-			}, nil
+		fragment := fragments[0]
+		switch fragment.Type {
+		case "function", "custom":
+			return map[string]any{"type": fragment.Type, "name": strings.TrimSpace(fragment.Name)}, nil
+		case "tool_search":
+			return map[string]any{"type": fragment.Type}, nil
 		default:
 			if changeLog != nil {
 				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{}))

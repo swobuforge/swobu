@@ -39,6 +39,9 @@ require (
 	github.com/googleapis/gax-go/v2 v2.23.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/lmittmann/tint v1.2.0
+	github.com/mattn/go-colorable v0.1.13
+	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/rogpeppe/go-internal v1.12.1-0.20240709150035-ccf4b4329d21 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect

@@ -88,18 +88,18 @@ func TestDecodeClientRequest_AcceptsHistoricalFunctionCallWithoutCurrentTools(t 
 func TestDecodeClientRequest_AcceptsHistoricalCustomToolCall(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"model":"gpt-4o-mini","input":[{"type":"custom_tool_call","id":"ctc_123","call_id":"call_1","name":"apply_patch","input":"line one\n\nline three\n"}]}`)
+	raw := []byte(`{"model":"gpt-4o-mini","tools":[{"type":"custom","name":"apply_patch","format":{"type":"text"}}],"input":[{"type":"custom_tool_call","id":"ctc_123","call_id":"call_1","name":"apply_patch","input":"line one\n\nline three\n"}]}`)
 	got, _, err := (testClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest returned err=%v", err)
 	}
 	items := got.Items()
-	if len(items) != 1 {
-		t.Fatalf("items len = %d, want one self-contained historical custom call", len(items))
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want declaration plus historical custom call", len(items))
 	}
-	call, ok := items[0].ToolCall()
+	call, ok := items[1].ToolCall()
 	if !ok {
-		t.Fatalf("items[0].Kind = %q, want %q", items[0].Kind(), canonical.ItemKindToolCall)
+		t.Fatalf("items[1].Kind = %q, want %q", items[1].Kind(), canonical.ItemKindToolCall)
 	}
 	if call.CallID().String() != "call_1" || call.Tool().Kind() != canonical.ToolKindCustom || call.Tool().Name() != "apply_patch" {
 		t.Fatalf("custom call identity = call_id:%q tool:%q, want call_1 and request/custom/apply_patch", call.CallID(), call.Tool())

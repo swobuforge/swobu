@@ -29,6 +29,10 @@ type CompileOptions struct {
 	OmitStoreFalse             bool
 	ForceArrayInput            bool
 	DefaultStore               *bool
+	OmitParallelToolCallsFalse func() bool
+	AcceptsReasoningEffortMax  func() bool
+	AcceptsReasoningDisabled   func() bool
+	AcceptsFunctionOutputArray func() bool
 }
 
 type inputMessageItem struct {
@@ -125,13 +129,8 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		inputRequest = req.WithItems(projected)
 		responsesRefined = true
 	}
-	payloadInput, err := encodeInput(inputRequest, input.ToolNames, changeLog, exchangeID)
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-
 	preludeItems := prelude.Items()
-	requestVisibility, err := responsesToolVisibilityAt(preludeItems)
+	fullVisibility, err := responsesToolVisibilityAt(items)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -139,7 +138,12 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	wireTools, loweredTools, err := compileResponsesTools(requestTools, requestVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
+	toolProjection, err := compileResponsesToolProjection(tools, fullVisibility, input.ToolNames, changeLog, exchangeID, compile.LowerTool)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	wireTools := toolProjection.fragmentsFor(requestTools)
+	payloadInput, err := encodeInput(inputRequest, req.Items(), input.ToolNames, compile.AcceptsFunctionOutputArray, changeLog, exchangeID, &toolProjection)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -158,7 +162,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if compile.LowerToolPolicy != nil {
 		var handled bool
 		var changes []compat.Change
-		choice, handled, changes, err = compile.LowerToolPolicy(policy, loweredTools, input.ToolNames)
+		choice, handled, changes, err = compile.LowerToolPolicy(policy, toolProjection.lowered, input.ToolNames)
 		if changeLog != nil {
 			*changeLog = append(*changeLog, changes...)
 		}
@@ -166,10 +170,10 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 			return ProviderRequestDocument{}, err
 		}
 		if !handled {
-			choice, err = encodeToolChoice(policy, loweredTools, input.ToolNames, changeLog, exchangeID)
+			choice, err = encodeToolChoice(policy, toolProjection, input.ToolNames, changeLog, exchangeID)
 		}
 	} else {
-		choice, err = encodeToolChoice(policy, loweredTools, input.ToolNames, changeLog, exchangeID)
+		choice, err = encodeToolChoice(policy, toolProjection, input.ToolNames, changeLog, exchangeID)
 	}
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -208,14 +212,14 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if store == nil && compile.DefaultStore != nil {
 		store = compile.DefaultStore
 	}
-	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), loweredTools.TotalFragments() > 0); err != nil {
+	if err := encodeResponsesToolCallBatch(payload, req.ToolCallBatch(), toolProjection.lowered.TotalFragments() > 0, compile.OmitParallelToolCallsFalse, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && loweredTools.TotalFragments() > 0 {
+	if responsesRefined && req.ToolCallBatchSpecified() && req.ToolCallBatch().IsZero() && toolProjection.lowered.TotalFragments() > 0 {
 		payload["parallel_tool_calls"] = true
 	}
 	encodeResponsesGenerationControls(payload, req.Controls(), changeLog)
-	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, changeLog); err != nil {
+	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if !compile.OmitInclude {
@@ -405,7 +409,7 @@ func responsesWireToolChoiceShape(choice any) string {
 	return "other"
 }
 
-func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) (any, error) {
+func encodeInput(req canonical.CanonicalRequest, correlationItems []canonical.CanonicalItem, names wire.ToolNames, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) (any, error) {
 	items := req.Items()
 	_, history, err := canonical.SplitRequestPrelude(items)
 	if err != nil {
@@ -422,7 +426,7 @@ func encodeInput(req canonical.CanonicalRequest, names wire.ToolNames, changeLog
 		if err != nil {
 			return nil, err
 		}
-		return encodeConversation(req, items, environment.Declarations(), names, changeLog, exchangeID)
+		return encodeConversation(items, correlationItems, environment.Declarations(), names, acceptsFunctionOutputArray, changeLog, exchangeID, projection)
 	}
 }
 
@@ -469,11 +473,12 @@ func hasResumptionInput(items []canonical.CanonicalItem) bool {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary encodes canonical declaration kinds into Responses wire variants.
-func encodeConversation(request canonical.CanonicalRequest, items []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string) ([]any, error) {
+func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames, acceptsFunctionOutputArray func() bool, changeLog *[]compat.Change, exchangeID string, projection *responsesToolProjection) ([]any, error) {
 	encoded := make([]any, 0, len(items))
 	pendingWebSearch := make(map[canonical.ToolCallID]int)
-	pendingContentCalls := make(map[canonical.ToolCallID]canonical.ToolKind)
-	contentResultKinds, err := contentResultKindsByOccurrence(request.Items())
+	pendingContentCalls := make(map[canonical.ToolCallID]string)
+	omittedContentCalls := make(map[canonical.ToolCallID]int)
+	contentResultKinds, err := contentResultKindsByOccurrence(correlationItems)
 	if err != nil {
 		return nil, err
 	}
@@ -502,45 +507,55 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			if declarations.Scope() == canonical.ContextScopeRequest {
 				continue
 			}
-			wireTools, err := encodeResponsesTools(declarations.Tools().Declarations(), declarations.Visibility(), names, changeLog, exchangeID)
-			if err != nil {
-				return nil, err
-			}
+			wireTools := projection.fragmentsFor(declarations.Tools().Declarations())
 			encoded = append(encoded, map[string]any{"type": "additional_tools", "role": "developer", "tools": wireTools})
 		case canonical.ItemKindToolCall:
 			call, _ := current.ToolCall()
 			tool := call.Tool()
+			if tool.Kind() == canonical.ToolKindFunction || tool.Kind() == canonical.ToolKindCustom {
+				if _, exists := pendingContentCalls[call.CallID()]; exists {
+					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
+				}
+				fragments := projection.emittedFor(tool)
+				if len(fragments) == 0 {
+					if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+						return nil, err
+					}
+					omittedContentCalls[call.CallID()]++
+					continue
+				}
+				if len(fragments) != 1 {
+					return nil, canonical.InternalError("Responses callable projection emitted multiple target identities")
+				}
+				fragment := fragments[0]
+				switch fragment.Type {
+				case "function":
+					arguments := ""
+					if object, ok := call.Input().Object(); ok {
+						arguments = object.String()
+					} else if text, ok := call.Input().Text(); ok && tool.Kind() == canonical.ToolKindCustom {
+						wrapped, err := json.Marshal(map[string]string{"input": text})
+						if err != nil {
+							return nil, canonical.InternalError("Responses custom function wrapper encoding failed")
+						}
+						arguments = string(wrapped)
+					} else {
+						return nil, canonical.BadRequest("responses function projection requires object input")
+					}
+					encoded = append(encoded, functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: fragment.Name, Arguments: arguments})
+				case "custom":
+					text, ok := call.Input().Text()
+					if !ok {
+						return nil, canonical.BadRequest("responses custom projection requires text input")
+					}
+					encoded = append(encoded, customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: fragment.Name, Input: text})
+				default:
+					return nil, canonical.InternalError("Responses callable projection emitted a non-callable target fragment")
+				}
+				pendingContentCalls[call.CallID()] = fragment.Type
+				continue
+			}
 			switch tool.Kind() {
-			case canonical.ToolKindFunction:
-				name, err := wire.EncodeToolName(names, tool)
-				if err != nil {
-					return nil, err
-				}
-				if _, exists := pendingContentCalls[call.CallID()]; exists {
-					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
-				}
-				object, ok := call.Input().Object()
-				if !ok {
-					return nil, canonical.BadRequest("responses function calls require object input")
-				}
-				item := functionCallItem{Type: "function_call", CallID: call.CallID().String(), Name: name, Arguments: object.String()}
-				encoded = append(encoded, item)
-				pendingContentCalls[call.CallID()] = canonical.ToolKindFunction
-			case canonical.ToolKindCustom:
-				name, err := wire.EncodeToolName(names, tool)
-				if err != nil {
-					return nil, err
-				}
-				if _, exists := pendingContentCalls[call.CallID()]; exists {
-					return nil, canonical.BadRequest("responses history contains a duplicate unresolved tool call")
-				}
-				text, ok := call.Input().Text()
-				if !ok {
-					return nil, canonical.BadRequest("responses custom tool calls require text input")
-				}
-				item := customToolCallItem{Type: "custom_tool_call", CallID: call.CallID().String(), Name: name, Input: text}
-				encoded = append(encoded, item)
-				pendingContentCalls[call.CallID()] = canonical.ToolKindCustom
 			case canonical.ToolKindWebSearch:
 				if _, exists := pendingWebSearch[call.CallID()]; exists {
 					return nil, canonical.BadRequest("responses web-search history contains a duplicate unresolved call")
@@ -587,7 +602,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				}
 				encoded = append(encoded, map[string]any{"type": "tool_search_call", "call_id": wireCallID, "execution": execution, "arguments": json.RawMessage(object.String())})
 			default:
-				return nil, canonical.NotImplemented("Responses cannot project this canonical tool-call kind")
+				return nil, canonical.InternalError("Responses received an invalid canonical tool-call kind")
 			}
 		case canonical.ItemKindToolResult:
 			result, _ := current.ToolResult()
@@ -607,36 +622,56 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				delete(pendingWebSearch, result.CallID())
 				continue
 			}
+			if omittedContentCalls[result.CallID()] > 0 {
+				omittedContentCalls[result.CallID()]--
+				occurrences := contentResultKinds[result.CallID()]
+				if len(occurrences) == 0 {
+					return nil, canonical.InternalError("responses omitted tool-result occurrence pairing is inconsistent")
+				}
+				contentResultKinds[result.CallID()] = occurrences[1:]
+				if err := appendResponsesOccurrenceChange(changeLog, exchangeID, canonical.RequestItemsKind, compat.Omission, canonical.RequestItemOccurrence(uint32(itemIndex))); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if result.IsError() {
 				if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestItemsToolResultIsError, compat.Approximation); err != nil {
 					return nil, err
 				}
 			}
-			content, err := encodeResponsesToolResultContent(result.Content(), changeLog, exchangeID)
-			if err != nil {
-				return nil, err
-			}
 			outputType := "function_call_output"
-			callKind, found := pendingContentCalls[result.CallID()]
+			wireType, found := pendingContentCalls[result.CallID()]
 			if !found {
 				occurrences := contentResultKinds[result.CallID()]
 				if len(occurrences) == 0 {
-					// A result-only request contribution has no canonical call
-					// kind. Preserve the Responses portable default.
-					callKind = canonical.ToolKindFunction
+					return nil, canonical.InternalError("responses tool result lost canonical call provenance")
 				} else {
-					callKind = occurrences[0]
+					if occurrences[0] == canonical.ToolKindCustom {
+						wireType = "custom"
+					} else {
+						wireType = "function"
+					}
 					contentResultKinds[result.CallID()] = occurrences[1:]
 				}
 			} else {
 				occurrences := contentResultKinds[result.CallID()]
-				if len(occurrences) == 0 || occurrences[0] != callKind {
+				if len(occurrences) == 0 {
 					return nil, canonical.InternalError("responses tool-result occurrence pairing is inconsistent")
 				}
 				contentResultKinds[result.CallID()] = occurrences[1:]
 			}
-			if callKind == canonical.ToolKindCustom {
+			if wireType == "custom" {
 				outputType = "custom_tool_call_output"
+			}
+			var outputArrayFact func() bool
+			if wireType == "function" {
+				outputArrayFact = acceptsFunctionOutputArray
+			} else {
+				outputArrayFact = func() bool { return false }
+			}
+			content, rehomed, err := encodeResponsesToolResultContent(result.Content(), outputArrayFact, changeLog, exchangeID)
+			if err != nil {
+				return nil, err
 			}
 			delete(pendingContentCalls, result.CallID())
 			item := toolCallOutputItem{
@@ -645,15 +680,13 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 				Output: content,
 			}
 			encoded = append(encoded, item)
+			encoded = append(encoded, rehomed...)
 		case canonical.ItemKindToolDiscoveryResult:
 			result, _ := current.ToolDiscoveryResult()
 			if _, failed := result.Failure(); failed {
-				return nil, canonical.NotImplemented("Responses cannot project a typed failed discovery result")
+				return nil, canonical.InternalError("Responses received an invalid canonical failed-discovery item")
 			}
-			wireTools, err := encodeResponsesTools(result.Tools().Declarations(), result.Visibility(), names, changeLog, exchangeID)
-			if err != nil {
-				return nil, err
-			}
+			wireTools := projection.fragmentsFor(result.Tools().Declarations())
 			execution := "client"
 			if result.Executor() == canonical.DiscoveryExecutorProvider {
 				execution = "server"
@@ -709,7 +742,7 @@ func encodeConversation(request canonical.CanonicalRequest, items []canonical.Ca
 			}
 			encoded = append(encoded, item)
 		default:
-			return nil, canonical.NotImplemented("Responses cannot project this canonical item kind")
+			return nil, canonical.InternalError("Responses received an invalid canonical item kind")
 		}
 	}
 	return encoded, nil
@@ -730,13 +763,6 @@ func contentResultKindsByOccurrence(items []canonical.CanonicalItem) (map[canoni
 		}
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
-			// A native continuation contribution may contain only the result;
-			// its call kind remains behind the OpenAI Responses provider response
-			// ID used as previous_response_id. The encoder
-			// preserves Responses' portable function-result default below.
-			if _, resultOnly := item.ToolResult(); resultOnly {
-				continue
-			}
 			return nil, canonical.BadRequest("responses history has invalid tool-effect correlation: " + err.Error())
 		}
 		if completed != nil {
@@ -751,9 +777,6 @@ func appendResponsesRequestChange(changeLog *[]compat.Change, exchangeID string,
 		return nil
 	}
 	change := compat.Change{Capability: feature, Kind: outcome}
-	if outcome == compat.Approximation {
-		change.Preserved = feature
-	}
 	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
@@ -776,7 +799,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 		}
 		if part.Kind() == canonical.PartKindImage {
 			if author != canonical.MessageRoleUser {
-				return nil, canonical.NotImplemented("Responses cannot project image input outside user messages")
+				return nil, canonical.InternalError("Responses received an invalid canonical image variant")
 			}
 			image, _ := part.Image()
 			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
@@ -790,7 +813,7 @@ func encodeResponsesMessageContent(author canonical.MessageRole, parts []canonic
 			out = append(out, wireImage)
 			continue
 		}
-		return nil, canonical.NotImplemented("Responses cannot project this canonical content kind")
+		return nil, canonical.InternalError("Responses received an invalid canonical content variant")
 	}
 	return out, nil
 }
@@ -800,19 +823,14 @@ func responsesTextOnlyContent(parts []canonical.MessagePart, surface string) (st
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
+			return "", canonical.InternalError(surface + " received an invalid canonical content variant")
 		}
 		builder.WriteString(text.Text())
 	}
 	return builder.String(), nil
 }
 
-func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLog *[]compat.Change, exchangeID string) (any, error) {
-	if len(parts) == 1 {
-		if text, ok := parts[0].Text(); ok {
-			return text.Text(), nil
-		}
-	}
+func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, acceptsArray func() bool, changeLog *[]compat.Change, exchangeID string) (any, []any, error) {
 	var text strings.Builder
 	textOnly := true
 	for _, part := range parts {
@@ -823,11 +841,30 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLo
 		}
 		text.WriteString(value.Text())
 	}
-	if textOnly {
-		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestItemsToolResultContent, compat.Approximation); err != nil {
-			return nil, err
+	if acceptsArray != nil && !acceptsArray() {
+		if textOnly {
+			return text.String(), nil, nil
 		}
-		return text.String(), nil
+		images := make([]any, 0, len(parts))
+		for _, part := range parts {
+			image, ok := part.Image()
+			if !ok {
+				continue
+			}
+			rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
+			if err != nil {
+				return nil, nil, canonical.InternalError("canonical image source is invalid")
+			}
+			wireImage := map[string]any{"type": "input_image", "image_url": rawURL}
+			if detail != "" {
+				wireImage["detail"] = string(detail)
+			}
+			images = append(images, wireImage)
+		}
+		if err := appendResponsesRequestChange(changeLog, exchangeID, canonical.RequestItemsToolResultImage, compat.Approximation); err != nil {
+			return nil, nil, err
+		}
+		return text.String(), []any{inputMessageItem{Type: "message", Role: "user", Content: images}}, nil
 	}
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {
@@ -837,11 +874,11 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLo
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, canonical.NotImplemented("Responses cannot project this canonical tool-result content kind")
+			return nil, nil, canonical.InternalError("Responses received an invalid canonical tool-result part")
 		}
 		rawURL, detail, err := openaiwire.EncodeOpenAIImageURL(image)
 		if err != nil {
-			return nil, canonical.InternalError("canonical image source is invalid")
+			return nil, nil, canonical.InternalError("canonical image source is invalid")
 		}
 		wireImage := map[string]any{"type": "input_image", "image_url": rawURL}
 		if detail != "" {
@@ -849,7 +886,7 @@ func encodeResponsesToolResultContent(parts []canonical.ToolResultPart, changeLo
 		}
 		out = append(out, wireImage)
 	}
-	return out, nil
+	return out, nil, nil
 }
 
 var reservedResponsesSemanticFields = map[string]struct{}{

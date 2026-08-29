@@ -104,7 +104,7 @@ func encodeMessagesToolChoice(policy canonical.ToolPolicy, lowered wire.LoweredT
 			return nil, nil
 		}
 		switch record.Kind {
-		case canonical.ToolKindFunction:
+		case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
 			name, err := wire.EncodeToolName(names, record.Key)
 			if err != nil {
 				return nil, err

@@ -14,12 +14,7 @@ import (
 // enters canonical history, checkpoint state, sessions, or durable config.
 type AttemptToolNames struct {
 	byCanonical map[canonical.ToolKey]string
-	byWire      map[wireToolRef]canonical.ToolKey
-}
-
-type wireToolRef struct {
-	kind canonical.ToolKind
-	name string
+	byWire      map[string]canonical.ToolKey
 }
 
 // BuildAttemptToolNames allocates labels from the complete post-MCP semantic
@@ -36,7 +31,7 @@ func buildAttemptToolNames(
 ) (AttemptToolNames, []compat.Change, error) {
 	names := AttemptToolNames{
 		byCanonical: make(map[canonical.ToolKey]string),
-		byWire:      make(map[wireToolRef]canonical.ToolKey),
+		byWire:      make(map[string]canonical.ToolKey),
 	}
 	keys := make([]canonical.ToolKey, 0)
 	declared := make(map[canonical.ToolKey]struct{})
@@ -74,19 +69,17 @@ func buildAttemptToolNames(
 		if prior, exists := usedWireNames[wireName]; exists && prior != key {
 			return AttemptToolNames{}, nil, canonical.InternalError("attempt tool wire-name collision")
 		}
-		ref := wireToolRef{kind: key.Kind(), name: wireName}
-		if prior, exists := names.byWire[ref]; exists && prior != key {
+		if prior, exists := names.byWire[wireName]; exists && prior != key {
 			return AttemptToolNames{}, nil, canonical.InternalError("attempt tool wire-name collision")
 		}
 		names.byCanonical[key.Clone()] = wireName
-		names.byWire[ref] = key.Clone()
+		names.byWire[wireName] = key.Clone()
 		usedWireNames[wireName] = key.Clone()
 		if _, ok := declared[key]; ok && wireName != key.Name() {
 			changes = append(changes, compat.NewApproximation(
 				canonical.RequestToolsName,
-				canonical.RequestTools,
-				canonical.ToolOccurrence(key),
-			))
+
+				canonical.ToolOccurrence(key)))
 		}
 	}
 	return names, changes, nil
@@ -101,9 +94,11 @@ func (n AttemptToolNames) WireName(key canonical.ToolKey) (string, error) {
 	return name, nil
 }
 
-// CanonicalKey resolves one provider-returned callable label for this attempt.
-func (n AttemptToolNames) CanonicalKey(kind canonical.ToolKind, wireName string) (canonical.ToolKey, bool) {
-	key, ok := n.byWire[wireToolRef{kind: kind, name: wireName}]
+// CanonicalKey resolves one provider-returned callable label to its canonical
+// source key. Wire labels are globally unique per attempt, so provenance—not a
+// guessed wire kind—selects the canonical lifecycle.
+func (n AttemptToolNames) CanonicalKey(wireName string) (canonical.ToolKey, bool) {
+	key, ok := n.byWire[wireName]
 	return key.Clone(), ok
 }
 

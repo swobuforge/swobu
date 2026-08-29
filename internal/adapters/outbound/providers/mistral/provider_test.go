@@ -345,7 +345,7 @@ func assertMistralEffort(t *testing.T, request canonical.CanonicalRequest, want 
 	}
 	gotApprox := false
 	for _, change := range changes {
-		if change.Capability == canonical.RequestControlsEffort && change.Kind == compat.Approximation && change.Preserved == canonical.RequestControlsEffort {
+		if change.Capability == canonical.RequestControlsEffort && change.Kind == compat.Approximation {
 			gotApprox = true
 		}
 	}

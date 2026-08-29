@@ -555,7 +555,7 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes := completedResponseChanges(t, nativeAccepted); hasPreviousResponseDecision(changes) {
+	if changes := completedResponseChanges(t, nativeAccepted); len(changes) != 0 {
 		t.Fatalf("exact native continuation emitted non-exact changes: %#v", changes)
 	}
 
@@ -592,8 +592,8 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 		t.Fatalf("retry without native reference phase = %T, want completedPhase", completed.nextState.phase)
 	}
 	changes := completedResponseChanges(t, completed)
-	if !hasDecision(changes, canonical.RequestPreviousResponseResponses, compat.Approximation) {
-		t.Fatalf("retry without native reference changes = %#v", changes)
+	if len(changes) != 0 {
+		t.Fatalf("full canonical replay emitted compatibility evidence = %#v", changes)
 	}
 	terminal := completed.nextState.phase.(completedPhase)
 	if len(completed.nextState.providerCallAttempts) != 2 || terminal.target.TargetID != active.target.TargetID {
@@ -608,8 +608,8 @@ func TestReducerRetriesUnavailableNativePreviousResponseWithoutReferenceOnSameTa
 	if _, ok := semanticFailed.nextState.phase.(callingProviderPhase); ok {
 		t.Fatal("failed retry without native reference produced a third request")
 	}
-	if hasPreviousResponseDecision(semanticFailed.nextState.effectiveChanges) {
-		t.Fatalf("terminal call failures invented previous-response changes: %#v", semanticFailed.nextState.effectiveChanges)
+	if len(semanticFailed.nextState.effectiveChanges) != 0 {
+		t.Fatalf("terminal call failures invented compatibility evidence: %#v", semanticFailed.nextState.effectiveChanges)
 	}
 	if len(semanticFailed.nextState.providerCallAttempts) != 2 {
 		t.Fatalf("provider calls = %d, want exactly two", len(semanticFailed.nextState.providerCallAttempts))
@@ -667,8 +667,8 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasPreviousResponseDecision(routeFailover.nextState.effectiveChanges) {
-		t.Fatalf("semantic operational failure manufactured continuation changes: %#v", routeFailover.nextState.effectiveChanges)
+	if len(routeFailover.nextState.effectiveChanges) != 0 {
+		t.Fatalf("semantic operational failure manufactured compatibility evidence: %#v", routeFailover.nextState.effectiveChanges)
 	}
 	third := activeProviderAttempt(t, routeFailover.nextState)
 	if len(routeFailover.nextState.providerCallAttempts) != 3 || third.id != 3 ||
@@ -680,15 +680,6 @@ func TestFailedFullHistoryCallResumesConfiguredRouteFailover(t *testing.T) {
 func hasDecision(changes []compat.Change, feature canonical.CapabilityPath, outcome compat.Kind) bool {
 	for _, decision := range changes {
 		if decision.Capability == feature && decision.Kind == outcome {
-			return true
-		}
-	}
-	return false
-}
-
-func hasPreviousResponseDecision(changes []compat.Change) bool {
-	for _, decision := range changes {
-		if decision.Capability == canonical.RequestPreviousResponseResponses || decision.Capability == canonical.RequestPreviousResponse {
 			return true
 		}
 	}
@@ -735,12 +726,12 @@ func TestReducerUnavailableNativePreviousResponseDoesNotRepeatOperation(t *testi
 	if _, ok := failed.nextState.phase.(failedPhase); !ok {
 		t.Fatalf("phase = %T, want failedPhase without same-operation retry", failed.nextState.phase)
 	}
-	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
-		t.Fatalf("500 emitted previous-response compatibility changes: %#v", failed.nextState.effectiveChanges)
+	if len(failed.nextState.effectiveChanges) != 0 {
+		t.Fatalf("500 emitted compatibility evidence: %#v", failed.nextState.effectiveChanges)
 	}
 }
 
-func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
+func TestTargetMismatchSelectsExactFullCanonicalHistory(t *testing.T) {
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "native-a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -752,8 +743,8 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 	if nativePreviousResponseSent(attempt.call.request) {
 		t.Fatal("target mismatch sent native previous response")
 	}
-	if hasPreviousResponseDecision(started.nextState.effectiveChanges) {
-		t.Fatalf("target mismatch emitted effective changes before handoff: %#v", started.nextState.effectiveChanges)
+	if len(started.nextState.effectiveChanges) != 0 {
+		t.Fatalf("target mismatch emitted compatibility evidence before handoff: %#v", started.nextState.effectiveChanges)
 	}
 	ingress, err := attempt.call.backend.Transport.Send(context.Background(), attempt.call.document)
 	if err != nil {
@@ -764,8 +755,8 @@ func TestTargetMismatchSelectsSemanticAndEmitsDropEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	changes := completedResponseChanges(t, completed)
-	if !hasDecision(changes, canonical.RequestPreviousResponseResponses, compat.Approximation) {
-		t.Fatalf("target mismatch handoff changes = %#v", changes)
+	if len(changes) != 0 {
+		t.Fatalf("target mismatch full replay emitted compatibility evidence = %#v", changes)
 	}
 }
 
@@ -792,8 +783,8 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 		failedAttempt.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred {
 		t.Fatalf("attempt = %#v, want possible provider execution", failedAttempt)
 	}
-	if hasPreviousResponseDecision(failed.nextState.effectiveChanges) {
-		t.Fatalf("decode failure emitted previous-response compatibility changes: %#v", failed.nextState.effectiveChanges)
+	if len(failed.nextState.effectiveChanges) != 0 {
+		t.Fatalf("decode failure emitted compatibility evidence: %#v", failed.nextState.effectiveChanges)
 	}
 }
 

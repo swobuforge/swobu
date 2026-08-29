@@ -225,7 +225,13 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			return append(frames, more...), err
 		}
 		if len(s.unresolvedWebSearchCalls) > 0 {
-			return nil, canonical.NotImplemented("Messages cannot project an unresolved canonical web-search call")
+			for _, ordinal := range s.unresolvedWebSearchCalls {
+				s.changes = compat.AppendUnique(s.changes, compat.NewOmission(
+					canonical.ResponseItemsKind,
+					canonical.ResponseItemOccurrence(ordinal),
+				))
+			}
+			s.unresolvedWebSearchCalls = map[string]uint32{}
 		}
 		frames := make([][]byte, 0, len(s.blockIndexByID)+2)
 		for _, index := range s.blockIndexByID {

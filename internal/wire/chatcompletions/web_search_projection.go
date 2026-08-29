@@ -6,7 +6,7 @@ import (
 )
 
 // projectChatCompletionsRequestHistory composes target-local history losses:
-// settled WebSearch effect projection followed by citation accounting on every
+// provider-owned effect projection followed by citation accounting on every
 // surviving message part. It does not mutate canonical history.
 func projectChatCompletionsRequestHistory(items []canonical.CanonicalItem) ([]canonical.CanonicalItem, []compat.Change, error) {
 	projected, changes, err := projectChatCompletionsRequestWebSearchLifecycles(items)
@@ -19,27 +19,18 @@ func projectChatCompletionsRequestHistory(items []canonical.CanonicalItem) ([]ca
 	return projected, changes, nil
 }
 
-// projectChatCompletionsRequestWebSearchLifecycles removes completed
-// provider-owned web-search effects as occurrence-atomic call/result pairs.
-// The canonical matcher owns correlation, including call-ID reuse; unresolved
-// effects remain incompatible because no valid residual history exists.
+// projectChatCompletionsRequestWebSearchLifecycles removes provider-owned
+// search and discovery effects as occurrence-atomic call/result pairs. The
+// canonical matcher owns correlation, including call-ID reuse. Open effects
+// are omitted explicitly because Chat has no provider-owned lifecycle carrier.
 func projectChatCompletionsRequestWebSearchLifecycles(items []canonical.CanonicalItem) ([]canonical.CanonicalItem, []compat.Change, error) {
 	drop := map[int]struct{}{}
 	changes := make([]compat.Change, 0)
 	var matcher canonical.ToolEffectMatcher
 	effects := make([]canonical.ToolEffect, 0)
 	for index, item := range items {
-		if call, ok := item.ToolCall(); ok && call.Tool().Kind() != canonical.ToolKindWebSearch {
+		if !chatCompletionsOmitsProviderEffect(item) {
 			continue
-		}
-		if _, call := item.ToolCall(); !call {
-			result, ok := item.ToolResult()
-			if !ok {
-				continue
-			}
-			if _, webSearch := result.WebSearch(); !webSearch {
-				continue
-			}
 		}
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
@@ -51,14 +42,13 @@ func projectChatCompletionsRequestWebSearchLifecycles(items []canonical.Canonica
 	}
 	effects = append(effects, matcher.Pending()...)
 	for _, effect := range effects {
-		if effect.Kind != canonical.ToolKindWebSearch {
+		if effect.Kind != canonical.ToolKindWebSearch && effect.Kind != canonical.ToolKindDiscovery {
 			continue
 		}
-		if effect.ResultIndex < 0 {
-			return nil, nil, canonical.NotImplemented("Chat Completions cannot project unresolved web-search history")
-		}
 		drop[effect.CallIndex] = struct{}{}
-		drop[effect.ResultIndex] = struct{}{}
+		if effect.ResultIndex >= 0 {
+			drop[effect.ResultIndex] = struct{}{}
+		}
 		changes = append(changes, compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(uint32(effect.CallIndex))))
 	}
 	projected := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
@@ -69,6 +59,24 @@ func projectChatCompletionsRequestWebSearchLifecycles(items []canonical.Canonica
 		projected = append(projected, item)
 	}
 	return projected, changes, nil
+}
+
+func chatCompletionsOmitsProviderEffect(item canonical.CanonicalItem) bool {
+	if call, ok := item.ToolCall(); ok {
+		if call.Tool().Kind() == canonical.ToolKindWebSearch {
+			return true
+		}
+		executor, specified := call.DiscoveryExecutor()
+		return specified && executor == canonical.DiscoveryExecutorProvider
+	}
+	if result, ok := item.ToolResult(); ok {
+		_, webSearch := result.WebSearch()
+		return webSearch
+	}
+	if result, ok := item.ToolDiscoveryResult(); ok {
+		return result.Executor() == canonical.DiscoveryExecutorProvider
+	}
+	return false
 }
 
 func chatCompletionsRequestCitationDropDecisions(itemOrdinal uint32, item canonical.CanonicalItem) []compat.Change {

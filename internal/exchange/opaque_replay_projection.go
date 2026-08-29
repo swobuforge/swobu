@@ -11,7 +11,7 @@ import (
 // target generation. Ineligible opaque replay is omitted; if readable reasoning
 // parts exist, they are preserved. If the reasoning item was opaque-only, it
 // is removed entirely.
-func projectOpaqueReplayForTarget(request canonical.CanonicalRequest, targetID string, targetVersion uint64) (canonical.CanonicalRequest, []compat.Change, error) {
+func projectOpaqueReplayForTarget(request canonical.CanonicalRequest, targetID string, targetVersion uint64) (canonical.CanonicalRequest, bool, []compat.Change, error) {
 	items := request.Items()
 	projectedItems := make([]canonical.CanonicalItem, 0, len(items))
 	var changes []compat.Change
@@ -43,7 +43,7 @@ func projectOpaqueReplayForTarget(request canonical.CanonicalRequest, targetID s
 		if len(reasoning.Parts()) > 0 {
 			strippedItem, err := canonical.NewReasoningItem(reasoning.Parts(), canonical.OpaqueThinking{})
 			if err != nil {
-				return canonical.CanonicalRequest{}, nil, err
+				return canonical.CanonicalRequest{}, false, nil, err
 			}
 			projectedItems = append(projectedItems, strippedItem)
 		}
@@ -51,7 +51,7 @@ func projectOpaqueReplayForTarget(request canonical.CanonicalRequest, targetID s
 	}
 
 	if !changed {
-		return request, nil, nil
+		return request, false, nil, nil
 	}
-	return request.WithItems(projectedItems), changes, nil
+	return request.WithItems(projectedItems), true, changes, nil
 }

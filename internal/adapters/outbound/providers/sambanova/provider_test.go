@@ -158,7 +158,7 @@ func TestMessagesThinkingOnlyOmitsDocumentedUnsupportedForms(t *testing.T) {
 				t.Fatalf("unrelated fields changed: %#v", payload)
 			}
 			if tc.wantChange {
-				if len(changes) != 1 || changes[0].Capability != canonical.RequestReasoning || changes[0].Kind != compat.Approximation || changes[0].Preserved != canonical.RequestReasoning {
+				if len(changes) != 1 || changes[0].Capability != canonical.RequestReasoning || changes[0].Kind != compat.Approximation {
 					t.Fatalf("changes = %#v", changes)
 				}
 			} else if len(changes) != 0 {

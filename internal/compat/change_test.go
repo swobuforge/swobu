@@ -16,7 +16,6 @@ func TestExactLoweringIsEmptyChange(t *testing.T) {
 func TestChangeValidation(t *testing.T) {
 	approximation := NewApproximation(
 		canonical.RequestItemsMessageImageDetail,
-		canonical.RequestItemsMessageImage,
 		canonical.RequestPartOccurrence(canonical.RequestPartRef{Item: 1, Part: 2}),
 	)
 	if err := approximation.Validate(); err != nil {
@@ -29,7 +28,10 @@ func TestChangeValidation(t *testing.T) {
 	if err := omission.Validate(); err != nil {
 		t.Fatalf("omission validation: %v", err)
 	}
-	if err := ValidateChanges([]Change{{Capability: canonical.RequestModel, Kind: Approximation}}); err == nil {
-		t.Fatal("invalid approximation was accepted")
+	if err := ValidateChanges([]Change{{Kind: Approximation}}); err == nil {
+		t.Fatal("empty approximation capability was accepted")
+	}
+	if err := ValidateChanges([]Change{{Capability: canonical.RequestModel, Kind: Kind(99)}}); err == nil {
+		t.Fatal("unknown change kind was accepted")
 	}
 }

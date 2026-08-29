@@ -48,7 +48,6 @@ type ProviderRegistry struct {
 	manifests   map[profile.ProviderID]profile.Profile
 	discoveries map[profile.ProviderID]providersruntime.Discovery
 	backends    map[profile.ProviderID]provider.BackendResolver
-	support     map[profile.ProviderID]provider.TargetSupportResolver
 }
 
 // NewProviderRegistry explicitly constructs the fixed provider set. Provider
@@ -115,9 +114,8 @@ func newProviderRegistry(manifests []profile.Profile, runtimes []providersruntim
 	}
 	discoveryByID := make(map[profile.ProviderID]providersruntime.Discovery, len(runtimes))
 	backendByID := make(map[profile.ProviderID]provider.BackendResolver, len(runtimes))
-	supportByID := make(map[profile.ProviderID]provider.TargetSupportResolver, len(runtimes))
 	for _, runtime := range runtimes {
-		if runtime.ProviderID == "" || runtime.Discovery == nil || runtime.BackendResolver == nil || runtime.TargetSupport == nil {
+		if runtime.ProviderID == "" || runtime.Discovery == nil || runtime.BackendResolver == nil {
 			return ProviderRegistry{}, fmt.Errorf("providers: runtime bundle is incomplete")
 		}
 		if _, exists := backendByID[runtime.ProviderID]; exists {
@@ -125,10 +123,9 @@ func newProviderRegistry(manifests []profile.Profile, runtimes []providersruntim
 		}
 		discoveryByID[runtime.ProviderID] = runtime.Discovery
 		backendByID[runtime.ProviderID] = runtime.BackendResolver
-		supportByID[runtime.ProviderID] = runtime.TargetSupport
 	}
 	for providerID := range manifestByID {
-		if backendByID[providerID] == nil || discoveryByID[providerID] == nil || supportByID[providerID] == nil {
+		if backendByID[providerID] == nil || discoveryByID[providerID] == nil {
 			return ProviderRegistry{}, fmt.Errorf("providers: missing runtime for provider id %q", providerID)
 		}
 	}
@@ -141,7 +138,6 @@ func newProviderRegistry(manifests []profile.Profile, runtimes []providersruntim
 		manifests:   cloneManifestRegistry(manifestByID),
 		discoveries: cloneDiscoveryRegistry(discoveryByID),
 		backends:    cloneBackendRegistry(backendByID),
-		support:     cloneTargetSupportRegistry(supportByID),
 	}, nil
 }
 
@@ -164,20 +160,6 @@ func (r ProviderRegistry) ResolveBackend(target provider.TargetSnapshot) (provid
 		return provider.Backend{}, canonical.InternalError("provider backend target does not match selected target")
 	}
 	return backend, nil
-}
-
-// ResolveTargetSupport dispatches exact-target knowledge to the provider-owned
-// runtime facet. The registry contains no capability matrix of its own.
-func (r ProviderRegistry) ResolveTargetSupport(target provider.TargetSnapshot) provider.TargetSupport {
-	providerID, err := providerIDFromTarget(target.ProviderID())
-	if err != nil {
-		return provider.TargetSupport{}
-	}
-	resolver, ok := r.TargetSupportResolver(providerID)
-	if !ok {
-		return provider.TargetSupport{}
-	}
-	return resolver.ResolveTargetSupport(target)
 }
 
 func (r ProviderRegistry) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {
@@ -216,17 +198,6 @@ func (r ProviderRegistry) BackendResolver(providerID profile.ProviderID) (provid
 		return nil, false
 	}
 	resolver, ok := r.backends[providerID]
-	if !ok || resolver == nil {
-		return nil, false
-	}
-	return resolver, true
-}
-
-func (r ProviderRegistry) TargetSupportResolver(providerID profile.ProviderID) (provider.TargetSupportResolver, bool) {
-	if r.support == nil {
-		return nil, false
-	}
-	resolver, ok := r.support[providerID]
 	if !ok || resolver == nil {
 		return nil, false
 	}
@@ -274,17 +245,5 @@ func cloneBackendRegistry(src map[profile.ProviderID]provider.BackendResolver) m
 	return out
 }
 
-func cloneTargetSupportRegistry(src map[profile.ProviderID]provider.TargetSupportResolver) map[profile.ProviderID]provider.TargetSupportResolver {
-	if len(src) == 0 {
-		return map[profile.ProviderID]provider.TargetSupportResolver{}
-	}
-	out := make(map[profile.ProviderID]provider.TargetSupportResolver, len(src))
-	for providerID, resolver := range src {
-		out[providerID] = resolver
-	}
-	return out
-}
-
 var _ provider.BackendResolver = ProviderRegistry{}
-var _ provider.TargetSupportResolver = ProviderRegistry{}
 var _ provider.Discovery = ProviderRegistry{}

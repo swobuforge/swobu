@@ -53,10 +53,6 @@ func (r imageIncidentRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 	}, nil
 }
 
-func (imageIncidentRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
-
 func TestResponsesImageIncidentCallsChatWithSyntheticImageOnce(t *testing.T) {
 	transport := &imageIncidentTransport{}
 	handler := imageIncidentHandler(t, transport)

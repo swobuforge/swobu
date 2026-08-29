@@ -14,7 +14,7 @@ import (
 // ChatReplayScope owns the exact OpenRouter Chat opaque reasoning replay dialect.
 const ChatReplayScope canonical.ProviderChatReplayScope = "openrouter-chat"
 
-func applyOpenRouterReasoning(req canonical.CanonicalRequest, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
+func applyOpenRouterReasoning(req canonical.CanonicalRequest, target protocolcodec.ReasoningTargetDialect, changeLog *[]compat.Change, exchangeID string) (map[string]any, error) {
 	out := map[string]any{}
 	effort, effortSet := req.Controls().Effort.Get()
 	if compute, set := req.Reasoning().ComputeField().Get(); set {
@@ -24,7 +24,9 @@ func applyOpenRouterReasoning(req canonical.CanonicalRequest, changeLog *[]compa
 				*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestControlsEffort, canonical.Occurrence{}))
 				effortSet = false
 			}
-			out["enabled"] = false
+			if target.ProjectDisabled(changeLog) {
+				out["enabled"] = false
+			}
 		case canonical.ReasoningAutomatic:
 			out["enabled"] = true
 		case canonical.ReasoningBudget:
@@ -35,7 +37,7 @@ func applyOpenRouterReasoning(req canonical.CanonicalRequest, changeLog *[]compa
 		}
 	}
 	if effortSet {
-		out["effort"] = string(effort)
+		out["effort"] = string(target.ProjectEffort(effort, changeLog))
 	}
 	if disclosure, set := req.Reasoning().DisclosureField().Get(); set {
 		// Keep backend capture independent whenever this request may open a tool

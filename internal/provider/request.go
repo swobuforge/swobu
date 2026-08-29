@@ -42,9 +42,9 @@ type Request struct {
 	// persistence policy.
 	CacheLocality cachelocality.Key
 	Canonical     canonical.CanonicalRequest
-	// TargetSupport is the immutable knowledge snapshot resolved for this exact
-	// attempt. Feature owners decide how Unknown affects their own behavior.
-	TargetSupport   TargetSupport
+	// TargetFacts is one attempt-private empirical dialect reader. Codecs call
+	// only the typed getter at a branch they execute; nil reads as preferred.
+	TargetFacts     *TargetFacts
 	PreviousHistory *PreviousHistory
 	EncodeContext   EncodeContext
 	Delivery        delivery.Delivery

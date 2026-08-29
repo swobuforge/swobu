@@ -70,7 +70,7 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat, changeLog *[]comp
 		return nil, nil
 	case canonical.OutputFormatJSONSchema:
 		if !format.Strict && changeLog != nil {
-			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestOutputFormat, canonical.RequestOutputFormat, canonical.Occurrence{}))
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{}))
 		}
 		dto := messagesNativeOutputFormatDTO{
 			Type:   "json_schema",
@@ -101,7 +101,6 @@ func decodeMessagesNativeOutputFormat(format *messagesNativeOutputFormatDTO, cha
 		*changeLog = append(*changeLog, compat.Change{
 			Capability: canonical.RequestOutputFormat,
 			Kind:       compat.Approximation,
-			Preserved:  canonical.RequestOutputFormat,
 		})
 	}
 	return canonical.NewOutputFormat(canonical.OutputFormatParams{

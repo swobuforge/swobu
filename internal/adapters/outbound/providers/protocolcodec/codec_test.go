@@ -3,6 +3,7 @@ package protocolcodec
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -116,6 +117,278 @@ func TestResponsesCodecUsesSharedOfficialToolLowering(t *testing.T) {
 	if len(changes) != 1 || changes[0].Capability != canonical.RequestTools {
 		t.Fatalf("flat Responses changes = %#v", changes)
 	}
+}
+
+func TestParallelToolCallsFalseProjectionUsesAttemptFactAtEmission(t *testing.T) {
+	tool := canonicaltest.MustFunctionTool(
+		canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"),
+		"Search", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool](),
+	)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, tool),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "search"),
+		},
+		ToolCallBatch: canonical.Specify(canonical.NewToolCallBatchPolicy(canonical.ToolCallBatchAtMostOne)),
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol), func(t *testing.T) {
+			encode := func(known bool, value bool) (map[string]any, []compat.Change, map[provider.TargetFact]bool) {
+				facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+					if fact != provider.AcceptsParallelToolCallsFalse {
+						t.Fatalf("unexpected fact read: %v", fact)
+					}
+					return value, known
+				})
+				document, changes, encodeErr := (Codec{Protocol: protocol}).Encode(provider.Request{
+					Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery(), TargetFacts: facts,
+				})
+				if encodeErr != nil {
+					t.Fatal(encodeErr)
+				}
+				var payload map[string]any
+				if unmarshalErr := json.Unmarshal(document.RawBytes(), &payload); unmarshalErr != nil {
+					t.Fatal(unmarshalErr)
+				}
+				return payload, changes, facts.Reads()
+			}
+
+			unknown, unknownChanges, unknownReads := encode(false, false)
+			accepted, acceptedChanges, acceptedReads := encode(true, true)
+			if !bytes.Equal(mustJSON(t, unknown), mustJSON(t, accepted)) {
+				t.Fatalf("unknown projection = %#v, known-true projection = %#v", unknown, accepted)
+			}
+			if unknown["parallel_tool_calls"] != false || len(unknownChanges) != 0 || len(acceptedChanges) != 0 {
+				t.Fatalf("preferred projection=%#v unknown changes=%#v accepted changes=%#v", unknown, unknownChanges, acceptedChanges)
+			}
+			if !unknownReads[provider.AcceptsParallelToolCallsFalse] || !acceptedReads[provider.AcceptsParallelToolCallsFalse] {
+				t.Fatalf("preferred reads: unknown=%#v accepted=%#v", unknownReads, acceptedReads)
+			}
+
+			fallback, fallbackChanges, fallbackReads := encode(true, false)
+			if _, exists := fallback["parallel_tool_calls"]; exists {
+				t.Fatalf("fallback projection retained parallel_tool_calls: %#v", fallback)
+			}
+			wantChange := compat.NewOmission(canonical.RequestToolCallBatch, canonical.Occurrence{})
+			if len(fallbackChanges) != 1 || fallbackChanges[0] != wantChange {
+				t.Fatalf("fallback changes = %#v, want %#v", fallbackChanges, wantChange)
+			}
+			if len(fallbackReads) != 1 || fallbackReads[provider.AcceptsParallelToolCallsFalse] {
+				t.Fatalf("fallback reads = %#v", fallbackReads)
+			}
+		})
+	}
+}
+
+func TestMaxCompletionTokensProjectionUsesFactOnlyForPreferredCarrier(t *testing.T) {
+	maxTokens := 64
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: &maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:    canonical.Specify("model"),
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Controls: controls,
+	})
+
+	t.Run("known false falls back exactly", func(t *testing.T) {
+		facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+			if fact != provider.AcceptsMaxCompletionTokens {
+				t.Fatalf("unexpected fact read: %v", fact)
+			}
+			return false, true
+		})
+		document, changes, encodeErr := (Codec{
+			Protocol:    protocolkind.ChatCompletions,
+			ChatDialect: ChatDialect{UseMaxCompletionTokens: true},
+		}).Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts})
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		var payload map[string]any
+		if unmarshalErr := json.Unmarshal(document.RawBytes(), &payload); unmarshalErr != nil {
+			t.Fatal(unmarshalErr)
+		}
+		if _, exists := payload["max_completion_tokens"]; exists || payload["max_tokens"] != float64(maxTokens) {
+			t.Fatalf("fallback projection = %#v", payload)
+		}
+		if len(changes) != 0 || len(facts.Reads()) != 1 || facts.Reads()[provider.AcceptsMaxCompletionTokens] {
+			t.Fatalf("changes=%#v reads=%#v", changes, facts.Reads())
+		}
+	})
+
+	t.Run("static max tokens grammar does not read fact", func(t *testing.T) {
+		facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+			t.Fatalf("static grammar read fact: %v", fact)
+			return false, false
+		})
+		document, changes, encodeErr := (Codec{Protocol: protocolkind.ChatCompletions}).Encode(provider.Request{
+			Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts,
+		})
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if !bytes.Contains(document.RawBytes(), []byte(`"max_tokens":64`)) || len(changes) != 0 || len(facts.Reads()) != 0 {
+			t.Fatalf("document=%s changes=%#v reads=%#v", document.RawBytes(), changes, facts.Reads())
+		}
+	})
+}
+
+func TestOrdinalReasoningFactsSelectOnlyExecutedProjection(t *testing.T) {
+	encode := func(t *testing.T, protocol protocolkind.ProtocolKind, request canonical.CanonicalRequest, rejected provider.TargetFact) (map[string]any, []compat.Change, map[provider.TargetFact]bool) {
+		t.Helper()
+		facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+			if fact != rejected {
+				t.Fatalf("unexpected fact read: %v", fact)
+			}
+			return false, true
+		})
+		document, changes, err := (Codec{Protocol: protocol}).Encode(provider.Request{
+			Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload, changes, facts.Reads()
+	}
+
+	max := canonical.InferenceEffortMax
+	maxControls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &max})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Controls: maxControls,
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+	disabledControls, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewDisabledReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledRequest := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Reasoning: disabledControls,
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+
+	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
+		t.Run(string(protocol)+" max", func(t *testing.T) {
+			payload, changes, reads := encode(t, protocol, maxRequest, provider.AcceptsReasoningEffortMax)
+			got := payload["reasoning_effort"]
+			if protocol == protocolkind.Responses {
+				reasoning, _ := payload["reasoning"].(map[string]any)
+				got = reasoning["effort"]
+			}
+			want := compat.NewApproximation(canonical.RequestControlsEffort, canonical.Occurrence{})
+			if got != "xhigh" || len(changes) != 1 || changes[0] != want || len(reads) != 1 || reads[provider.AcceptsReasoningEffortMax] {
+				t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+			}
+		})
+		t.Run(string(protocol)+" disabled", func(t *testing.T) {
+			payload, changes, reads := encode(t, protocol, disabledRequest, provider.AcceptsReasoningDisabled)
+			if _, present := payload["reasoning_effort"]; present {
+				t.Fatalf("disabled carrier retained: %#v", payload)
+			}
+			if reasoning, present := payload["reasoning"].(map[string]any); present {
+				if _, effortPresent := reasoning["effort"]; effortPresent {
+					t.Fatalf("disabled effort retained: %#v", payload)
+				}
+			}
+			want := compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{})
+			if len(changes) != 1 || changes[0] != want || len(reads) != 1 || reads[provider.AcceptsReasoningDisabled] {
+				t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+			}
+		})
+	}
+}
+
+func TestResponsesFunctionOutputArrayFactSelectsExactStringOrImageRehome(t *testing.T) {
+	encode := func(t *testing.T, parts []canonical.ToolResultPart) (map[string]any, []compat.Change, map[provider.TargetFact]bool) {
+		t.Helper()
+		callID, _ := canonical.NewToolCallID("call_result")
+		key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "result_tool")
+		declarations := canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(key, "", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]()))
+		call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{}`)))
+		result, err := canonical.NewToolResultItem(callID, parts, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+			if fact != provider.AcceptsFunctionCallOutputArray {
+				t.Fatalf("unexpected fact read: %v", fact)
+			}
+			return false, true
+		})
+		request := canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations, call, result},
+		})
+		names, _, err := provider.BuildAttemptToolNames(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, changes, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+			Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts, ToolNames: names,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload, changes, facts.Reads()
+	}
+
+	t.Run("text is exact string", func(t *testing.T) {
+		payload, changes, reads := encode(t, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")})
+		input := payload["input"].([]any)
+		output := input[1].(map[string]any)
+		if output["call_id"] != "call_result" || output["output"] != "done" || len(changes) != 0 || len(reads) != 1 || reads[provider.AcceptsFunctionCallOutputArray] {
+			t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+		}
+	})
+
+	t.Run("multimodal preserves correlation and model-visible image", func(t *testing.T) {
+		image, err := canonical.NewURLImage("https://example.test/result.png", canonical.Unspecified[canonical.ImageDetail]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, changes, reads := encode(t, []canonical.ToolResultPart{
+			canonical.NewTextToolResultPart("caption"), canonical.NewImageToolResultPart(image),
+		})
+		input := payload["input"].([]any)
+		output := input[1].(map[string]any)
+		message := input[2].(map[string]any)
+		content := message["content"].([]any)
+		wireImage := content[0].(map[string]any)
+		want := compat.NewApproximation(canonical.RequestItemsToolResultImage, canonical.Occurrence{})
+		if output["call_id"] != "call_result" || output["output"] != "caption" ||
+			message["role"] != "user" || wireImage["image_url"] != "https://example.test/result.png" ||
+			len(changes) != 1 || changes[0] != want || len(reads) != 1 || reads[provider.AcceptsFunctionCallOutputArray] {
+			t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+		}
+	})
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func TestChatCompletionsWebSearchOmitsWithoutNativeLowering(t *testing.T) {
@@ -498,5 +771,62 @@ func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
 				t.Fatalf("expected error when Messages DecorateAttempt mutates reserved semantic field %q", field)
 			}
 		})
+	}
+}
+
+func TestResponsesCustomAsFunctionUsesOneEmittedCallableForDeclarationHistoryAndPolicy(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell")
+	tool := canonicaltest.MustCustomTool(key, "Run shell text", canonical.EmptyToolFormat())
+	declarations := canonicaltest.ToolDeclarations(t, tool)
+	call := canonicaltest.ToolCall(t, "call_1", key, canonical.NewTextToolInput("echo exact"))
+	callValue, _ := call.ToolCall()
+	result, err := canonical.NewToolResultItem(
+		callValue.CallID(),
+		[]canonical.ToolResultPart{canonical.NewTextToolResultPart("done")},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := canonical.NewToolPolicy(canonical.ToolPolicySpecific, &key)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{declarations, call, result}, ToolPolicy: canonical.Specify(policy),
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, changes, err := (Codec{
+		Protocol:         protocolkind.Responses,
+		ResponsesDialect: ResponsesDialect{LowerTool: ResponsesCustomAsFunction()},
+	}).Encode(provider.Request{
+		Canonical: request, Delivery: delivery.BufferedDelivery(), ToolNames: names,
+		TargetFacts: provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+			if fact == provider.AcceptsFunctionCallOutputArray {
+				return false, true
+			}
+			return true, false
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("plaintext wrapper changes = %#v, want exact", changes)
+	}
+	wire := string(document.RawBytes())
+	for _, want := range []string{
+		`"tools":[{"type":"function","name":"shell"`,
+		`"parameters":{"additionalProperties":false,"properties":{"input":{"type":"string"}},"required":["input"],"type":"object"}`,
+		`"tool_choice":{"name":"shell","type":"function"}`,
+		`"type":"function_call","call_id":"call_1","name":"shell","arguments":"{\"input\":\"echo exact\"}"`,
+		`"type":"function_call_output","call_id":"call_1","output":"done"`,
+	} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("wrapped custom request = %s, want %s", wire, want)
+		}
+	}
+	if strings.Contains(wire, "custom_tool_call") || strings.Contains(wire, `"type":"custom"`) {
+		t.Fatalf("wrapped custom request leaked native Custom syntax: %s", wire)
 	}
 }

@@ -121,7 +121,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ExchangeID:      requestID,
 	})
 	if err != nil {
-		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, err)
 		deliveryResult := exchangeFailureDeliveryResult(err)
 		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
@@ -136,7 +136,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deliveryResult := writeSuccessResponse(r.Context(), writer, requestID, family, out)
 	if deliveryResult.Kind != delivery.Succeeded {
 		err := deliveryResult.Err
-		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, err)
+		logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, err)
 		if deliveryResult.Kind == delivery.ClientCancelled {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
@@ -158,7 +158,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
-	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, nil)
+	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, nil)
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 }
 
@@ -269,6 +269,7 @@ func logRequestOutcome(
 	family canonical.ClientFamily,
 	normalizedPath canonical.NormalizedPath,
 	targetID string,
+	attemptCount int,
 	err error,
 ) {
 	result := "success"
@@ -319,7 +320,25 @@ func logRequestOutcome(
 	if errorCode != "" {
 		attrs = append(attrs, "error_code", errorCode)
 	}
-	slog.Debug("protocol request outcome", attrs...)
+	attrs = append(attrs, "attempt_count", attemptCount)
+	level := slog.LevelDebug
+	if err != nil && !errors.Is(err, context.Canceled) {
+		var backendErr canonical.BackendError
+		if errors.As(err, &backendErr) || errorCode != string(canonical.ErrorCodeInternal) {
+			level = slog.LevelWarn
+		} else {
+			level = slog.LevelError
+		}
+	}
+	slog.LogAttrs(context.Background(), level, "protocol request outcome", anyAttrs(attrs)...)
+}
+
+func anyAttrs(values []any) []slog.Attr {
+	attrs := make([]slog.Attr, 0, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		attrs = append(attrs, slog.Any(values[i].(string), values[i+1]))
+	}
+	return attrs
 }
 
 func statusCodeForExchangeError(err error) int {

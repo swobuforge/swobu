@@ -6,10 +6,11 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestChatCompletionsOmitsUnsupportedLiveDiscoveryCapability(t *testing.T) {
+func TestChatCompletionsEagerlyMaterializesProviderOwnedDiscovery(t *testing.T) {
 	discovery, err := canonical.NewToolDiscoveryTool(
 		"find a tool",
 		canonicaltest.Schema(t, `{"type":"object"}`),
@@ -18,23 +19,75 @@ func TestChatCompletionsOmitsUnsupportedLiveDiscoveryCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	loaded := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"), "weather", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, discovery, loaded),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "find an appropriate tool"),
+		},
+	})
+	var changes []compat.Change
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Tools) != 1 || document.Tools[0].Function == nil || document.Tools[0].Function.Name != "weather" {
+		t.Fatalf("tools=%#v, want eager weather function only", document.Tools)
+	}
+	if len(changes) != 1 || changes[0].Capability != canonical.RequestToolsVisibility || changes[0].Kind != compat.Approximation {
+		t.Fatalf("changes=%#v, want one visibility approximation", changes)
+	}
+}
+
+func TestChatCompletionsOmitsSettledProviderOwnedDiscoveryHistoryAtomically(t *testing.T) {
+	discovery, err := canonical.NewToolDiscoveryTool(
+		"find a tool",
+		canonicaltest.Schema(t, `{"type":"object"}`),
+		canonical.DiscoveryExecutorProvider,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID, _ := canonical.NewToolCallID("discovery_1")
+	input := canonical.NewJSONObjectToolInput(canonicaltest.Object(t, `{"query":"weather"}`))
+	call, err := canonical.NewToolDiscoveryCallItem(callID, input, canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "weather"), "weather", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())
+	result, err := canonical.NewToolDiscoveryResultItem(callID, canonicaltest.ToolSet(t, loaded), canonical.DiscoveryExecutorProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{
 			canonicaltest.ToolDeclarations(t, discovery),
 			canonicaltest.Message(t, canonical.MessageRoleUser, "find an appropriate tool"),
+			call,
+			result,
+			canonicaltest.Message(t, canonical.MessageRoleUser, "continue"),
 		},
 	})
 	var changes []compat.Change
-	document, err := CompileProviderRequestDocument(request, nil, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	names, _, err := provider.BuildAttemptToolNames(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Tools) != 0 {
-		t.Fatalf("unsupported discovery leaked into request: %#v", document.Tools)
+	document, err := CompileProviderRequestDocument(request, names, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(discovery.Key()))
-	if len(changes) != 1 || changes[0] != want {
-		t.Fatalf("changes = %#v, want %#v", changes, want)
+	if len(document.Messages) != 2 {
+		t.Fatalf("messages=%#v, want only user messages", document.Messages)
+	}
+	if len(changes) != 2 || changes[0].Capability != canonical.RequestItemsKind || changes[0].Kind != compat.Omission ||
+		changes[1].Capability != canonical.RequestToolsVisibility || changes[1].Kind != compat.Approximation {
+		t.Fatalf("changes=%#v, want atomic effect omission plus visibility approximation", changes)
 	}
 }

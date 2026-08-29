@@ -82,7 +82,6 @@ type RuntimeResolver interface {
 type ExecutionRuntime interface {
 	RuntimeResolver
 	provider.BackendResolver
-	provider.TargetSupportResolver
 }
 
 func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
@@ -99,13 +98,14 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
-			Runtime:         runtime,
-			TrafficEvidence: policies.TrafficEvidence,
-			CheckpointStore: policies.CheckpointStore,
-			ResponseIDs:     policies.ResponseIDs,
-			ImageFetcher:    policies.ImageFetcher,
-			PolicyResolver:  policyResolver,
-			TargetBackoff:   newTargetBackoffLedger(),
+			Runtime:          runtime,
+			TrafficEvidence:  policies.TrafficEvidence,
+			CheckpointStore:  policies.CheckpointStore,
+			ResponseIDs:      policies.ResponseIDs,
+			ImageFetcher:     policies.ImageFetcher,
+			PolicyResolver:   policyResolver,
+			TargetBackoff:    newTargetBackoffLedger(),
+			TargetExceptions: newTargetExceptions(),
 		},
 	}
 }
@@ -127,6 +127,9 @@ type RequestOutput struct {
 	Target          provider.TargetSnapshot
 	TrafficEvidence *TrafficEvidenceInput
 	Compatibility   *wire.ResponseCompletion
+	// AttemptCount is the authoritative number of issued provider commands.
+	// It lets the terminal HTTP log prove a rejected request never contacted a target.
+	AttemptCount int
 }
 
 // TrafficEvidenceInput is the immutable exchange fact set completed by the

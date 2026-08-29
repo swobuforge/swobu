@@ -120,6 +120,16 @@ func compileChatCompletionsTools(tools []canonical.ToolDeclaration, names wire.T
 		}
 		if _, function := tool.Function(); !function {
 			if _, custom := tool.Custom(); !custom {
+				if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorClient {
+					wireTool, err := encodeChatCompletionsDiscoveryTool(tool, discovery, names)
+					if err != nil {
+						return nil, nil, wire.LoweredToolSet{}, err
+					}
+					typed = append(typed, wireTool)
+					out = append(out, wireTool)
+					lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind(), FragmentCount: 1})
+					continue
+				}
 				if changeLog != nil {
 					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
 				}
@@ -182,6 +192,22 @@ func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, de
 		wireTool.Function.Parameters = parameters
 	}
 	return wireTool, nil
+}
+
+// encodeChatCompletionsDiscoveryTool lowers client-owned discovery through the
+// ordinary function grammar; the canonical result still owns tool-environment growth.
+func encodeChatCompletionsDiscoveryTool(declaration canonical.ToolDeclaration, discovery canonical.ToolDiscoveryTool, names wire.ToolNames) (ProviderRequestTool, error) {
+	name, err := wire.EncodeToolName(names, declaration.Key())
+	if err != nil {
+		return ProviderRequestTool{}, err
+	}
+	parameters, err := chatCompletionsToolParametersFromSchema(discovery.InputSchema())
+	if err != nil {
+		return ProviderRequestTool{}, err
+	}
+	return ProviderRequestTool{Type: "function", Function: &chatCompletionsToolDefinitionFunctionDTO{
+		Name: strings.TrimSpace(name), Description: strings.TrimSpace(discovery.Description()), Parameters: parameters,
+	}}, nil
 }
 
 func encodeChatCompletionsCustomTool(declaration canonical.ToolDeclaration, decl canonical.CustomTool, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -367,7 +393,7 @@ func encodeChatCompletionsToolChoice(policy canonical.ToolPolicy, lowered wire.L
 			return nil, nil
 		}
 		switch record.Kind {
-		case canonical.ToolKindFunction:
+		case canonical.ToolKindFunction, canonical.ToolKindDiscovery:
 			name, err := wire.EncodeToolName(names, record.Key)
 			if err != nil {
 				return nil, err

@@ -6,8 +6,8 @@ import (
 )
 
 // projectMessagesWebSearchLifecycles removes only completed call/result pairs
-// that Messages cannot express exactly. The leaf encoders remain strict so an
-// unresolved call still rejects and can drive ordinary target fallback.
+// that Messages cannot express exactly. Open effects are omitted at their call
+// occurrence; target spelling gaps never become execution-owned failures.
 func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature canonical.CapabilityPath) ([]canonical.CanonicalItem, []compat.Change, error) {
 	drop := map[int]struct{}{}
 	changes := make([]compat.Change, 0)
@@ -47,11 +47,10 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		if valid && search.Action == canonical.WebSearchActionSearch && len(search.Queries) == 1 {
 			continue
 		}
-		if effect.ResultIndex < 0 {
-			return nil, nil, canonical.NotImplemented("Messages cannot project unresolved canonical web-search history")
-		}
 		drop[effect.CallIndex] = struct{}{}
-		drop[effect.ResultIndex] = struct{}{}
+		if effect.ResultIndex >= 0 {
+			drop[effect.ResultIndex] = struct{}{}
+		}
 		occurrence := canonical.RequestItemOccurrence(uint32(effect.CallIndex))
 		if feature == canonical.ResponseItemsKind {
 			occurrence = canonical.ResponseItemOccurrence(uint32(effect.CallIndex))

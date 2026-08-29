@@ -48,10 +48,6 @@ func (r terminalProjectionRuntime) ResolveBackend(target provider.TargetSnapshot
 	}, nil
 }
 
-func (terminalProjectionRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
-
 func TestChatStreamingClientProjectsResponsesCompletedAsStop(t *testing.T) {
 	handler := terminalProjectionHandler(t, terminalProjectionTransport{})
 	request := httptest.NewRequest(http.MethodPost, "/c/personal/chat/completions", strings.NewReader(`{"model":"default","messages":[{"role":"user","content":"hello"}],"stream":true}`))

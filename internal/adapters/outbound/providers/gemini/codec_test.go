@@ -107,13 +107,42 @@ func TestCodecStatelesslyReplaysInteractionsThoughtFunctionCallAndResult(t *test
 		t.Fatalf("changes = %#v", changes)
 	}
 	wire := string(document.RawBytes())
-	for _, want := range []string{`"store":false`, `"type":"thought"`, `"signature":"thought-secret"`, `"type":"function_call"`, `"id":"call_lookup"`, `"arguments":{"q":"x"}`, `"type":"function_result"`, `"call_id":"call_lookup"`} {
+	for _, want := range []string{`"store":false`, `"type":"thought"`, `"signature":"thought-secret"`, `"type":"function_call"`, `"id":"call_lookup"`, `"arguments":{"q":"x"}`, `"type":"function_result"`, `"name":"lookup"`, `"call_id":"call_lookup"`} {
 		if !strings.Contains(wire, want) {
 			t.Fatalf("wire missing %s: %s", want, wire)
 		}
 	}
 	if strings.Contains(wire, "previous_interaction_id") {
 		t.Fatalf("stateless wire used native continuation: %s", wire)
+	}
+}
+
+func TestCodecOmitsHistoricalCustomEffectAtomically(t *testing.T) {
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell")
+	callID, _ := canonical.NewToolCallID("call_shell")
+	call := canonicaltest.ToolCall(t, callID.String(), key, canonical.NewTextToolInput("pwd"))
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("/workspace")}, false)
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gemini-model"),
+		Items: []canonical.CanonicalItem{call, result},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, changes, err := (codec{}).Encode(provider.Request{
+		Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantChange := compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(0))
+	if len(changes) != 1 || changes[0] != wantChange {
+		t.Fatalf("changes = %#v, want %#v", changes, wantChange)
+	}
+	wire := string(document.RawBytes())
+	if strings.Contains(wire, "call_shell") || strings.Contains(wire, "function_result") {
+		t.Fatalf("wire retained half of omitted custom effect: %s", wire)
 	}
 }
 
@@ -662,16 +691,22 @@ func TestCodecOmitsSettledPortableGoogleSearchHistory(t *testing.T) {
 		t.Fatalf("changes = %#v, want %#v", changes, wantChange)
 	}
 
-	_, _, err = (codec{}).Encode(provider.Request{
+	document, changes, err = (codec{}).Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("gemini-model"),
 			Items: []canonical.CanonicalItem{call, current},
 		}),
 		Delivery: providerDelivery,
 	})
-	var swobuErr canonical.Error
-	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("unsettled Search Encode error = %T %v, want NOT_IMPLEMENTED", err, err)
+	if err != nil {
+		t.Fatalf("unsettled Search Encode error = %v", err)
+	}
+	if strings.Contains(string(document.RawBytes()), "google_search_call") {
+		t.Fatalf("unsettled portable Search leaked into Gemini request: %s", document.RawBytes())
+	}
+	wantChange = compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(0))
+	if len(changes) != 1 || changes[0] != wantChange {
+		t.Fatalf("unsettled changes = %#v, want %#v", changes, wantChange)
 	}
 
 	exactCall, err := canonical.NewInteractionsWebSearchCall(canonical.WebSearchCall{
@@ -689,15 +724,21 @@ func TestCodecOmitsSettledPortableGoogleSearchHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, changes, err = (codec{}).Encode(provider.Request{
+	document, changes, err = (codec{}).Encode(provider.Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("gemini-model"),
 			Items: []canonical.CanonicalItem{exactCallItem, result, current},
 		}),
 		Delivery: providerDelivery,
 	})
-	if !errors.As(err, &swobuErr) || swobuErr.Code != canonical.ErrorCodeInternal || len(changes) != 0 {
-		t.Fatalf("partially exact Search Encode = (%#v, %T %v), want INTERNAL_ERROR", changes, err, err)
+	if err != nil {
+		t.Fatalf("partially exact Search Encode error = %v", err)
+	}
+	if strings.Contains(string(document.RawBytes()), "google_search_call") || strings.Contains(string(document.RawBytes()), "google_search_result") {
+		t.Fatalf("partially exact Search leaked into Gemini request: %s", document.RawBytes())
+	}
+	if len(changes) != 1 || changes[0] != wantChange {
+		t.Fatalf("partially exact changes = %#v, want %#v", changes, wantChange)
 	}
 }
 
@@ -716,15 +757,31 @@ func TestSettledPortableSearchProjectionFailsClosedAndPreservesOccurrences(t *te
 	}{
 		{name: "orphan result", items: []canonical.CanonicalItem{portableResult, current}, wantCode: canonical.ErrorCodeInternal},
 		{name: "duplicate result", items: []canonical.CanonicalItem{portableCall, portableResult, portableResult, current}, wantCode: canonical.ErrorCodeInternal},
-		{name: "unresolved call", items: []canonical.CanonicalItem{portableCall, current}, wantCode: canonical.ErrorCodeNotImplemented},
-		{name: "exact call portable result", items: []canonical.CanonicalItem{exactCall, portableResult, current}, wantCode: canonical.ErrorCodeInternal},
-		{name: "portable call exact result", items: []canonical.CanonicalItem{portableCall, exactResult, current}, wantCode: canonical.ErrorCodeInternal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := projectSettledPortableSearchHistory(canonical.NewCanonicalRequest(canonical.RequestParams{Items: tc.items}))
 			var swobuErr canonical.Error
 			if !errors.As(err, &swobuErr) || swobuErr.Code != tc.wantCode {
 				t.Fatalf("projection error = %T %v, want %s", err, err, tc.wantCode)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name  string
+		items []canonical.CanonicalItem
+	}{
+		{name: "unresolved call", items: []canonical.CanonicalItem{portableCall, current}},
+		{name: "exact call portable result", items: []canonical.CanonicalItem{exactCall, portableResult, current}},
+		{name: "portable call exact result", items: []canonical.CanonicalItem{portableCall, exactResult, current}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projected, changes, err := projectSettledPortableSearchHistory(canonical.NewCanonicalRequest(canonical.RequestParams{Items: tc.items}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(projected.Items()) != 1 || len(changes) != 1 || changes[0] != compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(0)) {
+				t.Fatalf("projection = (%#v, %#v), want current item plus call omission", projected.Items(), changes)
 			}
 		})
 	}
@@ -744,6 +801,40 @@ func TestSettledPortableSearchProjectionFailsClosedAndPreservesOccurrences(t *te
 	}
 	if len(projected.Items()) != 1 {
 		t.Fatalf("projected items = %#v, want current message only", projected.Items())
+	}
+}
+
+func TestGeminiFunctionResultProjectsImageContentWithLossEvidence(t *testing.T) {
+	image, err := canonical.NewURLImage("https://example.test/result.png", canonical.Specify(canonical.ImageDetailHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID, _ := canonical.NewToolCallID("call_image")
+	resultItem, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{
+		canonical.NewTextToolResultPart("before"),
+		canonical.NewImageToolResultPart(image),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := resultItem.ToolResult()
+	if !ok {
+		t.Fatal("tool result constructor returned another item kind")
+	}
+
+	step, changes, err := geminiFunctionResult(result, "inspect", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(step.Result) != 2 || step.Result[0].Text != "before" || step.Result[1].URI != "https://example.test/result.png" {
+		t.Fatalf("function result = %#v", step.Result)
+	}
+	want := []compat.Change{
+		compat.NewApproximation(canonical.RequestItemsToolResultImage, canonical.RequestItemOccurrence(3)),
+		compat.NewApproximation(canonical.RequestItemsToolResultImageDetail, canonical.RequestItemOccurrence(3)),
+	}
+	if !reflect.DeepEqual(changes, want) {
+		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
 }
 
@@ -897,9 +988,9 @@ func TestCodecRejectsUnrepresentableToolAndReplaySemanticsBeforeDispatch(t *test
 			}
 		})
 	}
-	document, _, err := (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gemini-model"), Items: []canonical.CanonicalItem{result}}), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
-	if err != nil || !strings.Contains(string(document.RawBytes()), `"type":"function_result"`) {
-		t.Fatalf("stateless function result = %s, %v", document.RawBytes(), err)
+	_, _, err = (codec{}).Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gemini-model"), Items: []canonical.CanonicalItem{result}}), Delivery: delivery.StreamingDelivery(delivery.FramingSSE)})
+	if err == nil || !strings.Contains(err.Error(), "orphan result") {
+		t.Fatalf("orphan function result error = %v", err)
 	}
 }
 
@@ -1167,7 +1258,7 @@ func mustGeminiBudgetReasoning(t *testing.T, tokens int) canonical.ReasoningCont
 func geminiEffort(value canonical.InferenceEffort) *canonical.InferenceEffort { return &value }
 
 func geminiReasoningApproximation() compat.Change {
-	return compat.NewApproximation(canonical.RequestReasoning, canonical.RequestControlsEffort, canonical.Occurrence{})
+	return compat.NewApproximation(canonical.RequestReasoning, canonical.Occurrence{})
 }
 
 func TestCodecRejectsNonSSEProviderDelivery(t *testing.T) {

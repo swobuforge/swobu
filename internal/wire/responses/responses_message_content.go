@@ -83,6 +83,32 @@ func decodeResponsesFunctionCallArguments(raw json.RawMessage) (canonical.JSONOb
 	return input, nil
 }
 
+func decodeResponsesCallableInput(key canonical.ToolKey, raw json.RawMessage) (canonical.ToolInput, error) {
+	object, err := decodeResponsesFunctionCallArguments(raw)
+	if err != nil {
+		if key.Kind() == canonical.ToolKindCustom {
+			return canonical.ToolInput{}, canonical.NewBackendError("responses", 0, "custom function wrapper arguments are invalid", "")
+		}
+		return canonical.ToolInput{}, err
+	}
+	if key.Kind() != canonical.ToolKindCustom {
+		return canonical.NewJSONObjectToolInput(object), nil
+	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(object.String()), &wrapper); err != nil || len(wrapper) != 1 {
+		return canonical.ToolInput{}, canonical.NewBackendError("responses", 0, "custom function wrapper arguments are invalid", "")
+	}
+	rawInput, ok := wrapper["input"]
+	if !ok {
+		return canonical.ToolInput{}, canonical.NewBackendError("responses", 0, "custom function wrapper arguments are invalid", "")
+	}
+	var input string
+	if err := json.Unmarshal(rawInput, &input); err != nil {
+		return canonical.ToolInput{}, canonical.NewBackendError("responses", 0, "custom function wrapper arguments are invalid", "")
+	}
+	return canonical.NewTextToolInput(input), nil
+}
+
 func appendResponsesOccurrenceChange(changeLog *[]compat.Change, exchangeID string, feature canonical.CapabilityPath, outcome compat.Kind, occurrence canonical.Occurrence) error {
 	if changeLog == nil {
 		return nil
@@ -91,9 +117,6 @@ func appendResponsesOccurrenceChange(changeLog *[]compat.Change, exchangeID stri
 		Capability: feature,
 		Occurrence: occurrence,
 		Kind:       outcome,
-	}
-	if outcome == compat.Approximation {
-		change.Preserved = feature
 	}
 	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil

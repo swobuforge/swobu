@@ -10,7 +10,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
-	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestDecodeResponsesToolPolicy_DefaultsBySurface(t *testing.T) {
@@ -236,11 +235,11 @@ func TestEncodeToolChoice_WiresExplicitModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			names := toolChoiceNames(t, tc.tools)
-			var lowered wire.LoweredToolSet
+			projection := responsesToolProjection{emitted: make(map[canonical.ToolKey][]ProviderRequestTool)}
 			if len(tc.tools) > 0 {
-				_, lowered, _ = compileResponsesTools(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
+				projection, _ = compileResponsesToolProjection(tc.tools, canonical.ToolVisibilityRefinements{}, names, nil, "", nil)
 			}
-			got, err := encodeToolChoice(tc.policy, lowered, names, nil, "")
+			got, err := encodeToolChoice(tc.policy, projection, names, nil, "")
 			if err != nil {
 				t.Fatalf("encodeToolChoice returned error: %v", err)
 			}
@@ -254,7 +253,7 @@ func TestEncodeToolChoice_RecordsPolicyLossWithoutProjectedTools(t *testing.T) {
 
 	webSearch := canonical.NewWebSearchDeclaration()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, webSearch)}})
-	_, lowered, err := compileResponsesTools([]canonical.ToolDeclaration{webSearch}, canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
+	projection, err := compileResponsesToolProjection([]canonical.ToolDeclaration{webSearch}, canonical.ToolVisibilityRefinements{}, testAttemptToolNames(request), nil, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +266,7 @@ func TestEncodeToolChoice_RecordsPolicyLossWithoutProjectedTools(t *testing.T) {
 		t.Run(string(policy.Mode), func(t *testing.T) {
 			t.Parallel()
 			var changes []compat.Change
-			choice, err := encodeToolChoice(policy, lowered, nil, &changes, "")
+			choice, err := encodeToolChoice(policy, projection, nil, &changes, "")
 			want := compat.NewOmission(canonical.RequestToolPolicy, canonical.Occurrence{})
 			if err != nil || choice != nil || len(changes) != 1 || changes[0] != want {
 				t.Fatalf("choice=%#v changes=%#v err=%v", choice, changes, err)

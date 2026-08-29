@@ -52,7 +52,6 @@ func NewRuntime(client *http.Client, credentials providersruntime.CredentialProv
 	return providersruntime.ProviderRuntimeBundle{
 		ProviderID:         profile.ProviderSpecAnthropic,
 		BackendResolver:    executor,
-		TargetSupport:      provider.TargetSupportFunc(provider.UnknownTargetSupport),
 		CredentialProvider: credentials,
 		Discovery:          executor,
 	}

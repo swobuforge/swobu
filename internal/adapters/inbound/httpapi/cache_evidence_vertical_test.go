@@ -39,10 +39,6 @@ func (r cacheEvidenceRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 	return provider.Backend{Target: target, Codec: protocolcodec.Codec{Protocol: target.ProtocolKind}, Transport: provider.BindTransport(target, r.transport.Send)}, nil
 }
 
-func (cacheEvidenceRuntime) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
-}
-
 func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) {
 	restoreLogger, logs := testDebugLogger()
 	defer restoreLogger()

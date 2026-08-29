@@ -114,7 +114,7 @@ func encodeMessagesReasoning(payload map[string]any, reasoning canonical.Reasoni
 		}
 		if omitAdaptiveThinking && (compute.Kind() == canonical.ReasoningAutomatic || compute.Kind() == canonical.ReasoningBudget) {
 			if changeLog != nil {
-				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestReasoning, canonical.RequestReasoning, canonical.Occurrence{}))
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestReasoning, canonical.Occurrence{}))
 			}
 			return nil
 		}

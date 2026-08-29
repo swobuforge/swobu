@@ -35,7 +35,7 @@ func TestAttemptToolNamesAreOrderIndependentAndReversible(t *testing.T) {
 		if len(one) > toolname.MaxLength || !toolname.Safe(one) {
 			t.Fatalf("unsafe wire name %q", one)
 		}
-		resolved, ok := first.CanonicalKey(key.Kind(), one)
+		resolved, ok := first.CanonicalKey(one)
 		if !ok || resolved != key {
 			t.Fatalf("reverse lookup = %q, %t", resolved, ok)
 		}
@@ -73,16 +73,15 @@ func TestAttemptToolNamesKeepSameNameAcrossCallableKindsDistinct(t *testing.T) {
 		t.Fatalf("cross-kind wire names collide at %q", functionName)
 	}
 	for _, test := range []struct {
-		kind canonical.ToolKind
 		name string
 		want canonical.ToolKey
 	}{
-		{kind: canonical.ToolKindFunction, name: functionName, want: function},
-		{kind: canonical.ToolKindCustom, name: customName, want: custom},
+		{name: functionName, want: function},
+		{name: customName, want: custom},
 	} {
-		got, ok := names.CanonicalKey(test.kind, test.name)
+		got, ok := names.CanonicalKey(test.name)
 		if !ok || got != test.want {
-			t.Fatalf("reverse lookup (%s, %q) = %q, %t", test.kind, test.name, got, ok)
+			t.Fatalf("reverse lookup %q = %q, %t", test.name, got, ok)
 		}
 	}
 }

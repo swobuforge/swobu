@@ -338,9 +338,6 @@ func appendChatOccurrenceChange(changeLog *[]compat.Change, exchangeID string, f
 		return nil
 	}
 	change := compat.Change{Capability: feature, Occurrence: occurrence, Kind: outcome}
-	if outcome == compat.Approximation {
-		change.Preserved = feature
-	}
 	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }

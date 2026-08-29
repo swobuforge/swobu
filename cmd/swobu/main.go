@@ -15,7 +15,10 @@ import (
 )
 
 func main() {
-	logging.ConfigureDefaultLogger(os.Stderr)
+	if err := logging.ConfigureDefault(os.Stderr); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "invalid logging configuration: %v\n", err)
+		os.Exit(2)
+	}
 
 	runner := &cli.Runner{
 		Stdout: os.Stdout,

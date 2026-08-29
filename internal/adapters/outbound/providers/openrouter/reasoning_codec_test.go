@@ -304,6 +304,32 @@ func TestOpenRouterDisabledReasoningOmitsRedundantEffort(t *testing.T) {
 	}
 }
 
+func TestOpenRouterDisabledReasoningUsesEmpiricalFallback(t *testing.T) {
+	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewDisabledReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"), Reasoning: reasoning,
+		Items: []canonical.CanonicalItem{messageItem(t, canonical.MessageRoleUser, "hello")},
+	})
+	facts := provider.NewTargetFacts(func(fact provider.TargetFact) (bool, bool) {
+		return false, fact == provider.AcceptsReasoningDisabled
+	})
+	document, changes, err := openRouterBackend(t, request.Model()).Codec.Encode(provider.Request{
+		Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := compat.NewOmission(canonical.RequestReasoning, canonical.Occurrence{})
+	if bytes.Contains(document.RawBytes(), []byte(`"enabled":false`)) || len(changes) != 1 || changes[0] != want || facts.Reads()[provider.AcceptsReasoningDisabled] {
+		t.Fatalf("document=%s changes=%#v reads=%#v", document.RawBytes(), changes, facts.Reads())
+	}
+}
+
 func TestOpenRouterDoesNotSerializeForeignProviderChatOpaqueThinking(t *testing.T) {
 	opaque, err := canonical.NewProviderChatOpaqueThinking("foreign-chat-replay", []byte(`[{"type":"reasoning.summary","summary":"foreign"}]`))
 	if err != nil {

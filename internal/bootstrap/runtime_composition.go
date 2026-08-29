@@ -13,15 +13,14 @@ import (
 // the daemon live path. It owns the one codec lookup surface and the one
 // provider lookup surface without introducing a registry layer.
 type daemonProviderModelCatalogComposition struct {
-	wire          codecresolver.RuntimeCodecResolver
-	providers     provider.BackendResolver
-	targetSupport provider.TargetSupportResolver
-	discovery     provider.Discovery
+	wire      codecresolver.RuntimeCodecResolver
+	providers provider.BackendResolver
+	discovery provider.Discovery
 }
 
-func newDaemonProviderModelCatalogComposition(wire codecresolver.RuntimeCodecResolver, providers provider.BackendResolver, targetSupport provider.TargetSupportResolver, discovery provider.Discovery) daemonProviderModelCatalogComposition {
+func newDaemonProviderModelCatalogComposition(wire codecresolver.RuntimeCodecResolver, providers provider.BackendResolver, discovery provider.Discovery) daemonProviderModelCatalogComposition {
 	return daemonProviderModelCatalogComposition{
-		wire: wire, providers: providers, targetSupport: targetSupport, discovery: discovery,
+		wire: wire, providers: providers, discovery: discovery,
 	}
 }
 
@@ -31,10 +30,6 @@ func (r daemonProviderModelCatalogComposition) ClientCodec(f canonical.ClientFam
 
 func (r daemonProviderModelCatalogComposition) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
 	return r.providers.ResolveBackend(target)
-}
-
-func (r daemonProviderModelCatalogComposition) ResolveTargetSupport(target provider.TargetSnapshot) provider.TargetSupport {
-	return r.targetSupport.ResolveTargetSupport(target)
 }
 
 func (r daemonProviderModelCatalogComposition) ProbeTarget(ctx context.Context, target provider.TargetSnapshot) (provider.TargetProbeResult, error) {

@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const MaxLength = 64
+// MaxLength stays below the common 64-character declaration ceiling because
+// Gemini can normalize a generated name at that exact boundary when it emits
+// a function call, breaking exact reverse provenance.
+const MaxLength = 63
 
 const GeneratedPrefix = "s__"
 

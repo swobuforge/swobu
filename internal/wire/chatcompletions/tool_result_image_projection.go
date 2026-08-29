@@ -202,7 +202,7 @@ func encodeChatToolResultContent(result canonical.ToolResultItem, itemIndex int)
 		}
 		image, ok := part.Image()
 		if !ok {
-			return "", nil, canonical.NotImplemented("Chat Completions cannot project this canonical tool-result content kind")
+			return "", nil, canonical.InternalError("canonical tool-result content kind is invalid")
 		}
 		occurrence := chatToolResultImageOccurrence{
 			image: image, callID: result.CallID(), item: itemIndex, part: partIndex,
@@ -263,7 +263,7 @@ func encodeChatImage(
 }
 
 func unsupportedToolResultImage(occurrence chatToolResultImageOccurrence, reason string) error {
-	return canonical.NotImplemented(fmt.Sprintf(
+	return canonical.InternalError(fmt.Sprintf(
 		"Chat Completions cannot preserve canonical tool-result image at request item %d part %d for call %q: %s",
 		occurrence.item,
 		occurrence.part,

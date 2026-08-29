@@ -104,16 +104,12 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 	if snapshot.State != wire.CompletionCompleted {
 		t.Fatalf("compatibility completion state = %v, want completed", snapshot.State)
 	}
-	if snapshot.Compatibility.Classification != compat.ClassificationApproximate {
-		t.Fatalf("compatibility = %#v, want approximate", snapshot.Compatibility)
+	if len(snapshot.Changes) != 1 {
+		t.Fatalf("compatibility changes = %#v, want exactly one", snapshot.Changes)
 	}
-	if len(snapshot.Compatibility.Changes) != 1 {
-		t.Fatalf("compatibility changes = %#v, want exactly one", snapshot.Compatibility.Changes)
-	}
-	change := snapshot.Compatibility.Changes[0]
+	change := snapshot.Changes[0]
 	if change.Capability != canonical.RequestReasoning ||
-		change.Kind != compat.Approximation ||
-		change.Preserved != canonical.RequestControlsEffort {
+		change.Kind != compat.Approximation {
 		t.Fatalf("compatibility change = %#v, want reasoning-to-effort approximation", change)
 	}
 }
@@ -166,8 +162,8 @@ func TestResponsesExplicitEffortCompletesThroughZAIExactly(t *testing.T) {
 		t.Fatal("winning exchange compatibility is absent")
 	}
 	snapshot := out.Compatibility.Snapshot()
-	if snapshot.State != wire.CompletionCompleted || snapshot.Compatibility.Classification != compat.ClassificationExact {
-		t.Fatalf("compatibility = %#v state=%v, want exact completed", snapshot.Compatibility, snapshot.State)
+	if snapshot.State != wire.CompletionCompleted || len(snapshot.Changes) != 0 {
+		t.Fatalf("compatibility changes = %#v state=%v, want exact completed", snapshot.Changes, snapshot.State)
 	}
 }
 

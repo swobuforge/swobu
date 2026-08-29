@@ -4,62 +4,80 @@ import (
 	"bytes"
 	"log"
 	"log/slog"
-	"regexp"
 	"strings"
 	"testing"
 )
 
-func TestCommonLineHandler_Format(t *testing.T) {
+func TestNewHandler_RedirectedOutputUsesStandardTextHandler(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	logger := slog.New(NewCommonLineHandler(&out, slog.LevelInfo))
-	logger.Info("daemon lifecycle",
-		"component", "daemon",
-		"event", "process_start",
-		"config_path", "/tmp/swobu.yaml",
-	)
+	logger := slog.New(newHandler(&out, slog.LevelDebug, false))
+	logger.Debug("debug probe", "component", "daemon")
 
-	line := strings.TrimSpace(out.String()) // swobu:io-string source=domain
-	if line == "" {
-		t.Fatal("expected one log line")
+	text := out.String()
+	if strings.Contains(text, "\x1b[") {
+		t.Fatalf("redirected logs must not contain ANSI: %q", text)
 	}
-	pattern := `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z INFO\s+\S+:\d+ component=daemon event=process_start config_path=/tmp/swobu\.yaml$`
-	if !regexp.MustCompile(pattern).MatchString(line) {
-		t.Fatalf("line does not match canonical format:\n%s", line)
+	for _, want := range []string{"level=DEBUG", "source=", "msg=\"debug probe\"", "component=daemon"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("redirected log missing %q: %q", want, text)
+		}
 	}
 }
 
-func TestConfigureDefaultLogger_RedirectsStdlibLog(t *testing.T) {
-	t.Parallel()
+func TestNewHandler_InteractiveColorHonorsNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	var colored bytes.Buffer
+	slog.New(newHandler(&colored, slog.LevelInfo, true)).Warn("probe")
+	if !strings.Contains(colored.String(), "\x1b[") {
+		t.Fatalf("interactive handler did not emit color: %q", colored.String())
+	}
 
-	var out bytes.Buffer
-	ConfigureDefaultLogger(&out)
-	log.Printf("2026/05/06 09:56:42 failed to upload metrics: dial tcp timeout")
-
-	text := strings.TrimSpace(out.String()) // swobu:io-string source=domain
-	if text == "" {
-		t.Fatal("expected redirected stdlib log line")
-	}
-	if !strings.Contains(text, "WARN ") {
-		t.Fatalf("expected WARN level for redirected stdlib log; got=%q", text)
-	}
-	if !strings.Contains(text, "component=stdlib") {
-		t.Fatalf("expected stdlib component marker; got=%q", text)
-	}
-	if !strings.Contains(text, "failed to upload metrics: dial tcp timeout") {
-		t.Fatalf("expected stdlib payload text; got=%q", text)
+	t.Setenv("NO_COLOR", "1")
+	var plain bytes.Buffer
+	slog.New(newHandler(&plain, slog.LevelInfo, true)).Warn("probe")
+	if strings.Contains(plain.String(), "\x1b[") {
+		t.Fatalf("NO_COLOR handler emitted ANSI: %q", plain.String())
 	}
 }
 
-func TestConfigureDefaultLogger_EnablesDebugWithEnv(t *testing.T) {
-	t.Setenv("SWOBU_LOG_LEVEL", "debug")
-	var out bytes.Buffer
-	ConfigureDefaultLogger(&out)
-	slog.Debug("debug probe", "component", "daemon")
+func TestConfiguredLevel(t *testing.T) {
+	t.Run("defaults to info", func(t *testing.T) {
+		t.Setenv(envLogLevel, "")
+		got, err := configuredLevel()
+		if err != nil || got != slog.LevelInfo {
+			t.Fatalf("configuredLevel() = %v, %v; want INFO, nil", got, err)
+		}
+	})
+	t.Run("parses debug", func(t *testing.T) {
+		t.Setenv(envLogLevel, "debug")
+		got, err := configuredLevel()
+		if err != nil || got != slog.LevelDebug {
+			t.Fatalf("configuredLevel() = %v, %v; want DEBUG, nil", got, err)
+		}
+	})
+	t.Run("rejects invalid", func(t *testing.T) {
+		t.Setenv(envLogLevel, "debgu")
+		if _, err := configuredLevel(); err == nil {
+			t.Fatal("configuredLevel accepted invalid level")
+		}
+	})
+}
 
-	text := strings.TrimSpace(out.String()) // swobu:io-string source=domain
-	if !strings.Contains(text, "DEBUG") || !strings.Contains(text, "debug probe") {
-		t.Fatalf("expected debug log line, got=%q", text)
+func TestStandardLogUsesSlogDefaultWithoutFabricatedWarn(t *testing.T) {
+	var out bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	log.Print("standard probe")
+
+	text := out.String()
+	if !strings.Contains(text, "msg=\"standard probe\"") {
+		t.Fatalf("standard log did not reach slog default: %q", text)
+	}
+	if strings.Contains(text, "level=WARN") {
+		t.Fatalf("standard log fabricated WARN severity: %q", text)
 	}
 }

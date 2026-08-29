@@ -8,6 +8,8 @@
 //     backoff, semantic same-target request-shape recovery, and route failover;
 //   - provider-inflight traffic evidence after concrete target selection and
 //     immediately before each provider call;
+//   - truthful provider-attempt lifecycle logs from command start through
+//     handoff and the existing response-completion terminal boundary;
 //   - exact-target selection of concrete OpenAI Responses continuation data;
 //   - one exchange-scoped read-through image fetch cache reused across attempts;
 //   - canonical response capture and atomic session start/head advancement before

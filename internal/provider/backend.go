@@ -70,6 +70,30 @@ type Backend struct {
 	Transport Transport
 }
 
+// TargetFactCharacterizer owns isolated, target-local fixture execution for
+// the target facts its codec reads. Exchange decides when characterization is
+// admissible; the codec owns the fixture and its two wire projections.
+type TargetFactCharacterizer interface {
+	CharacterizeTargetFact(context.Context, TargetSnapshot, TargetFact, Transport) TargetFactResolution
+}
+
+// TargetFactResolution is conclusive only when the preferred fixture succeeds
+// or its typed rejection is distinguished by a successful control fixture.
+type TargetFactResolution struct {
+	Value      bool
+	Conclusive bool
+}
+
+// CharacterizeTargetFact delegates one isolated fact to the exact backend
+// codec. Codecs without empirical dialect branches return inconclusive.
+func (b Backend) CharacterizeTargetFact(ctx context.Context, fact TargetFact) TargetFactResolution {
+	characterizer, ok := b.Codec.(TargetFactCharacterizer)
+	if !ok || b.Transport == nil {
+		return TargetFactResolution{}
+	}
+	return characterizer.CharacterizeTargetFact(ctx, b.Target, fact, b.Transport)
+}
+
 // Validate proves the backend is complete before exchange execution.
 func (b Backend) Validate() error {
 	if b.Target.ProviderSpec == "" || b.Target.TargetID == "" || b.Target.TargetVersion == 0 || b.Target.Model == "" {

@@ -198,10 +198,6 @@ func decodeCompletedResponsesItemSetAtIndexes(
 				erasedSemantic = true
 			}
 		case "function_call":
-			object, err := decodeResponsesFunctionCallArguments(item.Arguments)
-			if err != nil {
-				return nil, canonical.InternalError("responses tool call arguments are invalid")
-			}
 			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
 			name := strings.TrimSpace(item.Name)     // swobu:io-string source=boundary
 			if callID == "" {
@@ -215,13 +211,17 @@ func decodeCompletedResponsesItemSetAtIndexes(
 				}
 				key = resolved.Key()
 			} else {
-				key, err = wire.DecodeToolKey(names, environment, canonical.ToolKindFunction, name)
+				key, err = wire.DecodeCallableKey(names, environment, name)
 				if err != nil {
 					return nil, canonical.InternalError("responses tool call references an unknown or ambiguous tool")
 				}
 			}
+			input, err := decodeResponsesCallableInput(key, item.Arguments)
+			if err != nil {
+				return nil, err
+			}
 			canonicalCallID, _ := canonical.NewToolCallID(callID)
-			call, err := canonical.NewToolCallItem(canonicalCallID, key, canonical.NewJSONObjectToolInput(object))
+			call, err := canonical.NewToolCallItem(canonicalCallID, key, input)
 			if err != nil {
 				return nil, canonical.InternalError("responses tool call is invalid")
 			}

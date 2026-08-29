@@ -278,8 +278,7 @@ func TestOpenRouterTransportKernelProjectsStandardReasoningBudget(t *testing.T) 
 		t.Fatalf("reasoning_effort = %#v, want low", payload["reasoning_effort"])
 	}
 	if len(changes) != 1 ||
-		changes[0].Capability != canonical.RequestReasoning ||
-		changes[0].Preserved != canonical.RequestControlsEffort {
+		changes[0].Capability != canonical.RequestReasoning {
 		t.Fatalf("changes = %#v, want one reasoning-to-effort approximation", changes)
 	}
 }

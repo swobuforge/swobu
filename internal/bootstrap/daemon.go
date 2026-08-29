@@ -71,7 +71,6 @@ type StartInput struct {
 	ConfigPath       string
 	StartupConfig    config.StartupConfig
 	Providers        provider.BackendResolver
-	TargetSupport    provider.TargetSupportResolver
 	ModelCatalog     provider.Discovery
 	TrafficEventSink observation.TrafficEventSink
 	Logger           *slog.Logger
@@ -108,12 +107,11 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		serveDone:   make(chan struct{}),
 	}
 
-	if (in.Providers == nil) != (in.ModelCatalog == nil) || (in.Providers == nil) != (in.TargetSupport == nil) {
-		return nil, fmt.Errorf("provider services must be wired together: providers, target support, and discovery must all be set or all be nil")
+	if (in.Providers == nil) != (in.ModelCatalog == nil) {
+		return nil, fmt.Errorf("provider services must be wired together: providers and discovery must both be set or both be nil")
 	}
 
 	providers := in.Providers
-	targetSupport := in.TargetSupport
 	discovery := in.ModelCatalog
 	authCredentialWritePolicy := credentialsadapter.NormalizeCredentialWritePolicy(config.ResolveAuthCredentialWritePolicy())
 	logger.Info("auth credential policy resolved",
@@ -131,10 +129,9 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 			return nil, fmt.Errorf("compose providers: %w", err)
 		}
 		providers = composition
-		targetSupport = composition
 		discovery = composition
 	}
-	runtimeRoot := newDaemonProviderModelCatalogComposition(codecresolver.NewRuntimeCodecResolver(), providers, targetSupport, discovery)
+	runtimeRoot := newDaemonProviderModelCatalogComposition(codecresolver.NewRuntimeCodecResolver(), providers, discovery)
 	trafficEventSink := in.TrafficEventSink
 	if trafficEventSink == nil {
 		daemon.trafficEventStore = trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})

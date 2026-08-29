@@ -72,12 +72,15 @@ func TestProjectOpaqueReplayForTargetPreservesExactTargetReplay(t *testing.T) {
 	})
 
 	// Project against exact target generation: target-alpha:1
-	projected, changes, err := projectOpaqueReplayForTarget(req, "target-alpha", 1)
+	projected, changed, changes, err := projectOpaqueReplayForTarget(req, "target-alpha", 1)
 	if err != nil {
 		t.Fatalf("projection error: %v", err)
 	}
 	if len(changes) != 0 {
 		t.Fatalf("expected 0 changes, got %d", len(changes))
+	}
+	if changed {
+		t.Fatal("exact-target replay reported structural projection")
 	}
 	if len(projected.Items()) != 2 {
 		t.Fatalf("items count = %d, want 2", len(projected.Items()))
@@ -122,9 +125,12 @@ func TestProjectOpaqueReplayForTargetStripsMismatchedReplayAndPreservesReadableR
 	})
 
 	// 1. Project against different target ID: target-beta:1
-	projectedBeta, changesBeta, err := projectOpaqueReplayForTarget(req, "target-beta", 1)
+	projectedBeta, changedBeta, changesBeta, err := projectOpaqueReplayForTarget(req, "target-beta", 1)
 	if err != nil {
 		t.Fatalf("projection error: %v", err)
+	}
+	if !changedBeta {
+		t.Fatal("mismatched replay did not report structural projection")
 	}
 	if len(changesBeta) != 1 {
 		t.Fatalf("expected 1 omission change, got %d: %#v", len(changesBeta), changesBeta)
@@ -148,9 +154,12 @@ func TestProjectOpaqueReplayForTargetStripsMismatchedReplayAndPreservesReadableR
 	}
 
 	// 2. Project against different target Version: target-alpha:2
-	projectedAlpha2, changesAlpha2, err := projectOpaqueReplayForTarget(req, "target-alpha", 2)
+	projectedAlpha2, changedAlpha2, changesAlpha2, err := projectOpaqueReplayForTarget(req, "target-alpha", 2)
 	if err != nil {
 		t.Fatalf("projection error: %v", err)
+	}
+	if !changedAlpha2 {
+		t.Fatal("changed target generation did not report structural projection")
 	}
 	if len(changesAlpha2) != 1 {
 		t.Fatalf("expected 1 omission change, got %d", len(changesAlpha2))
@@ -190,9 +199,12 @@ func TestProjectOpaqueReplayForTargetDropsOpaqueOnlyReasoningItem(t *testing.T) 
 	})
 
 	// Project against different target: target-beta:1
-	projected, changes, err := projectOpaqueReplayForTarget(req, "target-beta", 1)
+	projected, changed, changes, err := projectOpaqueReplayForTarget(req, "target-beta", 1)
 	if err != nil {
 		t.Fatalf("projection error: %v", err)
+	}
+	if !changed {
+		t.Fatal("opaque-only replay omission did not report structural projection")
 	}
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change, got %d", len(changes))
@@ -229,9 +241,12 @@ func TestProjectOpaqueReplayForTargetDropsUnboundClientReplay(t *testing.T) {
 		Items: []canonical.CanonicalItem{userMsg, reasoningItem},
 	})
 
-	projected, changes, err := projectOpaqueReplayForTarget(req, "target-alpha", 1)
+	projected, changed, changes, err := projectOpaqueReplayForTarget(req, "target-alpha", 1)
 	if err != nil {
 		t.Fatalf("projection error: %v", err)
+	}
+	if !changed {
+		t.Fatal("unbound replay did not report structural projection")
 	}
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 omission change for unbound replay, got %d", len(changes))
@@ -573,10 +588,6 @@ func (responsesProtocolBackendCodec) Decode(ctx context.Context, request provide
 type responsesBackendResolver struct {
 	RuntimeResolver
 	transport func(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error)
-}
-
-func (responsesBackendResolver) ResolveTargetSupport(provider.TargetSnapshot) provider.TargetSupport {
-	return provider.TargetSupport{}
 }
 
 func (r responsesBackendResolver) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {

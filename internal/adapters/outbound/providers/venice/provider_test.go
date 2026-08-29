@@ -191,37 +191,20 @@ func TestVenicePreservesLiteralCitationSyntaxWithoutSearchStreaming(t *testing.T
 	assertSingleMessageText(t, project(t, decoded.Stream).Items(), "x[REF]0[/REF]")
 }
 
-func TestVeniceDiscoveryPublishesExactTargetSupport(t *testing.T) {
-	store := &modelSupportStore{byModel: make(map[string]provider.TargetSupport)}
+func TestVeniceDiscoveryProjectsModelAuthoringMetadataWithoutInferenceSupport(t *testing.T) {
 	rows, err := modelcatalogopenai.DecodeModelRows(strings.NewReader(`{"data":[{"id":"capable","type":"text","owned_by":"venice.ai","model_spec":{"name":"Capable","capabilities":{"supportsFunctionCalling":false,"supportsReasoning":true,"supportsReasoningEffort":false,"supportsResponseSchema":true,"supportsWebSearch":true,"supportsVision":false}}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	option, include, err := store.projectModel(profile.ProviderSpecVenice, rows[0])
+	option, include, err := projectModel(profile.ProviderSpecVenice, rows[0])
 	if err != nil || !include {
 		t.Fatalf("project model: include=%v err=%v", include, err)
 	}
 	if option.DefaultProviderProtocol != "chat_completions" {
 		t.Fatalf("default protocol = %q", option.DefaultProviderProtocol)
 	}
-	target := veniceTarget(delivery.BufferedDelivery())
-	target.Model = "capable"
-	support := store.ResolveTargetSupport(target)
-	for _, capability := range []canonical.CapabilityPath{canonical.RequestTools, canonical.RequestReasoning, canonical.RequestOutputFormatSchema} {
-		if got := support.Get(capability); got != provider.SupportSupported {
-			t.Fatalf("%s support = %v, want supported", capability, got)
-		}
-	}
-	for _, capability := range []canonical.CapabilityPath{canonical.RequestControlsEffort, canonical.RequestItemsMessageImage} {
-		if got := support.Get(capability); got != provider.SupportUnsupported {
-			t.Fatalf("%s support = %v, want unsupported", capability, got)
-		}
-	}
-	if got := support.Get(canonical.ResponseItemsMessageCitations); got != provider.SupportUnknown {
-		t.Fatalf("citation support = %v, want unknown", got)
-	}
-	if got := support.Get(canonical.RequestToolsKind); got != provider.SupportUnknown {
-		t.Fatalf("tool-kind support = %v, want unknown", got)
+	if option.Name != "capable" || option.ModelPublisher != "venice.ai" {
+		t.Fatalf("model option = %#v", option)
 	}
 }
 

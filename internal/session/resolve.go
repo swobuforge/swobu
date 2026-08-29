@@ -232,9 +232,9 @@ func newResolvedRequest(request canonical.CanonicalRequest, previous *previousHi
 	return ResolvedRequest{request: request.Clone(), previousHistory: clonePreviousHistory(previous)}, nil
 }
 
-// resolveTurnContinuation validates tool-result correlation and writes the
-// ongoing assistant turn's compute and effort into the one effective request.
-// The checkpoint request is the sole authority for omitted continuation values.
+// resolveTurnContinuation validates tool-result correlation and restores only
+// unfinished-turn context. Current invocation controls remain current-request
+// truth: a checkpoint restores conversation state, never request configuration.
 func resolveTurnContinuation(checkpoint Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
 	pendingSet := make(map[canonical.ToolCallID]canonical.ToolKind)
 	for _, item := range checkpoint.Response.Items() {
@@ -273,34 +273,7 @@ func resolveTurnContinuation(checkpoint Checkpoint, current canonical.CanonicalR
 	if err != nil {
 		return canonical.CanonicalRequest{}, err
 	}
-	compute := current.Reasoning().ComputeField()
-	priorCompute := checkpoint.Request.Reasoning().ComputeField()
-	if explicit, ok := compute.Get(); ok {
-		prior, priorSet := priorCompute.Get()
-		if !priorSet || !equalReasoningCompute(explicit, prior) {
-			return canonical.CanonicalRequest{}, canonical.BadRequest("current reasoning compute conflicts with unfinished tool turn")
-		}
-	} else {
-		compute = priorCompute
-	}
-	controls := current.Controls()
-	priorEffort := checkpoint.Request.Controls().Effort
-	if explicit, ok := controls.Effort.Get(); ok {
-		prior, priorSet := priorEffort.Get()
-		if !priorSet || explicit != prior {
-			return canonical.CanonicalRequest{}, canonical.BadRequest("current inference effort conflicts with unfinished tool turn")
-		}
-	} else {
-		controls.Effort = priorEffort
-	}
-	reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
-		Compute: compute, Disclosure: current.Reasoning().DisclosureField(),
-		ResponsesContext: current.Reasoning().ResponsesContextField(),
-	})
-	if err != nil {
-		return canonical.CanonicalRequest{}, err
-	}
-	return replaceComputeControls(current, controls, reasoning), nil
+	return current, nil
 }
 
 func repeatUnfinishedTurnContext(previous, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
@@ -353,29 +326,6 @@ func replaceRequestItems(request canonical.CanonicalRequest, items []canonical.C
 		ToolPolicy: request.ToolPolicyField(), ToolCallBatch: request.ToolCallBatchField(),
 		Controls: request.Controls(), Reasoning: request.Reasoning(), OutputFormat: request.OutputFormatField(),
 		Store: request.StoreField(),
-	})
-}
-
-func equalReasoningCompute(left, right canonical.ReasoningCompute) bool {
-	if left.Kind() != right.Kind() || left.Kind() == "" {
-		return false
-	}
-	leftTokens, leftBudget := left.Tokens()
-	rightTokens, rightBudget := right.Tokens()
-	return leftBudget == rightBudget && (!leftBudget || leftTokens == rightTokens)
-}
-
-func replaceComputeControls(request canonical.CanonicalRequest, controls canonical.GenerationControls, reasoning canonical.ReasoningControls) canonical.CanonicalRequest {
-	previous, _ := request.PreviousResponse()
-	var previousPointer *canonical.ResponseRef
-	if _, ok := request.PreviousResponse(); ok {
-		previousPointer = &previous
-	}
-	return canonical.NewCanonicalRequest(canonical.RequestParams{
-		Model: request.ModelField(), Items: request.Items(),
-		PreviousResponse: previousPointer, ToolPolicy: request.ToolPolicyField(),
-		ToolCallBatch: request.ToolCallBatchField(), Controls: controls, Reasoning: reasoning,
-		OutputFormat: request.OutputFormatField(), Store: request.StoreField(),
 	})
 }
 

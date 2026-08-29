@@ -126,7 +126,25 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 			return ProviderRequestDocument{}, err
 		}
 	}
-	tools = flatTools.Declarations
+	tools = removeEagerProviderDiscovery(flatTools.Declarations)
+	deferred := messagesDeferredToolKeys(items)
+	if hasEagerProviderDiscovery(flatTools.Declarations) {
+		deferred = nil
+		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsVisibility, compat.Approximation); err != nil {
+			return ProviderRequestDocument{}, err
+		}
+	}
+	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	items, historyChanges, err := projectMessagesUnloweredToolHistory(items, loweredTools)
+	if err != nil {
+		return ProviderRequestDocument{}, err
+	}
+	if changeLog != nil {
+		*changeLog = append(*changeLog, historyChanges...)
+	}
 	conversation, err := lowerMessagesContextPrefix(items, changeLog, exchangeID)
 	if err != nil {
 		return ProviderRequestDocument{}, err
@@ -149,12 +167,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if loweredInstructions.Text != "" {
 		payload["system"] = loweredInstructions.Text
 	}
-	deferred := messagesDeferredToolKeys(items)
 	policy, err := req.EffectiveToolPolicy()
-	if err != nil {
-		return ProviderRequestDocument{}, err
-	}
-	wireTools, loweredTools, err := compileMessagesTools(tools, deferred, names, changeLog, exchangeID, options.LowerTool)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -214,6 +227,54 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		payload["stream"] = true
 	}
 	return ProviderRequestDocument{Payload: payload, Tools: wireTools}, nil
+}
+
+// projectMessagesUnloweredToolHistory keeps declaration and history projection
+// on one emitted-fragment authority. A zero-fragment callable effect is omitted
+// atomically; one historical call cannot truthfully name multiple fragments.
+func projectMessagesUnloweredToolHistory(items []canonical.CanonicalItem, lowered wire.LoweredToolSet) ([]canonical.CanonicalItem, []compat.Change, error) {
+	effects, err := canonical.MatchToolEffects(items)
+	if err != nil {
+		// Isolated wire-encoder tests may exercise a result without materialized
+		// history. The canonical request boundary rejects that state; preserve the
+		// local item here so its owning encoder can still be tested directly.
+		return append([]canonical.CanonicalItem(nil), items...), nil, nil
+	}
+	drop := make(map[int]struct{})
+	changes := make([]compat.Change, 0)
+	for _, effect := range effects {
+		call, ok := items[effect.CallIndex].ToolCall()
+		if !ok || call.Tool().Kind() == canonical.ToolKindWebSearch {
+			continue
+		}
+		record, found := lowered.FindSource(call.Tool())
+		fragments := 0
+		if found {
+			fragments = record.FragmentCount
+		}
+		switch {
+		case fragments == 1:
+			continue
+		case fragments > 1:
+			return nil, nil, canonical.InternalError("Messages callable history source lowered to multiple wire call identities")
+		default:
+			drop[effect.CallIndex] = struct{}{}
+			if effect.ResultIndex >= 0 {
+				drop[effect.ResultIndex] = struct{}{}
+			}
+			changes = append(changes, compat.NewOmission(canonical.RequestItemsKind, canonical.RequestItemOccurrence(uint32(effect.CallIndex))))
+		}
+	}
+	if len(drop) == 0 {
+		return append([]canonical.CanonicalItem(nil), items...), nil, nil
+	}
+	projected := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
+	for index, item := range items {
+		if _, omitted := drop[index]; !omitted {
+			projected = append(projected, item)
+		}
+	}
+	return projected, changes, nil
 }
 
 func lowerMessagesContextPrefix(items []canonical.CanonicalItem, changeLog *[]compat.Change, exchangeID string) ([]canonical.CanonicalItem, error) {
@@ -289,7 +350,7 @@ func encodeItems(items []canonical.CanonicalItem, tools []canonical.ToolDeclarat
 	for i := 0; i < len(items); {
 		owner := items[i].Owner()
 		if owner != canonical.TurnOwnerUser && owner != canonical.TurnOwnerAssistant {
-			return nil, canonical.NotImplemented("Messages cannot project interleaved canonical system or developer messages")
+			return nil, canonical.InternalError("Messages received an invalid canonical system/developer item")
 		}
 		wire := messageBody{Role: string(owner)}
 		for i < len(items) && items[i].Owner() == owner {
@@ -334,11 +395,11 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 				continue
 			}
 			if owner != canonical.TurnOwnerUser {
-				return nil, canonical.NotImplemented("Messages cannot project image input outside user messages")
+				return nil, canonical.InternalError("Messages received an invalid canonical image variant")
 			}
 			image, ok := part.Image()
 			if !ok {
-				return nil, canonical.NotImplemented("Messages cannot project this canonical content kind")
+				return nil, canonical.InternalError("Messages received an invalid canonical content variant")
 			}
 			block, err := encodeMessagesImage(image, changeLog, exchangeID, canonical.RequestItemsMessageImageDetail)
 			if err != nil {
@@ -407,7 +468,7 @@ func appendMessagesItemBlocks(blocks []contentID, item canonical.CanonicalItem, 
 		}
 		return append(blocks, contentID{opaque: opaque}), nil
 	}
-	return nil, canonical.NotImplemented("Messages cannot project this canonical item kind")
+	return nil, canonical.InternalError("Messages received an invalid canonical item kind")
 }
 
 func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.ToolDeclaration, names wire.ToolNames) (contentID, error) {
@@ -419,7 +480,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.Tool
 	if tool.Kind() == canonical.ToolKindWebSearch {
 		search, ok := call.Input().WebSearch()
 		if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
-			return contentID{}, canonical.NotImplemented("Messages cannot project multi-query canonical server-tool calls")
+			return contentID{}, canonical.InternalError("Messages received an invalid canonical multi-query server-tool item")
 		}
 		input, err := json.Marshal(map[string]string{"query": search.Queries[0]})
 		if err != nil {
@@ -454,7 +515,7 @@ func encodeMessagesToolCall(item canonical.CanonicalItem, tools []canonical.Tool
 		return contentID{Type: "server_tool_use", ID: call.CallID().String(), Name: name, Input: json.RawMessage(object.Bytes())}, nil
 	}
 	if tool.Kind() != canonical.ToolKindFunction {
-		return contentID{}, canonical.NotImplemented("Messages cannot project this canonical tool-call kind")
+		return contentID{}, canonical.InternalError("Messages received an invalid canonical tool-call kind")
 	}
 	name, err := wire.EncodeToolName(names, tool)
 	if err != nil {
@@ -472,7 +533,7 @@ func messagesTextOnlyContent(parts []canonical.MessagePart, surface string) (str
 	for _, part := range parts {
 		text, ok := part.Text()
 		if !ok {
-			return "", canonical.NotImplemented(surface + " cannot project this canonical content kind")
+			return "", canonical.InternalError(surface + " received an invalid canonical content variant")
 		}
 		builder.WriteString(text.Text())
 	}
@@ -493,7 +554,7 @@ func encodeMessagesToolResultContent(parts []canonical.ToolResultPart, changeLog
 		}
 		image, ok := part.Image()
 		if !ok {
-			return nil, canonical.NotImplemented("Messages cannot project this canonical tool-result content kind")
+			return nil, canonical.InternalError("Messages received an invalid canonical tool-result part")
 		}
 		block, err := encodeMessagesImage(image, changeLog, exchangeID, canonical.RequestItemsToolResultImageDetail)
 		if err != nil {
@@ -525,9 +586,6 @@ func appendMessagesRequestChange(changeLog *[]compat.Change, exchangeID string, 
 		return nil
 	}
 	change := compat.Change{Capability: feature, Kind: outcome}
-	if outcome == compat.Approximation {
-		change.Preserved = feature
-	}
 	*changeLog = compat.AppendUnique(*changeLog, change)
 	return nil
 }
@@ -610,10 +668,6 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 			}
 			typeName, name, representable := messagesProviderDiscoveryTool(discovery)
 			if !representable {
-				if changeLog != nil {
-					*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key())))
-				}
-				lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: tool.Key(), Kind: tool.Kind()})
 				continue
 			}
 			wireTool := ProviderRequestTool{Type: typeName, Name: name}
@@ -641,11 +695,37 @@ func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canoni
 		if allDeferred {
 			out[0].DeferLoading = false
 			if changeLog != nil {
-				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestToolsVisibility, canonical.RequestTools, canonical.Occurrence{}))
+				*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestToolsVisibility, canonical.Occurrence{}))
 			}
 		}
 	}
 	return out, lowered, nil
+}
+
+func hasEagerProviderDiscovery(tools []canonical.ToolDeclaration) bool {
+	for _, tool := range tools {
+		if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorProvider {
+			_, _, native := messagesProviderDiscoveryTool(discovery)
+			if !native {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func removeEagerProviderDiscovery(tools []canonical.ToolDeclaration) []canonical.ToolDeclaration {
+	projected := make([]canonical.ToolDeclaration, 0, len(tools))
+	for _, tool := range tools {
+		if discovery, ok := tool.Discovery(); ok && discovery.Executor() == canonical.DiscoveryExecutorProvider {
+			_, _, native := messagesProviderDiscoveryTool(discovery)
+			if !native {
+				continue
+			}
+		}
+		projected = append(projected, tool)
+	}
+	return projected
 }
 
 func messagesDeferredToolKeys(items []canonical.CanonicalItem) map[canonical.ToolKey]struct{} {

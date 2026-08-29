@@ -36,7 +36,7 @@ func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 	}
 }
 
-func TestBackendValidationDoesNotOwnTargetSupport(t *testing.T) {
+func TestBackendValidationOwnsOnlyTargetCodecAndTransport(t *testing.T) {
 	target := TargetSnapshot{
 		TargetID: "target", TargetVersion: 1, ProviderSpec: "openai", Model: "m",
 		ProtocolKind: protocolkind.Responses, ProviderProtocol: "responses",

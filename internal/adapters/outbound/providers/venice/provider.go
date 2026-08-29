@@ -25,24 +25,16 @@ import (
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
 
-type modelSupportStore struct {
-	mu          sync.RWMutex
-	byModel     map[string]provider.TargetSupport
-	searchModel map[string]provider.Support
-}
-
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
-	store := &modelSupportStore{byModel: make(map[string]provider.TargetSupport), searchModel: make(map[string]provider.Support)}
 	policy := openaifamily.StandardBearerPolicy(profile.ProviderSpecVenice).
 		WithModelCatalogQuery(func(values url.Values) { values.Set("type", "text") }).
-		WithModelCatalogProject(store.projectModel)
+		WithModelCatalogProject(projectModel)
 	bundle := openaifamily.NewRuntime(client, credentials, policy)
-	bundle.BackendResolver = backendResolver{standard: bundle.BackendResolver, support: store}
-	bundle.TargetSupport = store
+	bundle.BackendResolver = backendResolver{standard: bundle.BackendResolver}
 	return bundle
 }
 
-func (s *modelSupportStore) projectModel(providerID profile.ProviderID, row modelcatalogopenai.ModelRow) (profile.ModelAuthoringOption, bool, error) {
+func projectModel(providerID profile.ProviderID, row modelcatalogopenai.ModelRow) (profile.ModelAuthoringOption, bool, error) {
 	var model struct {
 		Type      string `json:"type"`
 		OwnedBy   string `json:"owned_by"`
@@ -64,23 +56,6 @@ func (s *modelSupportStore) projectModel(providerID profile.ProviderID, row mode
 	if model.Type != "" && !strings.EqualFold(strings.TrimSpace(model.Type), "text") {
 		return profile.ModelAuthoringOption{}, false, nil
 	}
-	values := make(map[canonical.CapabilityPath]provider.Support)
-	addSupportValue(values, canonical.RequestTools, combinedToolSupport(model.ModelSpec.Capabilities.FunctionCalling, model.ModelSpec.Capabilities.WebSearch))
-	addSupport(values, canonical.RequestReasoning, model.ModelSpec.Capabilities.Reasoning)
-	addSupport(values, canonical.RequestControlsEffort, model.ModelSpec.Capabilities.ReasoningEffort)
-	addSupport(values, canonical.RequestOutputFormatSchema, model.ModelSpec.Capabilities.ResponseSchema)
-	addSupport(values, canonical.RequestItemsMessageImage, model.ModelSpec.Capabilities.Vision)
-	support := provider.NewTargetSupport(values)
-	s.mu.Lock()
-	if s.byModel == nil {
-		s.byModel = make(map[string]provider.TargetSupport)
-	}
-	if s.searchModel == nil {
-		s.searchModel = make(map[string]provider.Support)
-	}
-	s.byModel[row.ID()] = support
-	s.searchModel[row.ID()] = boolSupport(model.ModelSpec.Capabilities.WebSearch)
-	s.mu.Unlock()
 	publisher := strings.TrimSpace(model.OwnedBy)
 	if publisher == "" {
 		publisher = string(providerID)
@@ -88,54 +63,8 @@ func (s *modelSupportStore) projectModel(providerID profile.ProviderID, row mode
 	return profile.NewModelAuthoringOption(row.ID(), row.ID(), publisher, "", "", []string{"chat_completions", "chat_completions_stream"}, "chat_completions"), true, nil
 }
 
-func combinedToolSupport(functionCalling, webSearch *bool) provider.Support {
-	functionSupport := boolSupport(functionCalling)
-	searchSupport := boolSupport(webSearch)
-	if functionSupport == provider.SupportSupported || searchSupport == provider.SupportSupported {
-		return provider.SupportSupported
-	}
-	if functionSupport == provider.SupportUnsupported && searchSupport == provider.SupportUnsupported {
-		return provider.SupportUnsupported
-	}
-	return provider.SupportUnknown
-}
-
-func boolSupport(value *bool) provider.Support {
-	if value == nil {
-		return provider.SupportUnknown
-	}
-	if *value {
-		return provider.SupportSupported
-	}
-	return provider.SupportUnsupported
-}
-
-func addSupportValue(values map[canonical.CapabilityPath]provider.Support, capability canonical.CapabilityPath, support provider.Support) {
-	if support != provider.SupportUnknown {
-		values[capability] = support
-	}
-}
-
-func addSupport(values map[canonical.CapabilityPath]provider.Support, capability canonical.CapabilityPath, value *bool) {
-	if value == nil {
-		return
-	}
-	if *value {
-		values[capability] = provider.SupportSupported
-		return
-	}
-	values[capability] = provider.SupportUnsupported
-}
-
-func (s *modelSupportStore) ResolveTargetSupport(target provider.TargetSnapshot) provider.TargetSupport {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.byModel[target.Model]
-}
-
 type backendResolver struct {
 	standard provider.BackendResolver
-	support  *modelSupportStore
 }
 
 func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
@@ -717,4 +646,3 @@ func (s *veniceResponseStream) citeMessage(item canonical.CanonicalItem) (canoni
 func (s *veniceResponseStream) Close(ctx context.Context) error { return s.upstream.Close(ctx) }
 
 var _ provider.Codec = codec{}
-var _ provider.TargetSupportResolver = (*modelSupportStore)(nil)

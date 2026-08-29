@@ -63,13 +63,15 @@ func decodeChatCompletionsGenerationControls(dto chatCompletionsRequestDTO) (can
 	return controls, reasoning, err
 }
 
-func encodeChatCompletionsReasoning(payload map[string]any, request canonical.CanonicalRequest, changeLog *[]compat.Change) error {
+func encodeChatCompletionsReasoning(payload map[string]any, request canonical.CanonicalRequest, target ReasoningTargetDialect, changeLog *[]compat.Change) error {
 	projection := reasoningprojection.ProjectOrdinalReasoning(request.Reasoning(), request.Controls().Effort)
 	switch projection.Kind {
 	case reasoningprojection.OrdinalDisabled:
-		payload["reasoning_effort"] = "none"
+		if target.ProjectDisabled(changeLog) {
+			payload["reasoning_effort"] = "none"
+		}
 	case reasoningprojection.OrdinalEffort:
-		payload["reasoning_effort"] = string(projection.Effort)
+		payload["reasoning_effort"] = string(target.ProjectEffort(projection.Effort, changeLog))
 	}
 	if changeLog != nil {
 		for _, change := range projection.Changes {
