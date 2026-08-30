@@ -72,6 +72,57 @@ func TestResponsesLowersLateDirectiveRoleWithoutReorderingHistory(t *testing.T) 
 	}
 }
 
+func TestResponsesDisablesOmittedReasoningForUsableClientLatency(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.Message(t, canonical.MessageRoleUser, "Hello World"),
+		},
+	})
+
+	document := encodeResponsesRequest(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request)
+	if !bytes.Contains(document, []byte(`"reasoning":{"effort":"none"}`)) {
+		t.Fatalf("Ollama omitted reasoning remained provider-default instead of disabled: %s", document)
+	}
+}
+
+func TestResponsesPreservesExplicitReasoningIntent(t *testing.T) {
+	automatic, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+		Compute: canonical.Specify(canonical.NewAutomaticReasoningCompute()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:     canonical.Specify("model"),
+		Items:     []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "solve")},
+		Reasoning: automatic,
+	})
+
+	document := encodeResponsesRequest(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request)
+	if bytes.Contains(document, []byte(`"reasoning":{"effort":"none"}`)) {
+		t.Fatalf("Ollama explicit reasoning intent was disabled: %s", document)
+	}
+}
+
+func TestResponsesPreservesExplicitLowEffortInsteadOfDisablingReasoning(t *testing.T) {
+	low := canonical.InferenceEffortLow
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &low})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:    canonical.Specify("model"),
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "solve")},
+		Controls: controls,
+	})
+
+	document := encodeResponsesRequest(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request)
+	if !bytes.Contains(document, []byte(`"reasoning":{"effort":"low"}`)) {
+		t.Fatalf("Ollama explicit low effort was not preserved exactly: %s", document)
+	}
+}
+
 func TestResponsesResumeLowersHistoricalCustomThroughPortableFunction(t *testing.T) {
 	key := canonicaltest.MustRequestToolKey(canonical.ToolKindCustom, "shell")
 	declaration := canonicaltest.MustCustomTool(key, "Run shell text", canonicaltest.MustToolFormat(`{"type":"text"}`))
@@ -139,6 +190,26 @@ func TestHistoricalSearchDoesNotRequireCurrentSearchAndInstructionsStayFirst(t *
 	}
 	if standardPayload["instructions"] != "current instructions" {
 		t.Fatalf("standard Responses instruction placement changed: %s", standardDocument)
+	}
+}
+
+func TestResponsesLowersCurrentHostedSearchToOllamaNativeSearch(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonical.NewWebSearchDeclaration()),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "find current news"),
+		},
+	})
+
+	document, changes := encodeResponsesRequestWithChanges(t, NewRuntime(nil, nil).BackendResolver, profile.ProviderSpecOllama, request)
+	if !bytes.Contains(document, []byte(`"type":"web_search"`)) {
+		t.Fatalf("Ollama current hosted search was not lowered natively: %s", document)
+	}
+	for _, change := range changes {
+		if change.Capability == canonical.RequestToolsKind && change.Occurrence == canonical.ToolOccurrence(canonical.WebSearchToolKey()) {
+			t.Fatalf("Ollama native hosted search recorded semantic loss: %#v", changes)
+		}
 	}
 }
 

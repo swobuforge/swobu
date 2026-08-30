@@ -70,6 +70,7 @@ type ResponsesDialect struct {
 	DefaultStore                 *bool
 	RequireStreamingSSE          bool
 	CaptureResponsesContinuation bool
+	DefaultReasoningDisabled     bool
 	DecorateAttempt              AttemptDecorator
 }
 

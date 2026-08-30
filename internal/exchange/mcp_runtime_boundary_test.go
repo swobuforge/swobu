@@ -10,7 +10,11 @@ import (
 
 func TestUnavailableOnlyMCPRuntimeDoesNotDelayClientHandoff(t *testing.T) {
 	t.Parallel()
-	if delayClientHandoffFor(&mcp.Run{}) {
+	delayed, err := delayClientHandoffFor(&mcp.Run{}, canonical.CanonicalRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delayed {
 		t.Fatal("runtime without executable bindings delayed incremental client handoff")
 	}
 }

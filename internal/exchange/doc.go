@@ -9,11 +9,13 @@
 //   - provider-inflight traffic evidence after concrete target selection and
 //     immediately before each provider call;
 //   - truthful provider-attempt lifecycle logs from command start through
-//     handoff and the existing response-completion terminal boundary;
+//     provider ingress, client acceptance, and response-completion settlement;
 //   - exact-target selection of concrete OpenAI Responses continuation data;
 //   - one exchange-scoped read-through image fetch cache reused across attempts;
 //   - canonical response capture and atomic session start/head advancement before
 //     terminal client publication;
+//   - delayed handoff for specifically required provider-hosted effects so an
+//     eligible terminal rejection can advance the route without mixing output;
 //   - delayed MCP handoff, local tool execution, provider re-entry, usage
 //     accumulation, and compatibility evidence.
 //

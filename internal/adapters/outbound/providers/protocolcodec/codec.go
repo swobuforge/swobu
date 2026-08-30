@@ -145,6 +145,7 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 			},
 			AcceptsReasoningEffortMax:  req.TargetFacts.AcceptsReasoningEffortMax,
 			AcceptsReasoningDisabled:   req.TargetFacts.AcceptsReasoningDisabled,
+			DefaultReasoningDisabled:   dialect.DefaultReasoningDisabled,
 			AcceptsFunctionOutputArray: req.TargetFacts.AcceptsFunctionCallOutputArray,
 		},
 	)

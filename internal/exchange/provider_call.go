@@ -113,6 +113,10 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	if err != nil {
 		return providerCall{}, path.target, requestChanges, fetchCache, fmt.Errorf("provider request encoding: %w", err)
 	}
+	delayClientHandoff, err := delayClientHandoffFor(s.mcp, providerRequest.Canonical)
+	if err != nil {
+		return providerCall{}, path.target, requestChanges, fetchCache, err
+	}
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		decodeContext:  bindRequestToTarget(attemptRequest, path.target.Model),
@@ -124,7 +128,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		advance:            s.advance,
 		sessionID:          s.sessionID,
 		expectedHead:       s.expectedHead,
-		delayClientHandoff: delayClientHandoffFor(s.mcp),
+		delayClientHandoff: delayClientHandoff,
 		providerRound:      len(s.providerUsage),
 	}, path.target, requestChanges, fetchCache, nil
 }
@@ -143,8 +147,28 @@ func hasNextRouteCandidate(s exchangeState, selection providerCallSelection) boo
 	return exists
 }
 
-func delayClientHandoffFor(run *mcp.Run) bool {
-	return run != nil && run.CanExecute()
+// delayClientHandoffFor keeps provider-owned effects inside Exchange until a
+// terminal outcome exists. Response identity alone is not a usable outcome for
+// an effect that may still fail; retaining ownership lets the ordinary
+// pre-handoff recovery rule advance to another target without mixing streams.
+func delayClientHandoffFor(run *mcp.Run, request canonical.CanonicalRequest) (bool, error) {
+	if run != nil && run.CanExecute() {
+		return true, nil
+	}
+	tools, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return false, fmt.Errorf("resolve delayed-handoff tool environment: %w", err)
+	}
+	policy, err := request.EffectiveToolPolicy()
+	if err != nil {
+		return false, fmt.Errorf("resolve delayed-handoff tool policy: %w", err)
+	}
+	specific, ok := policy.SpecificID()
+	if !ok || specific != canonical.WebSearchToolKey() {
+		return false, nil
+	}
+	declaration, ok := tools.Lookup(specific)
+	return ok && declaration.Kind() == canonical.ToolKindWebSearch, nil
 }
 
 // completeProviderCall is a reducer-owned response edge. It validates and

@@ -78,7 +78,7 @@ func TestCurrentSearchGrammarOmissionReachesPrimaryWithoutFallback(t *testing.T)
 	assertCapabilityOmission(t, out, canonical.RequestToolsKind)
 }
 
-func TestNativeSearchProviderRejectionAdvancesToFallback(t *testing.T) {
+func TestNativeSearchProviderUnauthorizedAdvancesToFallback(t *testing.T) {
 	native := capabilityFallbackTarget(t, "native-search", "responses")
 	fallback := capabilityFallbackTarget(t, "local-fallback", "chat_completions")
 	workspace := capabilityFallbackWorkspace(t, "search-rejection", []routing.Target{native}, []routing.Target{fallback})
@@ -93,7 +93,9 @@ func TestNativeSearchProviderRejectionAdvancesToFallback(t *testing.T) {
 			if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search"`)) {
 				t.Fatalf("native search rejection lacked search wire: %s", document.RawBytes())
 			}
-			return nil, canonical.NewBackendError(target.TargetID, 400, "search unsupported", "")
+			// Ollama 0.33.1 returns this shape after its unconfigured private
+			// /api/experimental/web_search integration rejects the search.
+			return nil, canonical.NewBackendError(target.TargetID, 401, "something went wrong", "")
 		case "local-fallback":
 			if bytes.Contains(document.RawBytes(), []byte("web_search")) {
 				t.Fatalf("fallback Chat projection leaked web_search: %s", document.RawBytes())

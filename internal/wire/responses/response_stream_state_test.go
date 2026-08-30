@@ -2,7 +2,9 @@ package responses
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -53,6 +55,18 @@ func TestDecodeResponseStreamTreatsResponseFailedAsBackendFailure(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "model_error: review failed") {
 		t.Fatalf("response.failed error = %v, want provider code and message", err)
+	}
+}
+
+func TestDecodeResponseStreamClassifiesAuthenticationFailureAsBackendRejection(t *testing.T) {
+	raw := responsesCreatedFrame() +
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"failed\",\"error\":{\"code\":\"authentication_error\",\"message\":\"something went wrong\"}}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	bound := canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "swobu_1"})
+	_, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(bound), canonical.EnvResponse)
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) || backend.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("authentication failure = %T %v, want backend HTTP-equivalent 401", err, err)
 	}
 }
 
