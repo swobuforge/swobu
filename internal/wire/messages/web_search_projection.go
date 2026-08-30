@@ -5,10 +5,18 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// projectMessagesWebSearchLifecycles removes only completed call/result pairs
-// that Messages cannot express exactly. Open effects are omitted at their call
-// occurrence; target spelling gaps never become execution-owned failures.
-func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature canonical.CapabilityPath) ([]canonical.CanonicalItem, []compat.Change, error) {
+type messagesWebSearchProjection struct {
+	Items             []canonical.CanonicalItem
+	Changes           []compat.Change
+	WebSearchRequests int
+	ObservedWebSearch bool
+}
+
+// projectMessagesWebSearchLifecycles is the single Messages authority for
+// WebSearch lifecycle matching, projection, accounting, and fault origin.
+// Completed call/result pairs that Messages cannot express exactly erase
+// atomically; successful search actions count once regardless of sources.
+func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature canonical.CapabilityPath) (messagesWebSearchProjection, error) {
 	drop := map[int]struct{}{}
 	changes := make([]compat.Change, 0)
 	var matcher canonical.ToolEffectMatcher
@@ -29,21 +37,29 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		completed, err := matcher.Accept(index, item)
 		if err != nil {
 			if feature == canonical.ResponseItemsKind {
-				return nil, nil, canonical.NewBackendError("messages", 0, "backend returned an invalid web-search lifecycle: "+err.Error(), "")
+				return messagesWebSearchProjection{}, canonical.NewBackendError("messages", 0, "backend returned an invalid web-search lifecycle: "+err.Error(), "")
 			}
-			return nil, nil, canonical.InternalError("canonical web-search lifecycle is malformed: " + err.Error())
+			return messagesWebSearchProjection{}, canonical.InternalError("canonical web-search lifecycle is malformed: " + err.Error())
 		}
 		if completed != nil {
 			effects = append(effects, *completed)
 		}
 	}
 	effects = append(effects, matcher.Pending()...)
+	projection := messagesWebSearchProjection{ObservedWebSearch: len(effects) > 0}
 	for _, effect := range effects {
 		if effect.Kind != canonical.ToolKindWebSearch {
 			continue
 		}
 		call, _ := items[effect.CallIndex].ToolCall()
 		search, valid := call.Input().WebSearch()
+		if effect.ResultIndex >= 0 && valid && search.Action == canonical.WebSearchActionSearch {
+			result, _ := items[effect.ResultIndex].ToolResult()
+			searchResult, _ := result.WebSearch()
+			if _, failed := searchResult.Failure(); !failed {
+				projection.WebSearchRequests++
+			}
+		}
 		if valid && search.Action == canonical.WebSearchActionSearch && len(search.Queries) == 1 {
 			continue
 		}
@@ -58,7 +74,8 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		changes = append(changes, compat.NewOmission(feature, occurrence))
 	}
 	if len(drop) == 0 {
-		return append([]canonical.CanonicalItem(nil), items...), nil, nil
+		projection.Items = append([]canonical.CanonicalItem(nil), items...)
+		return projection, nil
 	}
 	out := make([]canonical.CanonicalItem, 0, len(items)-len(drop))
 	for index, item := range items {
@@ -67,5 +84,7 @@ func projectMessagesWebSearchLifecycles(items []canonical.CanonicalItem, feature
 		}
 		out = append(out, item)
 	}
-	return out, changes, nil
+	projection.Items = out
+	projection.Changes = changes
+	return projection, nil
 }

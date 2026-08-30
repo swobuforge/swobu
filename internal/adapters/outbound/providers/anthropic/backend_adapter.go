@@ -106,7 +106,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("messages provider request failed before backend response"))
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
@@ -160,7 +160,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	}
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("anthropic provider model catalog request failed before backend response")
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

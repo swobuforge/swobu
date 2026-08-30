@@ -52,7 +52,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 		applyAuth(httpRequest, auth)
 		response, requestErr := d.runtime.client.Do(httpRequest)
 		if requestErr != nil {
-			return provider.TargetProbeResult{}, canonical.BadEndpoint("Gemini provider model catalog request failed before backend response")
+			return provider.TargetProbeResult{}, provider.TransportFailure(ctx, requestErr)
 		}
 		response, requestErr = httpedge.DecodeHTTPResponseContentEncoding(response)
 		if requestErr != nil {

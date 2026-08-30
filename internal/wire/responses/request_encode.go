@@ -170,7 +170,6 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 
 	payload := map[string]any{"model": req.Model()}
 	loweredInstructions := flattenInstructionsForResponses(preludeItems)
-	logResponsesEncodeShape(req, tools, loweredInstructions.Text, payloadInput, choice, policy, d)
 	if changeLog != nil {
 		*changeLog = append(*changeLog, loweredInstructions.Changes...)
 	}
@@ -191,6 +190,10 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 			payloadInput = []any{map[string]any{"type": "message", "role": "user", "content": inputStr}}
 		}
 	}
+	// Shape diagnostics run only after every input transformation so encoded
+	// fields describe the document handed to serialization, not canonical or
+	// intermediate state.
+	logResponsesEncodeShape(req, tools, loweredInstructions.Text, payloadInput, choice, policy, d)
 	var store *bool
 	if storeValue, specified := req.Store(); specified {
 		store = &storeValue
@@ -214,7 +217,11 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 	if !compile.OmitInclude {
 		// Request encrypted reasoning state required to preserve official Responses
 		// reasoning continuity when Swobu manages conversation history manually.
-		payload["include"] = []string{"reasoning.encrypted_content"}
+		include := []string{"reasoning.encrypted_content"}
+		if search, ok := toolProjection.occurrences[canonical.WebSearchToolKey()]; ok && search.SupportsWebSearchSourceInclude {
+			include = append(include, "web_search_call.action.sources")
+		}
+		payload["include"] = include
 	}
 	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
 		return ProviderRequestDocument{}, err
@@ -328,7 +335,6 @@ func mergedResponsesInstructions(requestInstructions string, optionInstructions 
 
 func logResponsesEncodeShape(req canonical.CanonicalRequest, tools []canonical.ToolDeclaration, instructions string, input any, choice any, policy canonical.ToolPolicy, d delivery.Delivery) {
 	thread := req.Items()
-	encodedItems := thread
 	_, hasPrevious := req.PreviousResponse()
 	instructions = strings.TrimSpace(instructions) // swobu:io-string source=domain
 	inputType := "nil"
@@ -350,9 +356,9 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, tools []canonical.T
 		"instructions_present", instructions != "",
 		"instructions_bytes", len(instructions),
 		"thread_item_count", len(thread),
-		"encoded_item_count", len(encodedItems),
+		"encoded_item_count", responsesEncodedItemCount(input),
 		"thread_tail_role", responsesTailRole(thread),
-		"encoded_tail_role", responsesTailRole(encodedItems),
+		"encoded_tail_role", responsesEncodedTailRole(input),
 		"input_type", inputType,
 		"tool_count", len(tools),
 		"function_tool_count", responsesToolKindCount(tools, canonical.ToolTypeFunction),
@@ -361,6 +367,48 @@ func logResponsesEncodeShape(req canonical.CanonicalRequest, tools []canonical.T
 		"tool_choice_shape", responsesWireToolChoiceShape(choice),
 		"parallel_tool_calls", strings.TrimSpace(string(req.ToolCallBatch().Mode)), // swobu:io-string source=domain
 	)
+}
+
+func responsesEncodedTailRole(input any) string {
+	switch value := input.(type) {
+	case string:
+		return "user"
+	case []any:
+		if len(value) == 0 {
+			return ""
+		}
+		switch item := value[len(value)-1].(type) {
+		case inputMessageItem:
+			return strings.TrimSpace(item.Role) // swobu:io-string source=provider-wire
+		case functionCallItem, customToolCallItem:
+			return "assistant"
+		case toolCallOutputItem:
+			return "tool"
+		case map[string]any:
+			if role, ok := item["role"].(string); ok {
+				return strings.TrimSpace(role) // swobu:io-string source=provider-wire
+			}
+			kind, _ := item["type"].(string)
+			switch strings.TrimSpace(kind) { // swobu:io-string source=provider-wire
+			case "function_call_output", "custom_tool_call_output":
+				return "tool"
+			case "function_call", "custom_tool_call":
+				return "assistant"
+			}
+		}
+	}
+	return ""
+}
+
+func responsesEncodedItemCount(input any) int {
+	switch value := input.(type) {
+	case string:
+		return 1
+	case []any:
+		return len(value)
+	default:
+		return 0
+	}
 }
 
 func responsesTailRole(items []canonical.CanonicalItem) string {

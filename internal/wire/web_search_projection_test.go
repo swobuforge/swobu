@@ -76,6 +76,22 @@ func TestMessagesLifecycleProjectsToResponsesWithOriginalIdentity(t *testing.T) 
 	}
 }
 
+func TestResponsesUndisclosedSourcesProjectOneClaudeSearchRequest(t *testing.T) {
+	raw := []byte(`{"id":"resp_provider","model":"model","status":"completed","output":[{"type":"web_search_call","id":"ws_original","status":"completed","action":{"type":"search","queries":["one"],"sources":null}},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}`)
+	response := decodeResponsesOutput(t, raw)
+	encoded, err := (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := encoded.Document.RawBytes()
+	if !bytes.Contains(output, []byte(`"content":[]`)) {
+		t.Fatalf("undisclosed sources did not remain an empty successful result: %s", output)
+	}
+	if !bytes.Contains(output, []byte(`"server_tool_use":{"web_search_requests":1}`)) {
+		t.Fatalf("Claude search accounting did not preserve completed search: %s", output)
+	}
+}
+
 func decodeResponsesOutput(t *testing.T, raw []byte) canonical.CanonicalResponse {
 	t.Helper()
 	decoded, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(

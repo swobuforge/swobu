@@ -75,7 +75,7 @@ func TestChatStreamingClientProjectsResponsesCompletedAsStop(t *testing.T) {
 	}
 }
 
-func TestChatStreamingClientDoesNotProjectResponsesFailureAsStop(t *testing.T) {
+func TestChatStreamingClientProjectsPostIdentityResponsesFailureInStream(t *testing.T) {
 	body := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_provider\",\"model\":\"responses-model\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_provider\",\"model\":\"responses-model\",\"status\":\"failed\",\"error\":{\"code\":\"backend_failed\",\"message\":\"provider failed\"}}}\n\n"
 	handler := terminalProjectionHandler(t, terminalProjectionTransport{body: body})
@@ -87,14 +87,14 @@ func TestChatStreamingClientDoesNotProjectResponsesFailureAsStop(t *testing.T) {
 	handler.ServeHTTP(response, request)
 
 	raw := response.Body.Bytes()
-	if response.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want uncommitted backend 502: %s", response.Code, raw)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want committed stream 200: %s", response.Code, raw)
 	}
 	if bytes.Contains(raw, []byte(`"finish_reason":"stop"`)) {
 		t.Fatalf("failed Responses stream became Chat success: %s", raw)
 	}
-	if !bytes.Contains(raw, []byte("backend_failed")) {
-		t.Fatalf("failed Responses stream lacks uncommitted backend error: status=%d body=%s", response.Code, raw)
+	if !bytes.Contains(raw, []byte("provider_stream_decode_failed")) {
+		t.Fatalf("failed Responses stream lacks post-identity stream error: status=%d body=%s", response.Code, raw)
 	}
 }
 

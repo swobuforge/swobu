@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
@@ -49,6 +50,9 @@ func TestRuntimeComposesSharedProtocolsAndGMIResponsesWebSearch(t *testing.T) {
 			tools, ok := payload["tools"].([]any)
 			if !ok || len(tools) != 1 || tools[0].(map[string]any)["type"] != "web_search_preview" {
 				t.Fatalf("GMI Responses tools = %#v", payload["tools"])
+			}
+			if strings.Contains(string(doc.RawBytes()), "web_search_call.action.sources") {
+				t.Fatalf("GMI inherited unproven OpenAI source include: %s", doc.RawBytes())
 			}
 		}
 	}

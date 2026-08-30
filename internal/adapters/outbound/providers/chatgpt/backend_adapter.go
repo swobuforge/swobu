@@ -119,7 +119,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("chatgpt provider request failed before backend response"))
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
@@ -142,7 +142,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		}
 		retryResp, retryErr := e.client.Do(retryReq)
 		if retryErr != nil {
-			return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("chatgpt provider request failed before backend response"))
+			return nil, provider.TransportFailure(ctx, retryErr)
 		}
 		retryResp, retryErr = httpedge.DecodeHTTPResponseContentEncoding(retryResp)
 		if retryErr != nil {

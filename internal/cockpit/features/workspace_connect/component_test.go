@@ -1880,6 +1880,60 @@ func TestRealPiConfigurationExternalDeletionAndRecovery(t *testing.T) {
 	}
 }
 
+func TestRealPiConfigurationCreatesMissingGlobalFiles(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	binDir := filepath.Join(tempHome, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "pi"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	target := connectTarget(t)
+	d := New(target, clientconnect.NewService())
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		observations := d.Observations.Get()
+		return len(observations) >= 1 && observationFor(t, observations, clientconnect.ClientPi).Kind != observationChecking
+	})
+	observation := observationFor(t, d.Observations.Get(), clientconnect.ClientPi)
+	if observation.Kind != observationNeedsChange {
+		t.Fatalf("Pi observation = %#v\n%s", observation, h.Frame())
+	}
+	d.chooseClient(clientconnect.ClientPi)
+	waitFor(t, func() bool {
+		h.Frame()
+		return d.Child.Get().isClient(clientconnect.ClientPi)
+	})
+	observation = observationFor(t, d.Observations.Get(), clientconnect.ClientPi)
+	if frame := h.Frame(); !strings.Contains(frame, "apply ↵") || !strings.Contains(observation.Plan.ConfigPath, "settings.json") || !strings.Contains(observation.Plan.ConfigPath, "models.json") {
+		t.Fatalf("fresh Pi plan missing:\n%s", frame)
+	}
+	d.applyPlan(clientconnect.ClientPi)
+	waitFor(t, func() bool {
+		h.Frame()
+		observations := d.Observations.Get()
+		return len(observations) >= 1 && observationFor(t, observations, clientconnect.ClientPi).Kind == observationMatch
+	})
+	for _, name := range []string{"settings.json", "models.json"} {
+		if _, err := os.Stat(filepath.Join(tempHome, ".pi", "agent", name)); err != nil {
+			t.Fatalf("%s not created: %v", name, err)
+		}
+	}
+}
+
 func TestStaleRenderedCallbackActivationReusesInFlightInspectionAndGatesDuplicatePlan(t *testing.T) {
 	d, ops := connectFixture(t)
 	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientPi, Name: "pi"}}

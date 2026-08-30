@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
+func TestMessagesProjectionDebugLogsStructureWithoutContent(t *testing.T) {
 	const canary = "SWOBU_PRIVATE_MESSAGE_CANARY"
 
 	var logs bytes.Buffer
@@ -17,9 +17,8 @@ func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	logMessagesEgressBuffered([]byte(`{"content":[{"type":"text","text":"` + canary + `"}]}`))
-	logMessagesEgressStreamFrame([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"" + canary + "\"}}\n\n"))
-	logMessagesEgressStreamFrame([]byte("event: " + canary + "\nmalformed\n\n"))
+	logMessagesStreamProjectionFrame([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"" + canary + "\"}}\n\n"))
+	logMessagesStreamProjectionFrame([]byte("event: " + canary + "\nmalformed\n\n"))
 	logMessagesStreamProjection(canonical.EventTextDelta)
 
 	got := logs.String()
@@ -27,9 +26,8 @@ func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
 		t.Fatalf("Messages output content reached logs: %s", got)
 	}
 	for _, structural := range []string{
-		"event=messages_buffered_egress",
-		"payload_bytes=",
-		"event=messages_stream_egress_frame",
+		"component=protocol.messages",
+		"event=messages_stream_projection_frame",
 		"frame_bytes=",
 		"event=messages_stream_projection",
 		"canonical_kind=text.delta",
@@ -37,5 +35,8 @@ func TestMessagesEgressDebugLogsStructureWithoutContent(t *testing.T) {
 		if !strings.Contains(got, structural) {
 			t.Fatalf("logs missing structural field %q: %s", structural, got)
 		}
+	}
+	if strings.Contains(got, "egress") {
+		t.Fatalf("codec projection claimed client egress: %s", got)
 	}
 }

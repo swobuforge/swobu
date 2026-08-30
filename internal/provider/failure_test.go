@@ -69,6 +69,40 @@ func TestTransportFailurePreservesInvocationCancellation(t *testing.T) {
 	}
 }
 
+func TestTransportFailureDoesNotInferCallerCancellationFromTransportError(t *testing.T) {
+	err := TransportFailure(context.Background(), context.Canceled)
+	var unavailable UnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("error = %T %v, want fallback-eligible UnavailableError", err, err)
+	}
+	var cancelled CancelledError
+	if errors.As(err, &cancelled) {
+		t.Fatalf("live caller context acquired cancellation from transport error: %v", err)
+	}
+}
+
+type timeoutTransportError struct{}
+
+func (timeoutTransportError) Error() string   { return "response headers timed out" }
+func (timeoutTransportError) Timeout() bool   { return true }
+func (timeoutTransportError) Temporary() bool { return true }
+
+func TestTransportFailureSeparatesTransportTimeoutFromLiveCallerContext(t *testing.T) {
+	err := TransportFailure(context.Background(), timeoutTransportError{})
+	var timeout TimeoutError
+	if !errors.As(err, &timeout) {
+		t.Fatalf("error = %T %v, want TimeoutError", err, err)
+	}
+	var unavailable UnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("error = %T %v, want fallback-eligible UnavailableError", err, err)
+	}
+	var cancelled CancelledError
+	if errors.As(err, &cancelled) {
+		t.Fatalf("transport timeout = %T %v, must not be caller cancellation", err, err)
+	}
+}
+
 func TestBindTransportDefaultsUntypedFailureToPossibleExecution(t *testing.T) {
 	target := NewTargetSnapshot("target-a", "openai", "https://example.test", "", "responses", "responses", delivery.BufferedDelivery())
 	target.Model = "m"

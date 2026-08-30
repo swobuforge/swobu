@@ -43,7 +43,7 @@ func (r reasoningBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 		backend.Codec = protocolcodec.Codec{
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
-				Tools:           protocolcodec.ResponsesToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("openrouter:web_search")},
+				Tools:           protocolcodec.ResponsesToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("openrouter:web_search", false)},
 				DecorateAttempt: decorateOpenRouterAttempt,
 			},
 		}

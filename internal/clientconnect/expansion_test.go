@@ -432,6 +432,51 @@ func TestPiDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 	}
 }
 
+func TestPiCreatesMissingGlobalConfiguration(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".pi", "agent")
+	service := &Service{getenv: func(key string) string {
+		if key == "PI_CODING_AGENT_DIR" {
+			return dir
+		}
+		return ""
+	}}
+	plan, err := service.Plan(ClientPi, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RequiresReplace() {
+		t.Fatalf("missing configuration requires replace: %#v", plan.Changes)
+	}
+	if err := service.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(settings), `"defaultProvider":"swobu"`) || !strings.Contains(string(settings), `"defaultModel":"default"`) {
+		t.Fatalf("settings=%s", settings)
+	}
+	models, err := os.ReadFile(filepath.Join(dir, "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"swobu"`, `"baseUrl":"` + testTarget(t).WorkspaceURL() + `"`, `"api":"openai-completions"`, `"id":"default"`} {
+		if !strings.Contains(string(models), want) {
+			t.Fatalf("missing %q in models=%s", want, models)
+		}
+	}
+	for _, path := range []string{filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
+		}
+	}
+}
+
 func TestPiReusesExistingSwobuCredentialPresentationAndMetadata(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")

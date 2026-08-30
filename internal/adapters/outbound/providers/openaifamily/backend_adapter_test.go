@@ -433,7 +433,7 @@ func (t failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, t.err
 }
 
-func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
+func TestSendProviderRequest_ClassifiesTransportFailureWithoutConfigurationError(t *testing.T) {
 	t.Parallel()
 
 	transportErr := errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
@@ -467,18 +467,15 @@ func TestSendProviderRequest_PreservesTransportErrorDetail(t *testing.T) {
 	}
 
 	var swErr canonical.Error
-	if !errors.As(err, &swErr) {
-		t.Fatalf("error type = %T, want canonical.Error", err)
+	if errors.As(err, &swErr) {
+		t.Fatalf("transport failure contains configuration error %#v", swErr)
 	}
-	if swErr.Code != canonical.ErrorCodeBadEndpoint {
-		t.Fatalf("error code = %s, want %s", swErr.Code, canonical.ErrorCodeBadEndpoint)
-	}
-	if got := swErr.Details["request_transport_error"]; got != transportErr.Error() {
-		t.Fatalf("transport detail = %q, want %q", got, transportErr.Error())
+	if !errors.Is(err, transportErr) {
+		t.Fatalf("transport cause = %v, want %v", err, transportErr)
 	}
 }
 
-func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
+func TestSendProviderRequest_DoesNotInferCallerCancellationFromTransportError(t *testing.T) {
 	exec := NewExecutor(
 		&http.Client{Transport: failingRoundTripper{err: context.Canceled}},
 		nil,
@@ -500,13 +497,17 @@ func TestSendProviderRequest_PreservesTransportCancellation(t *testing.T) {
 	target.Model = "gpt-4o-mini"
 
 	_, err := exec.Send(context.Background(), target, doc)
+	var unavailable provider.UnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("error type = %T, want provider.UnavailableError", err)
+	}
 	var cancelled provider.CancelledError
-	if !errors.As(err, &cancelled) {
-		t.Fatalf("error type = %T, want provider.CancelledError", err)
+	if errors.As(err, &cancelled) {
+		t.Fatalf("live caller context acquired cancellation from transport error: %v", err)
 	}
 	var swErr canonical.Error
-	if !errors.As(err, &swErr) || swErr.Code != canonical.ErrorCodeBadEndpoint {
-		t.Fatalf("diagnostic error = %#v, want BAD_ENDPOINT", err)
+	if errors.As(err, &swErr) {
+		t.Fatalf("cancellation contains configuration error %#v", swErr)
 	}
 }
 

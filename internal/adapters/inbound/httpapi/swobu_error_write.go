@@ -28,6 +28,10 @@ func statusCodeForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusNotImplemented
 	case canonical.ErrorCodeNoAvailableTarget:
 		return http.StatusServiceUnavailable
+	case canonical.ErrorCodeProviderTimeout:
+		return http.StatusGatewayTimeout
+	case canonical.ErrorCodeProviderUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

@@ -10,6 +10,9 @@
 // Settled historical WebSearch calls
 // and results are transcript facts, not current capability requirements; the
 // conversation projector replays them independently without re-execution.
+// Request projection asks for web_search_call.action.sources only when the
+// selected WebSearch projection explicitly owns that target capability;
+// fragment emission and client/provider identity do not imply support.
 // Unknown additive declarations erase locally and preserve sibling order.
 // Missing discriminators, closed-contract violations, invalid residual
 // containers, and contradictory lifecycle or identity fail at their owning

@@ -196,7 +196,7 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 		compatibility.progressive = nil
 		return nil, &cloned, compatibility, nil
 	}
-	prefetched, err := prefetchSemanticHandoff(ctx, events)
+	prefetched, err := prefetchResponseHandoff(ctx, events, call.clientDelivery.Mode == delivery.Streaming)
 	if err != nil {
 		_ = events.Close(ctx)
 		return nil, nil, compatibility, responseFailure("provider_stream_decode", err)

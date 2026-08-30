@@ -222,6 +222,35 @@ func TestRuntimeUsesSharedOfficialResponsesToolLowering(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesUsesStableHostedWebSearch(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration), canonicaltest.Message(t, canonical.MessageRoleUser, "search")},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.Responses, "responses", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, ToolNames: names, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := document.RawBytes()
+	if !bytes.Contains(raw, []byte(`"type":"web_search"`)) || bytes.Contains(raw, []byte("web_search_preview")) {
+		t.Fatalf("OpenAI Responses hosted search is not stable dialect: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(`"include":["reasoning.encrypted_content","web_search_call.action.sources"]`)) {
+		t.Fatalf("OpenAI Responses lacks source disclosure include: %s", raw)
+	}
+}
+
 func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) {
 	var firstWire string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

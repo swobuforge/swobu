@@ -20,6 +20,8 @@ const (
 	ErrorCodeUnknownTarget        ErrorCode = "UNKNOWN_TARGET"
 	ErrorCodeNotImplemented       ErrorCode = "NOT_IMPLEMENTED"
 	ErrorCodeNoAvailableTarget    ErrorCode = "NO_AVAILABLE_TARGET"
+	ErrorCodeProviderTimeout      ErrorCode = "PROVIDER_TIMEOUT"
+	ErrorCodeProviderUnavailable  ErrorCode = "PROVIDER_UNAVAILABLE"
 )
 
 const (
@@ -33,7 +35,7 @@ const (
 // itself a code; callers gate it separately.
 func ValidErrorCode(c ErrorCode) bool {
 	switch c {
-	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoAvailableTarget:
+	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoAvailableTarget, ErrorCodeProviderTimeout, ErrorCodeProviderUnavailable:
 		return true
 	}
 	return false
@@ -128,6 +130,19 @@ func NotImplemented(message string) Error {
 // eligible configured targets from establishing a successful selection.
 func NoAvailableTarget(message string) Error {
 	return newSwobuError(ErrorCodeNoAvailableTarget, message)
+}
+
+// ProviderTimeout reports that every eligible provider path ended without a
+// response before Swobu's provider transport deadline. Individual timed-out
+// attempts remain fallback-eligible before this terminal projection.
+func ProviderTimeout(message string) Error {
+	return newSwobuError(ErrorCodeProviderTimeout, message)
+}
+
+// ProviderUnavailable reports that every eligible provider path ended in a
+// transport availability failure without a backend HTTP response.
+func ProviderUnavailable(message string) Error {
+	return newSwobuError(ErrorCodeProviderUnavailable, message)
 }
 
 func UnknownTarget(message string) Error {

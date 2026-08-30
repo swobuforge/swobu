@@ -334,6 +334,9 @@ func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *tes
 	if err != nil || len(document.RawBytes()) == 0 || len(changes) != 1 || changes[0].Kind != compat.Omission {
 		t.Fatalf("document=%s changes=%#v err=%v", document.RawBytes(), changes, err)
 	}
+	if strings.Contains(string(document.RawBytes()), "web_search_call.action.sources") {
+		t.Fatalf("omitted hosted search requested source disclosure: %s", document.RawBytes())
+	}
 
 	rule := func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		return ToolProjection{Fragments: []ProviderRequestTool{{Type: "web_search"}}, TargetType: "web_search"}, nil, nil
@@ -348,6 +351,43 @@ func TestEncodeRequestLowersStableWebSearchTool_GenericOmitsAndRuleLowers(t *tes
 	}
 	if !strings.Contains(string(doc.Raw), `"type":"web_search"`) {
 		t.Fatalf("expected web_search tool in payload, got %s", string(doc.Raw))
+	}
+	if strings.Contains(string(doc.Raw), "web_search_call.action.sources") {
+		t.Fatalf("plain WebSearch fragment inferred source-disclosure capability: %s", string(doc.Raw))
+	}
+
+	sourceRule := func(_ ToolLoweringContext, _ canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		return HostedSearchProjection(ProviderRequestTool{Type: "web_search"}, true), nil, nil
+	}
+	typed, err = CompileProviderRequestDocument(EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)}, delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering().Overlay(ToolLowering{WebSearch: sourceRule})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = EncodeProviderRequestDocument(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc.Raw), `"include":["reasoning.encrypted_content","web_search_call.action.sources"]`) {
+		t.Fatalf("explicit source-disclosure capability was not emitted: %s", string(doc.Raw))
+	}
+}
+
+func TestEncodeRequestOmitsWebSearchSourcesIncludeWithoutLoweredHostedSearch(t *testing.T) {
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})
+	typed, err := CompileProviderRequestDocument(
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
+		delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering()},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := EncodeProviderRequestDocument(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(document.Raw)
+	if !strings.Contains(wire, `"include":["reasoning.encrypted_content"]`) || strings.Contains(wire, "web_search_call.action.sources") {
+		t.Fatalf("unexpected include payload without hosted search: %s", wire)
 	}
 }
 

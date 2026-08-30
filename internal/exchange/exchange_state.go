@@ -630,6 +630,16 @@ func terminateProviderExecution(s exchangeState) reducerOutcome {
 	}
 	last := s.providerCallAttempts[len(s.providerCallAttempts)-1]
 	problem := last.failure.Attempt.Cause()
+	var timeout provider.TimeoutError
+	if errors.As(problem, &timeout) {
+		problem = canonical.ProviderTimeout("provider did not respond before the configured deadline")
+	} else {
+		var unavailable provider.UnavailableError
+		var backend canonical.BackendError
+		if errors.As(problem, &unavailable) && !errors.As(problem, &backend) {
+			problem = canonical.ProviderUnavailable("provider transport was unavailable")
+		}
+	}
 	s.phase = failedPhase{problem: problem, target: last.target}
 	return reducerOutcome{nextState: s}
 }

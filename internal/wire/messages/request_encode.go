@@ -180,12 +180,13 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	items, projectionDecisions, err := projectMessagesWebSearchLifecycles(items, canonical.RequestItemsKind)
+	webProjection, err := projectMessagesWebSearchLifecycles(items, canonical.RequestItemsKind)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
+	items = webProjection.Items
 	if changeLog != nil {
-		*changeLog = append(*changeLog, projectionDecisions...)
+		*changeLog = append(*changeLog, webProjection.Changes...)
 	}
 	tools := environment.Declarations()
 	flatTools, err := wire.PrepareFlatToolSet(tools, func(tool canonical.ToolDeclaration) (string, error) {

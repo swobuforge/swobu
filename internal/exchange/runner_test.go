@@ -208,6 +208,71 @@ func TestStreamingClientDoesNotReadProviderStreamToEOFBeforeFirstFrame(t *testin
 	close(release)
 }
 
+func TestMessagesClientReceivesStreamStartAtResponsesIdentityBeforeModelOutput(t *testing.T) {
+	providerRead, providerWrite := io.Pipe()
+	defer func() { _ = providerRead.Close() }()
+	release := make(chan struct{})
+	go func() {
+		defer func() { _ = providerWrite.Close() }()
+		_, _ = io.WriteString(providerWrite, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[]}}\n\n")
+		<-release
+		_, _ = io.WriteString(providerWrite, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"in_progress\",\"content\":[]}}\n\n")
+		_, _ = io.WriteString(providerWrite, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"OK\"}\n\n")
+		_, _ = io.WriteString(providerWrite, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}}\n\n")
+		_, _ = io.WriteString(providerWrite, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n")
+	}()
+
+	runner := withRuntime(streamingProviderTransport(providerRead))
+	type result struct {
+		out ClientResponse
+		err error
+	}
+	returned := make(chan result, 1)
+	go func() {
+		out, err := RunPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+			ExchangeID:       "ex_response_identity_handoff",
+			ClientFamily:     canonical.ClientFamilyMessages,
+			ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+			Request:          testCanonicalRequest("m"),
+			WorkspaceSlug:    testWorkspaceSlug(),
+			ProviderProtocol: protocolkind.Responses,
+			ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+			Target:           provider.NewTargetSnapshot("ollama", "ollama", "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "responses", delivery.BufferedDelivery()),
+			Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+		})
+		returned <- result{out: out, err: err}
+	}()
+
+	var response ClientResponse
+	select {
+	case got := <-returned:
+		if got.err != nil {
+			t.Fatalf("Run() error = %v", got.err)
+		}
+		response = got.out
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		t.Fatal("exchange withheld Messages stream after validated provider response identity")
+	}
+	defer func() { _ = ClientTransportForTest(response).Body.Close() }()
+	first := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, 1024)
+		n, _ := ClientTransportForTest(response).Body.Read(buf)
+		first <- buf[:n]
+	}()
+	select {
+	case raw := <-first:
+		if !strings.Contains(string(raw), "message_start") {
+			t.Fatalf("first Messages bytes = %s, want message_start", raw)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		t.Fatal("Messages stream produced no first byte after handoff")
+	}
+	close(release)
+}
+
 func TestRunnerRun_RejectsAmbiguousProviderIngress(t *testing.T) {
 	runner := withRuntime(func(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error) {
 		return nil, nil

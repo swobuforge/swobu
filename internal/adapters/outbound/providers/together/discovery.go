@@ -112,7 +112,7 @@ func (d discovery) get(ctx context.Context, target provider.TargetSnapshot, requ
 	req.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return canonical.BadEndpoint("Together AI catalog request failed before backend response")
+		return provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

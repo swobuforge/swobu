@@ -32,7 +32,6 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	logResponsesEgressBuffered(encodedBody)
 	return wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.Responses, "application/json", nil, encodedBody, carrier.Meta{}),
 		ResponseFingerprint: &responseFingerprint,

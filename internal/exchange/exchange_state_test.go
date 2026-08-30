@@ -461,6 +461,66 @@ func TestProviderCancellationNeverSelectsRecovery(t *testing.T) {
 	}
 }
 
+func TestProviderTransportTimeoutSelectsNextCandidate(t *testing.T) {
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "timeout-a"),
+		requestpathTarget(t, "fallback-b"),
+	}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Attempt: mayHaveExecuted(provider.TimedOut(errors.New("response headers timed out"))),
+		},
+	}}
+	selection, ok := selectNextProviderCall(s)
+	if !ok || selection.candidateIndex != 1 {
+		t.Fatalf("timeout fallback = (%#v, %t), want next candidate", selection, ok)
+	}
+}
+
+func TestExhaustedProviderTransportTimeoutBecomesCanonicalTimeout(t *testing.T) {
+	s := reducerTestState(t)
+	target := requestpathTarget(t, "timeout-only")
+	s.route = routePlan{targets: []routing.Target{target}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Attempt: mayHaveExecuted(provider.TimedOut(errors.New("response headers timed out"))),
+		},
+	}}
+	outcome := terminateProviderExecution(s)
+	failed := outcome.nextState.phase.(failedPhase)
+	var terminal canonical.Error
+	if !errors.As(failed.problem, &terminal) || terminal.Code != canonical.ErrorCodeProviderTimeout {
+		t.Fatalf("terminal failure = %T %v, want PROVIDER_TIMEOUT", failed.problem, failed.problem)
+	}
+}
+
+func TestExhaustedProviderTransportUnavailabilityBecomesCanonicalUnavailable(t *testing.T) {
+	s := reducerTestState(t)
+	target := requestpathTarget(t, "unavailable-only")
+	s.route = routePlan{targets: []routing.Target{target}}
+	s.providerCallAttempts = []providerCallAttempt{{
+		candidateIndex: 0,
+		requestChoice:  providerRequestPreferred,
+		status:         providerCallAttemptFailed,
+		failure: &providerCallFailure{
+			Attempt: mayHaveExecuted(provider.Unavailable(errors.New("connection refused"))),
+		},
+	}}
+	outcome := terminateProviderExecution(s)
+	failed := outcome.nextState.phase.(failedPhase)
+	var terminal canonical.Error
+	if !errors.As(failed.problem, &terminal) || terminal.Code != canonical.ErrorCodeProviderUnavailable {
+		t.Fatalf("terminal failure = %T %v, want PROVIDER_UNAVAILABLE", failed.problem, failed.problem)
+	}
+}
+
 // genericBackendRejection is the adapter-edge fact for an unclassified backend
 // 4xx: a complete response proves exact-target rejection, not canonical
 // invalidity or absence of execution. The prose is deliberately opaque evidence,

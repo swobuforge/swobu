@@ -13,6 +13,10 @@
 // and contradictory stream lifecycle or identity fail at their owning
 // boundary. Buffered and streamed delivery must converge on the same surviving
 // canonical semantics.
+// One lifecycle traversal owns WebSearch projection, fault origin, and usage.
+// Successful search actions count once regardless of disclosed source
+// cardinality, while failures and non-search actions count zero. The derived
+// Messages counter never enters canonical token usage.
 //
 // Static top-level system/tools fields cannot represent arbitrary mid-history
 // activation order. Lowering hoists the proven leading prefix and may expose one

@@ -1,11 +1,68 @@
 package providers
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestProviderPackages_DoNotWrapDispatchedTransportFailuresAsBadEndpoints(t *testing.T) {
+	t.Parallel()
+
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != "." && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || !isSelectorCall(call.Fun, "provider", "TransportFailure") {
+				return true
+			}
+			for _, argument := range call.Args {
+				ast.Inspect(argument, func(nested ast.Node) bool {
+					nestedCall, ok := nested.(*ast.CallExpr)
+					if ok && isSelectorCall(nestedCall.Fun, "canonical", "BadEndpoint") {
+						t.Errorf("%s: dispatched transport failure contains canonical.BadEndpoint", fileSet.Position(nestedCall.Pos()))
+						return false
+					}
+					return true
+				})
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk providers tree: %v", err)
+	}
+}
+
+func isSelectorCall(expression ast.Expr, packageName, functionName string) bool {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != functionName {
+		return false
+	}
+	identifier, ok := selector.X.(*ast.Ident)
+	return ok && identifier.Name == packageName
+}
 
 func TestProviderPackages_DoNotImportProtocolFamilyPackagesDirectly(t *testing.T) {
 	t.Parallel()

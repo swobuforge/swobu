@@ -19,6 +19,8 @@ func TestStatusCodeForSwobuError_UsesRecoveryOwnership(t *testing.T) {
 		{name: "client operation", code: canonical.ErrorCodeUnsupportedOperation, want: http.StatusBadRequest},
 		{name: "Swobu capability", code: canonical.ErrorCodeNotImplemented, want: http.StatusNotImplemented},
 		{name: "temporary target availability", code: canonical.ErrorCodeNoAvailableTarget, want: http.StatusServiceUnavailable},
+		{name: "provider timeout", code: canonical.ErrorCodeProviderTimeout, want: http.StatusGatewayTimeout},
+		{name: "provider unavailable", code: canonical.ErrorCodeProviderUnavailable, want: http.StatusServiceUnavailable},
 		{name: "Swobu invariant", code: canonical.ErrorCodeInternal, want: http.StatusInternalServerError},
 	}
 
@@ -45,6 +47,16 @@ func TestWriteSwobuError_EmitsRecoveryOwnedHTTPStatusAndCode(t *testing.T) {
 		{
 			name: "configured targets temporarily unavailable",
 			err:  canonical.NoAvailableTarget("no currently available configured target can serve the request"),
+			want: http.StatusServiceUnavailable,
+		},
+		{
+			name: "provider response timeout",
+			err:  canonical.ProviderTimeout("provider did not respond before the configured deadline"),
+			want: http.StatusGatewayTimeout,
+		},
+		{
+			name: "provider transport unavailable",
+			err:  canonical.ProviderUnavailable("provider transport was unavailable"),
 			want: http.StatusServiceUnavailable,
 		},
 	}

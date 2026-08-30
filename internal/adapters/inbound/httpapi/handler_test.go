@@ -201,6 +201,39 @@ func TestExchangeFailureDeliveryResult_PreservesClientCancellation(t *testing.T)
 	}
 }
 
+func TestHandler_ProjectsProviderTimeoutAcrossClientFamilies(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "Messages", path: "/c/alpha/messages", body: `{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`},
+		{name: "Responses", path: "/c/alpha/responses", body: `{"model":"m","input":"hello"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := newTestHandler(staticRequestIngress{err: canonical.ProviderTimeout("provider did not respond before the configured deadline")})
+			request := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(test.body))
+			if test.name == "Messages" {
+				request.Header.Set("anthropic-version", "2023-06-01")
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusGatewayTimeout {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusGatewayTimeout, response.Body.String())
+			}
+			var envelope swobuErrorEnvelope
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Code != string(canonical.ErrorCodeProviderTimeout) {
+				t.Fatalf("error code = %q, want %q", envelope.Error.Code, canonical.ErrorCodeProviderTimeout)
+			}
+		})
+	}
+}
+
 func TestWriteExchangeErrorDefaultsStatuslessBackendFailureToBadGateway(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	err := canonical.NewBackendError("responses", 0, "provider contract failed", "")

@@ -110,7 +110,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, provider.TransportFailure(ctx, canonical.BadEndpoint("bedrock provider request failed before backend response"))
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {
@@ -187,7 +187,7 @@ func (e BackendAdapter) listDeploymentsWithAuth(ctx context.Context, target prov
 	}
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("bedrock provider model catalog request failed before backend response")
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

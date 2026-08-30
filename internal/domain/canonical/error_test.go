@@ -56,6 +56,11 @@ func TestRecoveryOwnedSwobuErrors_AreCanonicalAndActionable(t *testing.T) {
 			code: ErrorCodeNoAvailableTarget,
 		},
 		{
+			name: "provider timeout",
+			err:  ProviderTimeout("provider did not respond before the configured deadline"),
+			code: ErrorCodeProviderTimeout,
+		},
+		{
 			name: "caller controlled operation",
 			err: ClientUnsupportedOperation(
 				"models endpoint does not support POST",

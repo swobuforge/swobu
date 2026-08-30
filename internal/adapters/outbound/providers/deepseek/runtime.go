@@ -63,7 +63,7 @@ func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSn
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	resp, err := d.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("DeepSeek provider model catalog request failed before backend response")
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

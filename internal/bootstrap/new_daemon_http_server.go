@@ -8,7 +8,6 @@ func newDaemonHTTPServer(addr string, handler http.Handler) *http.Server {
 		Handler:           handler,
 		ReadHeaderTimeout: daemonReadHeaderTimeout,
 		ReadTimeout:       daemonReadTimeout,
-		WriteTimeout:      daemonWriteTimeout,
 		IdleTimeout:       daemonIdleTimeout,
 	}
 }

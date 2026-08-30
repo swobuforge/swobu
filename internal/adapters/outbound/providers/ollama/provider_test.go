@@ -1,8 +1,10 @@
 package ollama
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -17,6 +19,11 @@ import (
 )
 
 func TestResponsesLowersLateDirectiveRoleWithoutReorderingHistory(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{
@@ -44,6 +51,11 @@ func TestResponsesLowersLateDirectiveRoleWithoutReorderingHistory(t *testing.T) 
 	want := compat.NewApproximation(canonical.RequestItemsMessageRole, canonical.RequestItemOccurrence(1))
 	if len(changes) != 1 || changes[0] != want {
 		t.Fatalf("Ollama changes = %#v, want %#v", changes, []compat.Change{want})
+	}
+	for _, field := range []string{"thread_tail_role=system", "encoded_tail_role=user"} {
+		if !strings.Contains(logs.String(), field) {
+			t.Fatalf("Ollama request-shape logs missing %q after role lowering: %s", field, logs.String())
+		}
 	}
 
 	standardDocument := encodeResponsesRequest(t, openaifamily.NewRuntime(nil, nil, openaifamily.StandardBearerPolicy(profile.ProviderSpecOpenAI)).BackendResolver, profile.ProviderSpecOpenAI, request)

@@ -22,6 +22,9 @@ type messagesEnvelopeStreamEncoder struct {
 	request                  canonical.CanonicalRequest
 	pendingWebSearchStarts   map[string]sse.StreamEvent
 	unresolvedWebSearchCalls map[string]uint32
+	webSearchActions         map[string]canonical.WebSearchAction
+	webSearchRequests        int
+	observedWebSearch        bool
 	changes                  []compat.Change
 }
 
@@ -70,7 +73,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		})
 		frames := [][]byte{sse.SSEEventFrame("message_start", raw)}
 		for _, frame := range frames {
-			logMessagesEgressStreamFrame(frame)
+			logMessagesStreamProjectionFrame(frame)
 		}
 		return frames, nil
 	case sse.StreamEventItemStarted:
@@ -108,7 +111,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			})
 			frames := [][]byte{sse.SSEEventFrame("content_block_start", raw)}
 			for _, frame := range frames {
-				logMessagesEgressStreamFrame(frame)
+				logMessagesStreamProjectionFrame(frame)
 			}
 			return frames, nil
 		case canonical.ItemKindReasoning:
@@ -134,7 +137,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		s.blockIndexByID[key] = index
 		raw, _ := json.Marshal(messagesContentBlockStartDTO{Type: "content_block_start", Index: index, ContentBlock: messagesContentBlockBodyDTO{Type: "text", Text: ""}})
 		frame := sse.SSEEventFrame("content_block_start", raw)
-		logMessagesEgressStreamFrame(frame)
+		logMessagesStreamProjectionFrame(frame)
 		return [][]byte{frame}, nil
 	case sse.StreamEventTextDelta:
 		key := messagesStreamPartKey(event.ItemID, event.PartOrdinal)
@@ -157,7 +160,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		})
 		frames := [][]byte{sse.SSEEventFrame("content_block_delta", raw)}
 		for _, frame := range frames {
-			logMessagesEgressStreamFrame(frame)
+			logMessagesStreamProjectionFrame(frame)
 		}
 		return frames, nil
 	case sse.StreamEventToolUseArgumentsDelta:
@@ -188,7 +191,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		})
 		frames := [][]byte{sse.SSEEventFrame("content_block_delta", raw)}
 		for _, frame := range frames {
-			logMessagesEgressStreamFrame(frame)
+			logMessagesStreamProjectionFrame(frame)
 		}
 		return frames, nil
 	case sse.StreamEventItemCompleted:
@@ -251,7 +254,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			// Messages terminal usage is cumulative. Carry every known
 			// canonical counter here because a cross-family source may not
 			// expose input/cache usage before message_start.
-			Usage: messagesDeltaUsageFromCanonical(event.Usage),
+			Usage: messagesDeltaUsageFromCanonical(event.Usage, s.webSearchRequests, s.observedWebSearch),
 		})
 		frames = append(frames, sse.SSEEventFrame("message_delta", raw))
 		raw, _ = json.Marshal(struct {
@@ -261,7 +264,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 		s.blockIndexByID = map[string]int{}
 		s.sawToolUse = false
 		for _, frame := range frames {
-			logMessagesEgressStreamFrame(frame)
+			logMessagesStreamProjectionFrame(frame)
 		}
 		return frames, nil
 	case sse.StreamEventFailed:
@@ -274,7 +277,7 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 			},
 		})
 		frame := sse.SSEEventFrame("error", raw)
-		logMessagesEgressStreamFrame(frame)
+		logMessagesStreamProjectionFrame(frame)
 		return [][]byte{frame}, nil
 	default:
 		return nil, canonical.InternalError("Messages stream received an unknown canonical event kind")
@@ -312,7 +315,7 @@ func (s *messagesEnvelopeStreamEncoder) encodeCompletedReasoning(event sse.Strea
 		frames = append(frames, sse.SSEEventFrame("content_block_stop", raw))
 	}
 	for _, frame := range frames {
-		logMessagesEgressStreamFrame(frame)
+		logMessagesStreamProjectionFrame(frame)
 	}
 	return frames, nil
 }
@@ -326,7 +329,7 @@ func (s *messagesEnvelopeStreamEncoder) stopCompletedItem(event sse.StreamEvent)
 		delete(s.blockIndexByID, key)
 		raw, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 		frame := sse.SSEEventFrame("content_block_stop", raw)
-		logMessagesEgressStreamFrame(frame)
+		logMessagesStreamProjectionFrame(frame)
 		frames = append(frames, frame)
 	}
 	return frames
@@ -339,6 +342,10 @@ func (s *messagesEnvelopeStreamEncoder) completeWebSearchCall(event sse.StreamEv
 	}
 	delete(s.pendingWebSearchStarts, event.ItemID)
 	search, ok := call.Input().WebSearch()
+	if ok {
+		s.observedWebSearch = true
+		s.webSearchActions[call.CallID().String()] = search.Action
+	}
 	if !ok || search.Action != canonical.WebSearchActionSearch || len(search.Queries) != 1 {
 		s.unresolvedWebSearchCalls[call.CallID().String()] = event.ItemOrdinal
 		return nil, nil
@@ -351,13 +358,19 @@ func (s *messagesEnvelopeStreamEncoder) completeWebSearchCall(event sse.StreamEv
 	input, _ := json.Marshal(map[string]string{"query": search.Queries[0]})
 	raw, _ := json.Marshal(messagesContentBlockDeltaDTO{Type: "content_block_delta", Index: index, Delta: messagesContentBlockDeltaBodyDTO{Type: "input_json_delta", PartialJSON: string(input)}})
 	frame := sse.SSEEventFrame("content_block_delta", raw)
-	logMessagesEgressStreamFrame(frame)
+	logMessagesStreamProjectionFrame(frame)
 	frames := append(startFrames, frame)
 	return append(frames, s.stopCompletedItem(event)...), nil
 }
 
 func (s *messagesEnvelopeStreamEncoder) encodeCompletedWebSearchResult(event sse.StreamEvent, result canonical.ToolResultItem) ([][]byte, error) {
 	callID := result.CallID().String()
+	action := s.webSearchActions[callID]
+	delete(s.webSearchActions, callID)
+	search, _ := result.WebSearch()
+	if _, failed := search.Failure(); action == canonical.WebSearchActionSearch && !failed {
+		s.webSearchRequests++
+	}
 	if callOrdinal, omitted := s.unresolvedWebSearchCalls[callID]; omitted {
 		delete(s.unresolvedWebSearchCalls, callID)
 		s.changes = append(s.changes, compat.Change{
@@ -367,7 +380,6 @@ func (s *messagesEnvelopeStreamEncoder) encodeCompletedWebSearchResult(event sse
 		})
 		return nil, nil
 	}
-	search, _ := result.WebSearch()
 	content, err := encodeMessagesWebSearchResult(search)
 	if err != nil {
 		return nil, err
@@ -378,7 +390,7 @@ func (s *messagesEnvelopeStreamEncoder) encodeCompletedWebSearchResult(event sse
 	stop, _ := json.Marshal(messagesContentBlockStopDTO{Type: "content_block_stop", Index: index})
 	frames := [][]byte{sse.SSEEventFrame("content_block_start", start), sse.SSEEventFrame("content_block_stop", stop)}
 	for _, frame := range frames {
-		logMessagesEgressStreamFrame(frame)
+		logMessagesStreamProjectionFrame(frame)
 	}
 	return frames, nil
 }
@@ -400,7 +412,7 @@ func (s *messagesEnvelopeStreamEncoder) startWebSearchBlock(event sse.StreamEven
 		return nil, err
 	}
 	frame := sse.SSEEventFrame("content_block_start", raw)
-	logMessagesEgressStreamFrame(frame)
+	logMessagesStreamProjectionFrame(frame)
 	return [][]byte{frame}, nil
 }
 
@@ -427,7 +439,7 @@ func (s *messagesEnvelopeStreamEncoder) encodeCompletedMessageCitations(event ss
 			citation := citations[citationIndex]
 			raw, _ := json.Marshal(messagesContentBlockDeltaDTO{Type: "content_block_delta", Index: index, Delta: messagesContentBlockDeltaBodyDTO{Type: "citations_delta", Citation: &citation}})
 			frame := sse.SSEEventFrame("content_block_delta", raw)
-			logMessagesEgressStreamFrame(frame)
+			logMessagesStreamProjectionFrame(frame)
 			frames = append(frames, frame)
 		}
 	}
