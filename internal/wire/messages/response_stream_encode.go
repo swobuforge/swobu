@@ -17,6 +17,7 @@ func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
 		adapter:                  sse.NewEnvelopeEventAdapter(),
 		pendingWebSearchStarts:   map[string]sse.StreamEvent{},
 		unresolvedWebSearchCalls: map[string]uint32{},
+		webSearchActions:         map[string]canonical.WebSearchAction{},
 		changes:                  []compat.Change{},
 	}
 }

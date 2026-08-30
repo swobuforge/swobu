@@ -62,7 +62,6 @@ type Daemon struct {
 
 var daemonReadHeaderTimeout = 10 * time.Second
 var daemonReadTimeout = 30 * time.Second
-var daemonWriteTimeout = 5 * time.Minute
 var daemonIdleTimeout = 60 * time.Second
 
 // StartInput collects the one runtime config path plus the dependencies

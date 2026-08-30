@@ -129,7 +129,7 @@ func (s *sseEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte, erro
 		return nil, err
 	}
 	for _, raw := range rawFrames {
-		logResponsesEgressStreamFrame(raw)
+		logResponsesStreamProjectionFrame(raw)
 	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {
@@ -145,7 +145,7 @@ func (s *sseEnvelopeStreamEncoder) Finish() ([][]byte, error) {
 		return nil, err
 	}
 	for _, raw := range rawFrames {
-		logResponsesEgressStreamFrame(raw)
+		logResponsesStreamProjectionFrame(raw)
 	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {

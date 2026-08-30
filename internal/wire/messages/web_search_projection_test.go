@@ -3,6 +3,7 @@ package messages
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -75,7 +76,7 @@ func TestMessagesResponseOmitsCompletedUnrepresentableWebSearchPair(t *testing.T
 				t.Fatal(err)
 			}
 			raw := encoded.Document.RawBytes()
-			if bytes.Contains(raw, []byte("server_tool_use")) || bytes.Contains(raw, []byte("web_search_tool_result")) {
+			if bytes.Contains(raw, []byte(`"type":"server_tool_use"`)) || bytes.Contains(raw, []byte(`"type":"web_search_tool_result"`)) {
 				t.Fatalf("omitted lifecycle leaked: %s", raw)
 			}
 			if !bytes.Contains(raw, []byte(`"text":"answer"`)) || !bytes.Contains(raw, []byte(`"url":"https://example.com/source"`)) {
@@ -114,7 +115,7 @@ func TestMessagesStreamingResponseOmitsCompletedUnrepresentableWebSearchPair(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte("server_tool_use")) || bytes.Contains(raw, []byte("web_search_tool_result")) {
+	if bytes.Contains(raw, []byte(`"type":"server_tool_use"`)) || bytes.Contains(raw, []byte(`"type":"web_search_tool_result"`)) {
 		t.Fatalf("omitted lifecycle leaked: %s", raw)
 	}
 	if !bytes.Contains(raw, []byte("answer")) {
@@ -188,21 +189,21 @@ func TestMessagesProjectionPairsReusedWebSearchIDByOccurrence(t *testing.T) {
 		[]canonical.MessagePart{canonical.NewTextMessagePart("answer")},
 	)
 
-	projected, changes, err := projectMessagesWebSearchLifecycles(
+	projection, err := projectMessagesWebSearchLifecycles(
 		[]canonical.CanonicalItem{call, result, call, result, message},
 		canonical.ResponseItemsKind,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
-		t.Fatalf("projected items = %#v, want only message", projected)
+	if len(projection.Items) != 1 || projection.Items[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("projected items = %#v, want only message", projection.Items)
 	}
-	if len(changes) != 2 {
-		t.Fatalf("changes = %#v, want two occurrence-local drops", changes)
+	if len(projection.Changes) != 2 {
+		t.Fatalf("changes = %#v, want two occurrence-local drops", projection.Changes)
 	}
-	unique := make([]compat.Change, 0, len(changes))
-	for index, change := range changes {
+	unique := make([]compat.Change, 0, len(projection.Changes))
+	for index, change := range projection.Changes {
 		item, ok := change.Occurrence.ResponseItem()
 		if change.Capability != canonical.ResponseItemsKind || change.Kind != compat.Omission || !ok || item != uint32(index*2) {
 			t.Fatalf("change = %#v", change)
@@ -225,17 +226,17 @@ func TestMessagesRequestProjectionAddressesReusedWebSearchIDByPosition(t *testin
 	result, _ := canonical.NewWebSearchResultItem(callID, searchResult)
 	message, _ := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("continue")})
 
-	projected, changes, err := projectMessagesWebSearchLifecycles(
+	projection, err := projectMessagesWebSearchLifecycles(
 		[]canonical.CanonicalItem{call, result, call, result, message}, canonical.RequestItemsKind,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projected) != 1 || projected[0].Kind() != canonical.ItemKindMessage {
-		t.Fatalf("projected items = %#v", projected)
+	if len(projection.Items) != 1 || projection.Items[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("projected items = %#v", projection.Items)
 	}
-	unique := make([]compat.Change, 0, len(changes))
-	for index, change := range changes {
+	unique := make([]compat.Change, 0, len(projection.Changes))
+	for index, change := range projection.Changes {
 		item, ok := change.Occurrence.RequestItem()
 		if change.Capability != canonical.RequestItemsKind || change.Kind != compat.Omission || !ok || item != uint32(index*2) {
 			t.Fatalf("change = %#v", change)
@@ -244,6 +245,37 @@ func TestMessagesRequestProjectionAddressesReusedWebSearchIDByPosition(t *testin
 	}
 	if len(unique) != 2 {
 		t.Fatalf("deduplicated changes = %#v, want independently addressable occurrences", unique)
+	}
+}
+
+func TestMessagesResponseProjectionPreservesBackendOriginForMalformedWebSearchLifecycle(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("search_1")
+	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	object, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolCallItem(callID, functionKey, canonical.NewJSONObjectToolInput(object))
+	resultValue, _ := canonical.NewWebSearchResult(nil)
+	result, _ := canonical.NewWebSearchResultItem(callID, resultValue)
+
+	_, err := projectMessagesWebSearchLifecycles([]canonical.CanonicalItem{call, result}, canonical.ResponseItemsKind)
+	var backendError canonical.BackendError
+	if !errors.As(err, &backendError) {
+		t.Fatalf("error = %v, want backend-origin malformed WebSearch lifecycle", err)
+	}
+}
+
+func TestMessagesWebSearchProjectionDoesNotValidateUnrelatedEffects(t *testing.T) {
+	callID, _ := canonical.NewToolCallID("function_1")
+	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	object, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolCallItem(callID, functionKey, canonical.NewJSONObjectToolInput(object))
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("ok")}, false)
+
+	projection, err := projectMessagesWebSearchLifecycles([]canonical.CanonicalItem{result, call}, canonical.ResponseItemsKind)
+	if err != nil {
+		t.Fatalf("unrelated malformed function lifecycle was intercepted: %v", err)
+	}
+	if len(projection.Items) != 2 || projection.ObservedWebSearch || projection.WebSearchRequests != 0 {
+		t.Fatalf("projection = %#v", projection)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -95,6 +96,13 @@ func (e UnavailableError) Error() string {
 func (e UnavailableError) Unwrap() error  { return e.Cause }
 func (UnavailableError) providerFailure() {}
 
+// TimeoutError identifies provider-transport deadline exhaustion while the
+// caller context remains live. It is availability evidence, not cancellation.
+type TimeoutError struct{ Cause error }
+
+func (e TimeoutError) Error() string { return failureMessage("provider transport timed out", e.Cause) }
+func (e TimeoutError) Unwrap() error { return e.Cause }
+
 // RejectedError means the backend returned a response rejecting this exact
 // target. A complete 4xx is target-local evidence; it does not prove canonical
 // invalidity or absence of execution. Exact-target rejection is combined with
@@ -140,6 +148,13 @@ func (InternalError) providerFailure() {}
 func Unavailable(err error) error {
 	return wrapFailure(err, func(cause error) error { return UnavailableError{Cause: cause} })
 }
+
+func TimedOut(err error) error {
+	if err == nil {
+		return nil
+	}
+	return Unavailable(TimeoutError{Cause: err})
+}
 func Rejected(err error) error {
 	return wrapFailure(err, func(cause error) error { return RejectedError{Cause: cause} })
 }
@@ -159,8 +174,9 @@ func TransportFailure(ctx context.Context, err error) error {
 	if ctx != nil && ctx.Err() != nil {
 		return AttemptMayHaveExecuted(Cancelled(ctx.Err()))
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return AttemptMayHaveExecuted(Cancelled(err))
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return AttemptMayHaveExecuted(TimedOut(err))
 	}
 	return AttemptMayHaveExecuted(Unavailable(err))
 }

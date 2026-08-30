@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -130,13 +129,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		// Preserve the causal transport error so request-outcome logs can tell
-		// a connection/URL failure from the generic BAD_ENDPOINT wrapper.
-		badEndpoint := canonical.BadEndpoint("provider endpoint request failed before backend response")
-		badEndpoint.Details = map[string]string{
-			"request_transport_error": detailErrorMessage(err), // swobu:io-string source=boundary
-		}
-		return nil, provider.TransportFailure(ctx, fmt.Errorf("%w: %w", badEndpoint, err))
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

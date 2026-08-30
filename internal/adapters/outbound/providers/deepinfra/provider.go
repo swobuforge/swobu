@@ -126,7 +126,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	req.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	resp, err := client.Do(req)
 	if err != nil {
-		return provider.TargetProbeResult{}, canonical.BadEndpoint("DeepInfra catalog request failed before backend response")
+		return provider.TargetProbeResult{}, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

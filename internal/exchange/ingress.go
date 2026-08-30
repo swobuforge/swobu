@@ -377,7 +377,7 @@ func requestOutcomeFromSwobuError(code canonical.ErrorCode) trafficevidence.Resu
 		return trafficevidence.ResultClassNotImplemented
 	case canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnknownTarget:
 		return trafficevidence.ResultClassSwobuError
-	case canonical.ErrorCodeBadRequest, canonical.ErrorCodeInternal:
+	case canonical.ErrorCodeBadRequest, canonical.ErrorCodeInternal, canonical.ErrorCodeProviderTimeout, canonical.ErrorCodeProviderUnavailable:
 		return trafficevidence.ResultClassSwobuError
 	default:
 		return trafficevidence.ResultClassSwobuError
@@ -395,6 +395,10 @@ func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {
 	case canonical.ErrorCodeNotImplemented:
 		return http.StatusNotImplemented
 	case canonical.ErrorCodeNoAvailableTarget:
+		return http.StatusServiceUnavailable
+	case canonical.ErrorCodeProviderTimeout:
+		return http.StatusGatewayTimeout
+	case canonical.ErrorCodeProviderUnavailable:
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError

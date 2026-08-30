@@ -6,18 +6,10 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-func logResponsesEgressBuffered(payload []byte) {
-	slog.Debug("responses buffered egress",
-		"component", "httpapi",
-		"event", "responses_buffered_egress",
-		"payload_bytes", len(payload),
-	)
-}
-
-func logResponsesEgressStreamFrame(raw []byte) {
-	slog.Debug("responses stream egress frame",
-		"component", "httpapi",
-		"event", "responses_stream_egress_frame",
+func logResponsesStreamProjectionFrame(raw []byte) {
+	slog.Debug("responses stream projection frame",
+		"component", "protocol.responses",
+		"event", "responses_stream_projection_frame",
 		"frame_bytes", len(raw),
 	)
 }
@@ -34,7 +26,7 @@ func logResponsesTerminalProjection(usedFallback bool, rawOutputCount int, rawOu
 		}
 	}
 	slog.Debug("responses terminal projection",
-		"component", "httpapi",
+		"component", "protocol.responses",
 		"event", "responses_terminal_projection",
 		"used_fallback", usedFallback,
 		"raw_output_count", rawOutputCount,

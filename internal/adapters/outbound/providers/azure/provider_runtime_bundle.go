@@ -161,7 +161,7 @@ func (c azureProviderModelCatalogClient) listDeploymentsPage(ctx context.Context
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, "", canonical.BadEndpoint("azure provider deployment inventory request failed before backend response")
+		return nil, "", provider.TransportFailure(ctx, err)
 	}
 	decodedResp, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

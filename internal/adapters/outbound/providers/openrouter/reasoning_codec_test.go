@@ -163,6 +163,9 @@ func TestOpenRouterOwnsFinalWebSearchDialectAcrossProtocols(t *testing.T) {
 			if bytes.Contains(document.RawBytes(), []byte(`"web_search_options":`)) {
 				t.Fatalf("standard web-search options leaked into OpenRouter JSON = %s", document.RawBytes())
 			}
+			if protocol == protocolkind.Responses && bytes.Contains(document.RawBytes(), []byte("web_search_call.action.sources")) {
+				t.Fatalf("OpenRouter inherited unproven OpenAI source include: %s", document.RawBytes())
+			}
 			if !bytes.Contains(document.RawBytes(), []byte(`"tool_choice":{"type":"openrouter:web_search"}`)) {
 				t.Fatalf("OpenRouter-specific choice missing from JSON = %s", document.RawBytes())
 			}

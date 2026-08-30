@@ -104,12 +104,13 @@ func ChatOutOfBandHostedSearch() chatcompletions.ToolTransformer {
 }
 
 // ResponsesHostedSearchTool lowers canonical hosted search for Responses.
-func ResponsesHostedSearchTool(spelling string) responses.ToolTransformer {
+// Source disclosure must be established independently for the exact target.
+func ResponsesHostedSearchTool(spelling string, supportsSourceInclude bool) responses.ToolTransformer {
 	return func(_ responses.ToolLoweringContext, tool canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
 		if spelling == "" {
 			return responses.ToolProjection{}, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
-		return responses.HostedSearchProjection(responses.ProviderRequestTool{Type: spelling}), nil, nil
+		return responses.HostedSearchProjection(responses.ProviderRequestTool{Type: spelling}, supportsSourceInclude), nil, nil
 	}
 }
 

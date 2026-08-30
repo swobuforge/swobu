@@ -36,7 +36,7 @@ func (r capabilityFallbackRuntime) ResolveBackend(target provider.TargetSnapshot
 		codec = protocolcodec.Codec{
 			Protocol: protocolkind.Responses,
 			ResponsesDialect: protocolcodec.ResponsesDialect{
-				Tools: responses.ToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search_preview")},
+				Tools: responses.ToolLowering{WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search", false)},
 			},
 		}
 	}
@@ -90,7 +90,7 @@ func TestNativeSearchProviderRejectionAdvancesToFallback(t *testing.T) {
 		switch target.TargetID {
 		case "native-search":
 			nativeCalls++
-			if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search_preview"`)) {
+			if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search"`)) {
 				t.Fatalf("native search rejection lacked search wire: %s", document.RawBytes())
 			}
 			return nil, canonical.NewBackendError(target.TargetID, 400, "search unsupported", "")
@@ -124,7 +124,7 @@ func TestSettledSearchHistoryReentersLocalTarget(t *testing.T) {
 	searchTarget := capabilityFallbackTarget(t, "native-search", "responses")
 	searchWorkspace := capabilityFallbackWorkspace(t, "search-history", []routing.Target{searchTarget})
 	searchRuntime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
-		if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search_preview"`)) {
+		if !bytes.Contains(document.RawBytes(), []byte(`"type":"web_search"`)) {
 			t.Fatalf("search-producing turn lacked native search wire: %s", document.RawBytes())
 		}
 		return capabilityFallbackSearchResponse(), nil

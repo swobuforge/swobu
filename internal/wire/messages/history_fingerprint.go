@@ -303,12 +303,12 @@ func messagesFingerprintingEncoder(request canonical.CanonicalRequest, encode wi
 			fail(errors.New("messages response did not complete successfully"))
 			return encoded, nil
 		}
-		projected, _, err := projectMessagesWebSearchLifecycles(completedItems, canonical.ResponseItemsKind)
+		projection, err := projectMessagesWebSearchLifecycles(completedItems, canonical.ResponseItemsKind)
 		if err != nil {
 			fail(err)
 			return nil, err
 		}
-		for _, item := range projected {
+		for _, item := range projection.Items {
 			if err := state.appendItem(item); err != nil {
 				fail(err)
 				return nil, err

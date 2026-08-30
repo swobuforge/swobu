@@ -3,7 +3,6 @@ package gemini
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -103,7 +102,7 @@ func (r *geminiRuntime) send(ctx context.Context, target provider.TargetSnapshot
 
 	response, err := r.client.Do(httpRequest)
 	if err != nil {
-		return nil, provider.TransportFailure(ctx, fmt.Errorf("%w: %w", canonical.BadEndpoint("Gemini Interactions request failed before backend response"), err))
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	response, err = httpedge.DecodeHTTPResponseContentEncoding(response)
 	if err != nil {

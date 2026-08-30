@@ -35,11 +35,12 @@ type ToolLoweringContext struct {
 // ToolProjection is the complete Responses manifestation selected for one
 // canonical declaration occurrence.
 type ToolProjection struct {
-	Fragments     []ProviderRequestTool
-	TargetType    string
-	TargetName    string
-	ProjectCall   func(canonical.ToolCallItem) (toolCallProjection, error)
-	ProjectResult func(canonical.ToolResultItem) (toolResultProjection, error)
+	Fragments                      []ProviderRequestTool
+	TargetType                     string
+	TargetName                     string
+	SupportsWebSearchSourceInclude bool
+	ProjectCall                    func(canonical.ToolCallItem) (toolCallProjection, error)
+	ProjectResult                  func(canonical.ToolResultItem) (toolResultProjection, error)
 }
 
 // toolCallProjection is a closed Responses-local call union. Implementations
@@ -194,11 +195,12 @@ func webSearchToolProjection() ToolProjection {
 
 // HostedSearchProjection returns the complete Responses hosted-search
 // manifestation selected by a protocol or provider WebSearch slot.
-func HostedSearchProjection(fragment ProviderRequestTool) ToolProjection {
+func HostedSearchProjection(fragment ProviderRequestTool, supportsSourceInclude bool) ToolProjection {
 	projection := webSearchToolProjection()
 	projection.Fragments = []ProviderRequestTool{fragment}
 	projection.TargetType = fragment.Type
 	projection.TargetName = fragment.Name
+	projection.SupportsWebSearchSourceInclude = supportsSourceInclude
 	return projection
 }
 

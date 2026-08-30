@@ -44,9 +44,9 @@ func planPiCurrent(s *Service, target Target) (plannedMutation, error) {
 }
 
 func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, error) {
-	settings, err := inspectForeignFile(settingsPath, nil)
-	if err != nil || !settings.existed {
-		return plannedMutation{}, piNoChange(fmt.Errorf("global settings.json with defaultProvider is required"))
+	settings, err := inspectForeignFile(settingsPath, []byte("{}\n"))
+	if err != nil {
+		return plannedMutation{}, piNoChange(err)
 	}
 	editor := jsonEditor{}
 	provider, providerExists, err := editor.String(settings.raw, keyPath{"defaultProvider"})

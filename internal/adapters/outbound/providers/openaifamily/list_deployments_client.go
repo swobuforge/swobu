@@ -120,7 +120,7 @@ func (e BackendAdapter) getModelCatalog(ctx context.Context, target provider.Tar
 	}
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
-		return nil, canonical.BadEndpoint("provider endpoint model catalog request failed before backend response")
+		return nil, provider.TransportFailure(ctx, err)
 	}
 	decoded, err := httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

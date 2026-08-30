@@ -47,7 +47,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return provider.TargetProbeResult{}, canonical.BadEndpoint("LLM7 catalog request failed before backend response")
+		return provider.TargetProbeResult{}, provider.TransportFailure(ctx, err)
 	}
 	resp, err = httpedge.DecodeHTTPResponseContentEncoding(resp)
 	if err != nil {

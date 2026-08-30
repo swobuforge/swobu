@@ -13,7 +13,7 @@ import (
 
 func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
 	items := output.Items()
-	content, changes, err := messagesResponseContent(request, output)
+	content, changes, accounting, err := messagesResponseContent(request, output)
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
@@ -32,12 +32,11 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 		Model:      output.Model(),
 		Content:    content,
 		StopReason: stopReason,
-		Usage:      messagesUsageFromCanonical(output.Usage()),
+		Usage:      messagesUsageFromCanonical(output.Usage(), accounting.WebSearchRequests, accounting.ObservedWebSearch),
 	})
 	if err != nil {
 		return wire.ClientDocumentResult{}, err
 	}
-	logMessagesEgressBuffered(raw)
 	return wire.ClientDocumentResult{
 		Document:            carrier.NewDocument(protocolkind.Messages, "application/json", nil, raw, carrier.Meta{}),
 		Changes:             changes,
@@ -45,18 +44,18 @@ func (ResponseDocumentEncoder) EncodeResponseDocument(request canonical.Canonica
 	}, nil
 }
 
-func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Change, error) {
-	items, webDecisions, err := projectMessagesWebSearchLifecycles(output.Items(), canonical.ResponseItemsKind)
+func messagesResponseContent(request canonical.CanonicalRequest, output canonical.CanonicalResponse) ([]messagesResponsePartDTO, []compat.Change, messagesWebSearchProjection, error) {
+	projection, err := projectMessagesWebSearchLifecycles(output.Items(), canonical.ResponseItemsKind)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, messagesWebSearchProjection{}, err
 	}
 	state := messagesResponseHistoryState{request: request.Clone()}
-	for _, item := range items {
+	for _, item := range projection.Items {
 		if err := state.appendItem(item); err != nil {
-			return nil, nil, err
+			return nil, nil, messagesWebSearchProjection{}, err
 		}
 	}
-	return state.content, webDecisions, nil
+	return state.content, projection.Changes, projection, nil
 }
 
 func mustMarshalMessagesContent(content []messagesResponsePartDTO) json.RawMessage {
@@ -67,31 +66,39 @@ func mustMarshalMessagesContent(content []messagesResponsePartDTO) json.RawMessa
 	return raw
 }
 
-func messagesUsageFromCanonical(usage canonical.TokenUsage) *messagesUsageDTO {
+func messagesUsageFromCanonical(usage canonical.TokenUsage, webSearchRequests int, observedWebSearch bool) *messagesUsageDTO {
 	input, hasInput := usage.InputTokens()
 	output, hasOutput := usage.OutputTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite {
+	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite && !observedWebSearch {
 		return nil
 	}
-	return &messagesUsageDTO{
+	out := &messagesUsageDTO{
 		InputTokens:              input,
 		OutputTokens:             output,
 		CacheReadInputTokens:     cacheRead,
 		CacheCreationInputTokens: cacheWrite,
 	}
+	if observedWebSearch {
+		out.ServerToolUse = &messagesServerToolUsageDTO{WebSearchRequests: webSearchRequests}
+	}
+	return out
 }
 
-func messagesDeltaUsageFromCanonical(usage canonical.TokenUsage) messagesDeltaUsageDTO {
+func messagesDeltaUsageFromCanonical(usage canonical.TokenUsage, webSearchRequests int, observedWebSearch bool) messagesDeltaUsageDTO {
 	input, _ := usage.InputTokens()
 	output, _ := usage.OutputTokens()
 	cacheRead, _ := usage.CacheReadTokens()
 	cacheWrite, _ := usage.CacheWriteTokens()
-	return messagesDeltaUsageDTO{
+	out := messagesDeltaUsageDTO{
 		InputTokens:              input,
 		OutputTokens:             output,
 		CacheReadInputTokens:     cacheRead,
 		CacheCreationInputTokens: cacheWrite,
 	}
+	if observedWebSearch {
+		out.ServerToolUse = &messagesServerToolUsageDTO{WebSearchRequests: webSearchRequests}
+	}
+	return out
 }
