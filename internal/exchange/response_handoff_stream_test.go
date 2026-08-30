@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -110,6 +111,62 @@ func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 	}
 }
 
+func TestExchangeFallsBackWhenHostedSearchFailsAfterResponseIdentity(t *testing.T) {
+	runner, workspace, calls := responseHandoffFallbackFixture(t, 2)
+	request := testCanonicalRequest("a")
+	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = request.WithItems(append([]canonical.CanonicalItem{declarations}, request.Items()...))
+	searchKey := canonical.WebSearchToolKey()
+	request = canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model:      request.ModelField(),
+		Items:      request.Items(),
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),
+	})
+
+	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathMessages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Target.TargetID != "response-b" {
+		t.Fatalf("target = %q, want fallback target B", out.Target.TargetID)
+	}
+	if !reflect.DeepEqual(*calls, []string{"response-a", "response-b"}) {
+		t.Fatalf("calls = %#v, want hosted-search failure before handoff then fallback", *calls)
+	}
+	if _, err := io.ReadAll(ClientTransportForTest(out.Response).Body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOfferedHostedSearchDoesNotDelayOrdinaryIdentityHandoff(t *testing.T) {
+	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := canonical.NewToolDeclarationsItem(tools, canonical.ContextScopeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Items:      []canonical.CanonicalItem{declarations},
+		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicyAuto, nil)),
+	})
+	delayed, err := delayClientHandoffFor(nil, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delayed {
+		t.Fatal("optional hosted-search declaration delayed ordinary incremental response")
+	}
+}
+
 type responseHandoffFallbackRuntime struct {
 	RuntimeResolver
 	failAfter int
@@ -137,7 +194,11 @@ func (responseHandoffFallbackCodec) Encode(provider.Request) (carrier.Document, 
 func (c responseHandoffFallbackCodec) Decode(_ context.Context, request provider.Request, _ provider.Ingress) (provider.DecodedResponse, error) {
 	stream := stubResponseEventReader(request.ExchangeID)
 	if c.targetID == "response-a" {
-		stream = &failAfterNStream{upstream: stream, remaining: c.failAfter, err: provider.Unavailable(errors.New("primary unavailable"))}
+		failure := provider.Unavailable(errors.New("primary unavailable"))
+		if request.Canonical.ToolPolicy().Mode == canonical.ToolPolicySpecific {
+			failure = provider.Rejected(canonical.NewBackendError("responses", http.StatusUnauthorized, "authentication_error", ""))
+		}
+		stream = &failAfterNStream{upstream: stream, remaining: c.failAfter, err: failure}
 	}
 	return provider.DecodedResponse{Stream: stream}, nil
 }

@@ -28,6 +28,7 @@ func TestProviderFailureLogClassificationUsesTypedFailureAuthority(t *testing.T)
 		{"rejected", provider.Rejected(errors.New("rejected")), "rejected", slog.LevelWarn},
 		{"invalid request", provider.InvalidRequest(errors.New("invalid")), "invalid_request", slog.LevelWarn},
 		{"cancelled", provider.Cancelled(context.Canceled), "canceled", slog.LevelDebug},
+		{"raw backend rejection", canonical.NewBackendError("responses", 401, "authentication_error", ""), "rejected", slog.LevelWarn},
 		{"internal", provider.Internal(errors.New("invariant")), "internal", slog.LevelError},
 	}
 	for _, tt := range tests {
@@ -40,7 +41,7 @@ func TestProviderFailureLogClassificationUsesTypedFailureAuthority(t *testing.T)
 	}
 }
 
-func TestProviderAttemptLoggingSeparatesHandoffFromTerminalCompletion(t *testing.T) {
+func TestProviderAttemptLoggingSeparatesIngressFromTerminalCompletion(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -54,16 +55,16 @@ func TestProviderAttemptLoggingSeparatesHandoffFromTerminalCompletion(t *testing
 	}
 	call := callProviderCommand{attemptID: 1, backend: provider.Backend{Target: target}}
 
-	logProviderAttemptHandoff(state, call, providerIngressReceived{attemptID: 1}, time.Millisecond)
+	logProviderAttemptCommandResult(state, call, providerIngressReceived{attemptID: 1}, time.Millisecond)
 	completion, complete, _ := wire.NewResponseCompletion()
 	observeProviderAttemptTerminal(state, 1, attempt, completion)
 	complete(nil, nil)
 
 	entries := decodeLogEntries(t, logs.Bytes())
 	if len(entries) != 2 {
-		t.Fatalf("log entries = %#v, want handoff and terminal completion", entries)
+		t.Fatalf("log entries = %#v, want ingress and terminal completion", entries)
 	}
-	assertLogField(t, entries[0], "event", "provider_attempt_handoff_ready")
+	assertLogField(t, entries[0], "event", "provider_attempt_ingress_received")
 	if _, ok := entries[0]["outcome"]; ok {
 		t.Fatalf("handoff log unexpectedly has terminal outcome: %#v", entries[0])
 	}
@@ -82,7 +83,7 @@ func TestProviderAttemptLoggingRecordsSafeTerminalFailures(t *testing.T) {
 	state := exchangeState{input: exchangeInput{exchangeID: "request-a"}, providerCallAttempts: []providerCallAttempt{attempt}}
 	call := callProviderCommand{attemptID: 1, backend: provider.Backend{Target: target}}
 	failure := provider.AttemptRejectedBeforeExecution(provider.InvalidRequest(errors.New("private backend body")))
-	logProviderAttemptHandoff(state, call, providerCallFailed{attemptID: 1, failure: failure}, time.Millisecond)
+	logProviderAttemptCommandResult(state, call, providerCallFailed{attemptID: 1, failure: failure}, time.Millisecond)
 
 	completion, _, fail := wire.NewResponseCompletion()
 	observeProviderAttemptTerminal(state, 1, attempt, completion)
@@ -194,6 +195,37 @@ func TestProviderAttemptLoggingNamesSemanticPrefetchFailureBeforeHandoff(t *test
 	assertLogField(t, entries[0], "failure_stage", "provider_stream_decode")
 	if strings.Contains(logs.String(), "private transport detail") {
 		t.Fatalf("logs exposed arbitrary provider prose: %s", logs.String())
+	}
+}
+
+func TestProviderAttemptLoggingWarnsForTypedBackendRejectionBeforeHandoff(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	attempt := providerCallAttempt{target: provider.TargetSnapshot{TargetID: "target-a", ProviderSpec: "ollama", Model: "model-a"}}
+	state := exchangeState{input: exchangeInput{exchangeID: "request-a"}}
+	logProviderAttemptFailedBeforeHandoff(
+		state,
+		1,
+		attempt,
+		responseFailure("provider_stream_decode", canonical.NewBackendError("responses", 401, "authentication_error", "")),
+	)
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %#v, want one provider rejection", entries)
+	}
+	assertLogField(t, entries[0], "level", "WARN")
+	assertLogField(t, entries[0], "outcome", "failed_before_handoff")
+	assertLogField(t, entries[0], "failure_class", "rejected")
+	assertLogField(t, entries[0], "failure_stage", "provider_stream_decode")
+	assertLogField(t, entries[0], "error_type", "canonical.BackendError")
+	assertLogField(t, entries[0], "error_origin", "backend")
+	assertLogField(t, entries[0], "status_code", float64(401))
+	if strings.Contains(logs.String(), "authentication_error") {
+		t.Fatalf("logs exposed backend prose: %s", logs.String())
 	}
 }
 

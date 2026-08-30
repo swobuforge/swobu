@@ -38,8 +38,14 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 			ResponsesDialect: protocolcodec.ResponsesDialect{
 				PrependInstructionsToInput: true,
 				HistoryMessageRole:         lowerHistoryDirectiveRole,
+				// Ollama's Responses omission delegates to the model template. On
+				// reasoning models that can mean effectively unbounded hidden work,
+				// which fixed-lifetime Chat and Messages clients cannot observe.
+				// Explicit client reasoning controls still pass through unchanged.
+				DefaultReasoningDisabled: true,
 				Tools: protocolcodec.ResponsesToolLowering{
-					Custom: protocolcodec.ResponsesCustomAsFunction(),
+					Custom:    protocolcodec.ResponsesCustomAsFunction(),
+					WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search", false),
 				},
 			},
 		}

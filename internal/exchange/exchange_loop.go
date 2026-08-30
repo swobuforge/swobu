@@ -100,7 +100,7 @@ func runExchange(
 		started := time.Now()
 		current = executeCommand(ctx, tr.command)
 		if providerCall {
-			logProviderAttemptHandoff(s, call, current, time.Since(started))
+			logProviderAttemptCommandResult(s, call, current, time.Since(started))
 			runner.TargetBackoff.observe(observation, current)
 		}
 	}
@@ -118,7 +118,10 @@ func logProviderAttemptStarted(state exchangeState, call callProviderCommand) {
 	)
 }
 
-func logProviderAttemptHandoff(state exchangeState, call callProviderCommand, event exchangeEvent, duration time.Duration) {
+// logProviderAttemptCommandResult records only the provider command boundary.
+// Successful ingress still requires reducer-owned validation, decoding, and
+// client-response construction before the attempt is accepted for handoff.
+func logProviderAttemptCommandResult(state exchangeState, call callProviderCommand, event exchangeEvent, duration time.Duration) {
 	attrs := []any{"component", "exchange",
 		"request_id", state.input.exchangeID, "attempt", int(call.attemptID),
 		"target_id", call.backend.Target.TargetID, "provider", call.backend.Target.ProviderSpec,
@@ -139,8 +142,8 @@ func logProviderAttemptHandoff(state exchangeState, call callProviderCommand, ev
 		slog.LogAttrs(context.Background(), level, "provider attempt failed", anyAttrs(attrs)...)
 		return
 	}
-	attrs = append(attrs, "event", "provider_attempt_handoff_ready")
-	slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt handoff ready", anyAttrs(attrs)...)
+	attrs = append(attrs, "event", "provider_attempt_ingress_received")
+	slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt ingress received", anyAttrs(attrs)...)
 }
 
 func observeProviderAttemptTerminal(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, completion *wire.ResponseCompletion) {
@@ -192,6 +195,14 @@ func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID provid
 	}
 	if canceled {
 		attrs = append(attrs, "error_origin", "client")
+	} else {
+		var backendErr canonical.BackendError
+		if errors.As(err, &backendErr) {
+			attrs = append(attrs,
+				"error_origin", string(canonical.ErrorOriginBackend),
+				"status_code", backendErr.StatusCode,
+			)
+		}
 	}
 	if level == slog.LevelDebug {
 		slog.LogAttrs(context.Background(), level, "provider attempt canceled before handoff", anyAttrs(attrs)...)
@@ -233,10 +244,12 @@ func safeErrorType(err error) string {
 	return reflect.TypeOf(err).String()
 }
 
-// providerFailureLogClassification maps the adapter-owned typed failure fact
-// directly to the logging severity contract. Do not reclassify cancellation
-// from raw causes: provider.CancelledError is the single failure authority.
+// providerFailureLogClassification maps provider-normalized typed failure
+// truth to the logging severity contract: cancellation is debug, recoverable
+// target failure is warning, and internal failure is error. Message prose,
+// provider identity, and eventual route recovery never select severity.
 func providerFailureLogClassification(err error) (string, slog.Level) {
+	err = provider.NormalizeFailure(err)
 	var unavailable provider.UnavailableError
 	if errors.As(err, &unavailable) {
 		return "unavailable", slog.LevelWarn

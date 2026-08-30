@@ -106,8 +106,11 @@ func decodeResponsesReasoningInclude(raw json.RawMessage, changeLog *[]compat.Ch
 	return includeEncrypted, nil
 }
 
-func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], acceptsEffortMax, acceptsDisabled func() bool, changeLog *[]compat.Change) error {
+func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], acceptsEffortMax, acceptsDisabled func() bool, defaultDisabled bool, changeLog *[]compat.Change) error {
 	wireReasoning := map[string]any{}
+	if defaultDisabled && !reasoning.ComputeField().IsSpecified() && !reasoning.DisclosureField().IsSpecified() && !reasoning.ResponsesContextField().IsSpecified() && !effortField.IsSpecified() {
+		wireReasoning["effort"] = "none"
+	}
 	if compute, ok := reasoning.ComputeField().Get(); ok {
 		if disclosure, disclosed := reasoning.DisclosureField().Get(); disclosed && compute.Kind() == canonical.ReasoningDisabled && disclosure != canonical.ReasoningDisclosureNone {
 			return canonical.InternalError("disabled reasoning carries readable disclosure")

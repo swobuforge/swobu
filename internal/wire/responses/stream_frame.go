@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -192,19 +193,21 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		if message == "" {
 			message = "responses stream returned response.failed"
 		}
-		if code := strings.TrimSpace(frame.Response.Error.Code); code != "" { // swobu:io-string source=provider-wire
+		code := strings.TrimSpace(frame.Response.Error.Code) // swobu:io-string source=provider-wire
+		if code != "" {
 			message = code + ": " + message
 		}
-		return false, canonical.Event{}, canonical.NewBackendError("responses", 0, message, "")
+		return false, canonical.Event{}, canonical.NewBackendError("responses", responsesErrorStatus(code), message, "")
 	case "error":
 		message := strings.TrimSpace(frame.Message) // swobu:io-string source=provider-wire
 		if message == "" {
 			message = "responses stream returned an error event"
 		}
-		if code := strings.TrimSpace(frame.Code); code != "" { // swobu:io-string source=provider-wire
+		code := strings.TrimSpace(frame.Code) // swobu:io-string source=provider-wire
+		if code != "" {
 			message = code + ": " + message
 		}
-		return false, canonical.Event{}, canonical.NewBackendError("responses", 0, message, "")
+		return false, canonical.Event{}, canonical.NewBackendError("responses", responsesErrorStatus(code), message, "")
 	default:
 		key := responsesUnknownEventDecisionKey(frameType, frame.OutputIndex)
 		if _, recorded := s.unknownEventDecisions[key]; recorded {
@@ -215,6 +218,19 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		s.unknownEventDecisions[key] = struct{}{}
 		return true, canonical.Event{}, nil
+	}
+}
+
+// responsesErrorStatus retains the standard HTTP-equivalent class carried by
+// a typed Responses stream error after the HTTP stream has already opened.
+// Unknown codes remain statusless backend failures; message prose never
+// selects recovery.
+func responsesErrorStatus(code string) int {
+	switch strings.ToLower(strings.TrimSpace(code)) { // swobu:io-string source=provider-wire
+	case "authentication_error":
+		return http.StatusUnauthorized
+	default:
+		return 0
 	}
 }
 

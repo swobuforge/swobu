@@ -33,6 +33,7 @@ type CompileOptions struct {
 	OmitParallelToolCallsFalse func() bool
 	AcceptsReasoningEffortMax  func() bool
 	AcceptsReasoningDisabled   func() bool
+	DefaultReasoningDisabled   bool
 	AcceptsFunctionOutputArray func() bool
 }
 
@@ -211,7 +212,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		payload["parallel_tool_calls"] = true
 	}
 	encodeResponsesGenerationControls(payload, req.Controls(), compile.OmitMaxOutputTokens, changeLog)
-	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, changeLog); err != nil {
+	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, compile.DefaultReasoningDisabled, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if !compile.OmitInclude {
