@@ -94,6 +94,8 @@ type reportRuntime struct {
 // outcome) is derived downstream, never on the client. See product-telemetry.md.
 type reportTrafficRow struct {
 	ClientFamily        reportClientFamily             `json:"client_family"`
+	RequestedModel      reportModelClass               `json:"requested_model"`
+	ResolvedModel       reportModelClass               `json:"resolved_model"`
 	ClientProtocol      trafficevidence.ClientProtocol `json:"client_protocol"`
 	TargetProtocol      protocolkind.ProtocolKind      `json:"target_protocol"`
 	Operation           trafficevidence.NormalizedOp   `json:"operation"`
@@ -111,6 +113,15 @@ type reportTrafficRow struct {
 	DurationMS          [6]int                         `json:"duration_ms"`
 	TTFBMS              [6]int                         `json:"ttfb_ms"`
 }
+
+type reportModelClass string
+
+const (
+	reportModelDefault    reportModelClass = "default"
+	reportModelConfigured reportModelClass = "configured"
+	reportModelCustom     reportModelClass = "custom"
+	reportModelUnknown    reportModelClass = "unknown"
+)
 
 type reportClientFamily string
 

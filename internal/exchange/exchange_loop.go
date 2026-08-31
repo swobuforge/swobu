@@ -53,7 +53,7 @@ func runExchange(
 	s := exchangeState{
 		input: exchangeInput{
 			exchangeID: exchangeID, clientHandler: clientHandler,
-			clientFamily: clientFamily, clientDelivery: clientDelivery,
+			clientProduct: trafficevidence.ClassifyClientFamily(string(clientHandler)), clientFamily: clientFamily, clientDelivery: clientDelivery,
 			request:               canonical.CloneCanonicalRequest(decoded.Request),
 			rebasedRequest:        rebased,
 			requestFingerprint:    decoded.RequestFingerprint,
@@ -313,7 +313,8 @@ func appendProviderInflightEvidence(ctx context.Context, sink observation.Traffi
 		RequestID:             requestID,
 		Workspace:             state.input.workspace.Slug().String(),
 		ClientHandler:         state.input.clientHandler,
-		ClientFamily:          trafficevidence.ClientFamily(state.input.clientFamily),
+		ClientFamily:          state.input.clientProduct,
+		ClientProtocol:        trafficevidence.ClientProtocol(state.input.clientFamily),
 		RequestPath:           state.input.requestPath,
 		Route:                 route,
 		Timing:                timing,
@@ -423,7 +424,7 @@ func summarizeRoutingEvidence(attempts []providerCallAttempt, candidateCount int
 func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, routing terminalRoutingEvidence, reusablePrefix trafficevidence.ReusablePrefixEvidence) RequestOutput {
 	var evidence *TrafficEvidenceInput
 	if target.TargetID != "" {
-		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientFamily: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
+		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientProduct: input.clientProduct, clientProtocol: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
 	}
 	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response), AttemptCount: routing.providerCallCount}
 }

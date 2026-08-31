@@ -113,6 +113,51 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 	}
 }
 
+func TestClientFamilyTraversesRealHTTPIndependentlyFromProtocolAndProvider(t *testing.T) {
+	workspace := cacheEvidenceWorkspace(t)
+	store := trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
+	runtime := cacheEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: &cacheEvidenceTransport{}}
+	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
+		TrafficEvidence: store,
+		PolicyResolver:  exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
+	})
+	server := httptest.NewServer(NewHandler(ingress, store))
+	defer server.Close()
+
+	issueClientFamilyRequest(t, server, "/c/cache/responses", "Codex/1.2", `{"model":"default","input":"one","stream":false}`)
+	issueClientFamilyRequest(t, server, "/c/cache/chat/completions", "Claude-Code/2.0", `{"model":"default","messages":[{"role":"user","content":"two"}],"stream":false}`)
+
+	rows := store.ProjectStatus(trafficevidencestore.ProjectionInput{State: "running", Scope: trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll}}).RecentTraffic
+	if len(rows) != 2 {
+		t.Fatalf("recent traffic rows = %d, want 2", len(rows))
+	}
+	claude, codex := rows[0], rows[1]
+	if claude.ClientFamily != "claude_code" || claude.ClientProtocol != "chat_completions" || claude.ProviderSpec != "custom" {
+		t.Fatalf("Claude Code evidence = %#v", claude)
+	}
+	if codex.ClientFamily != "codex" || codex.ClientProtocol != "responses" || codex.ProviderSpec != "custom" {
+		t.Fatalf("Codex evidence = %#v", codex)
+	}
+}
+
+func issueClientFamilyRequest(t *testing.T, server *httptest.Server, path string, userAgent string, body string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", userAgent)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("%s request status = %d", userAgent, response.StatusCode)
+	}
+}
+
 func issueCacheEvidenceRequest(t *testing.T, server *httptest.Server, body string) string {
 	t.Helper()
 	request, _ := http.NewRequest(http.MethodPost, server.URL+"/c/cache/responses", strings.NewReader(body))

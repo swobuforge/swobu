@@ -139,7 +139,8 @@ type TrafficEvidenceInput struct {
 	routeName      routing.RouteName
 	exchangeID     string
 	clientHandler  trafficevidence.ClientHandler
-	clientFamily   canonical.ClientFamily
+	clientProduct  trafficevidence.ClientFamily
+	clientProtocol canonical.ClientFamily
 	requestPath    canonical.NormalizedPath
 	request        canonical.CanonicalRequest
 	target         provider.TargetSnapshot
@@ -259,7 +260,8 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.R
 		RequestID:             requestID,
 		Workspace:             evidence.workspace.Slug().String(),
 		ClientHandler:         evidence.clientHandler,
-		ClientFamily:          trafficevidence.ClientFamily(evidence.clientFamily),
+		ClientFamily:          evidence.clientProduct,
+		ClientProtocol:        trafficevidence.ClientProtocol(evidence.clientProtocol),
 		RequestPath:           evidence.requestPath,
 		Route:                 route,
 		Timing:                timing,

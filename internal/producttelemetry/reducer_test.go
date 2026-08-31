@@ -14,7 +14,7 @@ import (
 )
 
 func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
-	return terminalTrafficEventForFamily(t, requestID, clientHandler, providerSpec, requestPath, trafficevidence.ClientFamily("responses"), result, statusCode, durationMs, deliveryKind, canonicalErrorCode, attemptCount, fallbackRecovered)
+	return terminalTrafficEventForFamily(t, requestID, clientHandler, providerSpec, requestPath, trafficevidence.ClientFamilyCodex, result, statusCode, durationMs, deliveryKind, canonicalErrorCode, attemptCount, fallbackRecovered)
 }
 
 func terminalTrafficEventForFamily(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, clientFamily trafficevidence.ClientFamily, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
@@ -36,7 +36,7 @@ func terminalTrafficEventForFamily(t *testing.T, requestID, clientHandler, provi
 		Workspace:      "default",
 		ClientHandler:  trafficevidence.ClientHandler(clientHandler),
 		ClientFamily:   clientFamily,
-		ClientProtocol: trafficevidence.ClientProtocol(clientFamily),
+		ClientProtocol: trafficevidence.ClientProtocol("responses"),
 		RequestPath:    canonical.NormalizedPath(requestPath),
 		ProviderSpec:   profile.ProviderID(providerSpec),
 		Route:          route,
@@ -88,25 +88,69 @@ func TestReportReducer_MergesByDimension(t *testing.T) {
 	}
 }
 
-func TestReportReducer_ClassifiesBoundedClientProductSeparatelyFromProtocolAndProvider(t *testing.T) {
+func TestReportReducer_ProjectsBoundedClientProductSeparatelyFromProtocolAndProvider(t *testing.T) {
 	tests := []struct {
-		handler string
-		want    reportClientFamily
+		family trafficevidence.ClientFamily
+		want   reportClientFamily
 	}{
-		{"Codex/1.2", reportClientFamilyCodex},
-		{"Claude-Code/2.0", reportClientFamilyClaudeCode},
-		{"Cline/3", reportClientFamilyCline},
-		{"opencode/1.15", reportClientFamilyOpenCode},
-		{"Aider/0.82", reportClientFamilyAider},
-		{"NewClient/1", reportClientFamilyOther},
-		{"unknown", reportClientFamilyUnknown},
+		{trafficevidence.ClientFamilyCodex, reportClientFamilyCodex},
+		{trafficevidence.ClientFamilyClaudeCode, reportClientFamilyClaudeCode},
+		{trafficevidence.ClientFamilyCline, reportClientFamilyCline},
+		{trafficevidence.ClientFamilyOpenCode, reportClientFamilyOpenCode},
+		{trafficevidence.ClientFamilyAider, reportClientFamilyAider},
+		{trafficevidence.ClientFamilyOther, reportClientFamilyOther},
+		{trafficevidence.ClientFamilyUnknown, reportClientFamilyUnknown},
 	}
 	for _, tt := range tests {
 		r := newReportReducer()
-		r.Observe(terminalTrafficEvent(t, "req_1", tt.handler, "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+		r.Observe(terminalTrafficEventForFamily(t, "req_1", "must-not-be-classified-here", "openai", "/responses", tt.family, trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
 		row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
 		if row.ClientFamily != tt.want || row.ClientProtocol != "responses" || row.Provider != "openai" {
-			t.Fatalf("handler %q projected row %+v", tt.handler, row)
+			t.Fatalf("family %q projected row %+v", tt.family, row)
+		}
+	}
+}
+
+func TestReportReducer_ProjectsOnlyBoundedModelCategories(t *testing.T) {
+	tests := []struct {
+		name          string
+		requested     string
+		route         string
+		providerModel string
+		wantRequested reportModelClass
+		wantResolved  reportModelClass
+	}{
+		{"public default", "default", "route-a", "private-upstream-model", reportModelDefault, reportModelConfigured},
+		{"configured route", "route-a", "route-a", "private-upstream-model", reportModelConfigured, reportModelConfigured},
+		{"arbitrary alias", "customer-secret-model-alias", "route-a", "private-upstream-model", reportModelCustom, reportModelConfigured},
+		{"missing evidence", "", "", "", reportModelUnknown, reportModelUnknown},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyRequestedModel(test.requested, test.route); got != test.wantRequested {
+				t.Fatalf("requested class = %q, want %q", got, test.wantRequested)
+			}
+			if got := classifyResolvedModel(test.route, test.providerModel); got != test.wantResolved {
+				t.Fatalf("resolved class = %q, want %q", got, test.wantResolved)
+			}
+		})
+	}
+}
+
+func TestProductReportDoesNotEncodeArbitraryModelStrings(t *testing.T) {
+	report := productReport{Traffic: []reportTrafficRow{{
+		RequestedModel: reportModelCustom,
+		ResolvedModel:  reportModelConfigured,
+		TargetProtocol: protocolkind.Responses,
+		Count:          1,
+	}}}
+	body, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"customer-secret-model-alias", "private-upstream-model"} {
+		if strings.Contains(string(body), forbidden) {
+			t.Fatalf("report exposed arbitrary model string %q: %s", forbidden, body)
 		}
 	}
 }

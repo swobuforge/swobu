@@ -55,6 +55,7 @@ type historyAdvance struct {
 type exchangeInput struct {
 	exchangeID            string
 	clientHandler         trafficevidence.ClientHandler
+	clientProduct         trafficevidence.ClientFamily
 	clientFamily          canonical.ClientFamily
 	clientDelivery        delivery.Delivery
 	request               canonical.CanonicalRequest

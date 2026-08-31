@@ -2,7 +2,6 @@ package producttelemetry
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -34,6 +33,8 @@ type reportReducer struct {
 
 type trafficRowKey struct {
 	clientFamily        reportClientFamily
+	requestedModel      reportModelClass
+	resolvedModel       reportModelClass
 	clientProtocol      trafficevidence.ClientProtocol
 	targetProtocol      protocolkind.ProtocolKind
 	operation           trafficevidence.NormalizedOp
@@ -81,7 +82,9 @@ func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 		return
 	}
 	key := trafficRowKey{
-		clientFamily:        classifyReportClientFamily(event.ClientHandler()),
+		clientFamily:        reportClientFamily(event.ClientFamily()),
+		requestedModel:      classifyRequestedModel(event.ModelRequested(), event.WorkspaceRouteModelID()),
+		resolvedModel:       classifyResolvedModel(event.WorkspaceRouteModelID(), event.ProviderModel()),
 		clientProtocol:      event.ClientProtocol(),
 		targetProtocol:      event.TargetProtocol(),
 		operation:           event.NormalizedOp(),
@@ -106,29 +109,6 @@ func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 	accum.duration[durationBucketIndex(ms, hasDuration)]++
 	ttfbMS, hasTTFB := event.Timing().TTFBMillis()
 	accum.ttfb[durationBucketIndex(ttfbMS, hasTTFB)]++
-}
-
-func classifyReportClientFamily(handler trafficevidence.ClientHandler) reportClientFamily {
-	product := strings.ToLower(strings.TrimSpace(string(handler)))
-	if slash := strings.IndexByte(product, '/'); slash >= 0 {
-		product = product[:slash]
-	}
-	switch product {
-	case "codex":
-		return reportClientFamilyCodex
-	case "claude-code", "claude_code":
-		return reportClientFamilyClaudeCode
-	case "cline":
-		return reportClientFamilyCline
-	case "opencode":
-		return reportClientFamilyOpenCode
-	case "aider":
-		return reportClientFamilyAider
-	case "", "unknown":
-		return reportClientFamilyUnknown
-	default:
-		return reportClientFamilyOther
-	}
 }
 
 func (r *reportReducer) rowAccum(key trafficRowKey) *trafficRowAccum {
@@ -159,6 +139,8 @@ func (r *reportReducer) snapshot(installID, version, osFamily, arch string) prod
 	for key, acc := range r.rows {
 		rows = append(rows, reportTrafficRow{
 			ClientFamily:        key.clientFamily,
+			RequestedModel:      key.requestedModel,
+			ResolvedModel:       key.resolvedModel,
 			ClientProtocol:      key.clientProtocol,
 			TargetProtocol:      key.targetProtocol,
 			Operation:           key.operation,
@@ -186,6 +168,26 @@ func (r *reportReducer) snapshot(installID, version, osFamily, arch string) prod
 		Traffic:       rows,
 		OverflowCount: r.overflowCount,
 	}
+}
+
+func classifyRequestedModel(requested string, route string) reportModelClass {
+	switch {
+	case requested == "":
+		return reportModelUnknown
+	case requested == "default":
+		return reportModelDefault
+	case route != "" && requested == route:
+		return reportModelConfigured
+	default:
+		return reportModelCustom
+	}
+}
+
+func classifyResolvedModel(route string, providerModel string) reportModelClass {
+	if route != "" && providerModel != "" {
+		return reportModelConfigured
+	}
+	return reportModelUnknown
 }
 
 // Reset clears the active accumulator after it is frozen into an immutable
@@ -222,6 +224,12 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		if a.ClientFamily != b.ClientFamily {
 			return a.ClientFamily < b.ClientFamily
 		}
+		if a.RequestedModel != b.RequestedModel {
+			return a.RequestedModel < b.RequestedModel
+		}
+		if a.ResolvedModel != b.ResolvedModel {
+			return a.ResolvedModel < b.ResolvedModel
+		}
 		if a.ClientProtocol != b.ClientProtocol {
 			return a.ClientProtocol < b.ClientProtocol
 		}
@@ -230,6 +238,9 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		}
 		if a.Operation != b.Operation {
 			return a.Operation < b.Operation
+		}
+		if a.Result != b.Result {
+			return a.Result < b.Result
 		}
 		if a.DeliveryKind != b.DeliveryKind {
 			return a.DeliveryKind < b.DeliveryKind
@@ -243,7 +254,16 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		if a.AttemptCount != b.AttemptCount {
 			return a.AttemptCount < b.AttemptCount
 		}
-		return !a.FallbackRecovered && b.FallbackRecovered
+		if a.FallbackRecovered != b.FallbackRecovered {
+			return !a.FallbackRecovered
+		}
+		if a.ContinuityRecovered != b.ContinuityRecovered {
+			return !a.ContinuityRecovered
+		}
+		if a.CrossProtocol != b.CrossProtocol {
+			return !a.CrossProtocol
+		}
+		return !a.WireMutated && b.WireMutated
 	})
 }
 
