@@ -14,6 +14,10 @@ import (
 )
 
 func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
+	return terminalTrafficEventForFamily(t, requestID, clientHandler, providerSpec, requestPath, trafficevidence.ClientFamily("responses"), result, statusCode, durationMs, deliveryKind, canonicalErrorCode, attemptCount, fallbackRecovered)
+}
+
+func terminalTrafficEventForFamily(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, clientFamily trafficevidence.ClientFamily, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
 	t.Helper()
 	id, err := trafficevidence.ParseRequestID(requestID)
 	if err != nil {
@@ -31,7 +35,8 @@ func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, 
 		RequestID:      id,
 		Workspace:      "default",
 		ClientHandler:  trafficevidence.ClientHandler(clientHandler),
-		ClientFamily:   trafficevidence.ClientFamily(providerSpec),
+		ClientFamily:   clientFamily,
+		ClientProtocol: trafficevidence.ClientProtocol(clientFamily),
 		RequestPath:    canonical.NormalizedPath(requestPath),
 		ProviderSpec:   profile.ProviderID(providerSpec),
 		Route:          route,
@@ -66,11 +71,8 @@ func TestReportReducer_MergesByDimension(t *testing.T) {
 		t.Fatalf("rows=%d, want 1 (merged by dimension)", len(report.Traffic))
 	}
 	row := report.Traffic[0]
-	if row.Provider != "openai" || row.RequestPath != "/responses" {
+	if row.Provider != "openai" || row.ClientFamily != reportClientFamilyCodex || row.ClientProtocol != "responses" || row.TargetProtocol != protocolkind.Responses {
 		t.Fatalf("row = %+v", row)
-	}
-	if row.UserAgentProduct != "Codex/1.2" {
-		t.Fatalf("user_agent_product = %q, want Codex/1.2", row.UserAgentProduct)
 	}
 	if row.Count != 2 {
 		t.Fatalf("count=%d, want 2", row.Count)
@@ -86,7 +88,30 @@ func TestReportReducer_MergesByDimension(t *testing.T) {
 	}
 }
 
-func TestReportReducer_UserAgentIsADimension(t *testing.T) {
+func TestReportReducer_ClassifiesBoundedClientProductSeparatelyFromProtocolAndProvider(t *testing.T) {
+	tests := []struct {
+		handler string
+		want    reportClientFamily
+	}{
+		{"Codex/1.2", reportClientFamilyCodex},
+		{"Claude-Code/2.0", reportClientFamilyClaudeCode},
+		{"Cline/3", reportClientFamilyCline},
+		{"opencode/1.15", reportClientFamilyOpenCode},
+		{"Aider/0.82", reportClientFamilyAider},
+		{"NewClient/1", reportClientFamilyOther},
+		{"unknown", reportClientFamilyUnknown},
+	}
+	for _, tt := range tests {
+		r := newReportReducer()
+		r.Observe(terminalTrafficEvent(t, "req_1", tt.handler, "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+		row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
+		if row.ClientFamily != tt.want || row.ClientProtocol != "responses" || row.Provider != "openai" {
+			t.Fatalf("handler %q projected row %+v", tt.handler, row)
+		}
+	}
+}
+
+func TestReportReducer_UserAgentIsNotADimension(t *testing.T) {
 	r := newReportReducer()
 	// Two requests identical except for the client Product/Version must NOT merge:
 	// the version is part of the observed client identity. Mapping a token to a
@@ -95,15 +120,8 @@ func TestReportReducer_UserAgentIsADimension(t *testing.T) {
 	r.Observe(terminalTrafficEvent(t, "req_2", "Codex/1.3", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
 
 	rows := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic
-	if len(rows) != 2 {
-		t.Fatalf("rows=%d, want 2 (distinct Product/Version must not merge)", len(rows))
-	}
-	byUA := map[string]int{}
-	for _, row := range rows {
-		byUA[row.UserAgentProduct] = row.Count
-	}
-	if byUA["Codex/1.2"] != 1 || byUA["Codex/1.3"] != 1 {
-		t.Fatalf("user_agent rows = %v, want one count-1 row each for Codex/1.2 and Codex/1.3", byUA)
+	if len(rows) != 1 || rows[0].Count != 2 {
+		t.Fatalf("rows=%+v, want one semantic count-2 row", rows)
 	}
 }
 
@@ -199,15 +217,15 @@ func TestReportReducer_FoldsCardinalityIntoOverflow(t *testing.T) {
 	// Drive > cap distinct dimension tuples (protocol × status code × attempts).
 	// Beyond the cap, surplus folds into the overflow_count scalar rather than a
 	// fabricated domain row.
-	protocols := []string{"/responses", "/chat/completions", "/messages", "/models"}
+	clientFamilies := []string{"responses", "messages", "chat_completions", "other"}
 	attempts := []int{1, 2, 3, 5}
 	statuses := []int{400, 401, 404, 408, 422, 429, 500, 502, 503, 504}
 	n := 0
-	for _, p := range protocols {
+	for _, family := range clientFamilies {
 		for _, a := range attempts {
 			for _, s := range statuses {
-				r.Observe(terminalTrafficEvent(t, "req", "Codex/1", "openai", p,
-					trafficevidence.ResultClassBackendError, s, 10, "exchange_failed", "", a, false))
+				r.Observe(terminalTrafficEventForFamily(t, "req", "Codex/1", "openai", "/responses",
+					trafficevidence.ClientFamily(family), trafficevidence.ResultClassBackendError, s, 10, "exchange_failed", "", a, false))
 				n++
 			}
 		}
@@ -228,12 +246,10 @@ func TestReportReducer_FoldsCardinalityIntoOverflow(t *testing.T) {
 // genuine worst-case LEGAL report, not a favorable sample. Every variable-length
 // field takes its widest legal value:
 //   - 74 rows (the cap).
-//   - user_agent_product and runtime.version are both 64 '<' runes. The schema
-//     permits '<' (only whitespace and controls are excluded), and the real
-//     uploader uses json.Marshal, which HTML-escapes each '<' to the six-byte
-//     < — the widest legal encoding for both string fields.
-//   - the longest member of each closed enum: request_path "/chat/completions",
-//     provider "openrouter", delivery_kind "checkpoint_commit_failed",
+//   - runtime.version is 64 '<' runes. The schema permits '<', and the real
+//     uploader uses json.Marshal, which HTML-escapes each '<' to six bytes.
+//   - wide semantic dimensions and the longest closed values: client family,
+//     operation, provider "openrouter", delivery_kind "checkpoint_commit_failed",
 //     canonical_error_code "UNSUPPORTED_DELIVERY_MODE", os "dragonfly",
 //     arch "sparc64", installation_age_bucket "90d_plus".
 //   - every numeric field is at MaxInt32; the six-bucket histograms are spread to
@@ -247,7 +263,6 @@ func TestReportReducer_FoldsCardinalityIntoOverflow(t *testing.T) {
 func TestProductReport_MaximalEncodesUnderCeiling(t *testing.T) {
 	// json.Marshal HTML-escapes '<' to < (6 bytes), the widest legal encoding
 	// for both the UA token and the version token.
-	wideToken := strings.Repeat("<", productReportUserAgentProductMaxRunes)
 	wideVersion := strings.Repeat("<", productReportVersionMaxBytes)
 	// Spread MaxInt32 across six buckets at maximum digit width (one 10-digit +
 	// five 9-digit), summing exactly to count.
@@ -255,21 +270,29 @@ func TestProductReport_MaximalEncodesUnderCeiling(t *testing.T) {
 	rows := make([]reportTrafficRow, productReportMaxTrafficRows)
 	for i := range rows {
 		rows[i] = reportTrafficRow{
-			UserAgentProduct:   wideToken,
-			RequestPath:        canonical.NormalizedPathChatCompletions,
-			Provider:           profile.ProviderSpecOpenRouter,
-			StatusCode:         599,
-			DeliveryKind:       delivery.CheckpointCommitFailed,
-			CanonicalErrorCode: canonical.ErrorCodeUnsupportedDelivery,
-			AttemptCount:       productReportAttemptCountMax,
-			FallbackRecovered:  false,
-			Count:              productReportCountMax,
-			DurationMS:         sumToCountMax,
-			TTFBMS:             sumToCountMax,
+			ClientFamily:        "chat_completions",
+			ClientProtocol:      "chat_completions",
+			TargetProtocol:      protocolkind.ChatCompletions,
+			Operation:           "chat_completion",
+			Provider:            profile.ProviderSpecOpenRouter,
+			Result:              trafficevidence.ResultClassBackendError,
+			StatusCode:          599,
+			DeliveryKind:        delivery.CheckpointCommitFailed,
+			CanonicalErrorCode:  canonical.ErrorCodeUnsupportedDelivery,
+			AttemptCount:        productReportAttemptCountMax,
+			FallbackRecovered:   false,
+			ContinuityRecovered: true,
+			CrossProtocol:       false,
+			WireMutated:         true,
+			Count:               productReportCountMax,
+			DurationMS:          sumToCountMax,
+			TTFBMS:              sumToCountMax,
 		}
 	}
 	body, err := json.Marshal(productReport{
-		Schema:                1,
+		Schema:                productReportSchemaVersion,
+		ReportID:              "fedcba9876543210fedcba9876543210",
+		ReportCreatedAt:       "2026-08-31T12:00:00Z",
 		InstallID:             "0123456789abcdef0123456789abcdef",
 		Runtime:               reportRuntime{Version: wideVersion, OS: "dragonfly", Arch: "sparc64"},
 		InstallationAgeBucket: "90d_plus",

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +65,31 @@ func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
 	}
 	if got := stderr.String(); got == "" {
 		t.Fatal("stderr empty for removed telemetry log subcommand")
+	}
+}
+
+func TestRunner_TelemetryInspectPrintsDaemonReport(t *testing.T) {
+	report := `{"schema":1,"install_id":"0123456789abcdef0123456789abcdef","runtime":{"version":"0.1.0","os":"linux","arch":"amd64"},"installation_age_bucket":"1_7d","traffic":[],"overflow_count":1}`
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/_swobu/telemetry-report" || request.Method != http.MethodGet {
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+		_, _ = response.Write([]byte(report))
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := Runner{Stdout: &stdout, Stderr: &stderr, HTTPClient: server.Client()}
+	exitCode := runner.Run(context.Background(), []string{"telemetry", "inspect", "--addr", strings.TrimPrefix(server.URL, "http://")})
+	if exitCode != ExitHealthy {
+		t.Fatalf("exit=%d stderr=%s", exitCode, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["schema"] != float64(1) {
+		t.Fatalf("schema=%v", got["schema"])
 	}
 }
 
@@ -155,7 +182,7 @@ func TestRunner_TelemetryCommand_MissingSubcommandShowsError(t *testing.T) {
 	if exitCode != ExitDown {
 		t.Fatalf("exit code = %d, want %d", exitCode, ExitDown)
 	}
-	if got := stderr.String(); !strings.Contains(got, "telemetry subcommand required: status|on|off") {
+	if got := stderr.String(); !strings.Contains(got, "telemetry subcommand required: status|on|off|inspect") {
 		t.Fatalf("stderr missing telemetry missing-subcommand error; stderr=%q", got)
 	}
 }

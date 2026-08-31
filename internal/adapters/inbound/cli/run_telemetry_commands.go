@@ -1,18 +1,21 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 
+	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
-func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
+func runTelemetry(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off")
+		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off|inspect")
 		return ExitDown
 	}
 
@@ -24,10 +27,57 @@ func runTelemetry(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
 		return runTelemetrySetEnabled(stdout, stderr, true, args[1:])
 	case "off":
 		return runTelemetrySetEnabled(stdout, stderr, false, args[1:])
+	case "inspect":
+		return runTelemetryInspect(ctx, client, stdout, stderr, args[1:])
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown telemetry subcommand %q\n", telemetrySubcommand)
 		return ExitDown
 	}
+}
+
+func runTelemetryInspect(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string) ExitCode {
+	fs := flag.NewFlagSet("telemetry inspect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return ExitHealthy
+		}
+		return ExitDown
+	}
+	if rejectUnexpectedPositionalArgs(fs, stderr) {
+		return ExitDown
+	}
+	startup, err := platformconfig.ResolveStartupConfig(*addr)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(startup.Addr)+"/_swobu/telemetry-report", nil)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = fmt.Fprintf(stderr, "telemetry inspect failed: status %d\n", response.StatusCode)
+		return ExitDown
+	}
+	var payload json.RawMessage
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	if err := json.NewEncoder(stdout).Encode(payload); err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	return ExitHealthy
 }
 
 func runTelemetryStatus(stdout io.Writer, stderr io.Writer, args []string) ExitCode {
