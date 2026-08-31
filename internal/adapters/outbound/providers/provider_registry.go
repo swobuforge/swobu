@@ -58,6 +58,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 	}
 	return newProviderRegistry(profile.All(), []providersruntime.ProviderRuntimeBundle{
 		openai.NewRuntime(client, credentials),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecMeta)),
 		anthropic.NewRuntime(client, credentials),
 		cerebras.NewRuntime(client, credentials),
 		deepseek.NewRuntime(client, credentials),

@@ -87,6 +87,7 @@ workspaces:
         tiers:
           - targets:
               - {id: openai, model: gpt-5, protocol: responses, connection: {openai: {credential: env:OPENAI_API_KEY}}}
+              - {id: meta, model: muse-spark-1.2, connection: {meta: {credential: env:MODEL_API_KEY}}}
               - {id: anthropic, model: claude, protocol: messages, connection: {anthropic: {credential: env:ANTHROPIC_API_KEY}}}
               - {id: deepseek, model: deepseek-v4-pro, connection: {deepseek: {credential: env:DEEPSEEK_API_KEY}}}
               - {id: kimi, model: kimi-k3, connection: {kimi: {credential: env:MOONSHOT_API_KEY}}}

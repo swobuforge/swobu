@@ -3,6 +3,8 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -102,8 +104,9 @@ func DecodeResponsesToolPolicy(raw json.RawMessage, tools []canonical.ToolDeclar
 }
 
 type sseEnvelopeStreamEncoder struct {
-	wire    ResponseStreamWireEncoder
-	adapter *sse.EnvelopeEventAdapter
+	wire           ResponseStreamWireEncoder
+	adapter        *sse.EnvelopeEventAdapter
+	sequenceNumber uint64
 }
 
 func (s *sseEnvelopeStreamEncoder) EncodeEnvelopeEvent(event canonical.Event) ([][]byte, error) {
@@ -133,7 +136,11 @@ func (s *sseEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte, erro
 	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {
-		frames = append(frames, sse.SSEData(raw))
+		frame, err := s.responsesSSEEventFrame(raw)
+		if err != nil {
+			return nil, err
+		}
+		frames = append(frames, frame)
 	}
 	return frames, nil
 }
@@ -149,9 +156,36 @@ func (s *sseEnvelopeStreamEncoder) Finish() ([][]byte, error) {
 	}
 	frames := make([][]byte, 0, len(rawFrames))
 	for _, raw := range rawFrames {
-		frames = append(frames, sse.SSEData(raw))
+		frame, err := s.responsesSSEEventFrame(raw)
+		if err != nil {
+			return nil, err
+		}
+		frames = append(frames, frame)
 	}
 	return frames, nil
+}
+
+func (s *sseEnvelopeStreamEncoder) responsesSSEEventFrame(raw []byte) ([]byte, error) {
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("encode Responses SSE event name: %w", err)
+	}
+	if envelope.Type == "" {
+		return nil, fmt.Errorf("encode Responses SSE event name: frame type is empty")
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+		return nil, fmt.Errorf("encode Responses SSE sequence: frame is not an object")
+	}
+	payload := make([]byte, 0, len(trimmed)+32)
+	payload = append(payload, trimmed[:len(trimmed)-1]...)
+	payload = append(payload, []byte(`,"sequence_number":`)...)
+	payload = strconv.AppendUint(payload, s.sequenceNumber, 10)
+	payload = append(payload, '}')
+	s.sequenceNumber++
+	return sse.SSEEventFrame(envelope.Type, payload), nil
 }
 
 func (s *sseEnvelopeStreamEncoder) encoder() *ResponseStreamWireEncoder {

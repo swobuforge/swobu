@@ -16,6 +16,7 @@ var adapters = []adapter{
 	claudeAdapter,
 	kiloAdapter,
 	piAdapter,
+	museAdapter,
 	openClawAdapter,
 	hermesAdapter,
 }

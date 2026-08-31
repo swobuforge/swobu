@@ -451,6 +451,15 @@ func resolveResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, 
 // Provider output still uses strict attempt-local declaration resolution.
 func resolveHistoricalResponsesFunctionCall(tools []canonical.ToolDeclaration, namespace, name string) (canonical.ToolKey, error) {
 	if strings.TrimSpace(namespace) == "" {
+		if declaration, err := resolveResponsesFunctionCall(tools, "", name); err == nil {
+			return declaration.Key(), nil
+		}
+		if separator := strings.Index(name, "."); separator > 0 && separator < len(name)-1 {
+			group, leaf := name[:separator], name[separator+1:]
+			if declaration, err := resolveResponsesFunctionCall(tools, group, leaf); err == nil {
+				return declaration.Key(), nil
+			}
+		}
 		return canonical.ResolveHistoricalToolKeyByName(tools, name, canonical.ToolKindFunction)
 	}
 	historical, err := canonical.HistoricalScopedToolKey(namespace, name, canonical.ToolKindFunction)

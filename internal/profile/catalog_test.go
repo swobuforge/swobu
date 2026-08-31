@@ -97,10 +97,36 @@ func TestCatalog_SpecSupport(t *testing.T) {
 // RFC's current-provider preservation claim explicit. Catalog membership is
 // owned here; routing and transport boundaries must consume only these four
 // durable shape reasons, never recreate this inventory.
+
+func TestCatalog_MetaModelAPIIsDerivedStreamingResponses(t *testing.T) {
+	profile, ok := profileFor(string(ProviderSpecMeta))
+	if !ok {
+		t.Fatal("Meta Model API provider missing from catalog")
+	}
+	if profile.ProviderDisplayName != "Meta Model API" || profile.ConnectionShape != routing.ConnectionShapeStandard {
+		t.Fatalf("Meta profile identity = %#v", profile)
+	}
+	if profile.Locator.Kind != LocatorFixed || profile.Locator.Default != "https://api.meta.ai/v1" {
+		t.Fatalf("Meta locator = %#v", profile.Locator)
+	}
+	if profile.Credential.Requirement != CredentialRequired || profile.Credential.Authoring != CredentialAuthoringReference || profile.Credential.SuggestedEnvVar != "MODEL_API_KEY" {
+		t.Fatalf("Meta credential = %#v", profile.Credential)
+	}
+	if profile.ModelDiscovery != ModelDiscoveryModeAdvisory || !profile.VisibleInOperatorUI {
+		t.Fatalf("Meta authoring facts = %#v", profile)
+	}
+	if got := ConcreteProviderProtocolsForSpec(string(ProviderSpecMeta)); !slices.Equal(got, []string{"responses_stream"}) {
+		t.Fatalf("Meta protocols = %v", got)
+	}
+	if got, derived := DerivedProtocolForSpec(string(ProviderSpecMeta)); !derived || got != "responses_stream" {
+		t.Fatalf("Meta derived protocol = %q, %v", got, derived)
+	}
+}
+
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 40 {
-		t.Fatalf("provider profile count = %d, want 40", len(profiles))
+	if len(profiles) != 41 {
+		t.Fatalf("provider profile count = %d, want 41", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -117,7 +143,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 	for _, providerID := range []ProviderID{
 		ProviderSpecOllama, ProviderSpecLMStudio, ProviderSpecVLLM,
-		ProviderSpecOpenAI, ProviderSpecChatGPT, ProviderSpecGemini, ProviderSpecAnthropic,
+		ProviderSpecOpenAI, ProviderSpecMeta, ProviderSpecChatGPT, ProviderSpecGemini, ProviderSpecAnthropic,
 		ProviderSpecDeepSeek, ProviderSpecKimi, ProviderSpecMistral, ProviderSpecCerebras, ProviderSpecWorkersAI, ProviderSpecLLM7, ProviderSpecNVIDIA, ProviderSpecRunPod, ProviderSpecFriendli,
 		ProviderSpecTogether, ProviderSpecDeepInfra, ProviderSpecScaleway,
 		ProviderSpecSambaNova, ProviderSpecStepFun, ProviderSpecNebius,
@@ -133,7 +159,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 37,
+		routing.ConnectionShapeStandard: 38,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,

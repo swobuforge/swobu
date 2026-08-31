@@ -5,10 +5,12 @@
 // Foreign client configuration remains its own source of truth. A static
 // registry owns only catalogue ordering and lookup. Each adapter owns its
 // identity, name, presence signal, paths, admission, and planning semantics;
-// when the client exposes a backend/provider abstraction, the adapter declares
-// Swobu there and selects the facade model `default`. It must never hide Swobu
-// beneath OpenAI, Anthropic, OpenRouter, or another target-provider identity.
-// Endpoint-only mutation is valid only for an explicit gateway/proxy seam such
+// when a client field selects network/backend transport, the adapter declares
+// Swobu there and selects the facade model `default`. A client-internal profile
+// discriminator may retain a required provider value only when an independent
+// endpoint field unambiguously selects Swobu and the discriminator cannot
+// redirect traffic; Muse's `provider=meta` and `endpoint_transport.base_url`
+// are the bounded example. Endpoint-only mutation is valid only for an explicit gateway/proxy seam such
 // as Claude Code's ANTHROPIC_BASE_URL; the Claude adapter also enables the
 // client's gateway model-discovery request. Target provider/model and capability
 // metadata derived from the selected target remain encapsulated behind the

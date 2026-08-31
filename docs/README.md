@@ -6,6 +6,7 @@ These docs contain practical setup recipes and troubleshooting references that a
 
 - [Claude Code](./clients/claude-code.md)
 - [Codex CLI](./clients/codex-cli.md)
+- [Muse Code](./clients/muse-code.md)
 - [Kilo Code](./clients/kilo-code.md)
 - [pi](./clients/pi.md)
 - [OpenClaw](./clients/openclaw.md)
@@ -17,6 +18,7 @@ These docs contain practical setup recipes and troubleshooting references that a
 ## Backend recipes
 
 - [OpenAI](./backends/openai.md)
+- [Meta Model API / Muse Spark](./backends/meta-model-api.md)
 - [Anthropic](./backends/anthropic.md)
 - [OpenRouter](./backends/openrouter.md)
 - [AWS Bedrock](./backends/aws-bedrock.md)
