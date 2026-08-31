@@ -39,7 +39,41 @@ func NormalizeClientHandler(raw string) ClientHandler {
 
 type ClientFamily string
 
-const ClientFamilyUnknown ClientFamily = "unknown"
+const (
+	ClientFamilyCodex      ClientFamily = "codex"
+	ClientFamilyClaudeCode ClientFamily = "claude_code"
+	ClientFamilyCline      ClientFamily = "cline"
+	ClientFamilyOpenCode   ClientFamily = "opencode"
+	ClientFamilyAider      ClientFamily = "aider"
+	ClientFamilyOther      ClientFamily = "other"
+	ClientFamilyUnknown    ClientFamily = "unknown"
+)
+
+// ClassifyClientFamily projects a raw HTTP User-Agent into the closed product
+// family vocabulary admitted by traffic evidence. The raw header remains an
+// ingress-only fact and never enters ProductReport.
+func ClassifyClientFamily(raw string) ClientFamily {
+	product := strings.ToLower(string(NormalizeClientHandler(raw)))
+	if slash := strings.IndexByte(product, '/'); slash >= 0 {
+		product = product[:slash]
+	}
+	switch product {
+	case "codex":
+		return ClientFamilyCodex
+	case "claude-code", "claude_code":
+		return ClientFamilyClaudeCode
+	case "cline":
+		return ClientFamilyCline
+	case "opencode":
+		return ClientFamilyOpenCode
+	case "aider":
+		return ClientFamilyAider
+	case "", string(ClientHandlerUnknown):
+		return ClientFamilyUnknown
+	default:
+		return ClientFamilyOther
+	}
+}
 
 type NormalizedOp string
 

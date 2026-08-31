@@ -32,6 +32,8 @@ func currentGoldenReport() productReport {
 		Traffic: []reportTrafficRow{
 			{
 				ClientFamily:        reportClientFamilyCodex,
+				RequestedModel:      reportModelDefault,
+				ResolvedModel:       reportModelConfigured,
 				ClientProtocol:      "responses",
 				TargetProtocol:      protocolkind.Responses,
 				Operation:           "response",
@@ -51,6 +53,8 @@ func currentGoldenReport() productReport {
 			},
 			{
 				ClientFamily:        reportClientFamilyClaudeCode,
+				RequestedModel:      reportModelConfigured,
+				ResolvedModel:       reportModelConfigured,
 				ClientProtocol:      "messages",
 				TargetProtocol:      protocolkind.Messages,
 				Operation:           "message",
