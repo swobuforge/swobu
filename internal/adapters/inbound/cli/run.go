@@ -217,7 +217,7 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 	case "status":
 		return runStatus(ctx, client, stdout, stderr, args[1:])
 	case "telemetry":
-		return runTelemetry(stdout, stderr, args[1:])
+		return runTelemetry(ctx, client, stdout, stderr, args[1:])
 	case "connect":
 		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
 	default:

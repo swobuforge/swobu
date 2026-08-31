@@ -27,7 +27,7 @@ func TestReportUploader_PostsJSONAndAccepts2xx(t *testing.T) {
 	if gotCT != "application/json" {
 		t.Fatalf("content-type = %q, want application/json", gotCT)
 	}
-	if !strings.Contains(string(gotBody), `"schema":1`) {
+	if !strings.Contains(string(gotBody), `"schema":2`) {
 		t.Fatalf("body missing schema: %s", gotBody)
 	}
 }
@@ -54,7 +54,7 @@ func TestReportUploader_RejectsOversizeBeforeRequest(t *testing.T) {
 
 	rows := make([]reportTrafficRow, 0, 5000)
 	for range 5000 {
-		rows = append(rows, reportTrafficRow{Count: 1})
+		rows = append(rows, reportTrafficRow{TargetProtocol: "responses", Count: 1})
 	}
 	u := newReportUploader(srv.URL)
 	err := u.Upload(context.Background(), productReport{Schema: productReportSchemaVersion, Traffic: rows})

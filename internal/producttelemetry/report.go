@@ -3,13 +3,15 @@ package producttelemetry
 import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/profile"
 )
 
 const (
 	// productReportSchemaVersion is the closed-schema version this client emits.
 	// The Worker rejects any other value.
-	productReportSchemaVersion = 1
+	productReportSchemaVersion = 2
 	// productReportMaxBytes bounds a serialized report. The Worker also rejects
 	// payloads above 64 KiB; the client enforces the same ceiling before sending.
 	productReportMaxBytes = 64 * 1024
@@ -20,15 +22,9 @@ const (
 	// the published operational maxima (MaxInt32). See
 	// TestProductReport_MaximalEncodesUnderCeiling.
 	productReportMaxTrafficRows = 74
-	// productReportUserAgentProductMaxRunes bounds the client token. Together with
-	// the row cap and the numeric maxima it bounds the report size (the producer
-	// emits only the canonical request paths, so request_path needs no rune cap).
-	// The reducer enforces the UA cap at the projection edge; the evidence carries
-	// the raw values.
-	productReportUserAgentProductMaxRunes = 64
 	// productReportVersionMaxBytes bounds the version token by bytes; validReportVersion
 	// checks byte length and permits printable ASCII only (every accepted byte is one
-	// character), matching the V1 schema's version pattern. An invalid canonical build
+	// character), matching the V2 schema's version pattern. An invalid canonical build
 	// value fails closed at startup rather than collecting a period the Worker rejects.
 	productReportVersionMaxBytes = 64
 	// The numeric maxima are MaxInt32. This is an operational bound, not a proof:
@@ -46,7 +42,7 @@ const (
 )
 
 // validReportVersion reports whether v satisfies the version bound: 1–64 printable
-// ASCII characters, no space. It is equivalent to the V1 schema's version pattern —
+// ASCII characters, no space. It is equivalent to the V2 schema's version pattern —
 // every accepted character is one ASCII byte, so byte length equals character
 // count. It is the startup gate: an invalid canonical build value disables
 // telemetry for the lifetime (fail closed) rather than collecting a period the
@@ -69,6 +65,8 @@ func validReportVersion(v string) bool {
 // only ever carries approved fields. See product-telemetry.md.
 type productReport struct {
 	Schema                int                `json:"schema"`
+	ReportID              string             `json:"report_id"`
+	ReportCreatedAt       string             `json:"report_created_at"`
 	InstallID             string             `json:"install_id"`
 	Runtime               reportRuntime      `json:"runtime"`
 	InstallationAgeBucket string             `json:"installation_age_bucket"`
@@ -95,15 +93,33 @@ type reportRuntime struct {
 // the analytical failure taxonomy (and the coarse success/cancelled/failure
 // outcome) is derived downstream, never on the client. See product-telemetry.md.
 type reportTrafficRow struct {
-	UserAgentProduct   string                   `json:"user_agent_product"`
-	RequestPath        canonical.NormalizedPath `json:"request_path"`
-	Provider           profile.ProviderID       `json:"provider"`
-	StatusCode         int                      `json:"status_code"`
-	DeliveryKind       delivery.ResultKind      `json:"delivery_kind"`
-	CanonicalErrorCode canonical.ErrorCode      `json:"canonical_error_code"`
-	AttemptCount       int                      `json:"attempt_count"`
-	FallbackRecovered  bool                     `json:"fallback_recovered"`
-	Count              int                      `json:"count"`
-	DurationMS         [6]int                   `json:"duration_ms"`
-	TTFBMS             [6]int                   `json:"ttfb_ms"`
+	ClientFamily        reportClientFamily             `json:"client_family"`
+	ClientProtocol      trafficevidence.ClientProtocol `json:"client_protocol"`
+	TargetProtocol      protocolkind.ProtocolKind      `json:"target_protocol"`
+	Operation           trafficevidence.NormalizedOp   `json:"operation"`
+	Provider            profile.ProviderID             `json:"provider"`
+	Result              trafficevidence.ResultClass    `json:"result"`
+	StatusCode          int                            `json:"status_code"`
+	DeliveryKind        delivery.ResultKind            `json:"delivery_kind"`
+	CanonicalErrorCode  canonical.ErrorCode            `json:"canonical_error_code"`
+	AttemptCount        int                            `json:"attempt_count"`
+	FallbackRecovered   bool                           `json:"fallback_recovered"`
+	ContinuityRecovered bool                           `json:"continuity_recovered"`
+	CrossProtocol       bool                           `json:"cross_protocol"`
+	WireMutated         bool                           `json:"wire_mutated"`
+	Count               int                            `json:"count"`
+	DurationMS          [6]int                         `json:"duration_ms"`
+	TTFBMS              [6]int                         `json:"ttfb_ms"`
 }
+
+type reportClientFamily string
+
+const (
+	reportClientFamilyCodex      reportClientFamily = "codex"
+	reportClientFamilyClaudeCode reportClientFamily = "claude_code"
+	reportClientFamilyCline      reportClientFamily = "cline"
+	reportClientFamilyOpenCode   reportClientFamily = "opencode"
+	reportClientFamilyAider      reportClientFamily = "aider"
+	reportClientFamilyOther      reportClientFamily = "other"
+	reportClientFamilyUnknown    reportClientFamily = "unknown"
+)

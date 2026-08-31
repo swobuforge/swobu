@@ -21,7 +21,8 @@ type reportUploader struct {
 // NewReportUploader targets the given absolute endpoint URL (e.g.
 // "https://swobu.com/api/v1/telemetry"). The client sets no Timeout of its own:
 // the caller's context (set in flush) owns the single attempt deadline, so the
-// two cannot race. One attempt is used; product telemetry is allowed to be lossy.
+// two cannot race. One attempt is used; the runtime retains the immutable report
+// after failure and retries it at the next flush boundary.
 func newReportUploader(endpointURL string) *reportUploader {
 	return &reportUploader{
 		endpointURL: endpointURL,

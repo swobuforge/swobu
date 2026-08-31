@@ -49,6 +49,19 @@ func buildDaemonServeMux(
 	mux.Handle("/_swobu/status-projection", httpapi.NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		return daemon.StatusProjectionForScope(scope)
 	}))
+	mux.HandleFunc("/_swobu/telemetry-report", func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			response.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := daemon.inspectTelemetry(request.Context())
+		if err != nil {
+			http.Error(response, "telemetry report unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write(body)
+	})
 	mux.Handle("/_swobu/down", httpapi.NewShutdownHandler(func(context.Context) error {
 		go func() { _ = daemon.Close() }()
 		return nil

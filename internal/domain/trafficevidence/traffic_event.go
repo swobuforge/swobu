@@ -312,7 +312,7 @@ func NewProviderInflightTrafficEvent(base TrafficEventInput, attemptCount int) (
 }
 
 // validStatus reports whether code is a transport-valid HTTP status for a terminal
-// event: 0 (no response received) or a real status in 100-599. It matches the V1
+// event: 0 (no response received) or a real status in 100-599. It matches the V2
 // schema's status_code constraint, so every constructed terminal event is
 // transport-valid, not merely nonnegative.
 func validStatus(code int) bool {

@@ -2,9 +2,11 @@ package producttelemetry
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -30,20 +32,21 @@ type reportReducer struct {
 	overflowCount int
 }
 
-// userAgentProduct is the bounded first whitespace-delimited product token of
-// the client User-Agent (see trafficevidence.NormalizeClientHandler) — not the
-// full raw header. It is carried verbatim: telemetry does not classify it into a
-// client family; that derivation lives in the downstream DuckDB semantic model so
-// it can evolve and be recomputed over historical data. See product-telemetry.md.
 type trafficRowKey struct {
-	userAgentProduct   string
-	requestPath        canonical.NormalizedPath
-	provider           profile.ProviderID
-	statusCode         int
-	deliveryKind       delivery.ResultKind
-	canonicalErrorCode canonical.ErrorCode
-	attemptCount       int
-	fallbackRecovered  bool
+	clientFamily        reportClientFamily
+	clientProtocol      trafficevidence.ClientProtocol
+	targetProtocol      protocolkind.ProtocolKind
+	operation           trafficevidence.NormalizedOp
+	provider            profile.ProviderID
+	result              trafficevidence.ResultClass
+	statusCode          int
+	deliveryKind        delivery.ResultKind
+	canonicalErrorCode  canonical.ErrorCode
+	attemptCount        int
+	fallbackRecovered   bool
+	continuityRecovered bool
+	crossProtocol       bool
+	wireMutated         bool
 }
 
 type trafficRowAccum struct {
@@ -70,14 +73,6 @@ func newReportReducer() *reportReducer {
 // maximum length so every reducer-constructed report is byte-bounded (see
 // TestProductReport_MaximalEncodesUnderCeiling). The evidence carries the raw
 // token; only this projection edge bounds it.
-func boundUserAgentProduct(token string) string {
-	runes := []rune(token) // swobu:io-string source=boundary
-	if len(runes) <= productReportUserAgentProductMaxRunes {
-		return token
-	}
-	return string(runes[:productReportUserAgentProductMaxRunes])
-}
-
 // Observe folds one terminal traffic event into the accumulator. Non-terminal
 // events are ignored. Activation is installation-lifetime State overlaid by the
 // runtime, never derived here.
@@ -86,14 +81,20 @@ func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 		return
 	}
 	key := trafficRowKey{
-		userAgentProduct:   boundUserAgentProduct(string(event.ClientHandler())),
-		requestPath:        event.RequestPath(),
-		provider:           event.ProviderSpec(),
-		statusCode:         event.StatusCode(),
-		deliveryKind:       event.DeliveryKind(),
-		canonicalErrorCode: event.CanonicalErrorCode(),
-		attemptCount:       event.AttemptCount(),
-		fallbackRecovered:  event.FallbackRecovered(),
+		clientFamily:        classifyReportClientFamily(event.ClientHandler()),
+		clientProtocol:      event.ClientProtocol(),
+		targetProtocol:      event.TargetProtocol(),
+		operation:           event.NormalizedOp(),
+		provider:            event.ProviderSpec(),
+		result:              event.Result(),
+		statusCode:          event.StatusCode(),
+		deliveryKind:        event.DeliveryKind(),
+		canonicalErrorCode:  event.CanonicalErrorCode(),
+		attemptCount:        event.AttemptCount(),
+		fallbackRecovered:   event.FallbackRecovered(),
+		continuityRecovered: event.ContinuityRecovered(),
+		crossProtocol:       event.ClientProtocol() != trafficevidence.ClientProtocolUnknown && string(event.ClientProtocol()) != event.TargetProtocol().String(),
+		wireMutated:         hasWireMutation(event.Mutations()),
 	}
 	accum := r.rowAccum(key)
 	if accum == nil {
@@ -105,6 +106,29 @@ func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 	accum.duration[durationBucketIndex(ms, hasDuration)]++
 	ttfbMS, hasTTFB := event.Timing().TTFBMillis()
 	accum.ttfb[durationBucketIndex(ttfbMS, hasTTFB)]++
+}
+
+func classifyReportClientFamily(handler trafficevidence.ClientHandler) reportClientFamily {
+	product := strings.ToLower(strings.TrimSpace(string(handler)))
+	if slash := strings.IndexByte(product, '/'); slash >= 0 {
+		product = product[:slash]
+	}
+	switch product {
+	case "codex":
+		return reportClientFamilyCodex
+	case "claude-code", "claude_code":
+		return reportClientFamilyClaudeCode
+	case "cline":
+		return reportClientFamilyCline
+	case "opencode":
+		return reportClientFamilyOpenCode
+	case "aider":
+		return reportClientFamilyAider
+	case "", "unknown":
+		return reportClientFamilyUnknown
+	default:
+		return reportClientFamilyOther
+	}
 }
 
 func (r *reportReducer) rowAccum(key trafficRowKey) *trafficRowAccum {
@@ -134,17 +158,23 @@ func (r *reportReducer) snapshot(installID, version, osFamily, arch string) prod
 	rows := make([]reportTrafficRow, 0, len(r.rows))
 	for key, acc := range r.rows {
 		rows = append(rows, reportTrafficRow{
-			UserAgentProduct:   key.userAgentProduct,
-			RequestPath:        key.requestPath,
-			Provider:           key.provider,
-			StatusCode:         key.statusCode,
-			DeliveryKind:       key.deliveryKind,
-			CanonicalErrorCode: key.canonicalErrorCode,
-			AttemptCount:       key.attemptCount,
-			FallbackRecovered:  key.fallbackRecovered,
-			Count:              acc.count,
-			DurationMS:         acc.duration,
-			TTFBMS:             acc.ttfb,
+			ClientFamily:        key.clientFamily,
+			ClientProtocol:      key.clientProtocol,
+			TargetProtocol:      key.targetProtocol,
+			Operation:           key.operation,
+			Provider:            key.provider,
+			Result:              key.result,
+			StatusCode:          key.statusCode,
+			DeliveryKind:        key.deliveryKind,
+			CanonicalErrorCode:  key.canonicalErrorCode,
+			AttemptCount:        key.attemptCount,
+			FallbackRecovered:   key.fallbackRecovered,
+			ContinuityRecovered: key.continuityRecovered,
+			CrossProtocol:       key.crossProtocol,
+			WireMutated:         key.wireMutated,
+			Count:               acc.count,
+			DurationMS:          acc.duration,
+			TTFBMS:              acc.ttfb,
 		})
 	}
 	sortTrafficRows(rows)
@@ -158,8 +188,8 @@ func (r *reportReducer) snapshot(installID, version, osFamily, arch string) prod
 	}
 }
 
-// Reset clears the accumulator. Called after an upload attempt regardless of
-// outcome (product telemetry is lossy: a failed upload loses that period).
+// Reset clears the active accumulator after it is frozen into an immutable
+// pending report, or when consent is revoked.
 func (r *reportReducer) Reset() {
 	r.rows = make(map[trafficRowKey]*trafficRowAccum)
 	r.overflowCount = 0
@@ -189,11 +219,17 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		if a.Provider != b.Provider {
 			return a.Provider < b.Provider
 		}
-		if a.UserAgentProduct != b.UserAgentProduct {
-			return a.UserAgentProduct < b.UserAgentProduct
+		if a.ClientFamily != b.ClientFamily {
+			return a.ClientFamily < b.ClientFamily
 		}
-		if a.RequestPath != b.RequestPath {
-			return a.RequestPath < b.RequestPath
+		if a.ClientProtocol != b.ClientProtocol {
+			return a.ClientProtocol < b.ClientProtocol
+		}
+		if a.TargetProtocol != b.TargetProtocol {
+			return a.TargetProtocol < b.TargetProtocol
+		}
+		if a.Operation != b.Operation {
+			return a.Operation < b.Operation
 		}
 		if a.DeliveryKind != b.DeliveryKind {
 			return a.DeliveryKind < b.DeliveryKind
@@ -209,4 +245,13 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		}
 		return !a.FallbackRecovered && b.FallbackRecovered
 	})
+}
+
+func hasWireMutation(mutations []trafficevidence.Mutation) bool {
+	for _, mutation := range mutations {
+		if mutation.HasChanges() {
+			return true
+		}
+	}
+	return false
 }

@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"context"
+
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/producttelemetry"
@@ -26,10 +28,17 @@ func (d *Daemon) observeTelemetryEvent(event trafficevidence.TrafficEvent) {
 	d.telemetry.Observe(event)
 }
 
-// stopTelemetryRuntime stops the runtime and waits. No flush (lossy contract).
+// stopTelemetryRuntime stops the runtime and waits for its bounded final flush.
 func (d *Daemon) stopTelemetryRuntime() {
 	if d == nil || d.telemetry == nil {
 		return
 	}
 	d.telemetry.Close()
+}
+
+func (d *Daemon) inspectTelemetry(ctx context.Context) ([]byte, error) {
+	if d == nil || d.telemetry == nil {
+		return []byte("null"), nil
+	}
+	return d.telemetry.InspectJSON(ctx)
 }
