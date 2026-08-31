@@ -61,6 +61,7 @@ const (
 	ProviderSpecLMStudio    ProviderID = "lmstudio"
 	ProviderSpecVLLM        ProviderID = "vllm"
 	ProviderSpecOpenAI      ProviderID = "openai"
+	ProviderSpecMeta        ProviderID = "meta"
 	ProviderSpecChatGPT     ProviderID = "chatgpt"
 	ProviderSpecGemini      ProviderID = "gemini"
 	ProviderSpecAnthropic   ProviderID = "anthropic"

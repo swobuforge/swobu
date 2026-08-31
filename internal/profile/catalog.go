@@ -268,6 +268,23 @@ func catalog() []Profile {
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 		},
 		{
+			ProviderID:          ProviderSpecMeta,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "Meta Model API",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"Meta", "Muse", "Muse Spark", "Model API", "MODEL_API_KEY"},
+			Locator: LocatorSpec{
+				Kind:    LocatorFixed,
+				Default: "https://api.meta.ai/v1",
+			},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "MODEL_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols: []ProviderProtocolSpec{
+				streamingProtocol("responses_stream", protocolkind.Responses),
+			},
+		},
+		{
 			ProviderID:          ProviderSpecChatGPT,
 			ConnectionShape:     routing.ConnectionShapeStandard,
 			ModelDiscovery:      ModelDiscoveryModeAdvisory,

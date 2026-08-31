@@ -190,6 +190,14 @@ func TestEncodeResponseStreamPreservesWebSearchLifecycleKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	wire := string(raw)
+	if !strings.Contains(wire, `"sequence_number":0`) {
+		t.Fatalf("Responses SSE omitted its initial sequence number: %s", wire)
+	}
+	for _, event := range []string{"response.created", "response.output_item.added", "response.output_item.done", "response.completed"} {
+		if !strings.Contains(wire, "event: "+event+"\n") {
+			t.Fatalf("Responses SSE omitted event name %q: %s", event, wire)
+		}
+	}
 	if !strings.Contains(wire, `"type":"web_search_call"`) || !strings.Contains(wire, `"id":"search_original"`) {
 		t.Fatalf("web-search lifecycle missing: %s", wire)
 	}

@@ -82,6 +82,7 @@ Or use the CLI:
 ```bash
 swobu connect claude
 swobu connect codex
+swobu connect muse
 swobu connect openclaw
 swobu connect pi
 swobu connect kilo
@@ -223,6 +224,7 @@ Compatibility is not the product you should have to think about. It is what make
 ```text
 Claude Code ─┐
 Codex ───────┤
+Muse Code ────┤
 OpenClaw ────┤
 Pi ──────────┤
 Kilo ────────┼──── Swobu ────┬─ OpenAI
@@ -259,7 +261,7 @@ Swobu supports local inference, frontier APIs, hyperscalers, specialized inferen
 
 **Local:** Ollama · LM Studio · vLLM
 
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
+**Frontier:** OpenAI · Meta Model API · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
 
 **Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
 

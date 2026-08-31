@@ -2,6 +2,7 @@ package responses
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -46,6 +47,63 @@ func TestNamespacedFunctionCallUsesAttemptScopedFlatAddress(t *testing.T) {
 	body := string(encoded.RawBytes())
 	if strings.Contains(body, `"namespace"`) || !strings.Contains(body, `"name":"`+wireName+`"`) {
 		t.Fatalf("projected flat call address was not preserved: %s", body)
+	}
+}
+
+func TestDecodeClientRequestRecoversFlattenedNamespaceFunctionCall(t *testing.T) {
+	raw := []byte(`{
+		"model":"default",
+		"tools":[{"type":"namespace","name":"muse","tools":[{"type":"function","name":"bash","parameters":{"type":"object"}}]}],
+		"input":[
+			{"type":"message","role":"user","content":"run it"},
+			{"type":"function_call","name":"muse.bash","call_id":"call_1","arguments":"{\"command\":\"printf ok\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"ok"}
+		]
+	}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(
+		protocolkind.Responses, "application/json", nil, raw, carrier.Meta{},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.Request.Items()
+	call, ok := items[len(items)-2].ToolCall()
+	if !ok || call.Tool().Namespace() != "muse" || call.Tool().Name() != "bash" {
+		t.Fatalf("flattened call identity = %#v, want muse/bash", items[len(items)-2])
+	}
+	names, _, err := provider.BuildAttemptToolNames(decoded.Request.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := EncodeCarrierWithChanges(
+		EncodeInput{Request: decoded.Request.Request, ToolNames: names}, delivery.StreamingDelivery(delivery.FramingSSE), nil, "", EncodeOptions{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected struct {
+		Input []struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &projected); err != nil {
+		t.Fatal(err)
+	}
+	foundCall, foundResult := false, false
+	for _, item := range projected.Input {
+		foundCall = foundCall || item.Type == "function_call" && item.CallID == "call_1"
+		foundResult = foundResult || item.Type == "function_call_output" && item.CallID == "call_1"
+	}
+	if !foundCall || !foundResult {
+		t.Fatalf("flattened namespace history projected input = %#v", projected.Input)
+	}
+	if decoded.Request.RebasedRequest == nil {
+		t.Fatal("flattened call/result history did not produce a rebased current request")
+	}
+	current := decoded.Request.RebasedRequest.Request.Items()
+	if len(current) == 0 || current[len(current)-1].Kind() != canonical.ItemKindToolResult {
+		t.Fatalf("rebased current items = %#v, want tool result", current)
 	}
 }
 
