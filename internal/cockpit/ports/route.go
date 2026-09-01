@@ -3,8 +3,16 @@ package ports
 import (
 	"context"
 
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/sharestate"
 )
+
+type ShareCommands interface {
+	IssueShare(context.Context, string, sharestate.Expiry) (shares.Result, error)
+	RevealShare(context.Context, string) (shares.Result, error)
+	RevokeShare(context.Context, string) error
+}
 
 // RouteCommands mutates client-visible routes and their targets.
 type RouteCommands interface {

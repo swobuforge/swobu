@@ -32,6 +32,14 @@ templ (s *SectionView) Render() {
 										@RouteDefaultRowComponent(s, route)
 									</div>
 								}
+								<div key={s.shareRowKey(route)} class="w-full">
+									@ShareRowComponent(s, route)
+								</div>
+								if route.Share != nil {
+									<div key={s.shareRevokeRowKey(route)} class="w-full">
+										@ShareRevokeRowComponent(s, route)
+									</div>
+								}
 								// --- Target rows by step --------------------------------
 								for tierIdx, tierTargets := range groupedTargets(route) {
 									@StepHeaderRow(tierHeaderText(tierIdx, len(tierTargets) > 1))

@@ -1,0 +1,8 @@
+.git
+.out
+dist
+swobu
+swobu-relay
+exchange.test
+**/*.test
+**/.tmp

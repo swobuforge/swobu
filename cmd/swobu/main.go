@@ -107,6 +107,7 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		DisableFlagParsing: true,
 		RunE:               delegate("connect"),
 	}
+	shareCmd := &cobra.Command{Use: "share <workspace>/<route> [args]", Short: "Share one route", DisableFlagParsing: true, RunE: delegate("share")}
 	downCmd := &cobra.Command{
 		Use:                "down [args]",
 		Short:              "Request daemon shutdown",
@@ -144,7 +145,7 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		RunE:  delegate("version"),
 	}
 
-	root.AddCommand(connectCmd, daemonCmd, statusCmd, telemetryCmd, versionCmd)
+	root.AddCommand(connectCmd, daemonCmd, shareCmd, statusCmd, telemetryCmd, versionCmd)
 	return root
 }
 

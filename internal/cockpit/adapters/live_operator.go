@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
@@ -15,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/clipboard"
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
 type operatorClient interface {
@@ -37,6 +39,10 @@ type operatorClient interface {
 	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
 	ProbeTarget(context.Context, workspaceapi.Connection, string) (operatorclient.ModelCatalogResult, error)
 	StorePastedCredential(context.Context, string, string, string) (string, error)
+	ListShares(context.Context) ([]shares.Summary, error)
+	IssueShare(context.Context, string, sharestate.Expiry) (shares.Result, error)
+	RevealShare(context.Context, string) (shares.Result, error)
+	RevokeShare(context.Context, string) error
 }
 type LiveOperatorAdapter struct {
 	client operatorClient
@@ -52,6 +58,18 @@ func NewLiveOperatorAdapter(httpClient *http.Client, addr string) *LiveOperatorA
 	return a
 }
 
+func (a *LiveOperatorAdapter) IssueShare(ctx context.Context, route string, expiry sharestate.Expiry) (shares.Result, error) {
+	return a.client.IssueShare(ctx, route, expiry)
+}
+
+func (a *LiveOperatorAdapter) RevealShare(ctx context.Context, route string) (shares.Result, error) {
+	return a.client.RevealShare(ctx, route)
+}
+
+func (a *LiveOperatorAdapter) RevokeShare(ctx context.Context, route string) error {
+	return a.client.RevokeShare(ctx, route)
+}
+
 func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.WorkspaceID) (readmodel.WorkspaceReadModel, error) {
 	if id == "" || id == "+" {
 		return draftWorkspace(), nil
@@ -60,7 +78,15 @@ func (a *LiveOperatorAdapter) LoadWorkspace(ctx context.Context, id readmodel.Wo
 	if err != nil {
 		return readmodel.WorkspaceReadModel{}, adapterFailure("load workspace", err)
 	}
-	return a.workspaceFromView(ctx, workspace)
+	projection, err := a.workspaceFromView(ctx, workspace)
+	if err != nil {
+		return readmodel.WorkspaceReadModel{}, err
+	}
+	summaries, err := a.client.ListShares(ctx)
+	if err != nil {
+		return readmodel.WorkspaceReadModel{}, adapterFailure("load shares", err)
+	}
+	return projectWorkspaceShares(projection, summaries)
 }
 func (a *LiveOperatorAdapter) RenameWorkspace(ctx context.Context, request ports.RenameWorkspaceRequest) (readmodel.WorkspaceReadModel, error) {
 	slug := strings.TrimSpace(request.Slug)

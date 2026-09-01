@@ -3,13 +3,17 @@ package routes
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
 // port function aliases keep route mutation behind the section boundary.
@@ -31,6 +35,8 @@ type SectionView struct {
 	addRouteFocusPending bool
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
+	ShareCommands        ports.ShareCommands
+	app                  *tui.App
 	ApplyRouteDraft      func(context.Context, ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error)
 	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
 	OnWorkspaceCommitted func(readmodel.WorkspaceReadModel)
@@ -82,6 +88,10 @@ func (s *SectionView) BindApp(app *tui.App) {
 	s.State.AddTargetRoute.BindApp(app)
 	s.State.DeleteConfirmTarget.BindApp(app)
 	s.State.FocusRoute.BindApp(app)
+	s.State.SharePendingRoute.BindApp(app)
+	s.State.ShareErrorRoute.BindApp(app)
+	s.State.ShareError.BindApp(app)
+	s.app = app
 }
 
 func (s *SectionView) UpdateProps(fresh tui.Component) {
@@ -92,6 +102,7 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.Model = f.Model
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
+	s.ShareCommands = f.ShareCommands
 	s.ApplyRouteDraft = f.ApplyRouteDraft
 	s.OnWorkspacePersisted = f.OnWorkspacePersisted
 	s.OnWorkspaceCommitted = f.OnWorkspaceCommitted
@@ -105,6 +116,15 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	}
 	if s.State != nil && s.State.FocusRoute == nil {
 		s.State.FocusRoute = tui.NewState(readmodel.RouteID(""))
+	}
+	if s.State != nil && s.State.SharePendingRoute == nil {
+		s.State.SharePendingRoute = tui.NewState(readmodel.RouteID(""))
+	}
+	if s.State != nil && s.State.ShareErrorRoute == nil {
+		s.State.ShareErrorRoute = tui.NewState(readmodel.RouteID(""))
+	}
+	if s.State != nil && s.State.ShareError == nil {
+		s.State.ShareError = tui.NewState("")
 	}
 	if s.Expanded == nil {
 		s.Expanded = f.Expanded
@@ -124,6 +144,88 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	}
 	s.configureTargetConfigMounts()
 	s.refreshTargetConfigs()
+}
+
+func (s *SectionView) shareRouteRef(route readmodel.RouteReadModel) string {
+	return string(s.Model.RoutingWorkspaceID()) + "/" + string(route.ID)
+}
+
+func (s *SectionView) issueShare(route readmodel.RouteReadModel) {
+	if s.ShareCommands == nil || s.State.SharePendingRoute.Get() != "" {
+		return
+	}
+	s.State.SharePendingRoute.Set(route.ID)
+	s.State.ShareErrorRoute.Set("")
+	s.State.ShareError.Set("")
+	complete := func(result shares.Result, err error) {
+		s.State.SharePendingRoute.Set("")
+		if err != nil {
+			s.State.ShareErrorRoute.Set(route.ID)
+			s.State.ShareError.Set(err.Error())
+			return
+		}
+		parsed, parseErr := url.Parse(result.ShareURL)
+		if parseErr != nil || parsed.Hostname() == "" {
+			s.State.ShareErrorRoute.Set(route.ID)
+			s.State.ShareError.Set("share response is invalid")
+			return
+		}
+		share := &readmodel.ShareReadModel{Hostname: parsed.Hostname(), Never: result.ExpiresAt == "never"}
+		if !share.Never {
+			share.ExpiresAt, parseErr = time.Parse(time.RFC3339, result.ExpiresAt)
+			if parseErr != nil {
+				s.State.ShareErrorRoute.Set(route.ID)
+				s.State.ShareError.Set("share expiry is invalid")
+				return
+			}
+		}
+		for i := range s.State.Routes {
+			if s.State.Routes[i].ID == route.ID {
+				s.State.Routes[i].Share = share
+			}
+		}
+	}
+	if s.app == nil {
+		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), sharestate.ExpirySevenDays)
+		complete(result, err)
+		return
+	}
+	go func() {
+		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), sharestate.ExpirySevenDays)
+		s.app.QueueUpdate(func() { complete(result, err) })
+	}()
+}
+
+func (s *SectionView) copyShare(route readmodel.RouteReadModel) {
+	if s.ShareCommands == nil {
+		return
+	}
+	result, err := s.ShareCommands.RevealShare(context.Background(), s.shareRouteRef(route))
+	if err != nil {
+		s.State.ShareErrorRoute.Set(route.ID)
+		s.State.ShareError.Set(err.Error())
+		return
+	}
+	copyResult := ui.CopyToClipboard(result.ShareURL)
+	if displayErr := copyResult.ErrorForDisplay(); displayErr != "" {
+		s.State.ShareErrorRoute.Set(route.ID)
+		s.State.ShareError.Set(displayErr)
+	}
+}
+
+func (s *SectionView) revokeShare(route readmodel.RouteReadModel) error {
+	if s.ShareCommands == nil {
+		return nil
+	}
+	if err := s.ShareCommands.RevokeShare(context.Background(), s.shareRouteRef(route)); err != nil {
+		return err
+	}
+	for i := range s.State.Routes {
+		if s.State.Routes[i].ID == route.ID {
+			s.State.Routes[i].Share = nil
+		}
+	}
+	return nil
 }
 
 func sectionHeaderKey(s *SectionView) string {
@@ -645,6 +747,55 @@ func RouteDefaultRowComponent(s *SectionView, route readmodel.RouteReadModel) *u
 		action,
 		func() { s.setRouteDefault(route.ID) },
 	)
+}
+
+func (s *SectionView) shareRowKey(route readmodel.RouteReadModel) string {
+	return "route-share:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+func (s *SectionView) shareRevokeRowKey(route readmodel.RouteReadModel) string {
+	return "route-share-revoke:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+func ShareRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
+	value, action := "not shared", "share ↵"
+	activate := func() { s.issueShare(route) }
+	if s.State.SharePendingRoute.Get() == route.ID {
+		value, action, activate = "setting up HTTPS…", "", func() {}
+	} else if route.Share != nil {
+		value, action, activate = abbreviatedShareValue(route.Share.Hostname), "copy ↵", func() { s.copyShare(route) }
+	} else if s.State.ShareErrorRoute.Get() == route.ID {
+		value, action = "setup failed · "+s.State.ShareError.Get(), "retry ↵"
+	}
+	return ui.NewSelectableRow(s.shareRowKey(route), "share", value, action, activate)
+}
+
+func ShareRevokeRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.ConfirmActionRow {
+	expires := "never"
+	if route.Share != nil && !route.Share.Never {
+		expires = route.Share.ExpiresAt.Local().Format("2 Jan 2006")
+	}
+	copy := ui.ConfirmActionCopy{
+		Label:           "expires",
+		IdleValue:       expires,
+		IdleAction:      "revoke ↵",
+		ConfirmValue:    "revoke Share?",
+		ConfirmAction:   "confirm ↵",
+		SubmittingValue: "revoking…",
+		SubmittingHint:  "wait",
+		FailedValue:     "revoke failed",
+		FailedAction:    "retry ↵",
+	}
+	return ui.NewConfirmActionRow(s.shareRevokeRowKey(route), copy, func() error { return s.revokeShare(route) })
+}
+
+func abbreviatedShareValue(hostname string) string {
+	const suffix = ".share.swobu.com"
+	prefix := strings.TrimSuffix(hostname, suffix)
+	if prefix == hostname || len(prefix) <= 8 {
+		return hostname + "/#••••"
+	}
+	return prefix[:8] + "…" + suffix + "/#••••"
 }
 
 func (s *SectionView) applyRouteSaved(previousID readmodel.RouteID, route readmodel.RouteReadModel) {

@@ -1,6 +1,15 @@
 package readmodel
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+type ShareReadModel struct {
+	Hostname  string
+	ExpiresAt time.Time
+	Never     bool
+}
 
 // RouteID is the stable Cockpit identifier for a client-visible model name.
 type RouteID string
@@ -22,6 +31,7 @@ type RouteReadModel struct {
 	Tiers       []TierReadModel
 	Diagnostics []RouteDiagnosticReadModel
 	ActivityID  ActivityID
+	Share       *ShareReadModel
 }
 
 // RouteState is the operator-facing route status used by row copy and styling.

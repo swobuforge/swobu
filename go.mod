@@ -64,8 +64,11 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
+	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require github.com/hashicorp/yamux v0.1.2
 
 tool github.com/grindlemire/go-tui/cmd/tui

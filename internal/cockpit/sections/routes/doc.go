@@ -7,5 +7,7 @@
 // default row so add target is its next visible and selectable action.
 // Onboarding route creation, rename, and delete remain local; the first target
 // save crosses the existing atomic workspace-seed command and promotes the
-// workspace from Cockpit projection to persisted state.
+// workspace from Cockpit projection to persisted state. Share is a route-local
+// projection: issue uses the seven-day default, copy reveals just in time, and
+// revoke reuses the existing confirmation grammar.
 package routes

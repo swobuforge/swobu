@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
@@ -34,6 +35,8 @@ func (s *workspaceClientStub) ListWorkspaces(context.Context) ([]workspaceapi.Wo
 	s.listCalls++
 	return append([]workspaceapi.WorkspaceSummary(nil), s.summaries...), nil
 }
+
+func (s *workspaceClientStub) ListShares(context.Context) ([]shares.Summary, error) { return nil, nil }
 
 func (s *workspaceClientStub) DaemonVersion(context.Context) (string, error) { return "", nil }
 

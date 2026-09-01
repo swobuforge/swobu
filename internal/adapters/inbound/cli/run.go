@@ -220,6 +220,8 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		return runTelemetry(ctx, client, stdout, stderr, args[1:])
 	case "connect":
 		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
+	case "share":
+		return runShare(ctx, client, stdout, stderr, args[1:])
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", subcommand)
 		return ExitDown

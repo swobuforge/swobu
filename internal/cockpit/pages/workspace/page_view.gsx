@@ -36,6 +36,9 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 		RoutesSection:   routessection.Section(workspace, routeCommandPort(commands)),
 		ActivitySection: activitysection.Section(workspace, ctx, activityQuery),
 	}
+	if shareCommands, ok := any(commands).(ports.ShareCommands); ok {
+		page.RoutesSection.ShareCommands = shareCommands
+	}
 	if setupQueries != nil {
 		page.RoutesSection.TargetConfigs.Commands.Setup = setupQueries
 	}

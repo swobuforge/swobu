@@ -1,12 +1,12 @@
   model routes ▾
      dev               no targets                                                     collapse ↵
         name              dev                                                         edit ↵
+        share             not shared                                                  share ↵
 
         add target                                                                    add ↵
         delete            model route                                                 delete ↵
 
      add model route                                                                  add ↵
-
 
 
 

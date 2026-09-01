@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
@@ -12,9 +14,13 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/sharestate"
+	"github.com/swobuforge/swobu/internal/sharetransport"
+	"github.com/swobuforge/swobu/shareprotocol"
 )
 
 func buildDaemonServeMux(
@@ -32,6 +38,17 @@ func buildDaemonServeMux(
 			TrafficEvidence: trafficEventSink,
 		},
 	)
+	shareTLS := &sharestate.TLSManager{Store: daemon.shareStore}
+	shareHandler := httpapi.NewShareHandler(daemon.shareStore, daemon.configStore, exchangeIngress, trafficEventSink)
+	relayAddress := strings.TrimSpace(os.Getenv("SWOBU_SHARE_RELAY_ADDR"))
+	if relayAddress == "" {
+		relayAddress = shareprotocol.RelayHostname + ":443"
+	}
+	shareRuntime, err := sharetransport.NewOwnerRuntime(relayAddress, nil, daemon.shareStore, shareTLS, shareHandler)
+	if err != nil {
+		return nil, nil, err
+	}
+	daemon.shareRuntime = shareRuntime
 	mux := http.NewServeMux()
 	mux.Handle("/c/", httpapi.NewHandler(exchangeIngress, trafficEventSink))
 	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
@@ -82,6 +99,12 @@ func buildDaemonServeMux(
 	workspaceControl := httpapi.NewWorkspaceControlHandler(workspaceService)
 	mux.Handle("/_swobu/workspaces", workspaceControl)
 	mux.Handle("/_swobu/workspaces/", workspaceControl)
+	shareService, err := shares.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime)
+	if err != nil {
+		return nil, nil, err
+	}
+	mux.Handle("/_swobu/shares", httpapi.NewShareControlHandler(shareService))
+	daemon.shareRuntime.StartIfActive()
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
 		PublicBaseURL: daemonPublicBaseURLFromAddr(addr),
 		CredentialOut: chatgptlogin.CredentialWriterFunc(persistCredential),

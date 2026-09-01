@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/config"
 	"github.com/swobuforge/swobu/internal/producttelemetry"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/sharestate"
+	"github.com/swobuforge/swobu/internal/sharetransport"
 )
 
 type HealthState string
@@ -49,6 +52,8 @@ type Status struct {
 // boundary to break. Close runs once and returns the cached terminal result.
 type Daemon struct {
 	configStore       *configstore.Store
+	shareStore        *sharestate.Store
+	shareRuntime      *sharetransport.OwnerRuntime
 	server            *http.Server
 	listener          net.Listener
 	logger            *slog.Logger
@@ -94,6 +99,10 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 		}
 	}()
 	logger.Info("daemon lifecycle", "component", "daemon", "event", "intent_store_open_success", "config_path", in.ConfigPath, "workspace_count", store.Config().WorkspaceCount())
+	shareStore, err := sharestate.Open(filepath.Join(filepath.Dir(in.ConfigPath), "share.json"))
+	if err != nil {
+		return nil, err
+	}
 	startupConfig, err := config.ResolveStartupConfig(in.StartupConfig.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve daemon address: %w", err)
@@ -102,6 +111,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 
 	daemon := &Daemon{
 		configStore: store,
+		shareStore:  shareStore,
 		logger:      logger,
 		serveDone:   make(chan struct{}),
 	}
@@ -196,6 +206,9 @@ func (d *Daemon) Close() error {
 		shutdownErr := d.server.Shutdown(context.Background())
 		<-d.serveDone
 		d.stopTelemetryRuntime()
+		if d.shareRuntime != nil {
+			d.shareRuntime.Stop()
+		}
 		var storeErr error
 		if d.configStore != nil {
 			storeErr = d.configStore.Close()
