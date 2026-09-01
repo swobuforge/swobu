@@ -9,5 +9,7 @@
 // identifier aliases live beside the read model that owns their noun; a one-
 // line alias file is noise unless the identifier becomes a real boundary.
 // Draft construction and reset also live here so clearing authored setup cannot
-// accidentally discard ambient provider options supplied by the adapter.
+// accidentally discard ambient provider options supplied by the adapter. Share
+// projection carries only hostname and expiry; bearer secrets never enter this
+// package.
 package readmodel

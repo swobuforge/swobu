@@ -37,6 +37,8 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 				t.Fatalf("daemon status request method = %s", r.Method)
 			}
 			_, _ = w.Write([]byte(`{"state":"healthy","workspace_count":1,"control_plane_protocol":1,"swobu_version":"dev"}`))
+		case "/_swobu/shares":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}

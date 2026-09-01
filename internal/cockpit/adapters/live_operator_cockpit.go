@@ -30,6 +30,10 @@ func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.Cockpi
 		}
 		return model, nil
 	}
+	shareSummaries, err := a.client.ListShares(ctx)
+	if err != nil {
+		return readmodel.CockpitReadModel{}, adapterFailure("load shares", err)
+	}
 	for _, summary := range summaries {
 		id := readmodel.WorkspaceID(summary.Slug)
 		workspace, err := a.client.GetWorkspace(ctx, summary.Slug)
@@ -37,6 +41,10 @@ func (a *LiveOperatorAdapter) LoadCockpit(ctx context.Context) (readmodel.Cockpi
 			return readmodel.CockpitReadModel{}, adapterFailure("load workspace "+summary.Slug, err)
 		}
 		projection, err := a.workspaceFromView(ctx, workspace)
+		if err != nil {
+			return readmodel.CockpitReadModel{}, err
+		}
+		projection, err = projectWorkspaceShares(projection, shareSummaries)
 		if err != nil {
 			return readmodel.CockpitReadModel{}, err
 		}

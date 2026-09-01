@@ -7,5 +7,6 @@
 // are projected here as the Cockpit-only conventional `default` workspace;
 // projection performs no workspace get/create call. Activity projection keeps
 // requested model, routing-owned route identity, and execution-time terminal
-// provider/model separate.
+// provider/model separate. Active Share summaries are joined only onto routes
+// already present in daemon workspace truth; stale Grants cannot create routes.
 package adapters

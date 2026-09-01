@@ -110,6 +110,41 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 		t.Fatalf("attempted targets=%v", refs)
 	}
 }
+
+func TestRequestPathProjectedRouteCannotEscapeOneRouteWorkspace(t *testing.T) {
+	source := requestpathWorkspace(t)
+	sharedRouteName, err := routing.ParseRouteName("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedRoute, err := source.ResolveRoute(sharedRouteName.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, err := routing.NewWorkspace(source.Slug(), sharedRouteName, []routing.Route{sharedRoute})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var refs []string
+	ingress := RequestIngress{runner: withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+		refs = append(refs, target.TargetID)
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
+	})}
+	_, err = ingress.HandleRequestWithWorkspace(context.Background(), projected, RequestInput{
+		ExchangeID:      "shared-route",
+		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)),
+		ClientFamily:    canonical.ClientFamilyResponses,
+		ResponseFraming: delivery.FramingSSE,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0] != "target-b" {
+		t.Fatalf("projected route attempted targets=%v, want target-b only", refs)
+	}
+}
+
 func TestRequestPathFixedClientModelUsesConfiguredDefaultRoute(t *testing.T) {
 	workspace := requestpathWorkspace(t)
 	var refs []string
