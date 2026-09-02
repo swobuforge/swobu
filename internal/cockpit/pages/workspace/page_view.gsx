@@ -53,6 +53,7 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
 	page.OverviewSection.OnWorkspaceDiscarded = page.workspaceDiscarded
 	page.OverviewSection.OnNotice = page.publishNotice
+	page.RoutesSection.OnNotice = page.publishNotice
 	page.RoutesSection.OnWorkspacePersisted = page.workspacePersisted
 	return page
 }

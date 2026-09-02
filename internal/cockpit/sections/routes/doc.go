@@ -8,6 +8,6 @@
 // Onboarding route creation, rename, and delete remain local; the first target
 // save crosses the existing atomic workspace-seed command and promotes the
 // workspace from Cockpit projection to persisted state. Share is a route-local
-// projection: issue uses the seven-day default, copy reveals just in time, and
-// revoke reuses the existing confirmation grammar.
+// projection: issue selects one existing Grant expiry, copy reveals just in
+// time, and revoke reuses the existing confirmation grammar.
 package routes

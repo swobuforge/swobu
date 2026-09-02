@@ -36,6 +36,7 @@ type SectionView struct {
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
 	ShareCommands        ports.ShareCommands
+	OnNotice             func(readmodel.Notice)
 	app                  *tui.App
 	ApplyRouteDraft      func(context.Context, ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error)
 	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
@@ -88,9 +89,9 @@ func (s *SectionView) BindApp(app *tui.App) {
 	s.State.AddTargetRoute.BindApp(app)
 	s.State.DeleteConfirmTarget.BindApp(app)
 	s.State.FocusRoute.BindApp(app)
+	s.State.ShareExpiryRoute.BindApp(app)
 	s.State.SharePendingRoute.BindApp(app)
-	s.State.ShareErrorRoute.BindApp(app)
-	s.State.ShareError.BindApp(app)
+	s.State.ShareCopiedRoute.BindApp(app)
 	s.app = app
 }
 
@@ -103,6 +104,7 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
 	s.ShareCommands = f.ShareCommands
+	s.OnNotice = f.OnNotice
 	s.ApplyRouteDraft = f.ApplyRouteDraft
 	s.OnWorkspacePersisted = f.OnWorkspacePersisted
 	s.OnWorkspaceCommitted = f.OnWorkspaceCommitted
@@ -120,11 +122,11 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	if s.State != nil && s.State.SharePendingRoute == nil {
 		s.State.SharePendingRoute = tui.NewState(readmodel.RouteID(""))
 	}
-	if s.State != nil && s.State.ShareErrorRoute == nil {
-		s.State.ShareErrorRoute = tui.NewState(readmodel.RouteID(""))
+	if s.State != nil && s.State.ShareExpiryRoute == nil {
+		s.State.ShareExpiryRoute = tui.NewState(readmodel.RouteID(""))
 	}
-	if s.State != nil && s.State.ShareError == nil {
-		s.State.ShareError = tui.NewState("")
+	if s.State != nil && s.State.ShareCopiedRoute == nil {
+		s.State.ShareCopiedRoute = tui.NewState(readmodel.RouteID(""))
 	}
 	if s.Expanded == nil {
 		s.Expanded = f.Expanded
@@ -150,32 +152,29 @@ func (s *SectionView) shareRouteRef(route readmodel.RouteReadModel) string {
 	return string(s.Model.RoutingWorkspaceID()) + "/" + string(route.ID)
 }
 
-func (s *SectionView) issueShare(route readmodel.RouteReadModel) {
+func (s *SectionView) issueShare(route readmodel.RouteReadModel, expiry sharestate.Expiry) {
 	if s.ShareCommands == nil || s.State.SharePendingRoute.Get() != "" {
 		return
 	}
+	s.State.ShareExpiryRoute.Set("")
+	s.State.ShareCopiedRoute.Set("")
 	s.State.SharePendingRoute.Set(route.ID)
-	s.State.ShareErrorRoute.Set("")
-	s.State.ShareError.Set("")
 	complete := func(result shares.Result, err error) {
 		s.State.SharePendingRoute.Set("")
 		if err != nil {
-			s.State.ShareErrorRoute.Set(route.ID)
-			s.State.ShareError.Set(err.Error())
+			s.publishErrorNotice(err.Error())
 			return
 		}
 		parsed, parseErr := url.Parse(result.ShareURL)
 		if parseErr != nil || parsed.Hostname() == "" {
-			s.State.ShareErrorRoute.Set(route.ID)
-			s.State.ShareError.Set("share response is invalid")
+			s.publishErrorNotice("share response is invalid")
 			return
 		}
 		share := &readmodel.ShareReadModel{Hostname: parsed.Hostname(), Never: result.ExpiresAt == "never"}
 		if !share.Never {
 			share.ExpiresAt, parseErr = time.Parse(time.RFC3339, result.ExpiresAt)
 			if parseErr != nil {
-				s.State.ShareErrorRoute.Set(route.ID)
-				s.State.ShareError.Set("share expiry is invalid")
+				s.publishErrorNotice("share expiry is invalid")
 				return
 			}
 		}
@@ -186,12 +185,12 @@ func (s *SectionView) issueShare(route readmodel.RouteReadModel) {
 		}
 	}
 	if s.app == nil {
-		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), sharestate.ExpirySevenDays)
+		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), expiry)
 		complete(result, err)
 		return
 	}
 	go func() {
-		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), sharestate.ExpirySevenDays)
+		result, err := s.ShareCommands.IssueShare(context.Background(), s.shareRouteRef(route), expiry)
 		s.app.QueueUpdate(func() { complete(result, err) })
 	}()
 }
@@ -202,14 +201,21 @@ func (s *SectionView) copyShare(route readmodel.RouteReadModel) {
 	}
 	result, err := s.ShareCommands.RevealShare(context.Background(), s.shareRouteRef(route))
 	if err != nil {
-		s.State.ShareErrorRoute.Set(route.ID)
-		s.State.ShareError.Set(err.Error())
+		s.publishErrorNotice(err.Error())
 		return
 	}
 	copyResult := ui.CopyToClipboard(result.ShareURL)
 	if displayErr := copyResult.ErrorForDisplay(); displayErr != "" {
-		s.State.ShareErrorRoute.Set(route.ID)
-		s.State.ShareError.Set(displayErr)
+		s.State.ShareCopiedRoute.Set("")
+		s.publishErrorNotice(displayErr)
+		return
+	}
+	s.State.ShareCopiedRoute.Set(route.ID)
+}
+
+func (s *SectionView) publishErrorNotice(message string) {
+	if s.OnNotice != nil {
+		s.OnNotice(readmodel.Notice{Kind: readmodel.NoticeError, Message: message})
 	}
 }
 
@@ -220,6 +226,7 @@ func (s *SectionView) revokeShare(route readmodel.RouteReadModel) error {
 	if err := s.ShareCommands.RevokeShare(context.Background(), s.shareRouteRef(route)); err != nil {
 		return err
 	}
+	s.State.ShareCopiedRoute.Set("")
 	for i := range s.State.Routes {
 		if s.State.Routes[i].ID == route.ID {
 			s.State.Routes[i].Share = nil
@@ -285,6 +292,7 @@ func (s *SectionView) isExpanded(route readmodel.RouteReadModel) bool {
 
 func (s *SectionView) toggleRoute(route readmodel.RouteReadModel) {
 	if s.isExpanded(route) {
+		s.State.ShareExpiryRoute.Set("")
 		s.State.ExpandedRoute.Set("")
 		return
 	}
@@ -292,6 +300,7 @@ func (s *SectionView) toggleRoute(route readmodel.RouteReadModel) {
 }
 
 func (s *SectionView) OpenRoute(route readmodel.RouteReadModel) {
+	s.State.ShareExpiryRoute.Set("")
 	s.State.ExpandedRoute.Set(route.ID)
 }
 
@@ -451,6 +460,10 @@ func (s *SectionView) closeDeleteTargetConfirm() {
 }
 
 func (s *SectionView) Back() bool {
+	if s.State.ShareExpiryRoute.Get() != "" {
+		s.State.ShareExpiryRoute.Set("")
+		return true
+	}
 	if s.State.DeleteConfirmTarget.Get() != "" {
 		s.State.DeleteConfirmTarget.Set("")
 		return true
@@ -759,16 +772,71 @@ func (s *SectionView) shareRevokeRowKey(route readmodel.RouteReadModel) string {
 
 func ShareRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
 	value, action := "not shared", "share ↵"
-	activate := func() { s.issueShare(route) }
+	activate := func() { s.State.ShareExpiryRoute.Set(route.ID) }
 	if s.State.SharePendingRoute.Get() == route.ID {
 		value, action, activate = "setting up HTTPS…", "", func() {}
 	} else if route.Share != nil {
 		value, action, activate = abbreviatedShareValue(route.Share.Hostname), "copy ↵", func() { s.copyShare(route) }
-	} else if s.State.ShareErrorRoute.Get() == route.ID {
-		value, action = "setup failed · "+s.State.ShareError.Get(), "retry ↵"
+		if s.State.ShareCopiedRoute.Get() == route.ID {
+			value = "copied"
+		}
 	}
 	return ui.NewSelectableRow(s.shareRowKey(route), "share", value, action, activate)
 }
+
+func (s *SectionView) shareExpiryPickerKey(route readmodel.RouteReadModel) string {
+	return "route-share-expiry:" + string(s.Model.ID) + ":" + string(route.ID)
+}
+
+// ShareExpiryPicker presents the closed set of Grant expiries for one route.
+// It owns no durable state; choosing delegates directly to the existing Share
+// command and Escape clears only the route-local open projection.
+type ShareExpiryPicker struct {
+	ID        string
+	RouteName string
+	Choices   []shareExpiryChoice
+	OnCancel  func()
+}
+
+func (p *ShareExpiryPicker) UpdateProps(fresh tui.Component) {
+	next, ok := fresh.(*ShareExpiryPicker)
+	if !ok {
+		return
+	}
+	p.ID = next.ID
+	p.RouteName = next.RouteName
+	p.Choices = next.Choices
+	p.OnCancel = next.OnCancel
+}
+
+type shareExpiryChoice struct {
+	Expiry sharestate.Expiry
+	Label  string
+	Choose func()
+}
+
+func ShareExpiryPickerComponent(s *SectionView, route readmodel.RouteReadModel) *ShareExpiryPicker {
+	return &ShareExpiryPicker{
+		ID:        s.shareExpiryPickerKey(route),
+		RouteName: route.ModelName,
+		OnCancel:  func() { s.State.ShareExpiryRoute.Set("") },
+		Choices: []shareExpiryChoice{
+			{Expiry: sharestate.ExpiryOneDay, Label: "1 day", Choose: func() { s.issueShare(route, sharestate.ExpiryOneDay) }},
+			{Expiry: sharestate.ExpirySevenDays, Label: "7 days", Choose: func() { s.issueShare(route, sharestate.ExpirySevenDays) }},
+			{Expiry: sharestate.ExpiryThirtyDays, Label: "30 days", Choose: func() { s.issueShare(route, sharestate.ExpiryThirtyDays) }},
+			{Expiry: sharestate.ExpiryNever, Label: "never", Choose: func() { s.issueShare(route, sharestate.ExpiryNever) }},
+		},
+	}
+}
+
+func ShareExpiryChoiceComponent(picker *ShareExpiryPicker, choice shareExpiryChoice) *ui.SelectableRow {
+	row := ui.NewSelectableRow(picker.ID+":"+string(choice.Expiry), "", choice.Label, "", choice.Choose)
+	row.AutoFocus = choice.Expiry == sharestate.ExpirySevenDays
+	row.OnEscape = picker.OnCancel
+	return row
+}
+
+var _ tui.PropsUpdater = (*ShareExpiryPicker)(nil)
 
 func ShareRevokeRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.ConfirmActionRow {
 	expires := "never"
@@ -779,8 +847,8 @@ func ShareRevokeRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui
 		Label:           "expires",
 		IdleValue:       expires,
 		IdleAction:      "revoke ↵",
-		ConfirmValue:    "revoke Share?",
-		ConfirmAction:   "confirm ↵",
+		ConfirmValue:    "Revoke shared route?",
+		ConfirmAction:   "revoke ↵",
 		SubmittingValue: "revoking…",
 		SubmittingHint:  "wait",
 		FailedValue:     "revoke failed",
@@ -830,6 +898,9 @@ func (s *SectionView) applyRouteDeleted(routeID readmodel.RouteID) {
 	}
 	if s.State.ExpandedRoute.Get() == routeID {
 		s.State.ExpandedRoute.Set("")
+	}
+	if s.State.ShareExpiryRoute.Get() == routeID {
+		s.State.ShareExpiryRoute.Set("")
 	}
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
