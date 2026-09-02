@@ -60,7 +60,7 @@ A selected target may enter temporary local ownership.
 - `EditableRow` enters text editing
 - `Select` enters body-visible state
 - `ConfirmActionRow` enters confirmation state
-- `SearchPicker`/`FileBrowser` live inside an entered `Select`
+- `ChoicePicker`/`SearchPicker`/`FileBrowser` live inside an entered `Select`
 
 **This is the compression point.**
 
@@ -82,7 +82,7 @@ Escape exits the nearest entered owner.
 - `EditableRow` editing → exits edit mode
 - `Select` entered → exits `Select` body
 - `ConfirmActionRow` confirming → cancels confirmation
-- `SearchPicker`/`FileBrowser` → calls parent backout
+- `ChoicePicker`/`SearchPicker`/`FileBrowser` → calls parent backout
 - No local owner → feature `BackScope` handles `Escape`
 
 **The root feature must not know which child rows are entered.**
@@ -97,6 +97,7 @@ Feature packages may use only these interactive primitives:
 ui.SelectableRow
 ui.EditableRow
 ui.Select
+ui.ChoicePicker
 ui.SearchPicker
 ui.FileBrowser
 ui.ConfirmActionRow
@@ -148,7 +149,7 @@ Select entered → exits Select body
     ↓
 ConfirmActionRow confirming → cancels confirmation
     ↓
-SearchPicker/FileBrowser → calls parent backout
+ChoicePicker/SearchPicker/FileBrowser → calls parent backout
     ↓
 No local owner → feature BackScope handles Escape
     ↓
@@ -162,6 +163,11 @@ TargetConfig.Back() handles root concerns
 ### ui.Select
 
 The canonical "selectable row + entered body" primitive.
+
+The `Select` row is the sole semantic parent. Its body renders child choices or
+editing controls and MUST NOT repeat the parent label as a title. Visual proof
+for an entered control mounts the `Select` and its body together; rendering the
+body alone cannot prove hierarchy, indentation, or duplicate-label absence.
 
 **API:**
 ```go

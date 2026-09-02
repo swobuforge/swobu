@@ -101,6 +101,17 @@
 // Its value column is shared across action-bearing cockpit rows so verbs stay
 // aligned even when feature packages render their own variants.
 //
+// ChoicePicker and SearchPicker
+// ---------------------------------------------------------------------------
+//
+// ChoicePicker presents a closed enumerable value set with no text entry. It
+// is an entered Select body and therefore has no title/label API: the parent
+// Select is the sole owner of the field label and committed value.
+// SearchPicker presents a query-bearing catalog and may additionally accept an
+// open-set authored value. Both reuse ChoiceList for mounted selectable rows,
+// clipping, traversal, and Escape; feature packages choose the presentation
+// that matches the value algebra instead of hiding query behavior.
+//
 // ---------------------------------------------------------------------------
 // FocusTraversal
 // ---------------------------------------------------------------------------

@@ -8,17 +8,11 @@ import (
 	"errors"
 	"math/big"
 	"time"
-
-	"github.com/swobuforge/swobu/shareprotocol"
 )
-
-func EndpointID(publicKey any) (string, error) {
-	return shareprotocol.EndpointID(publicKey)
-}
 
 func SelfSignedClientCertificate(key *ecdsa.PrivateKey, now time.Time) (x509.Certificate, []byte, error) {
 	if key == nil {
-		return x509.Certificate{}, nil, errors.New("endpoint key is required")
+		return x509.Certificate{}, nil, errors.New("Endpoint identity key is required")
 	}
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {

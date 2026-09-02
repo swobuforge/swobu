@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/profile"
 )
 
 func TestPlacementCanChangeDuringCreationAndEditing(t *testing.T) {
@@ -123,6 +125,58 @@ func TestExistingTargetTailRendersEditableRoutingDecision(t *testing.T) {
 	if !strings.Contains(frame, "routing") || !strings.Contains(frame, "fallback") || !strings.Contains(frame, "change") {
 		t.Fatalf("edit form must render an editable routing decision:\n%s", frame)
 	}
+}
+
+func TestPlacementPickerIsAClosedChoiceWithoutSearch(t *testing.T) {
+	config := readyPlacementConfig(t)
+
+	control := PlacementSelect(config)
+	harness, err := testkit.NewHarnessAt(control, 100, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.App().FocusNext()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	frame := harness.FrameTrimmed()
+
+	if strings.Contains(frame, "search") {
+		t.Fatalf("closed routing placement must not render search:\n%s", frame)
+	}
+	if strings.Count(frame, "routing") != 1 {
+		t.Fatalf("entered placement must have one parent routing label:\n%s", frame)
+	}
+	if !strings.Contains(frame, "balance with step 1") || !strings.Contains(frame, "fallback 1") {
+		t.Fatalf("routing placement choices missing:\n%s", frame)
+	}
+}
+
+func TestPlacementPickerSelectsThroughClosedChoiceGrammar(t *testing.T) {
+	config := readyPlacementConfig(t)
+	control := PlacementSelect(config)
+	harness, err := testkit.NewHarnessAt(control, 100, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.App().FocusNext()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if got := config.Placement.Get().Summary(); got != "primary" {
+		t.Fatalf("selected placement = %q, want primary", got)
+	}
+}
+
+func readyPlacementConfig(t *testing.T) *TargetConfig {
+	t.Helper()
+	config := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
+	selectReadyModel(config, "gpt-4.1", "responses")
+	return config
 }
 
 func TestOnlyTargetEditTailOmitsUselessRoutingDecision(t *testing.T) {

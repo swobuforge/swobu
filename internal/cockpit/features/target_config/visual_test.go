@@ -31,7 +31,7 @@ var requiredProviderAuthoringVisualNames = []string{
 	"azure_project_required", "azure_credential_required", "azure_protocol_required", "azure_ready",
 	"ollama_default_url", "ollama_editing_url",
 	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_signed_in", "chatgpt_failed",
-	"model_picker", "deployment_picker", "protocol_picker", "ready_to_create",
+	"model_picker", "deployment_picker", "protocol_picker", "routing_picker", "ready_to_create",
 }
 
 type providerAuthoringVisualCase struct {
@@ -105,7 +105,7 @@ func TestProviderAuthoringVisualRegistryAndFixturesAreClosed(t *testing.T) {
 
 func providerAuthoringVisualWidths(name string) []int {
 	switch name {
-	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker",
+	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker", "routing_picker",
 		"chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending",
 		"chatgpt_open_failed":
 		return []int{80, 100, 120}
@@ -273,6 +273,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "model_picker", render: renderModelPicker},
 		{name: "deployment_picker", render: renderDeploymentPicker},
 		{name: "protocol_picker", render: renderProtocolPicker},
+		{name: "routing_picker", render: renderRoutingPicker},
 		{name: "ready_to_create", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
 			selectReadyModel(w, "gpt-4.1", "responses")
@@ -322,6 +323,20 @@ func renderProtocolPicker(t *testing.T, width int) string {
 	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 	selectReadyModel(w, "model-x", "responses")
 	return renderAuthoringKeys(t, width, w, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
+}
+
+func renderRoutingPicker(t *testing.T, width int) string {
+	t.Helper()
+	control := PlacementSelect(readyPlacementConfig(t))
+	harness, err := testkit.NewHarnessAt(control, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.App().FocusNext()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	return harness.FrameTrimmed()
 }
 
 func renderCustomHeaderJourney(t *testing.T, width int, query string) string {

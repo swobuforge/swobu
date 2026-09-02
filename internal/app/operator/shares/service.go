@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/configstore"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/sharestate"
@@ -16,6 +17,7 @@ type Service struct {
 	configStore *configstore.Store
 	shareStore  *sharestate.Store
 	runtime     *sharetransport.OwnerRuntime
+	bindings    *routebindings.Coordinator
 }
 
 type Result struct {
@@ -33,11 +35,15 @@ type Summary struct {
 	ExpiresAt *string `json:"expires_at"`
 }
 
-func NewService(configStore *configstore.Store, shareStore *sharestate.Store, runtime *sharetransport.OwnerRuntime) (Service, error) {
+func NewService(configStore *configstore.Store, shareStore *sharestate.Store, runtime *sharetransport.OwnerRuntime, coordinators ...*routebindings.Coordinator) (Service, error) {
 	if configStore == nil || shareStore == nil || runtime == nil {
 		return Service{}, fmt.Errorf("share service dependencies are required")
 	}
-	return Service{configStore: configStore, shareStore: shareStore, runtime: runtime}, nil
+	service := Service{configStore: configStore, shareStore: shareStore, runtime: runtime}
+	if len(coordinators) > 0 {
+		service.bindings = coordinators[0]
+	}
+	return service, nil
 }
 
 func (s Service) Issue(ctx context.Context, routeRef string, expiry sharestate.Expiry) (Result, error) {
@@ -52,8 +58,22 @@ func (s Service) Issue(ctx context.Context, routeRef string, expiry sharestate.E
 	if _, ok := workspace.Route(routeName); !ok {
 		return Result{}, fmt.Errorf("shared route %q does not exist", routeRef)
 	}
-	if err := s.runtime.EnsureReady(ctx); err != nil {
+	lease, err := s.runtime.EnsureReady(ctx)
+	if err != nil {
 		return Result{}, fmt.Errorf("prepare shared endpoint: %w", err)
+	}
+	defer lease.Release()
+	unlock := func() {}
+	if s.bindings != nil {
+		unlock = s.bindings.Lock()
+	}
+	defer unlock()
+	workspace, err = s.configStore.GetWorkspace(ctx, workspaceSlug)
+	if err != nil {
+		return Result{}, fmt.Errorf("resolve shared route: %w", err)
+	}
+	if _, ok := workspace.Route(routeName); !ok {
+		return Result{}, fmt.Errorf("shared route %q does not exist", routeRef)
 	}
 	grant, err := s.shareStore.Issue(workspaceSlug, routeName, expiry)
 	if err != nil {
@@ -116,6 +136,11 @@ func (s Service) Revoke(routeRef string) error {
 	if err != nil {
 		return err
 	}
+	unlock := func() {}
+	if s.bindings != nil {
+		unlock = s.bindings.Lock()
+	}
+	defer unlock()
 	if err := s.shareStore.Revoke(workspace, route); err != nil {
 		return err
 	}

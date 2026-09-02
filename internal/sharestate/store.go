@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -21,7 +22,7 @@ import (
 	"github.com/swobuforge/swobu/shareprotocol"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 var ErrUnauthorized = errors.New("share bearer is invalid or expired")
 
@@ -41,9 +42,16 @@ type Grant struct {
 	ExpiresAt time.Time
 }
 
-type Endpoint struct {
+type TLSCredential struct {
 	PrivateKey       *ecdsa.PrivateKey
 	CertificateChain []byte
+}
+
+type Endpoint struct {
+	IdentityPrivateKey       *ecdsa.PrivateKey
+	TLSCredential            *TLSCredential
+	CertificateFailureStreak uint32
+	NextCertificateAttempt   time.Time
 }
 
 type State struct {
@@ -52,10 +60,13 @@ type State struct {
 }
 
 type diskState struct {
-	SchemaVersion    int         `json:"schema_version"`
-	EndpointKeyPEM   string      `json:"endpoint_private_key_pem"`
-	CertificateChain string      `json:"certificate_chain_pem,omitempty"`
-	Grants           []diskGrant `json:"grants,omitempty"`
+	SchemaVersion            int         `json:"schema_version"`
+	IdentityPrivateKeyPEM    string      `json:"identity_private_key_pem"`
+	TLSPrivateKeyPEM         string      `json:"tls_private_key_pem,omitempty"`
+	CertificateChain         string      `json:"certificate_chain_pem,omitempty"`
+	CertificateFailureStreak uint32      `json:"certificate_failure_streak,omitempty"`
+	NextCertificateAttempt   time.Time   `json:"next_certificate_attempt_at,omitempty"`
+	Grants                   []diskGrant `json:"grants,omitempty"`
 }
 
 type diskGrant struct {
@@ -95,16 +106,16 @@ func Open(path string) (*Store, error) {
 func (s *Store) EnsureEndpoint() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state.Endpoint.PrivateKey != nil {
+	if s.state.Endpoint.IdentityPrivateKey != nil {
 		return nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate endpoint key: %w", err)
 	}
-	s.state.Endpoint.PrivateKey = key
+	s.state.Endpoint.IdentityPrivateKey = key
 	if err := s.persist(); err != nil {
-		s.state.Endpoint.PrivateKey = nil
+		s.state.Endpoint.IdentityPrivateKey = nil
 		return err
 	}
 	return nil
@@ -132,7 +143,7 @@ func (s *Store) ActiveGrants() []Grant {
 func (s *Store) EndpointID() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return endpointID(s.state.Endpoint.PrivateKey)
+	return endpointID(s.state.Endpoint.IdentityPrivateKey)
 }
 
 func (s *Store) Issue(workspace routing.WorkspaceSlug, route routing.RouteName, expiry Expiry) (Grant, error) {
@@ -167,27 +178,35 @@ func (s *Store) Issue(workspace routing.WorkspaceSlug, route routing.RouteName, 
 }
 
 func (s *Store) Revoke(workspace routing.WorkspaceSlug, route routing.RouteName) error {
+	_, err := s.RevokeBindings(workspace, &route)
+	return err
+}
+
+// RevokeBindings atomically removes every Grant for a workspace, or one route
+// when route is non-nil. It includes expired Grants so old bearers cannot revive.
+func (s *Store) RevokeBindings(workspace routing.WorkspaceSlug, route *routing.RouteName) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	updated := make([]Grant, 0, len(s.state.Grants))
 	removed := false
 	for _, grant := range s.state.Grants {
-		if grant.Workspace != workspace || grant.Route != route {
-			updated = append(updated, grant)
-		} else {
+		match := grant.Workspace == workspace && (route == nil || grant.Route == *route)
+		if match {
 			removed = true
+		} else {
+			updated = append(updated, grant)
 		}
 	}
 	if !removed {
-		return nil
+		return false, nil
 	}
 	previous := s.state.Grants
 	s.state.Grants = updated
 	if err := s.persist(); err != nil {
 		s.state.Grants = previous
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
 func (s *Store) Authenticate(bearer string) (Grant, error) {
@@ -206,15 +225,11 @@ func (s *Store) Authenticate(bearer string) (Grant, error) {
 	return Grant{}, ErrUnauthorized
 }
 
-func EndpointID(publicKey any) (string, error) {
-	return shareprotocol.EndpointID(publicKey)
-}
-
 func endpointID(key *ecdsa.PrivateKey) (string, error) {
 	if key == nil {
-		return "", errors.New("endpoint key is absent")
+		return "", errors.New("Endpoint identity key is absent")
 	}
-	return EndpointID(&key.PublicKey)
+	return shareprotocol.EndpointID(&key.PublicKey)
 }
 
 func Hostname(endpointID string) string { return shareprotocol.Hostname(endpointID) }
@@ -246,11 +261,19 @@ func (s *Store) persist() error {
 }
 
 func encode(state State) ([]byte, error) {
-	keyDER, err := x509.MarshalPKCS8PrivateKey(state.Endpoint.PrivateKey)
+	identityDER, err := x509.MarshalPKCS8PrivateKey(state.Endpoint.IdentityPrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("marshal endpoint key: %w", err)
+		return nil, fmt.Errorf("marshal Endpoint identity key: %w", err)
 	}
-	disk := diskState{SchemaVersion: SchemaVersion, EndpointKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})), CertificateChain: string(state.Endpoint.CertificateChain)}
+	disk := diskState{SchemaVersion: SchemaVersion, IdentityPrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: identityDER})), CertificateFailureStreak: state.Endpoint.CertificateFailureStreak, NextCertificateAttempt: state.Endpoint.NextCertificateAttempt}
+	if credential := state.Endpoint.TLSCredential; credential != nil {
+		tlsDER, err := x509.MarshalPKCS8PrivateKey(credential.PrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("marshal Endpoint TLS key: %w", err)
+		}
+		disk.TLSPrivateKeyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: tlsDER}))
+		disk.CertificateChain = string(credential.CertificateChain)
+	}
 	for _, grant := range state.Grants {
 		disk.Grants = append(disk.Grants, diskGrant{Workspace: grant.Workspace.String(), Route: grant.Route.String(), Bearer: grant.Bearer, ExpiresAt: grant.ExpiresAt})
 	}
@@ -261,6 +284,22 @@ func encode(state State) ([]byte, error) {
 	return append(raw, '\n'), nil
 }
 
+func decodePrivateKey(raw, noun string) (*ecdsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(raw))
+	if block == nil {
+		return nil, fmt.Errorf("decode %s: PEM is invalid", noun)
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", noun, err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok || key.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("%s must be ECDSA P-256", noun)
+	}
+	return key, nil
+}
+
 func decode(raw []byte) (State, error) {
 	var disk diskState
 	if err := json.Unmarshal(raw, &disk); err != nil {
@@ -269,19 +308,26 @@ func decode(raw []byte) (State, error) {
 	if disk.SchemaVersion != SchemaVersion {
 		return State{}, fmt.Errorf("unsupported share state schema version %d", disk.SchemaVersion)
 	}
-	block, _ := pem.Decode([]byte(disk.EndpointKeyPEM))
-	if block == nil {
-		return State{}, errors.New("decode endpoint key: PEM is invalid")
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	identity, err := decodePrivateKey(disk.IdentityPrivateKeyPEM, "Endpoint identity key")
 	if err != nil {
-		return State{}, fmt.Errorf("parse endpoint key: %w", err)
+		return State{}, err
 	}
-	key, ok := parsed.(*ecdsa.PrivateKey)
-	if !ok || key.Curve != elliptic.P256() {
-		return State{}, errors.New("endpoint key must be ECDSA P-256")
+	state := State{Endpoint: Endpoint{IdentityPrivateKey: identity, CertificateFailureStreak: disk.CertificateFailureStreak, NextCertificateAttempt: disk.NextCertificateAttempt}}
+	if (disk.TLSPrivateKeyPEM == "") != (disk.CertificateChain == "") {
+		return State{}, errors.New("Endpoint TLS credential must contain both private key and certificate chain")
 	}
-	state := State{Endpoint: Endpoint{PrivateKey: key, CertificateChain: []byte(disk.CertificateChain)}}
+	if disk.TLSPrivateKeyPEM != "" {
+		key, err := decodePrivateKey(disk.TLSPrivateKeyPEM, "Endpoint TLS key")
+		if err != nil {
+			return State{}, err
+		}
+		keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+		if _, err := tls.X509KeyPair([]byte(disk.CertificateChain), keyPEM); err != nil {
+			return State{}, fmt.Errorf("decode Endpoint TLS credential: %w", err)
+		}
+		state.Endpoint.TLSCredential = &TLSCredential{PrivateKey: key, CertificateChain: []byte(disk.CertificateChain)}
+	}
 	for _, persisted := range disk.Grants {
 		workspace, err := routing.ParseWorkspaceSlug(persisted.Workspace)
 		if err != nil {
@@ -300,7 +346,10 @@ func decode(raw []byte) (State, error) {
 }
 
 func cloneState(state State) State {
-	cloned := State{Endpoint: Endpoint{PrivateKey: state.Endpoint.PrivateKey, CertificateChain: append([]byte(nil), state.Endpoint.CertificateChain...)}}
+	cloned := State{Endpoint: Endpoint{IdentityPrivateKey: state.Endpoint.IdentityPrivateKey, CertificateFailureStreak: state.Endpoint.CertificateFailureStreak, NextCertificateAttempt: state.Endpoint.NextCertificateAttempt}}
+	if state.Endpoint.TLSCredential != nil {
+		cloned.Endpoint.TLSCredential = &TLSCredential{PrivateKey: state.Endpoint.TLSCredential.PrivateKey, CertificateChain: append([]byte(nil), state.Endpoint.TLSCredential.CertificateChain...)}
+	}
 	cloned.Grants = append([]Grant(nil), state.Grants...)
 	return cloned
 }

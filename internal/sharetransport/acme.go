@@ -2,24 +2,56 @@ package sharetransport
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/sharestate"
 	"github.com/swobuforge/swobu/shareprotocol"
 )
 
+type CertificateProvisionError struct {
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (e *CertificateProvisionError) Error() string {
+	return "Relay certificate provisioning failed: " + e.Message
+}
+
+func provisioningResponseError(message shareprotocol.Message) error {
+	if message.Type == "error" {
+		retryAfter := time.Duration(0)
+		if message.RetryAfterSeconds > 0 {
+			retryAfter = time.Duration(message.RetryAfterSeconds) * time.Second
+		}
+		return &CertificateProvisionError{Message: message.Error, RetryAfter: retryAfter}
+	}
+	return fmt.Errorf("Relay certificate provisioning failed: %s", message.Error)
+}
+
 func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sharestate.Store, manager *sharestate.TLSManager) error {
 	if store == nil || manager == nil {
 		return errors.New("Owner certificate dependencies are required")
 	}
-	csr, _, err := store.CSR()
+	identity, err := store.EndpointID()
 	if err != nil {
 		return err
+	}
+	candidate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate Endpoint TLS key: %w", err)
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{sharestate.Hostname(identity)}}, candidate)
+	if err != nil {
+		return fmt.Errorf("create Endpoint TLS CSR: %w", err)
 	}
 	codec := shareprotocol.NewCodec(control)
 	request := shareprotocol.Message{Type: "certificate_request", CSR: base64.RawStdEncoding.EncodeToString(csr)}
@@ -37,7 +69,7 @@ func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sha
 		return err
 	}
 	if challenge.Type != "challenge" {
-		return fmt.Errorf("Relay certificate provisioning failed: %s", challenge.Error)
+		return provisioningResponseError(challenge)
 	}
 	temporary, err := decodeTemporaryCertificate(challenge.CertificateChain, challenge.ChallengePrivateKey)
 	if err != nil {
@@ -53,7 +85,7 @@ func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sha
 		return err
 	}
 	if certificate.Type != "certificate" {
-		return fmt.Errorf("Relay certificate provisioning failed: %s", certificate.Error)
+		return provisioningResponseError(certificate)
 	}
 	chain := make([][]byte, 0, len(certificate.CertificateChain))
 	for _, encoded := range certificate.CertificateChain {
@@ -63,7 +95,7 @@ func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sha
 		}
 		chain = append(chain, der)
 	}
-	if err := store.InstallCertificateDER(chain); err != nil {
+	if err := store.InstallTLSCredential(candidate, chain); err != nil {
 		return err
 	}
 	return codec.Write(shareprotocol.Message{Type: "certificate_installed"})

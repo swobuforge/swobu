@@ -40,11 +40,12 @@ type ChoiceWindow struct {
 	ShownRows int
 }
 
-// ChoiceList owns searchable/clipped list interaction state.
+// ChoiceList owns shared clipped-list interaction state.
 //
-// Domain wrappers provide items and callbacks. ChoiceList owns query mutation,
-// filtering, visible-row projection, and projection shifts when selection moves
-// across the clipped window edge.
+// Domain wrappers provide items and callbacks. ChoiceList owns filtering,
+// visible-row projection, and projection shifts when selection moves across the
+// clipped window edge. Query mutation is opt-in for query-bearing presentations;
+// closed-choice presentations reuse the same list with QueryEditing disabled.
 type ChoiceList struct {
 	Query       *tui.State[string]
 	WindowStart *tui.State[int]
@@ -62,10 +63,14 @@ type ChoiceList struct {
 	// (e.g. an open-set picker's "use the typed query" candidate). It is
 	// evaluated on every projection so it stays live as the operator types.
 	// Returning a ChoiceItem with an empty Key renders nothing.
-	QueryItem  func(query string) ChoiceItem
-	AutoFocus  bool
-	EmptyLabel string
-	OnEscape   func(tui.KeyEvent)
+	QueryItem func(query string) ChoiceItem
+	AutoFocus bool
+	// QueryEditing enables rune/backspace mutation for query-bearing
+	// presentations such as SearchPicker and FileBrowser. Closed-choice
+	// presentations leave it false so invisible text input is impossible.
+	QueryEditing bool
+	EmptyLabel   string
+	OnEscape     func(tui.KeyEvent)
 }
 
 // NewChoiceList creates a list kernel over an existing query state.
@@ -104,6 +109,35 @@ func (l *ChoiceList) RepairProjection() {
 	rows := l.filteredRows()
 	start := boundedChoiceWindowStart(l.WindowStart.Get(), len(rows), l.visibleRows(len(rows)))
 	l.WindowStart.Set(start)
+}
+
+// RevealFocus finds a row in the complete filtered model, reveals it, and
+// publishes its focus key. An unmatched selection falls back to the first row.
+func (l *ChoiceList) RevealFocus(match func(ChoiceItem) bool) bool {
+	rows := l.filteredRows()
+	if len(rows) == 0 {
+		l.FocusKey.Set("")
+		l.WindowStart.Set(0)
+		return false
+	}
+	selected := 0
+	found := false
+	for i, row := range rows {
+		if match(row.Item) {
+			selected, found = i, true
+			break
+		}
+	}
+	visible := l.visibleRows(len(rows))
+	start := l.WindowStart.Get()
+	if selected < start {
+		start = selected
+	} else if selected >= start+visible {
+		start = selected - visible + 1
+	}
+	l.WindowStart.Set(boundedChoiceWindowStart(start, len(rows), visible))
+	l.FocusKey.Set(choiceRowKey(rows[selected]))
+	return found
 }
 
 // Window returns the current filtered and clipped projection.
@@ -402,10 +436,12 @@ func (r *ChoiceRow) Render(*tui.App) *tui.Element {
 func (r *ChoiceRow) KeyMap() tui.KeyMap {
 	keys := ActivateSelected(func(tui.KeyEvent) { r.choose() })
 	if r.List != nil {
-		keys = append(keys,
-			tui.OnFocused(tui.AnyRune, func(ke tui.KeyEvent) { r.List.onTypeFromRow(r.Row, ke) }),
-			tui.OnFocused(tui.KeyBackspace, func(ke tui.KeyEvent) { r.List.onBackspaceFromRow(r.Row, ke) }),
-		)
+		if r.List.QueryEditing {
+			keys = append(keys,
+				tui.OnFocused(tui.AnyRune, func(ke tui.KeyEvent) { r.List.onTypeFromRow(r.Row, ke) }),
+				tui.OnFocused(tui.KeyBackspace, func(ke tui.KeyEvent) { r.List.onBackspaceFromRow(r.Row, ke) }),
+			)
+		}
 		if r.List.OnEscape != nil {
 			keys = append(keys, tui.OnFocused(tui.KeyEscape, r.List.OnEscape))
 		}

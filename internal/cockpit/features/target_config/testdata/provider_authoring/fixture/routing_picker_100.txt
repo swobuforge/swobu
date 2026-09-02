@@ -1,0 +1,23 @@
+  routing           fallback after step 1                                             close ↵
+     primary                                                                          select ↵
+     balance with step 1                                                              select ↵
+   > fallback 1                                                                       select ↵
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
