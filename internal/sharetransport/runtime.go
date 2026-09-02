@@ -22,17 +22,17 @@ type OwnerRuntime struct {
 	TLS     *sharestate.TLSManager
 	Handler http.Handler
 
-	mu          sync.Mutex
-	baseCtx     context.Context
-	stopBase    context.CancelFunc
-	cancel      context.CancelFunc
-	running     bool
-	readiness   *readinessResult
-	generation  uint64
-	activeReady int
-	renewEvery  time.Duration
-	renewOnce   sync.Once
-	now         func() time.Time
+	mu               sync.Mutex
+	baseCtx          context.Context
+	stopBase         context.CancelFunc
+	cancel           context.CancelFunc
+	running          bool
+	readiness        *readinessResult
+	generation       uint64
+	activeReady      int
+	replacementEvery time.Duration
+	replacementOnce  sync.Once
+	now              func() time.Time
 }
 
 type readinessResult struct {
@@ -69,7 +69,7 @@ func NewOwnerRuntime(address string, roots *x509.CertPool, store *sharestate.Sto
 		return nil, errors.New("Owner runtime dependencies are required")
 	}
 	baseCtx, stopBase := context.WithCancel(context.Background())
-	return &OwnerRuntime{Address: address, RootCAs: roots, Store: store, TLS: manager, Handler: handler, baseCtx: baseCtx, stopBase: stopBase, renewEvery: 6 * time.Hour, now: time.Now}, nil
+	return &OwnerRuntime{Address: address, RootCAs: roots, Store: store, TLS: manager, Handler: handler, baseCtx: baseCtx, stopBase: stopBase, replacementEvery: 6 * time.Hour, now: time.Now}, nil
 }
 
 func (r *OwnerRuntime) EnsureReady(ctx context.Context) (*ReadyLease, error) {
@@ -81,7 +81,7 @@ func (r *OwnerRuntime) EnsureReady(ctx context.Context) (*ReadyLease, error) {
 	if !certificate.Valid && !certificate.CanAttempt(now) {
 		return nil, fmt.Errorf("certificate provisioning is temporarily unavailable; retry after %s", certificate.RetryAt.UTC().Format(time.RFC3339))
 	}
-	r.ensureRenewalLoop()
+	r.ensureReplacementLoop()
 	r.mu.Lock()
 	r.activeReady++
 	lease := &ReadyLease{runtime: r}
@@ -115,7 +115,7 @@ func (r *OwnerRuntime) StartIfActive() {
 	if !r.Store.HasActiveGrants() {
 		return
 	}
-	r.ensureRenewalLoop()
+	r.ensureReplacementLoop()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.running {
@@ -218,8 +218,8 @@ func (r *OwnerRuntime) startLocked() {
 	}()
 }
 
-func (r *OwnerRuntime) renewalLoop() {
-	ticker := time.NewTicker(r.renewEvery)
+func (r *OwnerRuntime) replacementLoop() {
+	ticker := time.NewTicker(r.replacementEvery)
 	defer ticker.Stop()
 	for {
 		select {
@@ -231,7 +231,9 @@ func (r *OwnerRuntime) renewalLoop() {
 	}
 }
 
-func (r *OwnerRuntime) ensureRenewalLoop() { r.renewOnce.Do(func() { go r.renewalLoop() }) }
+func (r *OwnerRuntime) ensureReplacementLoop() {
+	r.replacementOnce.Do(func() { go r.replacementLoop() })
+}
 
 func (r *OwnerRuntime) reconcile(now time.Time) {
 	r.mu.Lock()
