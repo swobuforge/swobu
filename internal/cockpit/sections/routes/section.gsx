@@ -35,6 +35,11 @@ templ (s *SectionView) Render() {
 								<div key={s.shareRowKey(route)} class="w-full">
 									@ShareRowComponent(s, route)
 								</div>
+								if s.State.ShareExpiryRoute.Get() == route.ID {
+									<div key={s.shareExpiryPickerKey(route)} class="pl-3 w-full">
+										@ShareExpiryPickerComponent(s, route)
+									</div>
+								}
 								if route.Share != nil {
 									<div key={s.shareRevokeRowKey(route)} class="w-full">
 										@ShareRevokeRowComponent(s, route)
@@ -105,6 +110,24 @@ templ (s *SectionView) Render() {
 				}
 			</div>
 		}
+	</div>
+}
+
+templ (p *ShareExpiryPicker) Render() {
+	<div class="flex-col w-full">
+		<div class="flex-row w-full">
+			<span>{"Share " + p.RouteName}</span>
+		</div>
+		<div class="flex-row w-full mt-1">
+			<span>expires</span>
+		</div>
+		<div class="pl-3 flex-col w-full">
+			for _, choice := range p.Choices {
+				<div key={p.ID + ":" + string(choice.Expiry)} class="w-full">
+					@ShareExpiryChoiceComponent(p, choice)
+				</div>
+			}
+		</div>
 	</div>
 }
 
