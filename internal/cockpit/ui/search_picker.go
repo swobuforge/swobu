@@ -175,6 +175,7 @@ func (p *SearchPicker) configureList() {
 	}
 	p.list.VisibleRows = searchPickerDefaultVisibleRows
 	p.list.CountFullSet = true
+	p.list.QueryEditing = true
 	p.list.QueryItem = p.openSetQueryItem
 	p.list.AutoFocus = p.AutoFocus
 	p.list.EmptyLabel = "(no matches)"

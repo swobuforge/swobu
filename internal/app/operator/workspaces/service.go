@@ -6,20 +6,37 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/configstore"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/sharestate"
+	"github.com/swobuforge/swobu/internal/sharetransport"
 )
 
 type Service struct {
-	store *configstore.Store
+	store    *configstore.Store
+	shares   *sharestate.Store
+	runtime  *sharetransport.OwnerRuntime
+	bindings *routebindings.Coordinator
 }
 
-func NewService(store *configstore.Store) (Service, error) {
+func NewService(store *configstore.Store, lifecycle ...any) (Service, error) {
 	if store == nil {
 		return Service{}, fmt.Errorf("workspace store is required")
 	}
-	return Service{store: store}, nil
+	service := Service{store: store}
+	for _, dependency := range lifecycle {
+		switch value := dependency.(type) {
+		case *sharestate.Store:
+			service.shares = value
+		case *sharetransport.OwnerRuntime:
+			service.runtime = value
+		case *routebindings.Coordinator:
+			service.bindings = value
+		}
+	}
+	return service, nil
 }
 
 type CreateWorkspace struct {
@@ -130,7 +147,7 @@ func (s Service) RenameWorkspace(ctx context.Context, cmd RenameWorkspace) (Work
 	if e != nil {
 		return Workspace{}, commandError(e)
 	}
-	return s.update(ctx, to, func(c routing.Config) (routing.Config, error) { return c.RenameWorkspace(from, to) })
+	return s.destructiveUpdate(ctx, to, from, nil, func(c routing.Config) (routing.Config, error) { return c.RenameWorkspace(from, to) })
 }
 func (s Service) DeleteWorkspace(ctx context.Context, raw string) error {
 	if s.store == nil {
@@ -140,7 +157,7 @@ func (s Service) DeleteWorkspace(ctx context.Context, raw string) error {
 	if e != nil {
 		return commandError(e)
 	}
-	_, e = s.store.Update(ctx, func(c routing.Config) (routing.Config, error) { return c.DeleteWorkspace(slug) })
+	_, e = s.destructiveConfigUpdate(ctx, slug, nil, func(c routing.Config) (routing.Config, error) { return c.DeleteWorkspace(slug) })
 	return commandErrorOrNil(e)
 }
 func (s Service) CreateRoute(ctx context.Context, cmd CreateRoute) (Workspace, error) {
@@ -163,7 +180,7 @@ func (s Service) RenameRoute(ctx context.Context, cmd RenameRoute) (Workspace, e
 	if e != nil {
 		return Workspace{}, commandError(e)
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.RenameRoute(slug, from, to) })
+	return s.destructiveUpdate(ctx, slug, slug, &from, func(c routing.Config) (routing.Config, error) { return c.RenameRoute(slug, from, to) })
 }
 func (s Service) SetDefaultRoute(ctx context.Context, cmd SetDefaultRoute) (Workspace, error) {
 	slug, e := routing.ParseWorkspaceSlug(cmd.Workspace)
@@ -193,7 +210,7 @@ func (s Service) DeleteRoute(ctx context.Context, cmd DeleteRoute) (Workspace, e
 		}
 		replacement = &value
 	}
-	return s.update(ctx, slug, func(c routing.Config) (routing.Config, error) { return c.DeleteRoute(slug, name, replacement) })
+	return s.destructiveUpdate(ctx, slug, slug, &name, func(c routing.Config) (routing.Config, error) { return c.DeleteRoute(slug, name, replacement) })
 }
 func (s Service) GetRoute(_ context.Context, rawWorkspace, rawRoute string) (RouteSpec, error) {
 	if s.store == nil {
@@ -319,6 +336,36 @@ func connectionWithCredential(connection routing.Connection, credential string) 
 		return nil, fmt.Errorf("connection.%s.credential: connection does not carry a credential", connection.Provider())
 	}
 	return routing.FinalizeConnection(draft, profile.RoutingConstructionFacts())
+}
+
+func (s Service) destructiveConfigUpdate(ctx context.Context, bindingWorkspace routing.WorkspaceSlug, route *routing.RouteName, edit func(routing.Config) (routing.Config, error)) (routing.Config, error) {
+	if s.shares == nil || s.bindings == nil {
+		return s.store.Update(ctx, edit)
+	}
+	unlock := s.bindings.Lock()
+	defer unlock()
+	removed := false
+	next, err := s.store.UpdatePrepared(ctx, edit, func(_, _ routing.Config) error {
+		var revokeErr error
+		removed, revokeErr = s.shares.RevokeBindings(bindingWorkspace, route)
+		return revokeErr
+	})
+	if removed && s.runtime != nil {
+		s.runtime.StopIfInactive()
+	}
+	return next, err
+}
+
+func (s Service) destructiveUpdate(ctx context.Context, resultSlug, bindingWorkspace routing.WorkspaceSlug, route *routing.RouteName, edit func(routing.Config) (routing.Config, error)) (Workspace, error) {
+	next, err := s.destructiveConfigUpdate(ctx, bindingWorkspace, route, edit)
+	if err != nil {
+		return Workspace{}, commandError(err)
+	}
+	workspace, ok := next.Workspace(resultSlug)
+	if !ok {
+		return Workspace{}, CommandError{Internal, "committed workspace missing"}
+	}
+	return projectWorkspace(workspace), nil
 }
 
 func (s Service) update(ctx context.Context, slug routing.WorkspaceSlug, edit func(routing.Config) (routing.Config, error)) (Workspace, error) {

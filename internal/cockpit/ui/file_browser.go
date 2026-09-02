@@ -249,6 +249,7 @@ func (b *FileBrowser) configureList() {
 		b.list.VisibleRows = fileBrowserDefaultVisibleRows
 	}
 	b.list.AutoFocus = b.AutoFocus
+	b.list.QueryEditing = true
 	b.list.OnEscape = b.onEscape
 	b.list.SetItems(b.choiceItems())
 }

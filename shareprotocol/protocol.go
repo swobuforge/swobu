@@ -29,6 +29,7 @@ type Message struct {
 	CertificateChain    []string `json:"certificate_chain,omitempty"`
 	ChallengePrivateKey string   `json:"challenge_private_key,omitempty"`
 	Error               string   `json:"error,omitempty"`
+	RetryAfterSeconds   int64    `json:"retry_after_seconds,omitempty"`
 }
 
 type Codec struct {

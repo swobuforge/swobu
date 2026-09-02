@@ -11,9 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/configstore"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
 func testService(t *testing.T) (Service, *configstore.Store, string) {
@@ -650,5 +652,84 @@ func TestCommandErrorCollapsesDomainConflictSentinels(t *testing.T) {
 		if err := commandError(fmt.Errorf("%w: specific reason", sentinel)); !errors.As(err, &command) || command.Code != Conflict || !strings.Contains(command.Message, "specific reason") {
 			t.Errorf("commandError(%v) = %#v", sentinel, err)
 		}
+	}
+}
+
+func TestDeleteAndRenamePermanentlyRevokeOldRouteBindings(t *testing.T) {
+	for _, operation := range []string{"delete", "rename"} {
+		t.Run(operation, func(t *testing.T) {
+			service, configStore, _ := testService(t)
+			ctx := context.Background()
+			if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "personal", InitialRoute: "coding", Target: openAITarget("a")}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "other", Target: openAITarget("other")}); err != nil {
+				t.Fatal(err)
+			}
+			shareStore, err := sharestate.Open(filepath.Join(t.TempDir(), "share.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := shareStore.EnsureEndpoint(); err != nil {
+				t.Fatal(err)
+			}
+			workspace, _ := routing.ParseWorkspaceSlug("personal")
+			route, _ := routing.ParseRouteName("coding")
+			grant, err := shareStore.Issue(workspace, route, sharestate.ExpiryNever)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinator := &routebindings.Coordinator{}
+			service, _ = NewService(configStore, shareStore, coordinator)
+			if operation == "delete" {
+				if _, err := service.DeleteRoute(ctx, DeleteRoute{Workspace: "personal", Route: "coding", Replacement: "other"}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "coding", Target: openAITarget("b")}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := service.RenameRoute(ctx, RenameRoute{Workspace: "personal", Route: "coding", NewName: "renamed"}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "coding", Target: openAITarget("b")}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := shareStore.Authenticate(grant.Bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
+				t.Fatalf("old bearer revived: %v", err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceIdentityDestructionRevokesAllBindings(t *testing.T) {
+	for _, operation := range []string{"delete", "rename"} {
+		t.Run(operation, func(t *testing.T) {
+			service, configStore, _ := testService(t)
+			ctx := context.Background()
+			if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "personal", InitialRoute: "coding", Target: openAITarget("a")}); err != nil {
+				t.Fatal(err)
+			}
+			shareStore, _ := sharestate.Open(filepath.Join(t.TempDir(), "share.json"))
+			_ = shareStore.EnsureEndpoint()
+			workspace, _ := routing.ParseWorkspaceSlug("personal")
+			route, _ := routing.ParseRouteName("coding")
+			grant, _ := shareStore.Issue(workspace, route, sharestate.ExpiryNever)
+			coordinator := &routebindings.Coordinator{}
+			service, _ = NewService(configStore, shareStore, coordinator)
+			if operation == "delete" {
+				if err := service.DeleteWorkspace(ctx, "personal"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := service.RenameWorkspace(ctx, RenameWorkspace{Slug: "personal", NewSlug: "renamed"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := shareStore.Authenticate(grant.Bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
+				t.Fatalf("old bearer remained valid: %v", err)
+			}
+		})
 	}
 }

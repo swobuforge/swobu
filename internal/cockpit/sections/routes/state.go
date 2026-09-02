@@ -15,7 +15,6 @@ type RouteSectionState struct {
 	AddTargetRoute      *tui.State[readmodel.RouteID]
 	DeleteConfirmTarget *tui.State[readmodel.TargetID]
 	FocusRoute          *tui.State[readmodel.RouteID]
-	ShareExpiryRoute    *tui.State[readmodel.RouteID]
 	SharePendingRoute   *tui.State[readmodel.RouteID]
 	ShareCopiedRoute    *tui.State[readmodel.RouteID]
 }
@@ -28,7 +27,6 @@ func NewRouteSectionState(routes []readmodel.RouteReadModel) *RouteSectionState 
 		AddTargetRoute:      tui.NewState(readmodel.RouteID("")),
 		DeleteConfirmTarget: tui.NewState(readmodel.TargetID("")),
 		FocusRoute:          tui.NewState(readmodel.RouteID("")),
-		ShareExpiryRoute:    tui.NewState(readmodel.RouteID("")),
 		SharePendingRoute:   tui.NewState(readmodel.RouteID("")),
 		ShareCopiedRoute:    tui.NewState(readmodel.RouteID("")),
 	}

@@ -165,15 +165,15 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 func PlacementSelect(w *TargetConfig) *ui.Select {
 	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), Action: "change ↵", CanEnter: w.readyToCreate, Body: func(backout func()) tui.Component { return PlacementPicker(w, backout) }})
 }
-func PlacementPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
+func PlacementPicker(w *TargetConfig, backout func()) *ui.ChoicePicker {
 	opts := placementOptions(w.Route, w.mode, w.Target.ID)
-	items := make([]ui.SearchOption, 0, len(opts))
+	items := make([]ui.ChoiceOption, 0, len(opts))
 	for _, opt := range opts {
-		items = append(items, ui.SearchOption{ID: placementOptionID(opt), Label: opt.Summary()})
+		items = append(items, ui.ChoiceOption{ID: placementOptionID(opt), Label: opt.Summary()})
 	}
-	picker := ui.NewSearchPicker(TargetAddMountKey(w, "placement-picker"), "routing", items, func(sel ui.Selection) {
+	picker := ui.NewChoicePicker(TargetAddMountKey(w, "placement-picker"), items, placementOptionID(w.Placement.Get()), func(value string) {
 		for _, opt := range opts {
-			if placementOptionID(opt) == sel.Value {
+			if placementOptionID(opt) == value {
 				w.SelectPlacement(opt)
 				break
 			}
@@ -186,7 +186,6 @@ func PlacementPicker(w *TargetConfig, backout func()) *ui.SearchPicker {
 			backout()
 		}
 	})
-	picker.AutoFocus = true
 	return picker
 }
 func canChangePlacement(w *TargetConfig) bool {

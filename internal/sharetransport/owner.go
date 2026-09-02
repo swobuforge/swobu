@@ -17,19 +17,19 @@ import (
 )
 
 type OwnerConnector struct {
-	Address       string
-	EndpointKey   *ecdsa.PrivateKey
-	RootCAs       *x509.CertPool
-	Dialer        net.Dialer
-	RetryMinimum  time.Duration
-	RetryMaximum  time.Duration
-	HandleControl func(io.ReadWriter) error
-	OnConnected   func()
-	HandleStream  func(net.Conn)
+	Address            string
+	IdentityPrivateKey *ecdsa.PrivateKey
+	RootCAs            *x509.CertPool
+	Dialer             net.Dialer
+	RetryMinimum       time.Duration
+	RetryMaximum       time.Duration
+	HandleControl      func(io.ReadWriter) error
+	OnConnected        func()
+	HandleStream       func(net.Conn)
 }
 
 func (o OwnerConnector) Run(ctx context.Context) error {
-	if o.Address == "" || o.EndpointKey == nil || o.HandleStream == nil {
+	if o.Address == "" || o.IdentityPrivateKey == nil || o.HandleStream == nil {
 		return errors.New("owner connector dependencies are required")
 	}
 	minimum := o.RetryMinimum
@@ -64,11 +64,11 @@ func (o OwnerConnector) Run(ctx context.Context) error {
 }
 
 func (o OwnerConnector) connect(ctx context.Context) error {
-	parsed, der, err := SelfSignedClientCertificate(o.EndpointKey, time.Now())
+	parsed, der, err := SelfSignedClientCertificate(o.IdentityPrivateKey, time.Now())
 	if err != nil {
 		return err
 	}
-	certificate := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: o.EndpointKey}
+	certificate := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: o.IdentityPrivateKey}
 	raw, err := o.Dialer.DialContext(ctx, "tcp", o.Address)
 	if err != nil {
 		return err

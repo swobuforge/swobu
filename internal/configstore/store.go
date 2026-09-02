@@ -126,6 +126,10 @@ func (s *Store) GetWorkspace(_ context.Context, slug routing.WorkspaceSlug) (rou
 }
 
 func (s *Store) Update(ctx context.Context, edit func(routing.Config) (routing.Config, error)) (routing.Config, error) {
+	return s.UpdatePrepared(ctx, edit, nil)
+}
+
+func (s *Store) UpdatePrepared(ctx context.Context, edit func(routing.Config) (routing.Config, error), beforeCommit func(current, next routing.Config) error) (routing.Config, error) {
 	if s == nil {
 		return routing.Config{}, ErrStoreClosed
 	}
@@ -156,6 +160,11 @@ func (s *Store) Update(ctx context.Context, edit func(routing.Config) (routing.C
 	raw, err := encode(next)
 	if err != nil {
 		return routing.Config{}, err
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(current, next); err != nil {
+			return routing.Config{}, err
+		}
 	}
 	if err := replaceFile(s.path, raw, s.ops); err != nil {
 		return routing.Config{}, err

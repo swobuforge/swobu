@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/exchange"
@@ -92,14 +93,15 @@ func buildDaemonServeMux(
 			return persistCredential(providerSpec, keyName, secret)
 		},
 	))
-	workspaceService, err := workspaces.NewService(daemon.configStore)
+	bindingCoordinator := &routebindings.Coordinator{}
+	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime, bindingCoordinator)
 	if err != nil {
 		return nil, nil, err
 	}
 	workspaceControl := httpapi.NewWorkspaceControlHandler(workspaceService)
 	mux.Handle("/_swobu/workspaces", workspaceControl)
 	mux.Handle("/_swobu/workspaces/", workspaceControl)
-	shareService, err := shares.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime)
+	shareService, err := shares.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime, bindingCoordinator)
 	if err != nil {
 		return nil, nil, err
 	}
