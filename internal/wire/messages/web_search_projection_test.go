@@ -420,7 +420,7 @@ func TestMessagesWebSearchBufferedAndStreamedSemanticsAgree(t *testing.T) {
 		`"type":"server_tool_use"`,
 		`"type":"web_search_tool_result"`,
 		`"type":"citations_delta"`,
-		`"input_tokens":2`,
+		`"input_tokens":0`,
 		`"output_tokens":3`,
 		`"cache_read_input_tokens":1`,
 		`"cache_creation_input_tokens":1`,

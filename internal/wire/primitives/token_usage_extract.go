@@ -45,6 +45,28 @@ func ExtractTokenUsage(raw []byte, spec TokenUsagePathSpec) canonical.TokenUsage
 	return usage
 }
 
+// MergeLatestTokenUsage retains the latest known value for each cumulative
+// stream counter. Snapshots are observations, not increments.
+func MergeLatestTokenUsage(previous canonical.TokenUsage, current canonical.TokenUsage) canonical.TokenUsage {
+	latest := func(previousValue func() (int, bool), currentValue func() (int, bool)) *int {
+		if value, ok := currentValue(); ok {
+			return &value
+		}
+		if value, ok := previousValue(); ok {
+			return &value
+		}
+		return nil
+	}
+	merged, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens:      latest(previous.InputTokens, current.InputTokens),
+		OutputTokens:     latest(previous.OutputTokens, current.OutputTokens),
+		ReasoningTokens:  latest(previous.ReasoningTokens, current.ReasoningTokens),
+		CacheReadTokens:  latest(previous.CacheReadTokens, current.CacheReadTokens),
+		CacheWriteTokens: latest(previous.CacheWriteTokens, current.CacheWriteTokens),
+	})
+	return merged
+}
+
 func findFirstInt(payload any, paths [][]string) *int {
 	for _, path := range paths {
 		if len(path) == 0 {

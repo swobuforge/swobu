@@ -48,6 +48,10 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 		{"usageMetadata", "candidatesTokenCount"},
 		{"usage", "outputTokens"},
 	},
+	ReasoningPaths: [][]string{
+		{"message", "usage", "output_tokens_details", "thinking_tokens"},
+		{"usage", "output_tokens_details", "thinking_tokens"},
+	},
 	CacheReadPaths: [][]string{
 		{"message", "usage", "cache_read_input_tokens"},
 		{"usage", "cache_read_input_tokens"},
@@ -70,7 +74,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	if err := json.Unmarshal(raw, &dto); err != nil {
 		return nil, canonical.InternalError("messages response is invalid JSON")
 	}
-	usage := core.ExtractTokenUsage(raw, tokenUsagePathSpec)
+	usage := extractMessagesUsage(raw).canonical()
 	items := make([]canonical.CanonicalItem, 0, len(dto.Content))
 	textParts := make([]canonical.MessagePart, 0)
 	flushMessage := func() error {
@@ -251,6 +255,96 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 		messagesCompletion(dto.StopReason),
 		usage,
 	)), nil
+}
+
+type messagesUsageFamily uint8
+
+const (
+	messagesUsageFamilyUnknown messagesUsageFamily = iota
+	messagesUsageFamilyNativeCacheExclusive
+	messagesUsageFamilyCompatibilityCacheInclusive
+)
+
+type messagesUsageSnapshot struct {
+	family messagesUsageFamily
+	usage  canonical.TokenUsage
+}
+
+func extractMessagesUsage(raw []byte) messagesUsageSnapshot {
+	usageRaw := messagesUsageObject(raw)
+	var usageFields map[string]json.RawMessage
+	if json.Unmarshal(usageRaw, &usageFields) == nil {
+		if _, native := usageFields["input_tokens"]; native {
+			return messagesUsageSnapshot{
+				family: messagesUsageFamilyNativeCacheExclusive,
+				usage: core.ExtractTokenUsage(usageRaw, core.TokenUsagePathSpec{
+					InputPaths:      [][]string{{"input_tokens"}},
+					OutputPaths:     [][]string{{"output_tokens"}},
+					ReasoningPaths:  [][]string{{"output_tokens_details", "thinking_tokens"}},
+					CacheReadPaths:  [][]string{{"cache_read_input_tokens"}},
+					CacheWritePaths: [][]string{{"cache_creation_input_tokens"}},
+				}),
+			}
+		}
+		if _, compatible := usageFields["prompt_tokens"]; compatible {
+			return messagesUsageSnapshot{
+				family: messagesUsageFamilyCompatibilityCacheInclusive,
+				usage: core.ExtractTokenUsage(usageRaw, core.TokenUsagePathSpec{
+					InputPaths:     [][]string{{"prompt_tokens"}},
+					OutputPaths:    [][]string{{"completion_tokens"}},
+					ReasoningPaths: [][]string{{"output_tokens_details", "thinking_tokens"}},
+					CacheReadPaths: [][]string{{"prompt_tokens_details", "cached_tokens"}},
+				}),
+			}
+		}
+	}
+	return messagesUsageSnapshot{
+		usage: core.ExtractTokenUsage(raw, tokenUsagePathSpec),
+	}
+}
+
+func messagesUsageObject(raw []byte) json.RawMessage {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	usageRaw := payload["usage"]
+	if len(usageRaw) == 0 {
+		var message map[string]json.RawMessage
+		if json.Unmarshal(payload["message"], &message) == nil {
+			usageRaw = message["usage"]
+		}
+	}
+	return usageRaw
+}
+
+func (snapshot messagesUsageSnapshot) canonical() canonical.TokenUsage {
+	usage := snapshot.usage
+	input, hasInput := usage.InputTokens()
+	cacheRead, hasCacheRead := usage.CacheReadTokens()
+	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
+	if hasInput && snapshot.family == messagesUsageFamilyNativeCacheExclusive {
+		if hasCacheRead {
+			input += cacheRead
+		}
+		if hasCacheWrite {
+			input += cacheWrite
+		}
+	}
+	output, hasOutput := usage.OutputTokens()
+	reasoning, hasReasoning := usage.ReasoningTokens()
+	pointer := func(value int, known bool) *int {
+		if !known {
+			return nil
+		}
+		return &value
+	}
+	normalized, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens: pointer(input, hasInput), OutputTokens: pointer(output, hasOutput),
+		ReasoningTokens: pointer(reasoning, hasReasoning), CacheReadTokens: pointer(cacheRead, hasCacheRead),
+		CacheWriteTokens: pointer(cacheWrite, hasCacheWrite),
+	})
+	return normalized
 }
 
 func messagesProviderDiscoveryForName(request canonical.CanonicalRequest, name string) (canonical.ToolDiscoveryTool, error) {

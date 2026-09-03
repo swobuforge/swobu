@@ -178,6 +178,7 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 				AcceptsEffortMax: req.TargetFacts.AcceptsReasoningEffortMax,
 				AcceptsDisabled:  req.TargetFacts.AcceptsReasoningDisabled,
 			},
+			AcceptsStreamIncludeUsage: req.TargetFacts.AcceptsChatStreamIncludeUsage,
 		},
 	)
 	return document, changes, err

@@ -36,6 +36,20 @@ func TestTokenUsage_RejectsNegativeReasoningTokens(t *testing.T) {
 	}
 }
 
+func TestTokenUsage_TotalRequiresInputAndOutput(t *testing.T) {
+	value := 12
+	for name, usage := range map[string]TokenUsage{
+		"input only":  mustTokenUsage(t, TokenUsageParams{InputTokens: &value}),
+		"output only": mustTokenUsage(t, TokenUsageParams{OutputTokens: &value}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if total, known := usage.TotalKnownTokens(); known || total != 0 {
+				t.Fatalf("TotalKnownTokens = (%d,%v), want (0,false)", total, known)
+			}
+		})
+	}
+}
+
 func TestSumTokenUsageAccumulatesRoundsWithoutInventingUnknownFields(t *testing.T) {
 	inputOne, outputOne := 10, 2
 	inputTwo, outputTwo := 7, 3
@@ -51,4 +65,13 @@ func TestSumTokenUsageAccumulatesRoundsWithoutInventingUnknownFields(t *testing.
 	if _, ok := total.ReasoningTokens(); ok {
 		t.Fatal("unknown reasoning usage became a known total")
 	}
+}
+
+func mustTokenUsage(t *testing.T, params TokenUsageParams) TokenUsage {
+	t.Helper()
+	usage, err := NewTokenUsage(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return usage
 }

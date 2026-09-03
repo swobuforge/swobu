@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -25,6 +27,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 		{name: "reasoning effort max", fact: provider.AcceptsReasoningEffortMax, protocol: protocolkind.Responses},
 		{name: "reasoning disabled", fact: provider.AcceptsReasoningDisabled, protocol: protocolkind.Responses},
 		{name: "function call output array", fact: provider.AcceptsFunctionCallOutputArray, protocol: protocolkind.Responses},
+		{name: "chat stream include usage", fact: provider.AcceptsChatStreamIncludeUsage, protocol: protocolkind.ChatCompletions},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -41,8 +44,8 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 			if err := canonical.ValidateMaterializedRequest(request); err != nil {
 				t.Fatalf("fixture is invalid canonical: %v", err)
 			}
-			preferred := encodeTargetFactFixture(t, codec, request, test.fact, true)
-			control := encodeTargetFactFixture(t, codec, request, test.fact, false)
+			preferred := encodeTargetFactFixture(t, codec, request, targetFactFixtureDelivery(test.fact), test.fact, true)
+			control := encodeTargetFactFixture(t, codec, request, targetFactFixtureDelivery(test.fact), test.fact, false)
 			if bytes.Equal(preferred, control) {
 				t.Fatal("preferred and control fixtures do not differ")
 			}
@@ -51,7 +54,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 				calls := 0
 				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
 					calls++
-					return completedTargetFactIngress(test.protocol), nil
+					return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
 				}))
 				if !resolution.Conclusive || !resolution.Value || calls != 1 {
 					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
@@ -65,7 +68,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 					if calls == 1 {
 						return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "rejected", "")))
 					}
-					return completedTargetFactIngress(test.protocol), nil
+					return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
 				}))
 				if !resolution.Conclusive || resolution.Value || calls != 2 {
 					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
@@ -97,7 +100,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 	}
 }
 
-func encodeTargetFactFixture(t *testing.T, codec Codec, request canonical.CanonicalRequest, fact provider.TargetFact, value bool) []byte {
+func encodeTargetFactFixture(t *testing.T, codec Codec, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, fact provider.TargetFact, value bool) []byte {
 	t.Helper()
 	facts := provider.NewTargetFacts(func(read provider.TargetFact) (bool, bool) {
 		if read != fact {
@@ -110,7 +113,7 @@ func encodeTargetFactFixture(t *testing.T, codec Codec, request canonical.Canoni
 		t.Fatal(err)
 	}
 	document, _, err := codec.Encode(provider.Request{
-		Canonical: request, TargetFacts: facts, ToolNames: names, Delivery: delivery.BufferedDelivery(),
+		Canonical: request, TargetFacts: facts, ToolNames: names, Delivery: fixtureDelivery,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +125,14 @@ func encodeTargetFactFixture(t *testing.T, codec Codec, request canonical.Canoni
 	return document.RawBytes()
 }
 
-func completedTargetFactIngress(protocol protocolkind.Kind) provider.Ingress {
+func completedTargetFactIngress(protocol protocolkind.Kind, fixtureDelivery delivery.Delivery) provider.Ingress {
+	if fixtureDelivery.IsStreaming() {
+		raw := "data: {\"id\":\"response\",\"model\":\"model\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+			"data: {\"id\":\"response\",\"model\":\"model\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+			"data: {\"id\":\"response\",\"model\":\"model\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n"
+		return provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}}
+	}
 	raw := []byte(`{"id":"response","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 	if protocol == protocolkind.Responses {
 		raw = []byte(`{"id":"response","model":"model","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}`)

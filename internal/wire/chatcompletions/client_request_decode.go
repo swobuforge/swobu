@@ -124,6 +124,11 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto chatCo
 	resolvedDelivery := delivery.BufferedDelivery()
 	if streamRequested {
 		resolvedDelivery = delivery.StreamingDelivery(delivery.FramingNone)
+		includeUsage, err := decodeChatStreamIncludeUsage(dto.StreamOptions)
+		if err != nil {
+			return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
+		}
+		resolvedDelivery.IncludeUsageFrame = includeUsage
 	}
 	toolSet, err := canonical.NewToolSet(tools)
 	if err != nil {
@@ -155,6 +160,19 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto chatCo
 		params.OutputFormat = canonical.Specify(outputFormat)
 	}
 	return newChatCanonicalRequest(params, resolvedDelivery, decoder.ImageLimits)
+}
+
+func decodeChatStreamIncludeUsage(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, nil
+	}
+	var options struct {
+		IncludeUsage *bool `json:"include_usage"`
+	}
+	if err := json.Unmarshal(raw, &options); err != nil {
+		return false, canonical.BadRequest("chat completions stream_options must be an object")
+	}
+	return options.IncludeUsage != nil && *options.IncludeUsage, nil
 }
 
 func decodeChatConversation(messages []chatCompletionsMessageDTO, tools []canonical.ToolDeclaration, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy) ([]canonical.CanonicalItem, []canonical.CanonicalItem, error) {

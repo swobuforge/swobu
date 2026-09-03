@@ -75,6 +75,14 @@ type chatCompletionsResponseDTO[C any] struct {
 	Usage   *chatCompletionsUsageDTO `json:"usage,omitempty"`
 }
 
+type chatCompletionsStreamResponseDTO struct {
+	ID      string                           `json:"id"`
+	Object  string                           `json:"object"`
+	Model   string                           `json:"model"`
+	Choices []chatCompletionsStreamChoiceDTO `json:"choices"`
+	Usage   *chatCompletionsUsageDTO         `json:"usage"`
+}
+
 type chatCompletionsUsageDTO struct {
 	PromptTokens      int                                       `json:"prompt_tokens"`
 	CompletionTokens  int                                       `json:"completion_tokens"`

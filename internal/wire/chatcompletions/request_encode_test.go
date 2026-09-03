@@ -65,6 +65,34 @@ func TestEncodeCarrier_OmitsDisclosureOnlyReasoning(t *testing.T) {
 	}
 }
 
+func TestCompileProviderRequestDocumentRequestsStreamingUsageWhenAccepted(t *testing.T) {
+	req := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("gpt"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+	})
+	for _, test := range []struct {
+		name    string
+		accepts bool
+		want    bool
+	}{
+		{name: "accepted", accepts: true, want: true},
+		{name: "rejected", accepts: false, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := CompileProviderRequestDocument(req, nil, delivery.StreamingDelivery(delivery.FramingSSE), nil, "", CompileOptions{
+				Lowering: DefaultLowering(), AcceptsStreamIncludeUsage: func() bool { return test.accepts },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, present := document.Payload["stream_options"]
+			if present != test.want {
+				t.Fatalf("stream_options present = %t, want %t: %#v", present, test.want, document.Payload)
+			}
+		})
+	}
+}
+
 func TestEncodeCarrier_CurrentHostedSearchRequiresExactTargetLowering(t *testing.T) {
 	set, err := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	if err != nil {

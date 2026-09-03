@@ -28,6 +28,9 @@ const (
 type Delivery struct {
 	Mode    Mode
 	Framing Framing
+	// IncludeUsageFrame is client presentation state for protocols that expose
+	// accounting in a separate terminal frame. It never controls provider capture.
+	IncludeUsageFrame bool
 }
 
 func (d Delivery) IsStreaming() bool {
@@ -42,10 +45,14 @@ func StreamingDelivery(framing Framing) Delivery {
 	return Delivery{Mode: Streaming, Framing: framing}
 }
 
+func StreamingDeliveryWithUsage(framing Framing) Delivery {
+	return Delivery{Mode: Streaming, Framing: framing, IncludeUsageFrame: true}
+}
+
 func (d Delivery) Validate() error {
 	switch d.Mode {
 	case Buffered:
-		if d.Framing != FramingNone {
+		if d.Framing != FramingNone || d.IncludeUsageFrame {
 			return fmt.Errorf("buffered delivery requires no framing")
 		}
 		return nil

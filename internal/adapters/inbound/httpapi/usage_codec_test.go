@@ -113,6 +113,37 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.output_tokens_details.reasoning_tokens", 4)
 }
 
+func TestOpenAIFamilyCodecsDeriveProtocolTotalFromCanonicalCounters(t *testing.T) {
+	input, outputTokens := 10, 7
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{
+		InputTokens: &input, OutputTokens: &outputTokens,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := canonicaltest.ResponseWithUsage(t, "resp_total", "m",
+		[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
+		canonical.Completed("completed"), usage)
+
+	chatDocument, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responsesDocument, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string][]byte{"chat": chatDocument.Document.Raw, "responses": responsesDocument.Document.Raw} {
+		var dto map[string]any
+		if err := json.Unmarshal(raw, &dto); err != nil {
+			t.Fatal(err)
+		}
+		if total, ok := lookupNumber(dto, "usage.total_tokens"); !ok || total != 17 {
+			t.Fatalf("%s total = (%v,%t), want derived (17,true)", name, total, ok)
+		}
+	}
+}
+
 func TestResponsesCodec_EncodeResponse_UsageIncludesCachedTokensWhenZeroButPresent(t *testing.T) {
 	input, output := 12, 3
 	cacheRead, cacheWrite := 0, 0
@@ -153,7 +184,7 @@ func TestMessagesCodec_EncodeResponse_MapsUsage(t *testing.T) {
 	if err := json.Unmarshal(doc.Document.Raw, &dto); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
-	assertUsageFieldNumber(t, dto, "usage.input_tokens", 51)
+	assertUsageFieldNumber(t, dto, "usage.input_tokens", 21)
 	assertUsageFieldNumber(t, dto, "usage.output_tokens", 4)
 	assertUsageFieldNumber(t, dto, "usage.cache_read_input_tokens", 20)
 	assertUsageFieldNumber(t, dto, "usage.cache_creation_input_tokens", 10)
@@ -209,4 +240,57 @@ func splitPath(path string) []string {
 	}
 	parts = append(parts, path[start:])
 	return parts
+}
+
+func TestBufferedUsageProjectionDoesNotFabricateUnknownBaseCounters(t *testing.T) {
+	input, output, detail := 10, 4, 3
+	tests := []struct {
+		name  string
+		usage canonical.TokenUsage
+	}{
+		{name: "input only", usage: mustTokenUsageParams(t, canonical.TokenUsageParams{InputTokens: &input})},
+		{name: "output only", usage: mustTokenUsageParams(t, canonical.TokenUsageParams{OutputTokens: &output})},
+		{name: "detail only", usage: mustTokenUsageParams(t, canonical.TokenUsageParams{ReasoningTokens: &detail})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := canonicaltest.ResponseWithUsage(t, "resp_unknown", "m",
+				[]canonical.CanonicalItem{canonicaltest.MustMessage(canonical.MessageRoleAssistant, "ok")},
+				canonical.Completed("completed"), test.usage)
+			chatDocument, err := (chatcompletions.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responsesDocument, err := (responses.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messagesDocument, err := (messages.ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for family, raw := range map[string][]byte{
+				"chat":      chatDocument.Document.Raw,
+				"responses": responsesDocument.Document.Raw,
+				"messages":  messagesDocument.Document.Raw,
+			} {
+				var dto map[string]any
+				if err := json.Unmarshal(raw, &dto); err != nil {
+					t.Fatal(err)
+				}
+				if _, present := dto["usage"]; present {
+					t.Fatalf("%s projected partial usage as fabricated wire counters: %s", family, raw)
+				}
+			}
+		})
+	}
+}
+
+func mustTokenUsageParams(t *testing.T, params canonical.TokenUsageParams) canonical.TokenUsage {
+	t.Helper()
+	usage, err := canonical.NewTokenUsage(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return usage
 }

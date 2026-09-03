@@ -2,10 +2,10 @@ package canonical
 
 import "fmt"
 
-// TokenUsage captures provider-neutral token accounting for one successful output.
-// It allows adapter edges to expose usage, cache truth, and reasoning-token
-// breakdowns without leaking provider-dialect field names into canonical
-// semantics.
+// TokenUsage captures provider-neutral token accounting for one successful
+// output. Input includes cache categories and output includes reasoning. Cache
+// and reasoning counters are therefore subsets, not values to add to the
+// canonical totals. Total is known only when input and output are both known.
 type TokenUsage struct {
 	inputTokens      int
 	outputTokens     int

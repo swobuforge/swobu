@@ -236,6 +236,7 @@ type interactionUsagePayload struct {
 	TotalOutputTokens  *int `json:"total_output_tokens"`
 	TotalThoughtTokens *int `json:"total_thought_tokens"`
 	TotalCachedTokens  *int `json:"total_cached_tokens"`
+	TotalTokens        *int `json:"total_tokens"`
 }
 
 func (s *interactionsStream) handle(frame interactionSSEFrame) error {
@@ -1007,6 +1008,9 @@ func mergeInteractionUsage(previous canonical.TokenUsage, payload interactionUsa
 		reasoningKnown = true
 		reasoning = value
 	}
+	if outputKnown && reasoningKnown && output >= reasoning {
+		output -= reasoning
+	}
 	if value, known := previous.CacheReadTokens(); known {
 		cacheReadKnown = true
 		cacheRead = value
@@ -1019,6 +1023,9 @@ func mergeInteractionUsage(previous canonical.TokenUsage, payload interactionUsa
 	}
 	if payload.TotalThoughtTokens != nil {
 		reasoning, reasoningKnown = *payload.TotalThoughtTokens, true
+	}
+	if outputKnown && reasoningKnown {
+		output += reasoning
 	}
 	if payload.TotalCachedTokens != nil {
 		cacheRead, cacheReadKnown = *payload.TotalCachedTokens, true

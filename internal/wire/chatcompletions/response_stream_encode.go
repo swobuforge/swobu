@@ -12,16 +12,17 @@ import (
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
 
-func (ResponseStreamEncoder) newStreamState() sse.EnvelopeStreamEncoder {
+func (ResponseStreamEncoder) newStreamState(includeUsageFrame bool) sse.EnvelopeStreamEncoder {
 	return &chatCompletionsEnvelopeStreamEncoder{
 		adapter:               sse.NewEnvelopeEventAdapter(),
 		pendingWebSearchCalls: map[string]uint32{},
 		changes:               []compat.Change{},
+		includeUsageFrame:     includeUsageFrame,
 	}
 }
 
-func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, _ delivery.Delivery) (wire.ClientByteStreamResult, error) {
-	state := e.newStreamState()
+func (e ResponseStreamEncoder) EncodeResponseStream(ctx context.Context, _ canonical.CanonicalRequest, events canonical.ResponseStream, responseDelivery delivery.Delivery) (wire.ClientByteStreamResult, error) {
+	state := e.newStreamState(responseDelivery.IncludeUsageFrame)
 	streamState := state.(*chatCompletionsEnvelopeStreamEncoder)
 	completion, complete, fail := wire.NewResponseCompletion()
 	encoder := chatCompletionsFingerprintingEncoder(state.EncodeEnvelopeEvent, func(fingerprint *historyfingerprint.Response) {

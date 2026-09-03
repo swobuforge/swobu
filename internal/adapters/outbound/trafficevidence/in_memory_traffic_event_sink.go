@@ -97,6 +97,7 @@ func (s RecentTrafficTimingSnapshot) DurationMillisValue() *int {
 type RecentTrafficTokenUsageSnapshot struct {
 	InputTokens      *int `json:"input_tokens,omitempty"`
 	OutputTokens     *int `json:"output_tokens,omitempty"`
+	ReasoningTokens  *int `json:"reasoning_tokens,omitempty"`
 	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
 }
@@ -287,13 +288,16 @@ func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	if outputTokens, ok := trafficEvent.TokenUsage().OutputTokens(); ok {
 		usage.OutputTokens = &outputTokens
 	}
+	if reasoningTokens, ok := trafficEvent.TokenUsage().ReasoningTokens(); ok {
+		usage.ReasoningTokens = &reasoningTokens
+	}
 	if cacheReadTokens, ok := trafficEvent.TokenUsage().CacheReadTokens(); ok {
 		usage.CacheReadTokens = &cacheReadTokens
 	}
 	if cacheWriteTokens, ok := trafficEvent.TokenUsage().CacheWriteTokens(); ok {
 		usage.CacheWriteTokens = &cacheWriteTokens
 	}
-	if usage.InputTokens != nil || usage.OutputTokens != nil || usage.CacheReadTokens != nil || usage.CacheWriteTokens != nil {
+	if usage.InputTokens != nil || usage.OutputTokens != nil || usage.ReasoningTokens != nil || usage.CacheReadTokens != nil || usage.CacheWriteTokens != nil {
 		row.TokenUsage = &usage
 		row.InputTokens = usage.InputTokens
 		row.OutputTokens = usage.OutputTokens

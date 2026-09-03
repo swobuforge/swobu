@@ -22,6 +22,7 @@ type chatCompletionsEnvelopeStreamEncoder struct {
 	sawReasoning          bool
 	sawVisibleOutput      bool
 	changes               []compat.Change
+	includeUsageFrame     bool
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Changes() []compat.Change {
@@ -173,9 +174,18 @@ func (s *chatCompletionsEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([]
 		if projectionErr != nil {
 			return nil, projectionErr
 		}
-		frames, err := s.encodeChunk(chatCompletionsDeltaDTO{}, &clientFinishReason, chatUsageFromCanonical(event.Usage))
+		frames, err := s.encodeChunk(chatCompletionsDeltaDTO{}, &clientFinishReason, nil)
 		if err != nil {
 			return nil, err
+		}
+		if s.includeUsageFrame {
+			if usage := chatUsageFromCanonical(event.Usage); usage != nil {
+				usageFrame, usageErr := s.encodeUsageChunk(usage)
+				if usageErr != nil {
+					return nil, usageErr
+				}
+				frames = append(frames, usageFrame)
+			}
 		}
 		return append(frames, []byte("data: [DONE]\n\n")), nil
 	case sse.StreamEventFailed:
@@ -200,7 +210,7 @@ func (s *chatCompletionsEnvelopeStreamEncoder) encodeChunk(
 	finishReason *string,
 	usage *chatCompletionsUsageDTO,
 ) ([][]byte, error) {
-	raw, err := json.Marshal(chatCompletionsResponseDTO[chatCompletionsStreamChoiceDTO]{
+	raw, err := json.Marshal(chatCompletionsStreamResponseDTO{
 		ID:     sse.FallbackID(s.resultID, "chatcmpl_swobu"),
 		Object: "chat.completion.chunk",
 		Model:  s.model,
@@ -215,6 +225,17 @@ func (s *chatCompletionsEnvelopeStreamEncoder) encodeChunk(
 		return nil, canonical.InternalError("Chat Completions stream chunk could not be encoded")
 	}
 	return [][]byte{sse.SSEData(raw)}, nil
+}
+
+func (s *chatCompletionsEnvelopeStreamEncoder) encodeUsageChunk(usage *chatCompletionsUsageDTO) ([]byte, error) {
+	raw, err := json.Marshal(chatCompletionsStreamResponseDTO{
+		ID: sse.FallbackID(s.resultID, "chatcmpl_swobu"), Object: "chat.completion.chunk", Model: s.model,
+		Choices: []chatCompletionsStreamChoiceDTO{}, Usage: usage,
+	})
+	if err != nil {
+		return nil, canonical.InternalError("Chat Completions usage chunk could not be encoded")
+	}
+	return sse.SSEData(raw), nil
 }
 
 func (s *chatCompletionsEnvelopeStreamEncoder) Finish() ([][]byte, error) { return nil, nil }
@@ -307,13 +328,14 @@ func chatUsageFromCanonical(usage canonical.TokenUsage) *chatCompletionsUsageDTO
 	reasoning, hasReasoning := usage.ReasoningTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasReasoning && !hasCacheRead && !hasCacheWrite {
+	if !hasInput || !hasOutput {
 		return nil
 	}
+	total := input + output
 	dto := &chatCompletionsUsageDTO{
 		PromptTokens:     input,
 		CompletionTokens: output,
-		TotalTokens:      input + output,
+		TotalTokens:      total,
 	}
 	if hasCacheRead || hasCacheWrite {
 		dto.PromptDetails = &chatCompletionsPromptTokenDetailsDTO{

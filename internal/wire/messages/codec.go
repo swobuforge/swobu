@@ -58,6 +58,9 @@ func (s *messagesEnvelopeStreamEncoder) Encode(event sse.StreamEvent) ([][]byte,
 	switch event.Kind {
 	case sse.StreamEventStarted:
 		s.started = true
+		// Messages requires usage in message_start before translated upstream
+		// usage may be known. This zero-valued DTO is a wire placeholder only;
+		// canonical accounting remains owned by later EventUsage evidence.
 		raw, _ := json.Marshal(messagesStartEventDTO{
 			Type: "message_start",
 			Message: messagesStartMessageDTO{

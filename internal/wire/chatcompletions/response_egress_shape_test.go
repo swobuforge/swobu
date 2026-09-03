@@ -85,7 +85,7 @@ func TestChatStreamEncoderEmitsOnlyStreamChoiceShape(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			encoder := &chatCompletionsEnvelopeStreamEncoder{}
+			encoder := &chatCompletionsEnvelopeStreamEncoder{includeUsageFrame: test.wantUsage}
 			var frames [][]byte
 			for _, event := range test.events {
 				emitted, err := encoder.Encode(event)
@@ -116,8 +116,11 @@ func TestChatStreamEncoderEmitsOnlyStreamChoiceShape(t *testing.T) {
 					t.Fatalf("[DONE] must appear exactly once and last: %s", wire)
 				}
 			}
-			if test.wantUsage && !bytes.Contains(wire, []byte(`"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18`)) {
+			if test.wantUsage && !bytes.Contains(wire, []byte(`"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18`)) {
 				t.Fatalf("terminal stream lacks usage: %s", wire)
+			}
+			if test.wantFinish != "" && bytes.Contains(wire, []byte(`"finish_reason":"`+test.wantFinish+`","usage":{`)) {
+				t.Fatalf("terminal choice chunk must not carry usage: %s", wire)
 			}
 		})
 	}
@@ -218,6 +221,31 @@ func TestChatBufferedEncoderEmitsOnlyBufferedChoiceShape(t *testing.T) {
 				t.Fatalf("buffered message role = %q, want assistant", messageBody.Role)
 			}
 		})
+	}
+}
+
+func TestChatStreamDoesNotExposeKnownUsageWithoutClientPreference(t *testing.T) {
+	input, output := 10, 2
+	usage, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{InputTokens: &input, OutputTokens: &output})
+	encoder := &chatCompletionsEnvelopeStreamEncoder{}
+	var frames [][]byte
+	for _, event := range []sse.StreamEvent{
+		{Kind: sse.StreamEventStarted, ResultID: "chat_1", Model: "m"},
+		{Kind: sse.StreamEventTextDelta, TextDelta: "ok"},
+		{Kind: sse.StreamEventCompleted, Completion: canonical.Completed("stop"), Usage: usage},
+	} {
+		emitted, err := encoder.Encode(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frames = append(frames, emitted...)
+	}
+	wire := bytes.Join(frames, nil)
+	if bytes.Contains(wire, []byte(`"usage":{`)) || bytes.Contains(wire, []byte(`"choices":[]`)) {
+		t.Fatalf("unrequested usage escaped into Chat stream: %s", wire)
+	}
+	if !bytes.Contains(wire, []byte(`"usage":null`)) {
+		t.Fatalf("ordinary Chat chunks must carry usage null: %s", wire)
 	}
 }
 

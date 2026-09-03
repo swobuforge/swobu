@@ -64,3 +64,12 @@ func TestDeliveryValidate_ExhaustiveFiniteDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryValidateRejectsBufferedUsageFramePreference(t *testing.T) {
+	if err := (Delivery{Mode: Buffered, Framing: FramingNone, IncludeUsageFrame: true}).Validate(); err == nil {
+		t.Fatal("buffered delivery accepted streaming usage-frame preference")
+	}
+	if err := StreamingDeliveryWithUsage(FramingSSE).Validate(); err != nil {
+		t.Fatalf("streaming usage-frame delivery rejected: %v", err)
+	}
+}
