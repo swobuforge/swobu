@@ -11,6 +11,9 @@ const (
 	AcceptsReasoningEffortMax
 	AcceptsReasoningDisabled
 	AcceptsFunctionCallOutputArray
+	// AcceptsChatStreamIncludeUsage selects whether a streaming Chat request may
+	// carry the standard stream_options.include_usage capture opt-in.
+	AcceptsChatStreamIncludeUsage
 )
 
 // TargetFactLookup reads process-scoped knowledge for one target generation.
@@ -53,6 +56,9 @@ func (f *TargetFacts) AcceptsReasoningEffortMax() bool  { return f.read(AcceptsR
 func (f *TargetFacts) AcceptsReasoningDisabled() bool   { return f.read(AcceptsReasoningDisabled) }
 func (f *TargetFacts) AcceptsFunctionCallOutputArray() bool {
 	return f.read(AcceptsFunctionCallOutputArray)
+}
+func (f *TargetFacts) AcceptsChatStreamIncludeUsage() bool {
+	return f.read(AcceptsChatStreamIncludeUsage)
 }
 
 // Reads returns a detached snapshot of every fact and value used by encoding.

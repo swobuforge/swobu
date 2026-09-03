@@ -78,10 +78,12 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 	},
 	ReasoningPaths: [][]string{
 		{"usage", "completion_tokens_details", "reasoning_tokens"},
+		{"usage", "reasoning_tokens"},
 	},
 	CacheReadPaths: [][]string{
 		{"usage", "prompt_tokens_details", "cached_tokens"},
 		{"usage", "input_tokens_details", "cached_tokens"},
+		{"usage", "cached_tokens"},
 		{"usage", "cache_read_input_tokens"},
 		{"usageMetadata", "cachedContentTokenCount"},
 		{"usage", "cacheReadInputTokens"},
@@ -174,6 +176,8 @@ type chatCompletionsEventReader struct {
 	resultID        string
 	model           string
 	completed       bool
+	choiceFinished  bool
+	completion      canonical.Completion
 	pending         canonical.EventSequence
 	textOpen        bool
 	textEnvID       canonical.EnvelopeID
@@ -250,12 +254,18 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			return canonical.Event{}, err
 		}
 		if strings.TrimSpace(event.Data) == "[DONE]" { // swobu:io-string source=boundary
+			if s.choiceFinished && !s.completed {
+				s.settleCompletedResponse()
+				if len(s.pending) > 0 {
+					return s.shiftPending(), nil
+				}
+			}
 			continue
 		}
 		rawChunk := []byte(event.Data)
 		chunkUsage := core.ExtractTokenUsage(rawChunk, tokenUsagePathSpec)
 		if !chunkUsage.IsZero() {
-			s.latestUsage = chunkUsage
+			s.latestUsage = core.MergeLatestTokenUsage(s.latestUsage, chunkUsage)
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
@@ -364,6 +374,9 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
 		return nil
 	}
+	if s.choiceFinished {
+		return canonical.NewBackendError("", 0, "chat completions stream repeated its finish reason", "")
+	}
 	if err := s.validateToolOccurrenceFrontier(); err != nil {
 		return err
 	}
@@ -442,11 +455,16 @@ func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choi
 		occurrence.Completed = true
 		s.toolOccurrences[idx] = occurrence
 	}
+	s.choiceFinished = true
+	s.completion = chatCompletion(choice.FinishReason)
+	return nil
+}
+
+func (s *chatCompletionsEventReader) settleCompletedResponse() {
 	s.completed = true
 	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
+	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: s.completion}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
-	return nil
 }
 
 func logInvalidStreamedToolArguments(exchangeID, responseID string, index int, state streamToolState, err error) {
@@ -517,11 +535,9 @@ func (s *chatCompletionsEventReader) handleChoiceContentFilter(ctx context.Conte
 	if s.completed {
 		return
 	}
-	s.completed = true
 	s.closeOpenChildren(canonical.EnvelopeStatusError)
-	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
-	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: chatCompletion(choice.FinishReason)}})
-	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
+	s.choiceFinished = true
+	s.completion = chatCompletion(choice.FinishReason)
 }
 
 func (s *chatCompletionsEventReader) Close(context.Context) error {

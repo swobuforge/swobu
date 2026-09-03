@@ -18,14 +18,15 @@ func (c Codec) CharacterizeTargetFact(ctx context.Context, target provider.Targe
 	if !ok {
 		return provider.TargetFactResolution{}
 	}
-	preferred := c.runTargetFactFixture(ctx, target, request, fact, true, transport)
+	fixtureDelivery := targetFactFixtureDelivery(fact)
+	preferred := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, fact, true, transport)
 	if preferred == targetFactFixtureSucceeded {
 		return provider.TargetFactResolution{Value: true, Conclusive: true}
 	}
 	if preferred != targetFactFixtureRejected {
 		return provider.TargetFactResolution{}
 	}
-	if c.runTargetFactFixture(ctx, target, request, fact, false, transport) == targetFactFixtureSucceeded {
+	if c.runTargetFactFixture(ctx, target, request, fixtureDelivery, fact, false, transport) == targetFactFixtureSucceeded {
 		return provider.TargetFactResolution{Value: false, Conclusive: true}
 	}
 	return provider.TargetFactResolution{}
@@ -39,7 +40,7 @@ const (
 	targetFactFixtureRejected
 )
 
-func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureOutcome {
+func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureOutcome {
 	facts := provider.NewTargetFacts(func(read provider.TargetFact) (bool, bool) {
 		if read != fact {
 			return true, false
@@ -52,7 +53,7 @@ func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetS
 	}
 	providerRequest := provider.Request{
 		Canonical: request, TargetFacts: facts, ToolNames: names,
-		Delivery: delivery.BufferedDelivery(),
+		Delivery: fixtureDelivery,
 	}
 	document, _, err := c.Encode(providerRequest)
 	reads := facts.Reads()
@@ -161,6 +162,7 @@ func targetFactFixture(model string, fact provider.TargetFact) (canonical.Canoni
 			return canonical.CanonicalRequest{}, false
 		}
 		params.Items = []canonical.CanonicalItem{declarations, user, call, result, user}
+	case provider.AcceptsChatStreamIncludeUsage:
 	default:
 		return canonical.CanonicalRequest{}, false
 	}
@@ -168,4 +170,11 @@ func targetFactFixture(model string, fact provider.TargetFact) (canonical.Canoni
 		return canonical.CanonicalRequest{}, false
 	}
 	return canonical.NewCanonicalRequest(params), true
+}
+
+func targetFactFixtureDelivery(fact provider.TargetFact) delivery.Delivery {
+	if fact == provider.AcceptsChatStreamIncludeUsage {
+		return delivery.StreamingDelivery(delivery.FramingSSE)
+	}
+	return delivery.BufferedDelivery()
 }

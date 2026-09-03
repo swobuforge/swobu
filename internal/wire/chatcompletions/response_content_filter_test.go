@@ -40,7 +40,8 @@ func TestDecodeResponseBuffered_ContentFilterPreservesTerminalReason(t *testing.
 func TestDecodeResponseStream_ContentFilterPreservesTerminalReason(t *testing.T) {
 	t.Parallel()
 
-	raw := "data: {\"created\":1781902359,\"id\":\"chatcmpl-b1a3544fdfaf41e3a3e812af05b1e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\",\"content_filter_result\":{\"error\":{\"code\":\"content_filter\",\"message\":\"ResponsibleAI result indicated block action.\"}}}]}\n\n"
+	raw := "data: {\"created\":1781902359,\"id\":\"chatcmpl-b1a3544fdfaf41e3a3e812af05b1e\",\"model\":\"m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\",\"content_filter_result\":{\"error\":{\"code\":\"content_filter\",\"message\":\"ResponsibleAI result indicated block action.\"}}}]}\n\n" +
+		"data: [DONE]\n\n"
 
 	changeLog := &recordingChanges{}
 	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_stream_content_filter", changeLog)

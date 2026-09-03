@@ -73,7 +73,11 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	out := 9
 	cacheRead := 70
 	cacheWrite := 5
-	usage, err := trafficevidence.NewTokenUsageWithOptional(&in, &out, &cacheRead, &cacheWrite)
+	reasoning := 4
+	usage, err := trafficevidence.NewTokenUsage(trafficevidence.TokenUsageParams{
+		InputTokens: &in, OutputTokens: &out, ReasoningTokens: &reasoning,
+		CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite,
+	})
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
@@ -129,6 +133,10 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	}
 	if _, ok := row["token_usage"]; !ok {
 		t.Fatalf("row missing token_usage object: %#v", row)
+	}
+	usageRaw, ok := row["token_usage"].(map[string]any)
+	if !ok || usageRaw["reasoning_tokens"] != float64(4) || len(usageRaw) != 5 {
+		t.Fatalf("row token usage does not preserve the five-counter shape: %#v", row["token_usage"])
 	}
 	prefixRaw, ok := row["reusable_prefix"].(map[string]any)
 	if !ok || prefixRaw["state"] != "preserved" || len(prefixRaw) != 1 {

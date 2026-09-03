@@ -447,7 +447,9 @@ func normalizeClientDelivery(decoded delivery.Delivery, framing delivery.Framing
 	if decoded.Mode != delivery.Streaming || decoded.Framing != delivery.FramingNone || framing == delivery.FramingNone {
 		return decoded
 	}
-	return delivery.StreamingDelivery(framing)
+	normalized := delivery.StreamingDelivery(framing)
+	normalized.IncludeUsageFrame = decoded.IncludeUsageFrame
+	return normalized
 }
 
 type ListModelsInput struct {

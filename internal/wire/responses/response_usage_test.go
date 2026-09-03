@@ -80,3 +80,29 @@ func TestDecodeResponseStream_UsesCompletedOutputFallbackWhenNoDeltas(t *testing
 		t.Fatalf("output text=%q want ok", text.Text())
 	}
 }
+
+func TestDecodeResponseStreamMergesSparseUsageSnapshotsByField(t *testing.T) {
+	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":10}}}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}],\"usage\":{\"output_tokens\":7,\"output_tokens_details\":{\"reasoning_tokens\":3}}}}\n\n"
+	reader := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex_sparse_usage", nil, true)
+	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewBoundResponseIdentityStream(reader, canonical.ResponseBinding{SwobuID: "resp_test"}), canonical.EnvResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := closed.ProjectResponse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input, ok := response.Usage().InputTokens(); !ok || input != 20 {
+		t.Fatalf("input = (%d,%t), want retained (20,true)", input, ok)
+	}
+	if output, ok := response.Usage().OutputTokens(); !ok || output != 7 {
+		t.Fatalf("output = (%d,%t), want latest (7,true)", output, ok)
+	}
+	if cacheRead, ok := response.Usage().CacheReadTokens(); !ok || cacheRead != 10 {
+		t.Fatalf("cache read = (%d,%t), want retained (10,true)", cacheRead, ok)
+	}
+	if reasoning, ok := response.Usage().ReasoningTokens(); !ok || reasoning != 3 {
+		t.Fatalf("reasoning = (%d,%t), want latest (3,true)", reasoning, ok)
+	}
+}

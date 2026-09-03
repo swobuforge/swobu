@@ -39,7 +39,9 @@ func TestMessagesWebSearchUsageCountsSuccessfulActionsNotSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertMessagesWebSearchUsage(t, buffered.Document.RawBytes(), test.count)
+			if bytes.Contains(buffered.Document.RawBytes(), []byte(`"usage"`)) {
+				t.Fatalf("buffered Messages fabricated token usage to preserve web-search detail: %s", buffered.Document.RawBytes())
+			}
 
 			events := canonical.SynthesizeResponseEnvelopeEvents(
 				"exchange", response.Response(), response.Model(), response.Items(), response.Completion(), response.Usage(),

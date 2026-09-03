@@ -9,6 +9,7 @@ func TestExtractTokenUsage_MapsReasoningTokens(t *testing.T) {
 		"usage":{
 			"input_tokens":10,
 			"output_tokens":7,
+			"total_tokens":19,
 			"output_tokens_details":{"reasoning_tokens":4},
 			"input_tokens_details":{"cached_tokens":3,"cache_write_tokens":1}
 		}
@@ -36,7 +37,7 @@ func TestExtractTokenUsage_MapsReasoningTokens(t *testing.T) {
 	}
 	total, ok := usage.TotalKnownTokens()
 	if !ok || total != 17 {
-		t.Fatalf("TotalKnownTokens = (%d,%v), want (17,true)", total, ok)
+		t.Fatalf("TotalKnownTokens = (%d,%v), want derived (17,true)", total, ok)
 	}
 }
 

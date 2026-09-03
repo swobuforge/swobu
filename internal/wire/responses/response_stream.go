@@ -146,7 +146,7 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		rawFrame := []byte(event.Data)
 		frameUsage := core.ExtractTokenUsage(rawFrame, tokenUsagePathSpec)
 		if !frameUsage.IsZero() {
-			s.latestUsage = frameUsage
+			s.latestUsage = core.MergeLatestTokenUsage(s.latestUsage, frameUsage)
 		}
 		var frame streamFrame
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {

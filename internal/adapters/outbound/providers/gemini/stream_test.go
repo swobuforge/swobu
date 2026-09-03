@@ -64,7 +64,7 @@ func TestInteractionsStreamProjectsTextLifecycleAndCumulativeUsage(t *testing.T)
 		t.Fatalf("text = %q", text.Text())
 	}
 	usage := response.Usage()
-	assertUsage(t, usage, 3, 2, 5, 1)
+	assertUsage(t, usage, 3, 7, 5, 1)
 }
 
 func TestInteractionsStreamProjectsThoughtSummaryAndExactFunctionRouting(t *testing.T) {
@@ -1096,5 +1096,22 @@ func assertUsage(t *testing.T, usage canonical.TokenUsage, input, output, reason
 	}
 	if got, ok := usage.CacheReadTokens(); !ok || got != cached {
 		t.Fatalf("cached usage = %d/%t, want %d", got, ok, cached)
+	}
+}
+
+func TestMergeInteractionUsageIncludesThoughtInOutputAndIgnoresProviderTotal(t *testing.T) {
+	input, output, thought, cached, total := 10, 7, 3, 2, 20
+	usage := mergeInteractionUsage(canonical.NewUnknownTokenUsage(), interactionUsagePayload{
+		TotalInputTokens: &input, TotalOutputTokens: &output, TotalThoughtTokens: &thought,
+		TotalCachedTokens: &cached, TotalTokens: &total,
+	})
+	if got, ok := usage.OutputTokens(); !ok || got != 10 {
+		t.Fatalf("output = (%d,%t), want (10,true)", got, ok)
+	}
+	if got, ok := usage.ReasoningTokens(); !ok || got != 3 {
+		t.Fatalf("reasoning = (%d,%t), want (3,true)", got, ok)
+	}
+	if got, ok := usage.TotalKnownTokens(); !ok || got != 20 {
+		t.Fatalf("canonical total = (%d,%t), want input plus thought-inclusive output (20,true)", got, ok)
 	}
 }

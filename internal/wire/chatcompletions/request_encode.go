@@ -216,6 +216,7 @@ type CompileOptions struct {
 	AcceptsMaxCompletionTokens func() bool
 	OmitParallelToolCallsFalse func() bool
 	ReasoningTarget            ReasoningTargetDialect
+	AcceptsStreamIncludeUsage  func() bool
 }
 
 type toolCallBody struct {
@@ -396,6 +397,9 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	}
 	if d.Mode == delivery.Streaming {
 		payload["stream"] = true
+		if options.AcceptsStreamIncludeUsage == nil || options.AcceptsStreamIncludeUsage() {
+			payload["stream_options"] = map[string]any{"include_usage": true}
+		}
 	}
 	return document, nil
 }

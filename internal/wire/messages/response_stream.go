@@ -24,7 +24,7 @@ func decodeResponseStream(request canonical.CanonicalRequest, names wire.ToolNam
 		blocks:         map[int]*streamContentBlock{},
 		resolvedBlocks: map[int]struct{}{},
 		unknownEvents:  map[string]struct{}{},
-		latestUsage:    canonical.NewUnknownTokenUsage(),
+		latestUsage:    messagesUsageSnapshot{usage: canonical.NewUnknownTokenUsage()},
 		request:        request.Clone(),
 		toolNames:      names,
 	}
@@ -54,7 +54,7 @@ type messagesEventReader struct {
 	blocks             map[int]*streamContentBlock
 	resolvedBlocks     map[int]struct{}
 	unknownEvents      map[string]struct{}
-	latestUsage        canonical.TokenUsage
+	latestUsage        messagesUsageSnapshot
 	nextOrdinal        uint32
 	nextBlockIndex     int
 	frameIndex         int
@@ -165,8 +165,8 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		if strings.TrimSpace(frame.Data) == "" || frame.Event == "ping" { // swobu:io-string source=boundary
 			continue
 		}
-		frameUsage := core.ExtractTokenUsage([]byte(frame.Data), tokenUsagePathSpec)
-		if !frameUsage.IsZero() {
+		frameUsage := extractMessagesUsage([]byte(frame.Data))
+		if !frameUsage.usage.IsZero() {
 			s.latestUsage = mergeMessagesCumulativeUsage(s.latestUsage, frameUsage)
 		}
 		var envelope streamEnvelope
@@ -184,16 +184,26 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 	}
 }
 
-func mergeMessagesCumulativeUsage(previous canonical.TokenUsage, current canonical.TokenUsage) canonical.TokenUsage {
-	input := cumulativeUsageField(previous.InputTokens, current.InputTokens)
-	output := cumulativeUsageField(previous.OutputTokens, current.OutputTokens)
-	cacheRead := cumulativeUsageField(previous.CacheReadTokens, current.CacheReadTokens)
-	cacheWrite := cumulativeUsageField(previous.CacheWriteTokens, current.CacheWriteTokens)
+func mergeMessagesCumulativeUsage(previous messagesUsageSnapshot, current messagesUsageSnapshot) messagesUsageSnapshot {
+	if previous.family != messagesUsageFamilyUnknown &&
+		current.family != messagesUsageFamilyUnknown &&
+		previous.family != current.family {
+		return current
+	}
+	input := cumulativeUsageField(previous.usage.InputTokens, current.usage.InputTokens)
+	output := cumulativeUsageField(previous.usage.OutputTokens, current.usage.OutputTokens)
+	cacheRead := cumulativeUsageField(previous.usage.CacheReadTokens, current.usage.CacheReadTokens)
+	cacheWrite := cumulativeUsageField(previous.usage.CacheWriteTokens, current.usage.CacheWriteTokens)
+	reasoning := cumulativeUsageField(previous.usage.ReasoningTokens, current.usage.ReasoningTokens)
 	merged, _ := canonical.NewTokenUsage(canonical.TokenUsageParams{
 		InputTokens: input, OutputTokens: output,
-		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+		ReasoningTokens: reasoning, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
 	})
-	return merged
+	family := current.family
+	if family == messagesUsageFamilyUnknown {
+		family = previous.family
+	}
+	return messagesUsageSnapshot{family: family, usage: merged}
 }
 
 func cumulativeUsageField(previous func() (int, bool), current func() (int, bool)) *int {
@@ -656,7 +666,7 @@ func (s *messagesEventReader) handleMessageStop(ctx context.Context) error {
 	if finishReason == "" {
 		finishReason = "completed"
 	}
-	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage}})
+	s.enqueue(canonical.Event{Kind: canonical.EventUsage, EnvID: s.responseID, Payload: canonical.UsagePayload{Usage: s.latestUsage.canonical()}})
 	s.enqueue(canonical.Event{Kind: canonical.EventFinish, EnvID: s.responseID, Payload: canonical.FinishPayload{Completion: messagesCompletion(finishReason)}})
 	s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusCompleted)
 	return nil

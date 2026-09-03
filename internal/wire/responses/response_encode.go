@@ -88,18 +88,21 @@ func responsesUsageFromCanonical(usage canonical.TokenUsage) *responsesUsageDTO 
 	reasoning, hasReasoning := usage.ReasoningTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasReasoning && !hasCacheRead && !hasCacheWrite {
+	if !hasInput || !hasOutput {
 		return nil
 	}
+	total := input + output
 	dto := &responsesUsageDTO{
 		InputTokens:  input,
 		OutputTokens: output,
-		TotalTokens:  input + output,
+		TotalTokens:  total,
 	}
-	if hasCacheRead || hasCacheWrite {
+	if hasCacheRead {
 		dto.InputDetails = &responsesInputDetailsDTO{
-			CachedTokens:     cacheRead,
-			CacheWriteTokens: cacheWrite,
+			CachedTokens: cacheRead,
+		}
+		if hasCacheWrite {
+			dto.InputDetails.CacheWriteTokens = &cacheWrite
 		}
 	}
 	if hasReasoning {

@@ -68,11 +68,16 @@ type messagesResponseDTO struct {
 }
 
 type messagesUsageDTO struct {
-	InputTokens              int                         `json:"input_tokens"`
-	OutputTokens             int                         `json:"output_tokens"`
-	CacheReadInputTokens     int                         `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int                         `json:"cache_creation_input_tokens,omitempty"`
-	ServerToolUse            *messagesServerToolUsageDTO `json:"server_tool_use,omitempty"`
+	InputTokens              int                            `json:"input_tokens"`
+	OutputTokens             int                            `json:"output_tokens"`
+	CacheReadInputTokens     int                            `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                            `json:"cache_creation_input_tokens,omitempty"`
+	ServerToolUse            *messagesServerToolUsageDTO    `json:"server_tool_use,omitempty"`
+	OutputTokenDetails       *messagesOutputTokenDetailsDTO `json:"output_tokens_details,omitempty"`
+}
+
+type messagesOutputTokenDetailsDTO struct {
+	ThinkingTokens int `json:"thinking_tokens"`
 }
 
 type messagesServerToolUsageDTO struct {
@@ -131,11 +136,12 @@ type messagesDeltaBodyDTO struct {
 }
 
 type messagesDeltaUsageDTO struct {
-	InputTokens              int                         `json:"input_tokens,omitempty"`
-	OutputTokens             int                         `json:"output_tokens"`
-	CacheReadInputTokens     int                         `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int                         `json:"cache_creation_input_tokens,omitempty"`
-	ServerToolUse            *messagesServerToolUsageDTO `json:"server_tool_use,omitempty"`
+	InputTokens              *int                           `json:"input_tokens,omitempty"`
+	OutputTokens             *int                           `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     int                            `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                            `json:"cache_creation_input_tokens,omitempty"`
+	ServerToolUse            *messagesServerToolUsageDTO    `json:"server_tool_use,omitempty"`
+	OutputTokenDetails       *messagesOutputTokenDetailsDTO `json:"output_tokens_details,omitempty"`
 }
 
 type messagesContentBlockStartDTO struct {

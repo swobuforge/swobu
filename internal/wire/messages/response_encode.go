@@ -71,14 +71,25 @@ func messagesUsageFromCanonical(usage canonical.TokenUsage, webSearchRequests in
 	output, hasOutput := usage.OutputTokens()
 	cacheRead, hasCacheRead := usage.CacheReadTokens()
 	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	if !hasInput && !hasOutput && !hasCacheRead && !hasCacheWrite && !observedWebSearch {
+	reasoning, hasReasoning := usage.ReasoningTokens()
+	if !hasInput || !hasOutput {
 		return nil
 	}
+	wireInput := input
+	emitCacheBreakdown := hasCacheRead && hasCacheWrite && input >= cacheRead+cacheWrite
+	if emitCacheBreakdown {
+		wireInput = input - cacheRead - cacheWrite
+	}
 	out := &messagesUsageDTO{
-		InputTokens:              input,
-		OutputTokens:             output,
-		CacheReadInputTokens:     cacheRead,
-		CacheCreationInputTokens: cacheWrite,
+		InputTokens:  wireInput,
+		OutputTokens: output,
+	}
+	if emitCacheBreakdown {
+		out.CacheReadInputTokens = cacheRead
+		out.CacheCreationInputTokens = cacheWrite
+	}
+	if hasReasoning {
+		out.OutputTokenDetails = &messagesOutputTokenDetailsDTO{ThinkingTokens: reasoning}
 	}
 	if observedWebSearch {
 		out.ServerToolUse = &messagesServerToolUsageDTO{WebSearchRequests: webSearchRequests}
@@ -87,15 +98,33 @@ func messagesUsageFromCanonical(usage canonical.TokenUsage, webSearchRequests in
 }
 
 func messagesDeltaUsageFromCanonical(usage canonical.TokenUsage, webSearchRequests int, observedWebSearch bool) messagesDeltaUsageDTO {
-	input, _ := usage.InputTokens()
-	output, _ := usage.OutputTokens()
+	input, hasInput := usage.InputTokens()
+	output, hasOutput := usage.OutputTokens()
 	cacheRead, _ := usage.CacheReadTokens()
 	cacheWrite, _ := usage.CacheWriteTokens()
-	out := messagesDeltaUsageDTO{
-		InputTokens:              input,
-		OutputTokens:             output,
-		CacheReadInputTokens:     cacheRead,
-		CacheCreationInputTokens: cacheWrite,
+	reasoning, hasReasoning := usage.ReasoningTokens()
+	emitCacheBreakdown := false
+	if hasInput {
+		_, hasCacheRead := usage.CacheReadTokens()
+		_, hasCacheWrite := usage.CacheWriteTokens()
+		if hasCacheRead && hasCacheWrite && input >= cacheRead+cacheWrite {
+			input -= cacheRead + cacheWrite
+			emitCacheBreakdown = true
+		}
+	}
+	out := messagesDeltaUsageDTO{}
+	if hasInput {
+		out.InputTokens = &input
+	}
+	if hasOutput {
+		out.OutputTokens = &output
+	}
+	if emitCacheBreakdown {
+		out.CacheReadInputTokens = cacheRead
+		out.CacheCreationInputTokens = cacheWrite
+	}
+	if hasReasoning {
+		out.OutputTokenDetails = &messagesOutputTokenDetailsDTO{ThinkingTokens: reasoning}
 	}
 	if observedWebSearch {
 		out.ServerToolUse = &messagesServerToolUsageDTO{WebSearchRequests: webSearchRequests}
