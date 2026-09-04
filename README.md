@@ -261,13 +261,14 @@ Swobu supports local inference, frontier APIs, hyperscalers, specialized inferen
 
 **Local:** Ollama · LM Studio · vLLM
 
-**Frontier:** OpenAI · Meta Model API · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
+**Frontier:** OpenAI · Meta Model API · ChatGPT · Anthropic · Gemini API · Mistral AI · DeepSeek · Kimi · StepFun · Z.AI
 
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
+**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud AI Endpoints
 
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
+**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM Hosted · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius Token Factory · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope API-Inference · CompactifAI · LLM7 · Nous Portal · Command Code · Venice AI
 
-**Aggregation:** OpenRouter · Custom Endpoint
+**Aggregation:** OpenRouter · OpenCode Zen · Custom Endpoint
+
 
 <!-- generated:providers:end -->
 

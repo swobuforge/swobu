@@ -464,6 +464,18 @@ func catalog() []Profile {
 			ProviderProtocols:   slices.Clone(providerProtocolsModelScope),
 		},
 		{
+			ProviderID:          ProviderSpecCompactifAI,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "CompactifAI",
+			SetupHint:           "API key",
+			SetupKeywords:       []string{"CompactifAI", "Multiverse Computing", "Quasar"},
+			Locator:             LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.compactif.ai/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "COMPACTIFAI_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
+		},
+		{
 			ProviderID:          ProviderSpecRunPod,
 			ConnectionShape:     routing.ConnectionShapeStandard,
 			ModelDiscovery:      ModelDiscoveryModeAdvisory,

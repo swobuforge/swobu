@@ -193,6 +193,44 @@ func TestRuntimeOwnsOpenAIChatCompletionsTokenSpelling(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesPreservesExplicitMaxOutputTokensEight(t *testing.T) {
+	target := provider.NewTargetSnapshot("backend", string(profile.ProviderSpecOpenAI), "https://api.openai.com/v1", "env:TOKEN", protocolkind.Responses, "responses", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := NewRuntime(nil, nil).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encode := func(maxOutputTokens *int) map[string]any {
+		t.Helper()
+		controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{MaxOutputTokens: maxOutputTokens})
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, changes, err := backend.Codec.Encode(provider.Request{Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")}, Controls: controls,
+		}), Delivery: delivery.BufferedDelivery()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(changes) != 0 {
+			t.Fatalf("OpenAI Responses max-output projection changes = %#v", changes)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	eight := 8
+	if got := encode(&eight)["max_output_tokens"]; got != float64(8) {
+		t.Fatalf("max_output_tokens = %#v, want 8", got)
+	}
+	if value, exists := encode(nil)["max_output_tokens"]; exists {
+		t.Fatalf("unspecified max_output_tokens was invented: %#v", value)
+	}
+}
+
 func TestRuntimeUsesSharedOfficialResponsesToolLowering(t *testing.T) {
 	childKey, _ := canonical.NewToolKey("workspace", canonical.ToolKindFunction, "read_file")
 	child := canonicaltest.MustFunctionTool(childKey, "Read", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())

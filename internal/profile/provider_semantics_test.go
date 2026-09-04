@@ -14,6 +14,7 @@ func TestNousIsNativeChatOnly(t *testing.T) {
 
 func TestNewProviderFixedLocators(t *testing.T) {
 	for providerID, want := range map[ProviderID]string{
+		ProviderSpecCompactifAI: "https://api.compactif.ai/v1",
 		ProviderSpecOpenCodeZen: "https://opencode.ai/zen/v1",
 		ProviderSpecNous:        "https://inference-api.nousresearch.com/v1",
 		ProviderSpecCommandCode: "https://api.commandcode.ai/provider/v1",

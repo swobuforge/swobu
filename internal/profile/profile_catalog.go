@@ -94,6 +94,7 @@ const (
 	ProviderSpecSiliconFlow ProviderID = "siliconflow"
 	ProviderSpecOVHCloud    ProviderID = "ovhcloud"
 	ProviderSpecModelScope  ProviderID = "modelscope"
+	ProviderSpecCompactifAI ProviderID = "compactifai"
 	ProviderSpecOpenCodeZen ProviderID = "opencode-zen"
 	ProviderSpecNous        ProviderID = "nous"
 	ProviderSpecCommandCode ProviderID = "commandcode"

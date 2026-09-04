@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/cerebras"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/chatgpt"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/commandcode"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/compactifai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepinfra"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/deepseek"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/fireworks"
@@ -69,6 +70,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		opencodezen.NewRuntime(client, credentials),
 		nous.NewRuntime(client, credentials),
 		commandcode.NewRuntime(client, credentials),
+		compactifai.NewRuntime(client, credentials),
 		venice.NewRuntime(client, credentials),
 		novita.NewRuntime(client, credentials),
 		friendli.NewRuntime(client, credentials),
