@@ -103,7 +103,7 @@ data: {"event_type":"step.stop","index":1}
 data: {"event_type":"interaction.completed","interaction":{"id":"interaction_1","status":"requires_action"}}
 
 `
-	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "gemini-exchange", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, fmt.Sprintf(raw, providerName, providerName))
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{Attempt: provider.AttemptContext{ExchangeID: "gemini-exchange"}, Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, fmt.Sprintf(raw, providerName, providerName))
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_thought_function"})), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ data: {"event_type":"step.stop","index":0}
 data: {"event_type":"interaction.completed","interaction":{"id":"","status":"requires_action"}}
 
 `
-	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "gemini-discovery", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, fmt.Sprintf(raw, providerName))
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{Attempt: provider.AttemptContext{ExchangeID: "gemini-discovery"}, Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, fmt.Sprintf(raw, providerName))
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp_discovery"})), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -271,7 +271,7 @@ data: {"event_type":"step.delta","index":0,"delta":{"type":"function_call","id":
 `,
 	} {
 		t.Run(name, func(t *testing.T) {
-			stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "gemini-exchange", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, raw)
+			stream := decodeGeminiStreamForProviderRequest(t, provider.Request{Attempt: provider.AttemptContext{ExchangeID: "gemini-exchange"}, Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, raw)
 			for {
 				_, err := stream.Next(context.Background())
 				if err == nil {
@@ -307,7 +307,7 @@ data: {"event_type":"step.stop","index":0}
 data: {"event_type":"interaction.completed","interaction":{"id":"interaction_1","status":"requires_action"}}
 
 `
-	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "ex", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, raw)
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, raw)
 	closed, err := canonical.ReadClosedEnvelope(context.Background(), canonical.NewValidatedResponseStream(canonical.NewBoundResponseIdentityStream(stream, canonical.ResponseBinding{SwobuID: "resp"})), canonical.EnvResponse)
 	if err != nil {
 		t.Fatal(err)
@@ -519,7 +519,7 @@ func TestInteractionsStreamCompletesRequiresActionOnlyAfterFunctionCall(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{ExchangeID: "gemini-exchange", Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, `data: {"event_type":"interaction.created","interaction":{"id":"interaction_1","model":"gemini-model","status":"in_progress"}}
+	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{Attempt: provider.AttemptContext{ExchangeID: "gemini-exchange"}, Canonical: request, ToolNames: names, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}, `data: {"event_type":"interaction.created","interaction":{"id":"interaction_1","model":"gemini-model","status":"in_progress"}}
 
 data: {"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_lookup","name":"lookup","arguments":{"q":"x"}}}
 
@@ -985,10 +985,10 @@ func TestInteractionsStreamPreservesMultipleParallelFunctionCalls(t *testing.T) 
 		t.Fatal(err)
 	}
 	stream := decodeGeminiStreamForProviderRequest(t, provider.Request{
-		ExchangeID: "gemini-multi-call",
-		Canonical:  req,
-		ToolNames:  names,
-		Delivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Attempt:   provider.AttemptContext{ExchangeID: "gemini-multi-call"},
+		Canonical: req,
+		ToolNames: names,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	}, strings.Join([]string{
 		`data: {"event_type":"interaction.created","interaction":{"id":"interaction_multi","model":"gemini-model","status":"in_progress"}}`,
 		``,
@@ -1061,9 +1061,9 @@ func decodeGeminiStream(t *testing.T, raw string) *interactionsStream {
 func decodeGeminiStreamForRequest(t *testing.T, request canonical.CanonicalRequest, raw string) *interactionsStream {
 	t.Helper()
 	return decodeGeminiStreamForProviderRequest(t, provider.Request{
-		ExchangeID: "gemini-exchange",
-		Canonical:  request,
-		Delivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Attempt:   provider.AttemptContext{ExchangeID: "gemini-exchange"},
+		Canonical: request,
+		Delivery:  delivery.StreamingDelivery(delivery.FramingSSE),
 	}, raw)
 }
 

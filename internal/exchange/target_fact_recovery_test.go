@@ -157,7 +157,7 @@ func factRecoveryAttempt(t *testing.T, used bool) (exchangeState, runtimeBundle,
 	s := reducerTestState(t)
 	target := requestpathTarget(t, "fact-target")
 	s.route = routePlan{targets: []routing.Target{target}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := reducerRuntime()
 	runner.TargetExceptions = newTargetExceptions()

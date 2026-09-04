@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // ChatReplayScope owns the exact OpenRouter Chat opaque reasoning replay dialect.
@@ -71,7 +72,7 @@ func canOpenToolContinuation(req canonical.CanonicalRequest) (bool, error) {
 	return policy.Mode != canonical.ToolPolicyNone, nil
 }
 
-func decorateOpenRouterAttempt(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+func decorateOpenRouterAttempt(ctx provider.AttemptContext) (protocolcodec.AttemptDecoration, error) {
 	if ctx.CacheLocality.IsZero() {
 		return protocolcodec.AttemptDecoration{}, nil
 	}

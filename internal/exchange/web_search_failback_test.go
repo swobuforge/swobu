@@ -9,13 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire/responses"
 )
 
@@ -62,7 +62,7 @@ func TestCurrentSearchGrammarOmissionReachesPrimaryWithoutFallback(t *testing.T)
 		primaryRequest = document
 		return capabilityFallbackChatResponse("local answer"), nil
 	}}
-	ingress := capabilityFallbackIngress(workspace, session.NewMemoryStore(), runtime)
+	ingress := capabilityFallbackIngress(workspace, continuity.NewMemoryStore(), runtime)
 	out := runCapabilityFallbackTurn(t, ingress, workspace, "omission", `{
 		"model":"chat",
 		"tools":[{"type":"web_search"}],
@@ -106,7 +106,7 @@ func TestNativeSearchProviderUnauthorizedAdvancesToFallback(t *testing.T) {
 			return nil, nil
 		}
 	}}
-	ingress := capabilityFallbackIngress(workspace, session.NewMemoryStore(), runtime)
+	ingress := capabilityFallbackIngress(workspace, continuity.NewMemoryStore(), runtime)
 	out := runCapabilityFallbackTurn(t, ingress, workspace, "rejection", `{
 		"model":"chat",
 		"tools":[{"type":"web_search"}],
@@ -122,7 +122,7 @@ func TestNativeSearchProviderUnauthorizedAdvancesToFallback(t *testing.T) {
 }
 
 func TestSettledSearchHistoryReentersLocalTarget(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := continuity.NewMemoryStore()
 	searchTarget := capabilityFallbackTarget(t, "native-search", "responses")
 	searchWorkspace := capabilityFallbackWorkspace(t, "search-history", []routing.Target{searchTarget})
 	searchRuntime := capabilityFallbackRuntime{transport: func(_ context.Context, target provider.TargetSnapshot, document carrier.Document) (provider.Ingress, error) {
@@ -167,7 +167,7 @@ func TestSettledSearchHistoryReentersLocalTarget(t *testing.T) {
 	}
 }
 
-func capabilityFallbackIngress(workspace routing.Workspace, store session.Store, runtime capabilityFallbackRuntime) RequestIngress {
+func capabilityFallbackIngress(workspace routing.Workspace, store continuity.Store, runtime capabilityFallbackRuntime) RequestIngress {
 	return NewIngress(capabilityFallbackWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
 		CheckpointStore: store,
 		ResponseIDs:     deterministicResponseIDGenerator{},

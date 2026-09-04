@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -19,14 +21,18 @@ func (c Codec) CharacterizeTargetFact(ctx context.Context, target provider.Targe
 		return provider.TargetFactResolution{}
 	}
 	fixtureDelivery := targetFactFixtureDelivery(fact)
-	preferred := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, fact, true, transport)
+	threadID, err := thread.Derive("swobu/target-characterization/v1", target.TargetID, strconv.FormatUint(target.TargetVersion, 10), string(fact))
+	if err != nil {
+		return provider.TargetFactResolution{}
+	}
+	preferred := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, threadID, fact, true, transport)
 	if preferred == targetFactFixtureSucceeded {
 		return provider.TargetFactResolution{Value: true, Conclusive: true}
 	}
 	if preferred != targetFactFixtureRejected {
 		return provider.TargetFactResolution{}
 	}
-	if c.runTargetFactFixture(ctx, target, request, fixtureDelivery, fact, false, transport) == targetFactFixtureSucceeded {
+	if c.runTargetFactFixture(ctx, target, request, fixtureDelivery, threadID, fact, false, transport) == targetFactFixtureSucceeded {
 		return provider.TargetFactResolution{Value: false, Conclusive: true}
 	}
 	return provider.TargetFactResolution{}
@@ -40,7 +46,7 @@ const (
 	targetFactFixtureRejected
 )
 
-func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureOutcome {
+func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, threadID thread.ID, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureOutcome {
 	facts := provider.NewTargetFacts(func(read provider.TargetFact) (bool, bool) {
 		if read != fact {
 			return true, false
@@ -54,6 +60,7 @@ func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetS
 	providerRequest := provider.Request{
 		Canonical: request, TargetFacts: facts, ToolNames: names,
 		Delivery: fixtureDelivery,
+		Attempt:  provider.AttemptContext{ThreadID: threadID},
 	}
 	document, _, err := c.Encode(providerRequest)
 	reads := facts.Reads()

@@ -157,7 +157,7 @@ func TestProviderPreparationMediaCacheIsExchangeScoped(t *testing.T) {
 func mediaCachePreparationFixture(t *testing.T, modes []mediaEncodingMode, resolved ...*[][]byte) (exchangeState, runtimeBundle) {
 	t.Helper()
 	request := requestWithURLImage(t, "https://example.test/image.png")
-	prepared := mustBeginSession(t, request)
+	prepared := mustBeginContinuity(t, request)
 	state := reducerTestState(t)
 	state.input.request = request
 	state.prepared = &prepared

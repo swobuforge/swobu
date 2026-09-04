@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -89,7 +89,7 @@ func TestResponsesContinuationUsesMatchingTargetAndStoreFalseFallsBackToHistory(
 	turnTwo := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("accounts/acme/deployments/deploy-1"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "previous"},
 	})
-	prepared, err := session.Resume(turnTwo, session.Checkpoint{Request: turnOne, Response: turnOneResponse})
+	prepared, err := continuity.Resume(turnTwo, continuity.Checkpoint{Request: turnOne, Response: turnOneResponse})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestResponsesContinuationUsesMatchingTargetAndStoreFalseFallsBackToHistory(
 	storeFalse := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("accounts/acme/deployments/deploy-1"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "previous"}, Store: canonical.Specify(false),
 	})
-	fallback, err := session.Resume(storeFalse, session.Checkpoint{Request: turnOne, Response: canonicaltest.Response(t, "previous", "model", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one")}, canonical.Completed("completed"))})
+	fallback, err := continuity.Resume(storeFalse, continuity.Checkpoint{Request: turnOne, Response: canonicaltest.Response(t, "previous", "model", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one")}, canonical.Completed("completed"))})
 	if err != nil {
 		t.Fatal(err)
 	}

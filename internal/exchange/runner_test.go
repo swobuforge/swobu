@@ -12,12 +12,12 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
@@ -490,7 +490,7 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		CheckpointStore: session.NewMemoryStore(),
+		CheckpointStore: continuity.NewMemoryStore(),
 		ResponseIDs:     deterministicResponseIDGenerator{},
 		Policy:          DefaultWorkspacePolicy(),
 	}
@@ -564,7 +564,7 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 }
 
 func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	exchangeID := request.ExchangeID
+	exchangeID := request.Attempt.ExchangeID
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		var result wire.ProviderDecodeResult

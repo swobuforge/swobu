@@ -8,13 +8,13 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/responses"
 )
@@ -300,7 +300,7 @@ func TestPrepareProviderCallTargetBoundReplayAndFallback(t *testing.T) {
 
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{targetA, targetB}}
-	prepared := mustBeginSession(t, req)
+	prepared := mustBeginContinuity(t, req)
 	s.prepared = &prepared
 	runner := reducerRuntime()
 
@@ -398,14 +398,14 @@ func TestCheckpointRecoveryPreservesAndProjectsTargetBoundReplay(t *testing.T) {
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_turn1"},
 	})
 
-	// Resume session with checkpoint
-	resolved, err := session.Resume(turn2Request, session.Checkpoint{
-		ID:       "swobu_turn1",
-		Request:  turn1Request,
-		Response: turn1Response,
+	// Resume continuity from the checkpoint.
+	resolved, err := continuity.Resume(turn2Request, continuity.Checkpoint{
+		ResponseID: "swobu_turn1",
+		Request:    turn1Request,
+		Response:   turn1Response,
 	})
 	if err != nil {
-		t.Fatalf("session.Resume failed: %v", err)
+		t.Fatalf("continuity.Resume failed: %v", err)
 	}
 
 	s := reducerTestState(t)
@@ -478,7 +478,7 @@ func TestCheckpointRecoveryPreservesAndProjectsTargetBoundReplay(t *testing.T) {
 
 func TestUnknownOriginReplayDecodedFromNativeClientIngressIsStrippedBeforeDispatch(t *testing.T) {
 	// Client sends a Responses request containing opaque reasoning replay (unbound origin)
-	// without any server checkpoint / session resume.
+	// without any server checkpoint or continuity resume.
 	rawClientJSON := `{
 		"model": "deepinfra-a",
 		"input": [
@@ -516,7 +516,7 @@ func TestUnknownOriginReplayDecodedFromNativeClientIngressIsStrippedBeforeDispat
 	targetA := requestpathTarget(t, "deepinfra-a")
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{targetA}}
-	prepared := mustBeginSession(t, decoded.Request.Request)
+	prepared := mustBeginContinuity(t, decoded.Request.Request)
 	s.prepared = &prepared
 	runner := reducerRuntime()
 
@@ -571,14 +571,14 @@ func (responsesProtocolBackendCodec) Encode(req provider.Request) (carrier.Docum
 		PreviousHistory: req.PreviousHistory,
 		ToolNames:       req.ToolNames,
 	}
-	result, err := (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, req.ExchangeID)
+	result, err := (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, req.Attempt.ExchangeID)
 	return result.Document, result.Changes, err
 }
 
 func (responsesProtocolBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
 	switch in := ingress.(type) {
 	case provider.DocumentIngress:
-		result, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, request.ExchangeID)
+		result, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, request.Attempt.ExchangeID)
 		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
@@ -603,7 +603,7 @@ func (r responsesBackendResolver) ResolveBackend(target provider.TargetSnapshot)
 func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *testing.T) {
 	// Setup workspace with route "a" -> "target-a" (Responses protocol, model "upstream-target-a")
 	workspace := requestpathWorkspace(t)
-	checkpointStore := session.NewMemoryStore()
+	checkpointStore := continuity.NewMemoryStore()
 
 	var turn1CapturedProviderReq carrier.Document
 	var turn2CapturedProviderReq carrier.Document

@@ -1,11 +1,11 @@
-// Package session owns immutable canonical checkpoints and linear client-session
-// heads used to resume one logical model session across independent requests.
+// Package continuity owns immutable canonical checkpoints and linear Thread
+// heads used to resume one logical conversation across independent requests.
 //
 // Each successfully client-encoded completed response commits one self-contained
 // checkpoint partitioned by workspace. A checkpoint retains one complete
 // effective canonical request, its canonical response, a mandatory immutable
 // codec scheme, an optional visible-history fingerprint for implicit lookup,
-// and the internal session lineage it advances. A current head without a
+// and the Thread lineage it advances. A current head without a
 // fingerprint remains explicitly resumable and unindexed. Only current heads
 // with fingerprints participate in implicit lookup; older retained checkpoints
 // remain available only by explicit Swobu response ID. Head advancement is
@@ -27,9 +27,9 @@
 //
 // Checkpoints are a bounded process-local recent window. Expiry, reclamation,
 // and daemon restart forget them. Fetched media bytes are execution artifacts
-// and never enter session, checkpoint, or history-fingerprint state.
+// and never enter Thread, checkpoint, or history-fingerprint state.
 //
-// Package session does not own client protocol DTOs, fingerprint composition,
+// Package continuity does not own client protocol DTOs, fingerprint composition,
 // routing, provider selection, image fetching, response-ID allocation,
 // authentication, transport encoding, or client stream lifecycle.
-package session
+package continuity

@@ -249,7 +249,7 @@ func (c codec) Decode(ctx context.Context, req provider.Request, ingress provide
 	if err != nil {
 		return decoded, err
 	}
-	decoded.Stream = &veniceResponseStream{upstream: decoded.Stream, citations: state, searchRequired: searchEnabled && searchMode == "on", exchangeID: req.ExchangeID}
+	decoded.Stream = &veniceResponseStream{upstream: decoded.Stream, citations: state, searchRequired: searchEnabled && searchMode == "on", exchangeID: req.Attempt.ExchangeID}
 	return decoded, nil
 }
 

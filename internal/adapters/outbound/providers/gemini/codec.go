@@ -47,7 +47,7 @@ func (codec) Decode(_ context.Context, request provider.Request, ingress provide
 		carrierErr.Details = map[string]string{"wire_invariant": err.Error()}
 		return provider.DecodedResponse{Stream: canonical.NewErrorEventReader(carrierErr)}, carrierErr
 	}
-	reader := newInteractionsStream(request.Canonical, request.ToolNames, stream.Stream, request.ExchangeID)
+	reader := newInteractionsStream(request.Canonical, request.ToolNames, stream.Stream, request.Attempt.ExchangeID)
 	return provider.DecodedResponse{Stream: reader, ProgressiveChanges: reader.Changes}, nil
 }
 

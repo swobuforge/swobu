@@ -117,6 +117,11 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		}
 		return nil, provider.AttemptNotDispatched(badEndpoint)
 	}
+	for name, values := range wireReqCarrier.Header {
+		for _, value := range values {
+			httpReq.Header.Add(name, value)
+		}
+	}
 	if len(wireReqBody) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}

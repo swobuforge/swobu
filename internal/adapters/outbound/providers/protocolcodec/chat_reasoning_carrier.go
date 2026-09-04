@@ -221,7 +221,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 		if err != nil || item.Kind() == "" {
 			return decoded, err
 		}
-		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, item, nil, request.ExchangeID)
+		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, item, nil, request.Attempt.ExchangeID)
 		return decoded, nil
 	case provider.StreamIngress:
 		body := NewChatReasoningSSEBody(value.Stream.Body, extractor)
@@ -232,7 +232,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 			_ = body.Close()
 			return decoded, err
 		}
-		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, canonical.CanonicalItem{}, body, request.ExchangeID)
+		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, canonical.CanonicalItem{}, body, request.Attempt.ExchangeID)
 		return decoded, nil
 	default:
 		return provider.DecodedResponse{}, fmt.Errorf("Chat reasoning carrier ingress %T is unsupported", ingress)

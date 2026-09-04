@@ -7,6 +7,8 @@ package cachelocality
 import (
 	"crypto/sha256"
 	"encoding/hex"
+
+	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
 // derivedDomain is a compatibility token. Changing it would remap existing
@@ -25,6 +27,16 @@ func Explicit(key string) Key { return Key{key: key} }
 func Derived(workspace, lineage string) Key {
 	sum := sha256.Sum256([]byte(derivedDomain + "\x00" + workspace + "\x00" + lineage))
 	return Key{key: "swobu_" + hex.EncodeToString(sum[:])}
+}
+
+// FromThread derives cache placement from Thread equality without exposing a
+// printable Thread representation to callers.
+func FromThread(id thread.ID) (Key, error) {
+	projected, err := thread.Project("cache-locality/v1", id)
+	if err != nil {
+		return Key{}, err
+	}
+	return Key{key: "swobu_" + projected}, nil
 }
 
 func (a Key) Key() string  { return a.key }

@@ -59,7 +59,7 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 	return backend, backend.Validate()
 }
 
-func decorateOpenAIAttempt(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+func decorateOpenAIAttempt(ctx provider.AttemptContext) (protocolcodec.AttemptDecoration, error) {
 	if ctx.CacheLocality.IsZero() {
 		return protocolcodec.AttemptDecoration{}, nil
 	}

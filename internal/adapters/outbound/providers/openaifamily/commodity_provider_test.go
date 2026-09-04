@@ -95,7 +95,7 @@ func TestOVHCloudSharedRuntimeSupportsAnonymousAndBearerStreamingChat(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex_ovh", Canonical: request}, ingress)
+			decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh"}, Canonical: request}, ingress)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +156,7 @@ func TestOVHCloudSharedRuntimeDecodesFragmentedToolCallAndReplaysResult(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := provider.Request{ExchangeID: "ex_ovh_tool_1", Canonical: base, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+	first := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh_tool_1"}, Canonical: base, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
 	document, _, err := backend.Codec.Encode(first)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestOVHCloudSharedRuntimeDecodesFragmentedToolCallAndReplaysResult(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := provider.Request{ExchangeID: "ex_ovh_tool_2", Canonical: secondCanonical, ToolNames: secondNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+	second := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh_tool_2"}, Canonical: secondCanonical, ToolNames: secondNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
 	document, _, err = backend.Codec.Encode(second)
 	if err != nil {
 		t.Fatal(err)

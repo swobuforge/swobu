@@ -1,18 +1,54 @@
 package opencodezen
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/provider"
 )
 
 func NewRuntime(client *http.Client, credentials providersruntime.CredentialProvider) providersruntime.ProviderRuntimeBundle {
 	policy := openaifamily.BearerWithMessagesAPIKeyPolicy(profile.ProviderSpecOpenCodeZen).WithModelCatalogProject(projectModel)
-	return openaifamily.NewRuntime(client, credentials, policy)
+	runtime := openaifamily.NewRuntime(client, credentials, policy)
+	runtime.BackendResolver = openCodeBackendResolver{base: runtime.BackendResolver}
+	return runtime
+}
+
+type openCodeBackendResolver struct {
+	base provider.BackendResolver
+}
+
+func (r openCodeBackendResolver) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
+	backend, err := r.base.ResolveBackend(target)
+	if err != nil {
+		return provider.Backend{}, err
+	}
+	codec, ok := backend.Codec.(protocolcodec.Codec)
+	if !ok {
+		return provider.Backend{}, errors.New("OpenCode backend requires protocol codec")
+	}
+	codec.ProjectRequestHeaders = projectOpenCodeRequestHeaders
+	backend.Codec = codec
+	return backend, backend.Validate()
+}
+
+func projectOpenCodeRequestHeaders(attempt provider.AttemptContext, header http.Header) error {
+	if attempt.ThreadID.IsZero() {
+		return errors.New("OpenCode request requires thread identity")
+	}
+	value, err := thread.Project("provider/opencode-session/v1", attempt.ThreadID)
+	if err != nil {
+		return err
+	}
+	header.Set("X-Opencode-Session", value)
+	return nil
 }
 
 func projectModel(providerID profile.ProviderID, row modelcatalogopenai.ModelRow) (profile.ModelAuthoringOption, bool, error) {

@@ -12,13 +12,14 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -28,6 +29,14 @@ import (
 type Runner = runtimeBundle
 
 const testHistoryScheme historyfingerprint.Scheme = "responses/v1"
+
+func testThreadID(material string) thread.ID {
+	id, err := thread.Derive("exchange-test/v1", material)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
 
 func testHistoryRequest(material []byte) historyfingerprint.Request {
 	fingerprint, err := historyfingerprint.FingerprintRequest(testHistoryScheme, material)
@@ -50,7 +59,7 @@ type ExchangeInput struct {
 	ClientFamily     canonical.ClientFamily
 	ClientDelivery   delivery.Delivery
 	Request          canonical.CanonicalRequest
-	Prepared         session.ResolvedRequest
+	Prepared         continuity.ResolvedRequest
 	WorkspaceSlug    string
 	Target           provider.TargetSnapshot
 	Contract         ExecutionContract
@@ -103,7 +112,7 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		return nil, err
 	}
 	if in.Prepared.Request().Model() == "" {
-		prepared, err := session.Begin(in.Request)
+		prepared, err := continuity.Begin(in.Request)
 		if err != nil {
 			return nil, err
 		}
@@ -119,6 +128,11 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
 	request := provider.Request{Canonical: in.Prepared.Request(), Delivery: in.ProviderDelivery}
+	threadID, err := thread.Derive("swobu/genesis-response/v1", in.WorkspaceSlug, responseID.String())
+	if err != nil {
+		return nil, err
+	}
+	request.Attempt = provider.AttemptContext{ThreadID: threadID}
 	if previous, ok := in.Prepared.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion); ok {
 		request.PreviousHistory = &previous
 	}
@@ -128,6 +142,7 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Request(),
 		historyScheme: testHistoryScheme,
 		advance:       &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
+		threadID:      threadID,
 	}
 	document, _, err := backend.Codec.Encode(request)
 	call.document = document
@@ -148,7 +163,7 @@ func mustResumeSession(
 	previousResponseItems []canonical.CanonicalItem,
 	current canonical.CanonicalRequest,
 	target routing.Target,
-) session.ResolvedRequest {
+) continuity.ResolvedRequest {
 	t.Helper()
 	path, err := resolveProviderPath(target)
 	if err != nil {
@@ -178,14 +193,14 @@ func mustResumeSession(
 		Controls: current.Controls(), Reasoning: current.Reasoning(), OutputFormat: current.OutputFormatField(),
 		Store: current.StoreField(),
 	})
-	prepared, err := session.Resume(current, session.Checkpoint{Request: previousRequest, Response: response})
+	prepared, err := continuity.Resume(current, continuity.Checkpoint{Request: previousRequest, Response: response})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return prepared
 }
 
-func mustNativeSession(t *testing.T, current canonical.CanonicalRequest, target routing.Target) session.ResolvedRequest {
+func mustNativeSession(t *testing.T, current canonical.CanonicalRequest, target routing.Target) continuity.ResolvedRequest {
 	t.Helper()
 	previous := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("a"),
@@ -322,7 +337,7 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
 		},
-		CheckpointStore: session.NewMemoryStore(),
+		CheckpointStore: continuity.NewMemoryStore(),
 		ResponseIDs:     deterministicResponseIDGenerator{},
 		Policy:          DefaultWorkspacePolicy(),
 	}
@@ -337,7 +352,7 @@ func (r runtimeWithProviderIngress) ResolveBackend(target provider.TargetSnapsho
 	return newTestBackend(target, r.providerTransport)
 }
 
-func (r Runner) WithCheckpointStore(store session.Store) Runner {
+func (r Runner) WithCheckpointStore(store continuity.Store) Runner {
 	r.CheckpointStore = store
 	return r
 }
@@ -396,7 +411,7 @@ func (testBackendCodec) Encode(req provider.Request) (carrier.Document, []compat
 }
 
 func (testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	exchangeID := request.ExchangeID
+	exchangeID := request.Attempt.ExchangeID
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		result, err := (testProviderEnvelopeDecoder{}).DecodeProviderEnvelope(in.Stream, exchangeID)

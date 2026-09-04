@@ -132,7 +132,7 @@ func TestRuntimeUsesBearerStandardChatAndPreservesOpaqueCatalogIDs(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex_modelscope", Canonical: request}, ingress)
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_modelscope"}, Canonical: request}, ingress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func sendAndProject(t *testing.T, backend provider.Backend, target provider.Targ
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt := provider.Request{ExchangeID: exchangeID, Canonical: request, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+	attempt := provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID}, Canonical: request, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
 	document, _, err := backend.Codec.Encode(attempt)
 	if err != nil {
 		t.Fatal(err)

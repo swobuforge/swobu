@@ -43,7 +43,7 @@ func (r backendResolver) ResolveBackend(target provider.TargetSnapshot) (provide
 	backend.Codec = protocolcodec.Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ChatDialect: protocolcodec.ChatDialect{
-			DecorateAttempt: func(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+			DecorateAttempt: func(ctx provider.AttemptContext) (protocolcodec.AttemptDecoration, error) {
 				if !ctx.HasNextRouteCandidate {
 					return protocolcodec.AttemptDecoration{}, nil
 				}

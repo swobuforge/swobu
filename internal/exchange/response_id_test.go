@@ -10,13 +10,14 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 )
 
 func TestDefaultResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
@@ -39,26 +40,30 @@ func TestDefaultResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
 
 type failingCheckpointStore struct{ puts *int }
 
-func (failingCheckpointStore) Get(context.Context, string, canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
-	return session.Checkpoint{}, false, nil
+func (failingCheckpointStore) GetCheckpoint(context.Context, string, canonical.SwobuResponseID) (continuity.Checkpoint, bool, error) {
+	return continuity.Checkpoint{}, false, nil
 }
 
-func (s failingCheckpointStore) StartSession(context.Context, string, session.Checkpoint) (session.ClientSession, error) {
+func (failingCheckpointStore) GetThread(context.Context, string, thread.ID) (continuity.Thread, bool, error) {
+	return continuity.Thread{}, false, nil
+}
+
+func (s failingCheckpointStore) StartThread(context.Context, string, continuity.Checkpoint) (continuity.Thread, error) {
 	if s.puts != nil {
 		*s.puts++
 	}
-	return session.ClientSession{}, errors.New("forced checkpoint store failure at /private/checkpoints")
+	return continuity.Thread{}, errors.New("forced checkpoint store failure at /private/checkpoints")
 }
 
-func (failingCheckpointStore) IsCurrentHead(context.Context, string, session.ClientSessionID, canonical.SwobuResponseID) (bool, error) {
+func (failingCheckpointStore) IsCurrentHead(context.Context, string, thread.ID, canonical.SwobuResponseID) (bool, error) {
 	return false, nil
 }
 
-func (failingCheckpointStore) ResolveHeadByHistory(context.Context, string, historyfingerprint.History) (session.Checkpoint, session.HistoryResolution, error) {
-	return session.Checkpoint{}, session.HistoryNotFound, nil
+func (failingCheckpointStore) ResolveHeadByHistory(context.Context, string, historyfingerprint.History, thread.ID) (continuity.Checkpoint, continuity.HistoryResolution, error) {
+	return continuity.Checkpoint{}, continuity.HistoryNotFound, nil
 }
 
-func (s failingCheckpointStore) AdvanceSession(context.Context, string, session.ClientSessionID, canonical.SwobuResponseID, session.Checkpoint) error {
+func (s failingCheckpointStore) AdvanceThread(context.Context, string, thread.ID, canonical.SwobuResponseID, continuity.Checkpoint) error {
 	if s.puts != nil {
 		*s.puts++
 	}
@@ -70,7 +75,7 @@ func (s failingCheckpointStore) AdvanceSession(context.Context, string, session.
 // the Swobu ID instead of the provider-native one.
 func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 	// The provider ingress contains provider-native ID "resp_1".
-	store := session.NewMemoryStore()
+	store := continuity.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -109,7 +114,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 		t.Fatalf("provider-native ID leaked to client: %s", string(raw))
 	}
 
-	rec, ok, err := store.Get(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_test_ex"))
+	rec, ok, err := store.GetCheckpoint(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_test_ex"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}
@@ -122,7 +127,7 @@ func TestRunner_SwobuResponseIDReplacesProviderID(t *testing.T) {
 }
 
 func TestRunner_SwobuResponseIDPassedByInput(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := continuity.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithCheckpointStore(store)
 	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -228,7 +233,7 @@ func TestRunnerRejectsEmptyCheckpointWorkspaceSlugBeforeProviderIngress(t *testi
 				return bufferedProviderTransport(nil)(context.Background(), target, doc)
 			},
 		},
-		CheckpointStore: session.NewMemoryStore(),
+		CheckpointStore: continuity.NewMemoryStore(),
 		ResponseIDs:     deterministicResponseIDGenerator{},
 	}
 	_, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
@@ -254,7 +259,7 @@ func TestRunnerRejectsEmptyCheckpointWorkspaceSlugBeforeProviderIngress(t *testi
 }
 
 func TestRunnerWithCheckpointStoreAllocatesResponseIDWhenInputMissing(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := continuity.NewMemoryStore()
 	runner := withRuntime(bufferedProviderTransport(nil)).
 		WithCheckpointStore(store).
 		WithResponseIDs(deterministicResponseIDGenerator{})
@@ -288,7 +293,7 @@ func TestRunnerWithCheckpointStoreAllocatesResponseIDWhenInputMissing(t *testing
 	if gotID != "swobu_alloc_missing" {
 		t.Fatalf("allocated response id = %q, want swobu_alloc_missing", gotID)
 	}
-	rec, ok, err := store.Get(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_alloc_missing"))
+	rec, ok, err := store.GetCheckpoint(context.Background(), "alpha", canonical.NewSwobuResponseID("swobu_alloc_missing"))
 	if err != nil {
 		t.Fatalf("store.Get error: %v", err)
 	}

@@ -1,4 +1,4 @@
-package session
+package continuity
 
 import (
 	"strings"
@@ -86,7 +86,7 @@ func mustTestToolSet(t *testing.T, declarations ...canonical.ToolDeclaration) ca
 
 func TestBeginRejectsPreviousResponse(t *testing.T) {
 	request := makeRequest("gpt-4o", makeItems("hello"), &canonical.ResponseRef{SwobuID: "resp_old"})
-	if _, err := Begin(request); err == nil || err.Error() != "session begin request contains previous response" {
+	if _, err := Begin(request); err == nil || err.Error() != "thread begin request contains previous response" {
 		t.Fatalf("Begin error = %v", err)
 	}
 }

@@ -12,13 +12,13 @@ import (
 
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -210,7 +210,7 @@ func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *
 }
 
 // TestGeminiFreshContinuationReentryAfterLocallyResolvedFunctionRound composes
-// the Exchange/session continuation seam with the real Gemini codec. Complete
+// the exchange/continuity seam with the real Gemini codec. Complete
 // canonical call/result history remains durable while Gemini receives only the
 // new result after the interaction that emitted the call.
 func TestGeminiFreshContinuationReentryAfterLocallyResolvedFunctionRound(t *testing.T) {
@@ -223,7 +223,7 @@ func TestGeminiFreshContinuationReentryAfterLocallyResolvedFunctionRound(t *test
 			canonicaltest.Message(t, canonical.MessageRoleUser, "look it up"),
 		},
 	})
-	prepared, err := session.Begin(request)
+	prepared, err := continuity.Begin(request)
 	if err != nil {
 		t.Fatal(err)
 	}

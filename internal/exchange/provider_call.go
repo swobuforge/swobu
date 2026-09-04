@@ -71,12 +71,16 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	targetFacts := targetFactsForAttempt(runner.TargetExceptions, generation)
 	providerRequest := provider.Request{
-		ExchangeID:    s.input.exchangeID,
-		CacheLocality: s.cacheLocality,
-		Canonical:     bindRequestToTarget(attemptRequest, path.target.Model),
-		TargetFacts:   targetFacts,
-		Delivery:      path.delivery,
-		ToolNames:     toolNames,
+		Attempt: provider.AttemptContext{
+			ExchangeID:            s.input.exchangeID,
+			CacheLocality:         s.cacheLocality,
+			ThreadID:              s.threadID,
+			HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
+		},
+		Canonical:   bindRequestToTarget(attemptRequest, path.target.Model),
+		TargetFacts: targetFacts,
+		Delivery:    path.delivery,
+		ToolNames:   toolNames,
 	}
 	preparationCtx := ctx
 	cancel := func() {}
@@ -85,9 +89,8 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	}
 	defer cancel()
 	providerRequest.EncodeContext = provider.EncodeContext{
-		Context:               preparationCtx,
-		ResolveImage:          newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
-		HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
+		Context:      preparationCtx,
+		ResolveImage: newImageResolver(runner.Policy.ImageFetch, runner.Policy.Limits.Media, runner.ImageFetcher, &fetchCache),
 	}
 	// Native continuation is exact only while the target-bound replay sequence
 	// still matches the canonical sequence represented by that handle. Semantic
@@ -126,7 +129,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		targetGeneration:   generation,
 		factReads:          factReads,
 		advance:            s.advance,
-		sessionID:          s.sessionID,
+		threadID:           s.threadID,
 		expectedHead:       s.expectedHead,
 		delayClientHandoff: delayClientHandoff,
 		providerRound:      len(s.providerUsage),
@@ -248,7 +251,7 @@ func handoffResponseStream(ctx context.Context, call providerCall, stream canoni
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
 		store: runner.CheckpointStore, request: call.fullRequest.Clone(), historyScheme: call.historyScheme,
-		advance: call.advance, sessionID: call.sessionID, expectedHead: call.expectedHead,
+		advance: call.advance, threadID: call.threadID, expectedHead: call.expectedHead,
 	}
 	gated := newCheckpointTerminalGate(capture, call.clientCodec, call.fullRequest, committer)
 	return encodeClientOutput(ctx, call, gated, incremental)

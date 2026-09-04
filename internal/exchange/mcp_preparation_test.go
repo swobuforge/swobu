@@ -115,7 +115,7 @@ func TestProviderPreparationPreservesNativeClaudeDiscoveryHistoryForResponsesEnc
 		t.Fatal(err)
 	}
 	request := decoded.Request.Request
-	prepared := mustBeginSession(t, request)
+	prepared := mustBeginContinuity(t, request)
 	state := reducerTestState(t)
 	state.input.clientFamily = canonical.ClientFamilyMessages
 	state.input.clientDelivery = delivery.BufferedDelivery()
@@ -162,7 +162,7 @@ func TestProviderPreparationEagerlyMaterializesUnrepresentableProviderDiscoveryS
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{declarations, canonicaltest.Message(t, canonical.MessageRoleUser, "weather")},
 	})
-	prepared := mustBeginSession(t, request)
+	prepared := mustBeginContinuity(t, request)
 	state := reducerTestState(t)
 	state.input.request = request
 	state.prepared = &prepared
@@ -216,7 +216,7 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	request = request.WithItems(append(request.Items(), discoveryCall, result))
-	prepared := mustBeginSession(t, request)
+	prepared := mustBeginContinuity(t, request)
 	state := reducerTestState(t)
 	state.input.request = request
 	state.prepared = &prepared

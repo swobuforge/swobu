@@ -37,6 +37,6 @@ func TestTerminalReusablePrefixReflectsWinningRepresentation(t *testing.T) {
 
 func TestTerminalReusablePrefixWithoutPredecessorIsUnknown(t *testing.T) {
 	if got := terminalReusablePrefix(exchangeState{}); got.State() != trafficevidence.ReusablePrefixUnknown {
-		t.Fatalf("new-session evidence = %#v", got)
+		t.Fatalf("new-thread evidence = %#v", got)
 	}
 }

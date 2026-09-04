@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -97,6 +99,32 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 				}
 			})
 		})
+	}
+}
+
+func TestCharacterizeTargetFactReusesOneSyntheticThreadIdentity(t *testing.T) {
+	var projected []thread.ID
+	codec := Codec{
+		Protocol: protocolkind.ChatCompletions,
+		ProjectRequestHeaders: func(attempt provider.AttemptContext, _ http.Header) error {
+			projected = append(projected, attempt.ThreadID)
+			return nil
+		},
+	}
+	target := provider.TargetSnapshot{ProviderSpec: "custom", TargetID: "target", TargetVersion: 7, Model: "model", ProtocolKind: protocolkind.ChatCompletions}
+	calls := 0
+	resolution := codec.CharacterizeTargetFact(context.Background(), target, provider.AcceptsParallelToolCallsFalse, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+		calls++
+		if calls == 1 {
+			return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "rejected", "")))
+		}
+		return completedTargetFactIngress(protocolkind.ChatCompletions, delivery.BufferedDelivery()), nil
+	}))
+	if !resolution.Conclusive || resolution.Value {
+		t.Fatalf("resolution = %#v, want conclusive false", resolution)
+	}
+	if len(projected) != 2 || projected[0].IsZero() || projected[0] != projected[1] {
+		t.Fatal("preferred and control characterization did not share one synthetic thread identity")
 	}
 }
 

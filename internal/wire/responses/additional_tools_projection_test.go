@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
@@ -43,11 +44,15 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := session.NewMemoryStore()
-	if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{HistoryScheme: "responses/v1", Request: decoded.Request.Request, Response: response}); err != nil {
+	store := continuity.NewMemoryStore()
+	threadID, err := thread.Derive("responses-test/v1", "additional-tools")
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkpoint, found, err := store.Get(context.Background(), "dev", responseID)
+	if _, err := store.StartThread(context.Background(), "dev", continuity.Checkpoint{ThreadID: threadID, HistoryScheme: "responses/v1", Request: decoded.Request.Request, Response: response}); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, found, err := store.GetCheckpoint(context.Background(), "dev", responseID)
 	if err != nil || !found {
 		t.Fatalf("checkpoint = (%t, %v)", found, err)
 	}

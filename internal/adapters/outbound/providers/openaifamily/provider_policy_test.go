@@ -78,7 +78,7 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 	} {
 		doc := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", http.Header{}, raw, carrier.Meta{})
 		codec := protocolcodec.Codec{Protocol: protocolkind.ChatCompletions}
-		respResult, err := codec.Decode(context.Background(), provider.Request{ExchangeID: "test_profile_decode"}, provider.DocumentIngress{Document: doc})
+		respResult, err := codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "test_profile_decode"}}, provider.DocumentIngress{Document: doc})
 		if err != nil {
 			t.Fatalf("provider=%s decode: %v", profile.ProviderID(), err)
 		}

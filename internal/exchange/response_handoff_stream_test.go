@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -71,12 +71,12 @@ func TestBufferedResponseHandoffKeepsIdentityInsideExchangeUntilOutput(t *testin
 
 func TestExchangeFallsBackWhenUnavailablePrecedesResponseIdentity(t *testing.T) {
 	runner, workspace, calls := responseHandoffFallbackFixture(t, 1)
-	out, err := runExchange(context.Background(), runner, "response_fallback", "unknown", canonical.ClientFamilyResponses, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+	out, err := runExchange(context.Background(), runner, "response_fallback", "unknown", canonical.ClientFamilyResponses, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Target.TargetID != "response-b" || !reflect.DeepEqual(*calls, []string{"response-a", "response-b"}) {
-		t.Fatalf("target/calls = %q %#v, want fallback target B", out.Target.TargetID, *calls)
+	if len(*calls) != 2 || out.Target.TargetID != (*calls)[1] || (*calls)[0] == (*calls)[1] {
+		t.Fatalf("target/calls = %q %#v, want distinct fallback target", out.Target.TargetID, *calls)
 	}
 	if _, err := io.ReadAll(ClientTransportForTest(out.Response).Body); err != nil {
 		t.Fatal(err)
@@ -85,12 +85,12 @@ func TestExchangeFallsBackWhenUnavailablePrecedesResponseIdentity(t *testing.T) 
 
 func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 	runner, workspace, calls := responseHandoffFallbackFixture(t, 2)
-	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathMessages)
+	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathMessages, thread.ID{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Target.TargetID != "response-a" {
-		t.Fatalf("target = %q, want committed target A", out.Target.TargetID)
+	if len(*calls) != 1 || out.Target.TargetID != (*calls)[0] {
+		t.Fatalf("target/calls = %q %#v, want first target committed", out.Target.TargetID, *calls)
 	}
 	raw, readErr := io.ReadAll(ClientTransportForTest(out.Response).Body)
 	if readErr != nil {
@@ -106,7 +106,7 @@ func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 			t.Fatalf("failed committed Messages stream contains success terminal %q: %s", forbidden, raw)
 		}
 	}
-	if !reflect.DeepEqual(*calls, []string{"response-a"}) {
+	if len(*calls) != 1 {
 		t.Fatalf("calls = %#v, fallback must remain closed after response identity", *calls)
 	}
 }
@@ -130,15 +130,15 @@ func TestExchangeFallsBackWhenHostedSearchFailsAfterResponseIdentity(t *testing.
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),
 	})
 
-	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathMessages)
+	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathMessages, thread.ID{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Target.TargetID != "response-b" {
-		t.Fatalf("target = %q, want fallback target B", out.Target.TargetID)
+	if len(*calls) != 2 || out.Target.TargetID != (*calls)[1] {
+		t.Fatalf("target/calls = %q %#v, want second target after fallback", out.Target.TargetID, *calls)
 	}
-	if !reflect.DeepEqual(*calls, []string{"response-a", "response-b"}) {
-		t.Fatalf("calls = %#v, want hosted-search failure before handoff then fallback", *calls)
+	if (*calls)[0] == (*calls)[1] {
+		t.Fatalf("calls = %#v, want distinct fallback target", *calls)
 	}
 	if _, err := io.ReadAll(ClientTransportForTest(out.Response).Body); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ type responseHandoffFallbackRuntime struct {
 }
 
 func (r responseHandoffFallbackRuntime) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	codec := responseHandoffFallbackCodec{targetID: target.TargetID, failAfter: r.failAfter}
+	codec := responseHandoffFallbackCodec{fail: len(*r.calls) == 0, failAfter: r.failAfter}
 	transport := provider.BindTransport(target, func(_ context.Context, selected provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 		*r.calls = append(*r.calls, selected.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{}`), carrier.Meta{})}, nil
@@ -183,7 +183,7 @@ func (r responseHandoffFallbackRuntime) ResolveBackend(target provider.TargetSna
 }
 
 type responseHandoffFallbackCodec struct {
-	targetID  string
+	fail      bool
 	failAfter int
 }
 
@@ -192,8 +192,8 @@ func (responseHandoffFallbackCodec) Encode(provider.Request) (carrier.Document, 
 }
 
 func (c responseHandoffFallbackCodec) Decode(_ context.Context, request provider.Request, _ provider.Ingress) (provider.DecodedResponse, error) {
-	stream := stubResponseEventReader(request.ExchangeID)
-	if c.targetID == "response-a" {
+	stream := stubResponseEventReader(request.Attempt.ExchangeID)
+	if c.fail {
 		failure := provider.Unavailable(errors.New("primary unavailable"))
 		if request.Canonical.ToolPolicy().Mode == canonical.ToolPolicySpecific {
 			failure = provider.Rejected(canonical.NewBackendError("responses", http.StatusUnauthorized, "authentication_error", ""))

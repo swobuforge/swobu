@@ -159,7 +159,7 @@ func TestChatReasoningAndFlexUseOnlyEstablishedAttemptFacts(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			document, _, err := backend.Codec.Encode(provider.Request{
-				Canonical: request, Delivery: delivery.BufferedDelivery(), EncodeContext: provider.EncodeContext{HasNextRouteCandidate: test.next},
+				Attempt: provider.AttemptContext{HasNextRouteCandidate: test.next}, Canonical: request, Delivery: delivery.BufferedDelivery(),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -243,7 +243,7 @@ func TestResponsesStayStatelessAndDoNotUseFlexCarrier(t *testing.T) {
 	document, _, err := backend.Codec.Encode(provider.Request{
 		Canonical: request, Delivery: delivery.BufferedDelivery(),
 		PreviousHistory: &provider.PreviousHistory{Response: canonical.ResponseRef{Responses: &canonical.ResponsesContinuation{ProviderResponseID: "never-send", TargetID: "target", TargetVersion: 1}}, OmitStart: 0, OmitEnd: 1},
-		EncodeContext:   provider.EncodeContext{HasNextRouteCandidate: true},
+		Attempt:         provider.AttemptContext{HasNextRouteCandidate: true},
 	})
 	if err != nil {
 		t.Fatal(err)

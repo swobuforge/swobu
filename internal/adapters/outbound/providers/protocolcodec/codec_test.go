@@ -16,6 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
@@ -34,7 +35,7 @@ func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
 		t.Run(string(protocol), func(t *testing.T) {
 			codec := Codec{Protocol: protocol}
 			projection := func(exchangeID string, deliveryMode delivery.Delivery) []byte {
-				document, _, err := codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, Delivery: deliveryMode})
+				document, _, err := codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID}, Canonical: request, Delivery: deliveryMode})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -60,6 +61,42 @@ func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
 				t.Fatalf("append projection = %s (%v)", appendProjection, err)
 			}
 		})
+	}
+}
+
+func TestStandardProtocolCodecDoesNotProjectThreadHeaders(t *testing.T) {
+	threadID, err := thread.Derive("protocol-codec-test/v1", "conversation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
+	})
+	document, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+		Attempt: provider.AttemptContext{ThreadID: threadID}, Canonical: request, Delivery: delivery.BufferedDelivery(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Header) != 0 {
+		t.Fatalf("standard protocol codec projected provider headers: %#v", document.Header)
+	}
+}
+
+func TestRequestHeaderProjectionComposesWithLoweredDocumentHeaders(t *testing.T) {
+	document := carrier.NewDocument(protocolkind.Responses, "application/json", http.Header{
+		"X-Lowered-Header": {"lowered"},
+	}, []byte(`{}`), carrier.Meta{})
+	projected, err := projectRequestHeaders(document, provider.AttemptContext{}, func(_ provider.AttemptContext, header http.Header) error {
+		header.Set("X-Projected-Header", "projected")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.Header.Get("X-Lowered-Header") != "lowered" || projected.Header.Get("X-Projected-Header") != "projected" {
+		t.Fatalf("composed headers = %#v", projected.Header)
 	}
 }
 
@@ -471,7 +508,7 @@ func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
 func TestChatCompletionsCodecOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := provider.Request{
-		ExchangeID: "exchange-shared-lowering",
+		Attempt: provider.AttemptContext{ExchangeID: "exchange-shared-lowering"},
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("model"),
 			Items: []canonical.CanonicalItem{
@@ -489,7 +526,7 @@ func TestChatCompletionsCodecOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 
 func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 	codec := Codec{Protocol: protocolkind.ChatCompletions}
-	request := provider.Request{ExchangeID: "exchange-identity", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}
+	request := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "exchange-identity"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}
 	decoded, err := codec.Decode(context.Background(), request, provider.DocumentIngress{Document: carrier.NewDocument(
 		protocolkind.ChatCompletions, "application/json", nil,
 		[]byte(`{"id":"provider-response","model":"model","choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}]}`), carrier.Meta{},
@@ -501,7 +538,7 @@ func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.ExchangeID != request.ExchangeID {
+	if event.ExchangeID != request.Attempt.ExchangeID {
 		t.Fatalf("exchange id = %q", event.ExchangeID)
 	}
 
@@ -558,7 +595,7 @@ func TestResponsesContinuationCaptureRequiresPersistenceEligibleRequest(t *testi
 			t.Parallel()
 
 			request := provider.Request{
-				ExchangeID: "exchange-store-policy",
+				Attempt: provider.AttemptContext{ExchangeID: "exchange-store-policy"},
 				Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 					Model: canonical.Specify("model"),
 					Store: test.requestStore,
@@ -642,7 +679,7 @@ func TestCompileChatRequest_ToolPolicyConsumesEmittedProjection(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearch})
 	searchKey := webSearch.Key()
 	request := provider.Request{
-		ExchangeID: "exchange-policy-lowering",
+		Attempt: provider.AttemptContext{ExchangeID: "exchange-policy-lowering"},
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:      canonical.Specify("model"),
 			ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),
@@ -697,7 +734,7 @@ func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
 			codec := Codec{
 				Protocol: protocolkind.ChatCompletions,
 				ChatDialect: ChatDialect{
-					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+					DecorateAttempt: func(_ provider.AttemptContext) (AttemptDecoration, error) {
 						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
 					},
 				},
@@ -721,7 +758,7 @@ func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
 			codec := Codec{
 				Protocol: protocolkind.Responses,
 				ResponsesDialect: ResponsesDialect{
-					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+					DecorateAttempt: func(_ provider.AttemptContext) (AttemptDecoration, error) {
 						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
 					},
 				},
@@ -743,7 +780,7 @@ func TestCodecAttemptDecoration_RejectsSemanticCollisions(t *testing.T) {
 			codec := Codec{
 				Protocol: protocolkind.Messages,
 				MessagesDialect: MessagesDialect{
-					DecorateAttempt: func(_ AttemptContext) (AttemptDecoration, error) {
+					DecorateAttempt: func(_ provider.AttemptContext) (AttemptDecoration, error) {
 						return AttemptDecoration{Fields: map[string]any{field: "override"}}, nil
 					},
 				},

@@ -74,6 +74,41 @@ func TestOpenAIFamilyKernelUsesStandardChatCompletionsTokenField(t *testing.T) {
 	}
 }
 
+func TestSendRealizesProviderHeadersBeforeTransportAndAuthOverrides(t *testing.T) {
+	client := &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("X-Test-Provider-Header") != "provider-value" {
+			t.Fatalf("provider header = %q", request.Header.Get("X-Test-Provider-Header"))
+		}
+		if request.Header.Get("Authorization") != "Bearer token_test" {
+			t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
+		}
+		if request.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("Content-Type = %q", request.Header.Get("Content-Type"))
+		}
+		if request.Header.Get("User-Agent") != swobuCallerUAHeaderValue {
+			t.Fatalf("User-Agent = %q", request.Header.Get("User-Agent"))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"response","model":"model","status":"completed","output":[]}`)),
+			Request:    request,
+		}, nil
+	})}
+	executor := NewExecutor(client, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecOpenAI))
+	target := provider.NewTargetSnapshot("target", string(profile.ProviderSpecOpenAI), "https://example.test/v1", "env:TOKEN", protocolkind.Responses, "responses", delivery.BufferedDelivery())
+	target.Model = "model"
+	document := carrier.NewDocument(protocolkind.Responses, "application/json", http.Header{
+		"X-Test-Provider-Header": {"provider-value"},
+		"Authorization":          {"fake"},
+		"Content-Type":           {"fake"},
+		"User-Agent":             {"fake"},
+	}, []byte(`{"model":"model","input":"hello"}`), carrier.Meta{})
+	if _, err := executor.Send(context.Background(), target, document); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenAIFamilyTargetsRequireExactChatCompletionsWebSearchDialect(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),

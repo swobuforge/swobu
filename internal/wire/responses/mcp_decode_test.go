@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -153,7 +153,7 @@ func TestResponsesRequiredPolicySurvivesKnownMCPAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wire decoder rejected MCP before residual validation: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err != nil {
+	if _, err := continuity.Begin(decoded.Request.Request); err != nil {
 		t.Fatalf("required MCP policy was invalidated at ingress: %v", err)
 	}
 }
@@ -171,7 +171,7 @@ func TestResponsesSpecificPolicySurvivesKnownMCPAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wire decoder rejected selected MCP before residual validation: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err != nil {
+	if _, err := continuity.Begin(decoded.Request.Request); err != nil {
 		t.Fatalf("specific MCP policy was invalidated at ingress: %v", err)
 	}
 }
