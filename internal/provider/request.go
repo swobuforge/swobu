@@ -6,6 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
 // EncodeContext carries request-scoped capabilities that an exact provider
@@ -14,8 +15,14 @@ import (
 type EncodeContext struct {
 	Context      context.Context
 	ResolveImage func(context.Context, canonical.URLImage) (InspectedImage, error)
-	// HasNextRouteCandidate is transient exchange execution context. It is not
-	// canonical intent, target capability, or persisted routing configuration.
+}
+
+// AttemptContext carries execution facts for one provider attempt. It excludes
+// canonical request semantics, credentials, and transport-owned state.
+type AttemptContext struct {
+	ExchangeID            string
+	ThreadID              thread.ID
+	CacheLocality         cachelocality.Key
 	HasNextRouteCandidate bool
 }
 
@@ -34,14 +41,8 @@ type PreviousHistory struct {
 // request-history authority. PreviousHistory is optional exact-target lowering
 // data; it never changes Canonical's meaning.
 type Request struct {
-	// ExchangeID correlates progressive response events for this invocation. It
-	// is execution context, not part of canonical request semantics.
-	ExchangeID string
-	// CacheLocality is attempt-scoped cache placement. It is neither
-	// conversation identity nor model intent, cache materialization, or
-	// persistence policy.
-	CacheLocality cachelocality.Key
-	Canonical     canonical.CanonicalRequest
+	Attempt   AttemptContext
+	Canonical canonical.CanonicalRequest
 	// TargetFacts is one attempt-private empirical dialect reader. Codecs call
 	// only the typed getter at a branch they execute; nil reads as preferred.
 	TargetFacts     *TargetFacts

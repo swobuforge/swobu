@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -25,13 +26,17 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 		t.Run(name, func(t *testing.T) {
 			priorRequest := replayFixturePriorRequest(t)
 			response := decodeReplayFixtureResponse(t, priorRequest, streamed)
-			store := session.NewMemoryStore()
-			if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{
-				HistoryScheme: fingerprintScheme, Request: priorRequest, Response: response,
+			store := continuity.NewMemoryStore()
+			threadID, err := thread.Derive("responses-test/v1", name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.StartThread(context.Background(), "dev", continuity.Checkpoint{
+				ThreadID: threadID, HistoryScheme: fingerprintScheme, Request: priorRequest, Response: response,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			checkpoint, found, err := store.Get(context.Background(), "dev", "swobu_turn_1")
+			checkpoint, found, err := store.GetCheckpoint(context.Background(), "dev", "swobu_turn_1")
 			if err != nil || !found {
 				t.Fatalf("latest checkpoint = (%t, %v)", found, err)
 			}
@@ -43,7 +48,7 @@ func TestCheckpointToDifferentResponsesTargetReplaysOneCanonicalGraph(t *testing
 				},
 				PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_turn_1"},
 			})
-			resolved, err := session.Resume(current, checkpoint)
+			resolved, err := continuity.Resume(current, checkpoint)
 			if err != nil {
 				t.Fatal(err)
 			}

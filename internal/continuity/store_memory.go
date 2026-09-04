@@ -1,4 +1,4 @@
-package session
+package continuity
 
 import (
 	"container/heap"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
 const maxMemoryStoreRecords = 1024
@@ -20,8 +21,8 @@ func NewMemoryStore() Store { return newMemoryStore() }
 type memoryStore struct {
 	mu        sync.RWMutex
 	records   map[workspaceRecordID]Checkpoint
-	sessions  map[workspaceSessionID]ClientSession
-	byHistory map[workspaceHistoryKey]map[workspaceSessionID]struct{}
+	threads   map[workspaceThreadID]Thread
+	byHistory map[workspaceHistoryKey]map[workspaceThreadID]struct{}
 	expires   expirationHeap
 	now       func() time.Time
 }
@@ -31,9 +32,9 @@ type workspaceRecordID struct {
 	id            canonical.SwobuResponseID
 }
 
-type workspaceSessionID struct {
+type workspaceThreadID struct {
 	workspaceSlug string
-	id            ClientSessionID
+	id            thread.ID
 }
 
 type workspaceHistoryKey struct {
@@ -43,8 +44,8 @@ type workspaceHistoryKey struct {
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		records: make(map[workspaceRecordID]Checkpoint), sessions: make(map[workspaceSessionID]ClientSession),
-		byHistory: make(map[workspaceHistoryKey]map[workspaceSessionID]struct{}),
+		records: make(map[workspaceRecordID]Checkpoint), threads: make(map[workspaceThreadID]Thread),
+		byHistory: make(map[workspaceHistoryKey]map[workspaceThreadID]struct{}),
 		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -70,12 +71,12 @@ func (h *expirationHeap) Pop() any {
 func normalizeWorkspace(workspace string) (string, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
-		return "", errors.New("session workspace slug is empty")
+		return "", errors.New("thread workspace slug is empty")
 	}
 	return workspace, nil
 }
 
-func (s *memoryStore) Get(_ context.Context, workspace string, id canonical.SwobuResponseID) (Checkpoint, bool, error) {
+func (s *memoryStore) GetCheckpoint(_ context.Context, workspace string, id canonical.SwobuResponseID) (Checkpoint, bool, error) {
 	workspace, err := normalizeWorkspace(workspace)
 	if err != nil {
 		return Checkpoint{}, false, err
@@ -90,7 +91,7 @@ func (s *memoryStore) Get(_ context.Context, workspace string, id canonical.Swob
 	return record.Clone(), true, nil
 }
 
-func (s *memoryStore) IsCurrentHead(_ context.Context, workspace string, sessionID ClientSessionID, checkpointID canonical.SwobuResponseID) (bool, error) {
+func (s *memoryStore) IsCurrentHead(_ context.Context, workspace string, threadID thread.ID, checkpointID canonical.SwobuResponseID) (bool, error) {
 	workspace, err := normalizeWorkspace(workspace)
 	if err != nil {
 		return false, err
@@ -98,17 +99,32 @@ func (s *memoryStore) IsCurrentHead(_ context.Context, workspace string, session
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reclaimExpired(s.now())
-	session, ok := s.sessions[workspaceSessionID{workspaceSlug: workspace, id: sessionID}]
-	return ok && session.Head == checkpointID, nil
+	value, ok := s.threads[workspaceThreadID{workspaceSlug: workspace, id: threadID}]
+	return ok && value.Head == checkpointID, nil
 }
 
-func (s *memoryStore) ResolveHeadByHistory(_ context.Context, workspace string, history historyfingerprint.History) (Checkpoint, HistoryResolution, error) {
+func (s *memoryStore) GetThread(_ context.Context, workspace string, id thread.ID) (Thread, bool, error) {
+	workspace, err := normalizeWorkspace(workspace)
+	if err != nil {
+		return Thread{}, false, err
+	}
+	if id.IsZero() {
+		return Thread{}, false, errors.New("thread ID is zero")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reclaimExpired(s.now())
+	value, ok := s.threads[workspaceThreadID{workspaceSlug: workspace, id: id}]
+	return value, ok, nil
+}
+
+func (s *memoryStore) ResolveHeadByHistory(_ context.Context, workspace string, history historyfingerprint.History, preferred thread.ID) (Checkpoint, HistoryResolution, error) {
 	workspace, err := normalizeWorkspace(workspace)
 	if err != nil {
 		return Checkpoint{}, HistoryNotFound, err
 	}
 	if history.Scheme() == "" {
-		return Checkpoint{}, HistoryNotFound, errors.New("session history fingerprint is invalid")
+		return Checkpoint{}, HistoryNotFound, errors.New("thread history fingerprint is invalid")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,15 +132,18 @@ func (s *memoryStore) ResolveHeadByHistory(_ context.Context, workspace string, 
 	indexKey := workspaceHistoryKey{workspaceSlug: workspace, history: history}
 	members := s.byHistory[indexKey]
 	available := make([]Checkpoint, 0, len(members))
-	for sessionKey := range members {
-		session, ok := s.sessions[sessionKey]
+	for threadKey := range members {
+		value, ok := s.threads[threadKey]
 		if !ok {
-			delete(members, sessionKey)
+			delete(members, threadKey)
 			continue
 		}
-		record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: session.Head}]
+		if !preferred.IsZero() && value.ID != preferred {
+			continue
+		}
+		record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: value.Head}]
 		if !ok {
-			delete(members, sessionKey)
+			delete(members, threadKey)
 			continue
 		}
 		available = append(available, record.Clone())
@@ -142,35 +161,35 @@ func (s *memoryStore) ResolveHeadByHistory(_ context.Context, workspace string, 
 	}
 }
 
-func (s *memoryStore) StartSession(_ context.Context, workspace string, record Checkpoint) (ClientSession, error) {
+func (s *memoryStore) StartThread(_ context.Context, workspace string, record Checkpoint) (Thread, error) {
 	workspace, err := normalizeWorkspace(workspace)
 	if err != nil {
-		return ClientSession{}, err
+		return Thread{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reclaimExpired(s.now())
 	if err := s.prepareRecord(&record); err != nil {
-		return ClientSession{}, err
+		return Thread{}, err
 	}
-	if record.SessionID == "" {
-		record.SessionID = ClientSessionID(record.ID)
+	if record.ThreadID.IsZero() {
+		return Thread{}, errors.New("thread ID is zero")
 	}
-	sessionKey := workspaceSessionID{workspaceSlug: workspace, id: record.SessionID}
-	if _, exists := s.sessions[sessionKey]; exists {
-		return ClientSession{}, ErrSessionExists
+	threadKey := workspaceThreadID{workspaceSlug: workspace, id: record.ThreadID}
+	if _, exists := s.threads[threadKey]; exists {
+		return Thread{}, ErrThreadExists
 	}
-	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ID}]; exists {
-		return ClientSession{}, ErrCheckpointExists
+	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ResponseID}]; exists {
+		return Thread{}, ErrCheckpointExists
 	}
-	session := ClientSession{ID: record.SessionID, Scheme: record.HistoryScheme, Head: record.ID}
+	value := Thread{ID: record.ThreadID, Scheme: record.HistoryScheme, Head: record.ResponseID}
 	s.storeRecord(workspace, record)
-	s.sessions[sessionKey] = session
-	s.indexHead(workspace, session, record)
-	return session, nil
+	s.threads[threadKey] = value
+	s.indexHead(workspace, value, record)
+	return value, nil
 }
 
-func (s *memoryStore) AdvanceSession(_ context.Context, workspace string, sessionID ClientSessionID, expectedHead canonical.SwobuResponseID, record Checkpoint) error {
+func (s *memoryStore) AdvanceThread(_ context.Context, workspace string, threadID thread.ID, expectedHead canonical.SwobuResponseID, record Checkpoint) error {
 	workspace, err := normalizeWorkspace(workspace)
 	if err != nil {
 		return err
@@ -181,26 +200,26 @@ func (s *memoryStore) AdvanceSession(_ context.Context, workspace string, sessio
 	if err := s.prepareRecord(&record); err != nil {
 		return err
 	}
-	sessionKey := workspaceSessionID{workspaceSlug: workspace, id: sessionID}
-	current, ok := s.sessions[sessionKey]
+	threadKey := workspaceThreadID{workspaceSlug: workspace, id: threadID}
+	current, ok := s.threads[threadKey]
 	if !ok || current.Head != expectedHead {
-		return ErrStaleSessionHead
+		return ErrStaleThreadHead
 	}
-	if record.SessionID != "" && record.SessionID != sessionID {
-		return errors.New("checkpoint session ID does not match advancing session")
+	if !record.ThreadID.IsZero() && record.ThreadID != threadID {
+		return errors.New("checkpoint thread ID does not match advancing thread")
 	}
 	if record.HistoryScheme != current.Scheme {
-		return ErrSessionSchemeMismatch
+		return ErrThreadSchemeMismatch
 	}
-	record.SessionID = sessionID
-	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ID}]; exists {
+	record.ThreadID = threadID
+	if _, exists := s.records[workspaceRecordID{workspaceSlug: workspace, id: record.ResponseID}]; exists {
 		return ErrCheckpointExists
 	}
 	old := s.records[workspaceRecordID{workspaceSlug: workspace, id: current.Head}]
 	s.unindexHead(workspace, current, old)
 	s.storeRecord(workspace, record)
-	current.Head = record.ID
-	s.sessions[sessionKey] = current
+	current.Head = record.ResponseID
+	s.threads[threadKey] = current
 	s.indexHead(workspace, current, record)
 	return nil
 }
@@ -214,13 +233,13 @@ func (s *memoryStore) prepareRecord(record *Checkpoint) error {
 	}
 	response := record.Response.Response()
 	if err := response.ValidateCommittedResponse(); err != nil {
-		return fmt.Errorf("invalid session checkpoint response reference: %w", err)
+		return fmt.Errorf("invalid thread checkpoint response reference: %w", err)
 	}
-	if record.ID == "" {
-		record.ID = response.SwobuID
+	if record.ResponseID == "" {
+		record.ResponseID = response.SwobuID
 	}
-	if record.ID != response.SwobuID {
-		return errors.New("checkpoint ID does not match response")
+	if record.ResponseID != response.SwobuID {
+		return errors.New("checkpoint ResponseID does not match response")
 	}
 	if record.ExpiresAt == nil {
 		expires := s.now().Add(defaultCheckpointTTL)
@@ -236,29 +255,29 @@ func (s *memoryStore) storeRecord(workspace string, record Checkpoint) {
 	if len(s.records) >= maxMemoryStoreRecords {
 		s.evictOldest()
 	}
-	key := workspaceRecordID{workspaceSlug: workspace, id: record.ID}
+	key := workspaceRecordID{workspaceSlug: workspace, id: record.ResponseID}
 	cloned := record.Clone()
 	s.records[key] = cloned
 	heap.Push(&s.expires, expirationEntry{key: key, at: *cloned.ExpiresAt})
 }
 
-func (s *memoryStore) indexHead(workspace string, session ClientSession, record Checkpoint) {
+func (s *memoryStore) indexHead(workspace string, value Thread, record Checkpoint) {
 	if record.History == nil {
 		return
 	}
 	key := workspaceHistoryKey{workspaceSlug: workspace, history: *record.History}
 	if s.byHistory[key] == nil {
-		s.byHistory[key] = make(map[workspaceSessionID]struct{})
+		s.byHistory[key] = make(map[workspaceThreadID]struct{})
 	}
-	s.byHistory[key][workspaceSessionID{workspaceSlug: workspace, id: session.ID}] = struct{}{}
+	s.byHistory[key][workspaceThreadID{workspaceSlug: workspace, id: value.ID}] = struct{}{}
 }
 
-func (s *memoryStore) unindexHead(workspace string, session ClientSession, record Checkpoint) {
+func (s *memoryStore) unindexHead(workspace string, value Thread, record Checkpoint) {
 	if record.History == nil {
 		return
 	}
 	key := workspaceHistoryKey{workspaceSlug: workspace, history: *record.History}
-	delete(s.byHistory[key], workspaceSessionID{workspaceSlug: workspace, id: session.ID})
+	delete(s.byHistory[key], workspaceThreadID{workspaceSlug: workspace, id: value.ID})
 	if len(s.byHistory[key]) == 0 {
 		delete(s.byHistory, key)
 	}
@@ -288,9 +307,9 @@ func (s *memoryStore) evictOldest() {
 
 func (s *memoryStore) deleteRecord(key workspaceRecordID, record Checkpoint) {
 	delete(s.records, key)
-	sessionKey := workspaceSessionID{workspaceSlug: key.workspaceSlug, id: record.SessionID}
-	if session, ok := s.sessions[sessionKey]; ok && session.Head == record.ID {
-		s.unindexHead(key.workspaceSlug, session, record)
-		delete(s.sessions, sessionKey)
+	threadKey := workspaceThreadID{workspaceSlug: key.workspaceSlug, id: record.ThreadID}
+	if value, ok := s.threads[threadKey]; ok && value.Head == record.ResponseID {
+		s.unindexHead(key.workspaceSlug, value, record)
+		delete(s.threads, threadKey)
 	}
 }

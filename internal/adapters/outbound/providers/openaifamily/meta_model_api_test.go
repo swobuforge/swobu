@@ -69,7 +69,7 @@ func TestMetaModelAPIComposesStandardBearerResponsesRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex_meta", Canonical: request}, ingress)
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_meta"}, Canonical: request}, ingress)
 	if err != nil {
 		t.Fatal(err)
 	}

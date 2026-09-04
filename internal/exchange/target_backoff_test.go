@@ -12,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -40,7 +41,7 @@ func TestTargetBackoffSkipsUnavailableTargetAcrossExchanges(t *testing.T) {
 	decoded.CacheLocality = locality
 
 	for _, exchangeID := range []string{"ex_discovery", "ex_avoids"} {
-		if _, err := runExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses); err != nil {
+		if _, err := runExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -66,7 +67,7 @@ func TestEligibleCandidateTraversalPreservesStaticIndicesAndFallbackFact(t *test
 	if hasNextRouteCandidate(s, selection) {
 		t.Fatal("terminal eligible target reported a fallback")
 	}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	outcome, err := advanceProviderExecutionFrom(context.Background(), s, reducerRuntime(), selection)
 	if err != nil {
@@ -93,7 +94,7 @@ func TestHasNextRouteCandidateSkipsSuppressedCandidateAndFindsEligibleFallback(t
 
 func TestAllBackedOffTargetsReturnNoAvailableTarget(t *testing.T) {
 	s := reducerTestState(t)
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	target := requestpathTarget(t, "a")
 	s.route = routePlan{targets: []routing.Target{target}}
@@ -116,7 +117,7 @@ func TestAllBackedOffTargetsReturnNoAvailableTarget(t *testing.T) {
 
 func TestSuppressedCandidateDoesNotSkipEligibleProjectedTarget(t *testing.T) {
 	s := reducerTestState(t)
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	a := requestpathTarget(t, "a")
 	b := requestpathTarget(t, "b")

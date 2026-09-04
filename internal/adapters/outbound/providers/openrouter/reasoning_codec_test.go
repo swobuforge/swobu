@@ -45,7 +45,7 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 	values := map[protocolkind.ProtocolKind]string{}
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
 		backend := openRouterBackendForProtocol(t, request.Model(), protocol)
-		document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit("client-secret"), Delivery: delivery.BufferedDelivery()})
+		document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{CacheLocality: cachelocality.Explicit("client-secret")}, Canonical: request, Delivery: delivery.BufferedDelivery()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestOpenRouterEmitsBoundedOpaqueSessionAcrossProtocols(t *testing.T) {
 		t.Fatalf("session ids differ across protocols: %#v", values)
 	}
 	backend := openRouterBackendForProtocol(t, request.Model(), protocolkind.ChatCompletions)
-	different, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit("different"), Delivery: delivery.BufferedDelivery()})
+	different, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{CacheLocality: cachelocality.Explicit("different")}, Canonical: request, Delivery: delivery.BufferedDelivery()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestOpenRouterCacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) 
 	for _, protocol := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses} {
 		backend := openRouterBackendForProtocol(t, request.Model(), protocol)
 		project := func(exchangeID, locality string, d delivery.Delivery) []byte {
-			document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheLocality: cachelocality.Explicit(locality), Delivery: d})
+			document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality)}, Canonical: request, Delivery: d})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,7 +202,7 @@ func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
 	backend := openRouterBackend(t, "model")
 	raw := []byte(`{"id":"resp","usage":{"extension":9007199254740993},"choices":[{"message":{"role":"assistant","content":"ok","reasoning":"think","extension":{"constant":9007199254740993}}}]}`)
 	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, raw, carrier.Meta{})
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.DocumentIngress{Document: document})
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.DocumentIngress{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
 	}
 
 	streamRaw := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"extension\":{\"constant\":9007199254740993}}}]}\n\ndata: [DONE]\n\n"
-	streamDecoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+	streamDecoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamRaw)),
 	}})
 	if err != nil {
@@ -435,7 +435,7 @@ func TestOpenRouterBufferedReasoningCompletesAtomicallyBeforeAnswer(t *testing.T
 	document := carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{
   "id":"chat_1","model":"model","choices":[{"message":{"role":"assistant","reasoning_details":[{"type":"reasoning.summary","summary":"brief"}],"content":"answer"},"finish_reason":"stop"}]
 }`), carrier.Meta{})
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: request}, provider.DocumentIngress{Document: document})
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: request}, provider.DocumentIngress{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestOpenRouterStreamingBuffersOnlyReasoningArtifact(t *testing.T) {
 		"data: [DONE]",
 		"",
 	}, "\n")
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: request}, provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: request}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
 	}})
 	if err != nil {
@@ -516,7 +516,7 @@ func TestOpenRouterStreamingDoesNotFinalizeOnEmptyContentBeforeReasoning(t *test
 		"",
 	}, "\n")
 	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{
-		ExchangeID: "ex", Canonical: request,
+		Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: request,
 	}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
 	}})
@@ -549,7 +549,7 @@ func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
 		"",
 	}, "\n")
 
-	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{ExchangeID: "ex", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
 	}})
 	if err != nil {

@@ -90,7 +90,7 @@ func TestFailFastFollowsTransientRouteContext(t *testing.T) {
 		{name: "terminal target", next: false, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery(), EncodeContext: provider.EncodeContext{HasNextRouteCandidate: tc.next}})
+			doc, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{HasNextRouteCandidate: tc.next}, Canonical: request, Delivery: delivery.BufferedDelivery()})
 			if err != nil {
 				t.Fatal(err)
 			}

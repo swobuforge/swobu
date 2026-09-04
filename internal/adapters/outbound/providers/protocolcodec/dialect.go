@@ -3,8 +3,8 @@ package protocolcodec
 import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
 	"github.com/swobuforge/swobu/internal/wire/messages"
@@ -18,16 +18,9 @@ type AttemptDecoration struct {
 	Meta   carrier.Meta
 }
 
-// AttemptContext contains attempt-scoped transport/routing context and cache placement.
-// It deliberately excludes canonical request semantics to preserve Phase D boundary integrity.
-type AttemptContext struct {
-	CacheLocality         cachelocality.Key
-	HasNextRouteCandidate bool
-}
-
 // AttemptDecorator adds attempt-specific non-semantic fields or carrier metadata
 // after semantic lowering and before the single serialization boundary.
-type AttemptDecorator func(ctx AttemptContext) (AttemptDecoration, error)
+type AttemptDecorator func(ctx provider.AttemptContext) (AttemptDecoration, error)
 
 // ReasoningTargetDialect is the wire compiler's narrow empirical reasoning
 // context, re-exported for exact-provider lowering rules.

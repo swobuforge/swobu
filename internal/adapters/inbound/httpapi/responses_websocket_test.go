@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -57,8 +58,9 @@ func TestDrainWebsocketMessagesPreservesOneLargeMessageBoundary(t *testing.T) {
 }
 
 type recordingWebsocketIngress struct {
-	mu  sync.Mutex
-	ids []string
+	mu        sync.Mutex
+	ids       []string
+	threadIDs []thread.ID
 }
 
 type cancellationWebsocketIngress struct {
@@ -97,6 +99,7 @@ func (i cancellationWebsocketIngress) HandleRequest(ctx context.Context, _ excha
 func (i *recordingWebsocketIngress) HandleRequest(ctx context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
 	i.mu.Lock()
 	i.ids = append(i.ids, in.ExchangeID)
+	i.threadIDs = append(i.threadIDs, in.ThreadID)
 	i.mu.Unlock()
 	return synthesizeRequestOutputFromEnvelope(ctx, in, testStreamingTextResponse("resp", "m", "text", "ok", "completed"))
 }
@@ -110,6 +113,7 @@ func TestResponsesWebsocket_AllocatesDistinctExchangeIdentityPerCreate(t *testin
 		t.Fatal(err)
 	}
 	config.Header.Set("X-Request-ID", "connection-id")
+	config.Header.Set(openCodeSessionHeader, "secret-marker-123")
 	conn, err := websocket.DialConfig(config)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +138,13 @@ func TestResponsesWebsocket_AllocatesDistinctExchangeIdentityPerCreate(t *testin
 	defer ingress.mu.Unlock()
 	if len(ingress.ids) != 2 || ingress.ids[0] == ingress.ids[1] {
 		t.Fatalf("exchange ids = %#v, want two distinct identities", ingress.ids)
+	}
+	wantThreadID, err := thread.Derive("client/x-opencode-session/v1", "alpha", "secret-marker-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ingress.threadIDs) != 2 || ingress.threadIDs[0] != wantThreadID || ingress.threadIDs[1] != wantThreadID {
+		t.Fatal("websocket connection did not reuse one derived thread identity")
 	}
 }
 

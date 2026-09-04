@@ -84,7 +84,7 @@ func applyGroqReasoning(req canonical.CanonicalRequest, _ protocolcodec.Reasonin
 	return fields, nil
 }
 
-func decorateGroqAttempt(ctx protocolcodec.AttemptContext) (protocolcodec.AttemptDecoration, error) {
+func decorateGroqAttempt(ctx provider.AttemptContext) (protocolcodec.AttemptDecoration, error) {
 	if !ctx.HasNextRouteCandidate {
 		return protocolcodec.AttemptDecoration{}, nil
 	}

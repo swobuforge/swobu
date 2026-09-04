@@ -1,10 +1,11 @@
-package session
+package continuity
 
 import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
 const defaultCheckpointTTL = 24 * time.Hour
@@ -13,10 +14,10 @@ const defaultCheckpointTTL = 24 * time.Hour
 // Request is always the complete effective canonical request. HistoryScheme
 // identifies the immutable client-codec lineage. History is an optional
 // visible-history digest used only for implicit lookup while this checkpoint
-// is the current session head.
+// is the current Thread head.
 type Checkpoint struct {
-	ID            canonical.SwobuResponseID
-	SessionID     ClientSessionID
+	ResponseID    canonical.SwobuResponseID
+	ThreadID      thread.ID
 	HistoryScheme historyfingerprint.Scheme
 	History       *historyfingerprint.History
 	Request       canonical.CanonicalRequest
@@ -27,7 +28,7 @@ type Checkpoint struct {
 
 func (r Checkpoint) Clone() Checkpoint {
 	cloned := Checkpoint{
-		ID: r.ID, SessionID: r.SessionID, HistoryScheme: r.HistoryScheme, Request: r.Request.Clone(),
+		ResponseID: r.ResponseID, ThreadID: r.ThreadID, HistoryScheme: r.HistoryScheme, Request: r.Request.Clone(),
 		Response: r.Response.Clone(), CreatedAt: r.CreatedAt,
 	}
 	if r.History != nil {

@@ -1,4 +1,4 @@
-package session
+package continuity
 
 import (
 	"os"
@@ -23,13 +23,13 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"ID", "SessionID", "HistoryScheme", "History", "Request", "Response", "CreatedAt", "ExpiresAt"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"ResponseID", "ThreadID", "HistoryScheme", "History", "Request", "Response", "CreatedAt", "ExpiresAt"})
 	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "previousHistory"})
 	assertFields("previousHistory", reflect.TypeOf(previousHistory{}), []string{"response", "omitItems"})
 	assertFields("requestItemRange", reflect.TypeOf(requestItemRange{}), []string{"start", "end"})
 
 	store := reflect.TypeOf((*Store)(nil)).Elem()
-	wantMethods := []string{"AdvanceSession", "Get", "IsCurrentHead", "ResolveHeadByHistory", "StartSession"}
+	wantMethods := []string{"AdvanceThread", "GetCheckpoint", "GetThread", "IsCurrentHead", "ResolveHeadByHistory", "StartThread"}
 	if store.NumMethod() != len(wantMethods) {
 		t.Fatalf("Store has %d methods, want %d", store.NumMethod(), len(wantMethods))
 	}
@@ -85,6 +85,12 @@ func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 		"ResolveMedia",
 		"WithSameItemLayout",
 		"ReplaceWithFullHistory",
+		"ClientSessionID",
+		"StartSession",
+		"AdvanceSession",
+		"ErrSessionExists",
+		"ErrStaleSessionHead",
+		"ErrSessionSchemeMismatch",
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {

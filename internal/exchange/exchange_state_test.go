@@ -13,14 +13,15 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -141,30 +142,34 @@ func (c decodeUnavailableCodec) Decode(context.Context, provider.Request, provid
 }
 
 type countingCheckpointStore struct {
-	base     session.Store
+	base     continuity.Store
 	getCalls int
 }
 
-func (s *countingCheckpointStore) Get(ctx context.Context, workspace string, id canonical.SwobuResponseID) (session.Checkpoint, bool, error) {
+func (s *countingCheckpointStore) GetCheckpoint(ctx context.Context, workspace string, id canonical.SwobuResponseID) (continuity.Checkpoint, bool, error) {
 	s.getCalls++
-	return s.base.Get(ctx, workspace, id)
+	return s.base.GetCheckpoint(ctx, workspace, id)
 }
 
-func (s *countingCheckpointStore) IsCurrentHead(ctx context.Context, workspace string, sessionID session.ClientSessionID, checkpointID canonical.SwobuResponseID) (bool, error) {
-	return s.base.IsCurrentHead(ctx, workspace, sessionID, checkpointID)
+func (s *countingCheckpointStore) IsCurrentHead(ctx context.Context, workspace string, threadID thread.ID, checkpointID canonical.SwobuResponseID) (bool, error) {
+	return s.base.IsCurrentHead(ctx, workspace, threadID, checkpointID)
 }
 
-func (s *countingCheckpointStore) ResolveHeadByHistory(ctx context.Context, workspace string, history historyfingerprint.History) (session.Checkpoint, session.HistoryResolution, error) {
+func (s *countingCheckpointStore) ResolveHeadByHistory(ctx context.Context, workspace string, history historyfingerprint.History, preferred thread.ID) (continuity.Checkpoint, continuity.HistoryResolution, error) {
 	s.getCalls++
-	return s.base.ResolveHeadByHistory(ctx, workspace, history)
+	return s.base.ResolveHeadByHistory(ctx, workspace, history, preferred)
 }
 
-func (s *countingCheckpointStore) StartSession(ctx context.Context, workspace string, record session.Checkpoint) (session.ClientSession, error) {
-	return s.base.StartSession(ctx, workspace, record)
+func (s *countingCheckpointStore) GetThread(ctx context.Context, workspace string, id thread.ID) (continuity.Thread, bool, error) {
+	return s.base.GetThread(ctx, workspace, id)
 }
 
-func (s *countingCheckpointStore) AdvanceSession(ctx context.Context, workspace string, sessionID session.ClientSessionID, expectedHead canonical.SwobuResponseID, record session.Checkpoint) error {
-	return s.base.AdvanceSession(ctx, workspace, sessionID, expectedHead, record)
+func (s *countingCheckpointStore) StartThread(ctx context.Context, workspace string, record continuity.Checkpoint) (continuity.Thread, error) {
+	return s.base.StartThread(ctx, workspace, record)
+}
+
+func (s *countingCheckpointStore) AdvanceThread(ctx context.Context, workspace string, threadID thread.ID, expectedHead canonical.SwobuResponseID, record continuity.Checkpoint) error {
+	return s.base.AdvanceThread(ctx, workspace, threadID, expectedHead, record)
 }
 
 func reducerTestState(t *testing.T) exchangeState {
@@ -179,6 +184,7 @@ func reducerTestState(t *testing.T) exchangeState {
 			workspace:          requestpathWorkspace(t),
 		},
 		swobuResponseID: canonical.SwobuResponseID("swobu_ex_reducer"),
+		threadID:        testThreadID("reducer"),
 		phase:           startingPhase{},
 	}
 }
@@ -200,9 +206,9 @@ func invalidContinuationReference(target string, status int, message string) err
 	)
 }
 
-func mustBeginSession(t *testing.T, request canonical.CanonicalRequest) session.ResolvedRequest {
+func mustBeginContinuity(t *testing.T, request canonical.CanonicalRequest) continuity.ResolvedRequest {
 	t.Helper()
-	prepared, err := session.Begin(request)
+	prepared, err := continuity.Begin(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +274,7 @@ func TestReducerStartProducesOneWireOnlyProviderCommand(t *testing.T) {
 		t.Fatalf("provider command is not final wire I/O: %#v", cmd)
 	}
 	if active.call.fullRequest.Model() == "" || cmd.attemptID != active.id {
-		t.Fatal("active phase lost resolved session request")
+		t.Fatal("active phase lost resolved continuity request")
 	}
 	if len(tr.nextState.providerCallAttempts) != 1 || active.status != providerCallAttemptCalling {
 		t.Fatalf("provider calls = %#v, want one calling attempt before command execution", tr.nextState.providerCallAttempts)
@@ -315,7 +321,7 @@ func TestReducerAdvancesWithoutRepeatingUnavailableOperation(t *testing.T) {
 		requestpathTarget(t, "retry-a"),
 		requestpathTarget(t, "retry-b"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
@@ -341,7 +347,7 @@ func TestProviderEncodeContextCarriesOnlyImmediateFallbackAvailability(t *testin
 		requestpathTarget(t, "deepinfra-a"),
 		requestpathTarget(t, "fallback-b"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := reducerRuntime()
 
@@ -349,7 +355,7 @@ func TestProviderEncodeContextCarriesOnlyImmediateFallbackAvailability(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.request.EncodeContext.HasNextRouteCandidate {
+	if !first.request.Attempt.HasNextRouteCandidate {
 		t.Fatal("first route candidate must receive transient next-candidate context")
 	}
 	if first.backend.Target == (provider.TargetSnapshot{}) {
@@ -360,7 +366,7 @@ func TestProviderEncodeContextCarriesOnlyImmediateFallbackAvailability(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.request.EncodeContext.HasNextRouteCandidate {
+	if terminal.request.Attempt.HasNextRouteCandidate {
 		t.Fatal("terminal route candidate must omit transient next-candidate context")
 	}
 }
@@ -371,7 +377,7 @@ func TestRejectedBeforeExecutionAdvancesNextCandidateWithoutRetry(t *testing.T) 
 		requestpathTarget(t, "deepinfra-a"),
 		requestpathTarget(t, "fallback-b"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	started := beginPreparedProviderCall(t, s)
 	active := activeProviderAttempt(t, started.nextState)
@@ -564,7 +570,7 @@ func TestSynchronousCompletionFailureAdvancesRouteCandidate(t *testing.T) {
 		requestpathTarget(t, "decode-unavailable-a"),
 		requestpathTarget(t, "retry-b"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
@@ -953,7 +959,7 @@ func TestProviderCallAttemptRejectsConsumedAttemptKey(t *testing.T) {
 func TestPreparationFailureDoesNotAllocateProviderCallAttempt(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "unmarked-a")}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
@@ -977,7 +983,7 @@ func TestPreparationNotImplementedDoesNotAdvanceRoute(t *testing.T) {
 		requestpathTarget(t, "unmarked-a"),
 		requestpathTarget(t, "fallback-b"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}
@@ -1057,7 +1063,7 @@ func requestpathTargetWithProtocol(t *testing.T, id string, rawProtocol string) 
 func TestBackendResolutionMustPreserveResolvedTargetProjection(t *testing.T) {
 	s := reducerTestState(t)
 	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "target-a")}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = targetMutatingRuntime{candidateSelectiveRuntime{transport: bufferedProviderTransport(nil)}}
@@ -1186,6 +1192,7 @@ func TestBedrockMantleStrictStructuredOutputExecutesWithoutFallback(t *testing.T
 		workspace,
 		nil,
 		canonical.NormalizedPathResponses,
+		thread.ID{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1251,6 +1258,7 @@ func TestResponsesStopSequenceIsOmittedWithoutRouteFallback(t *testing.T) {
 		workspace,
 		nil,
 		canonical.NormalizedPathResponses,
+		thread.ID{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1269,7 +1277,7 @@ func TestFailedResponsesWebSearchLifecycleCompletesAsTypedProviderOutput(t *test
 		requestpathTargetWithProtocol(t, "responses-a", "responses"),
 		requestpathTargetWithProtocol(t, "responses-b", "responses"),
 	}}
-	prepared := mustBeginSession(t, s.input.request)
+	prepared := mustBeginContinuity(t, s.input.request)
 	s.prepared = &prepared
 	runner := withRuntime(nil)
 	runner.Runtime = protocolProjectionRuntime{transport: bufferedProviderTransport(nil)}
@@ -1326,7 +1334,7 @@ func TestUntypedPreparationFailureDoesNotMakeFallbackEligible(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{})
 	if err == nil {
 		t.Fatal("unmarked codec rejection unexpectedly succeeded through fallback")
 	}
@@ -1347,14 +1355,15 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &countingCheckpointStore{base: session.NewMemoryStore()}
+	store := &countingCheckpointStore{base: continuity.NewMemoryStore()}
 	previousResponse, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_previous"}, "a", []canonical.CanonicalItem{
 		testMessage(canonical.MessageRoleAssistant, "answer one"),
 	}, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := session.Checkpoint{
+	previous := continuity.Checkpoint{
+		ThreadID:      testThreadID("explicit-fallback"),
 		HistoryScheme: testHistoryScheme,
 		History: func() *historyfingerprint.History {
 			value := testExchangeHistoryForScheme(t, "responses/v1", "explicit-fallback")
@@ -1363,11 +1372,15 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Request:  canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn one")}}),
 		Response: previousResponse,
 	}
-	started, err := store.StartSession(context.Background(), "dev", previous)
+	started, err := store.StartThread(context.Background(), "dev", previous)
 	if err != nil {
 		t.Fatal(err)
 	}
-	preferred := routing.BuildPlan(cachelocality.Derived("dev", string(started.ID)).Key(), route)[0].ID().String()
+	locality, err := cachelocality.FromThread(started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferred := routing.BuildPlan(locality.Key(), route)[0].ID().String()
 	providerCalls := 0
 	runner := withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 		providerCalls++
@@ -1381,7 +1394,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
-	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses)
+	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1404,13 +1417,13 @@ func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := exchangeState{input: exchangeInput{exchangeID: "turn-1", request: testCanonicalRequest("a"), workspace: workspace}}
-	first, err := applyRoutePlan(base, "lineage-1")
+	base := exchangeState{input: exchangeInput{exchangeID: "turn-1", request: testCanonicalRequest("a"), workspace: workspace}, threadID: testThreadID("lineage-1")}
+	first, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	base.input.exchangeID = "turn-2"
-	second, err := applyRoutePlan(base, "lineage-1")
+	second, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1419,11 +1432,12 @@ func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testin
 	}
 
 	base.input.explicitCacheLocality = cachelocality.Explicit("client-key")
-	explicitFirst, err := applyRoutePlan(base, "lineage-1")
+	explicitFirst, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	explicitSecond, err := applyRoutePlan(base, "different-lineage")
+	base.threadID = testThreadID("different-lineage")
+	explicitSecond, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1452,7 +1466,7 @@ func TestExchangeDoesNotExecuteFallbackAfterResponseProjectionFailure(t *testing
 			return bufferedProviderTransport(nil)(ctx, target, document)
 		},
 	}
-	response, err := runExchange(context.Background(), runner, "ex_response_projection_terminal", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+	response, err := runExchange(context.Background(), runner, "ex_response_projection_terminal", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{})
 	if err != nil {
 		t.Fatal(err)
 	}

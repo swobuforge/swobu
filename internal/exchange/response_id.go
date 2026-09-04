@@ -11,7 +11,7 @@ import (
 
 // defaultResponseIDGenerator produces opaque crypto-random IDs in production.
 // Exchange allocates response identity before provider execution and checkpoint
-// commit; session storage only indexes the identity after it is bound.
+// commit; continuity storage only indexes the identity after it is bound.
 type defaultResponseIDGenerator struct{}
 
 func (defaultResponseIDGenerator) NewSwobuResponseID(_ context.Context, _ string) (canonical.SwobuResponseID, error) {

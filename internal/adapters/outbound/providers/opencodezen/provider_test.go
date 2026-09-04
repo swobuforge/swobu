@@ -2,6 +2,7 @@ package opencodezen
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -68,50 +70,113 @@ func TestProjectModelSelectsExactZenProtocol(t *testing.T) {
 	}
 }
 
-func TestMessagesUsesZenNativeHeadersWhileOtherProtocolsRemainBearer(t *testing.T) {
+func TestOpenCodeProjectsThreadAcrossBufferedAndStreamingRails(t *testing.T) {
+	const rawClientSession = "secret-marker-123"
+	threadID, err := thread.Derive("client/x-opencode-session/v1", "alpha", rawClientSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherThreadID, err := thread.Derive("client/x-opencode-session/v1", "alpha", "other-marker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession, err := thread.Project("provider/opencode-session/v1", threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOtherSession, err := thread.Project("provider/opencode-session/v1", otherThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
-		t.Run(string(kind), func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if got := r.Header.Get("Authorization"); got != "Bearer zen-token" {
-					t.Fatalf("Authorization = %q", got)
-				}
-				if kind == protocolkind.Messages {
-					if got := r.Header.Get("X-API-Key"); got != "zen-token" {
-						t.Fatalf("X-API-Key = %q", got)
+		for _, mode := range []delivery.Delivery{delivery.BufferedDelivery(), delivery.StreamingDelivery(delivery.FramingSSE)} {
+			contract := string(kind)
+			if mode.IsStreaming() {
+				contract += "_stream"
+			}
+			t.Run(contract, func(t *testing.T) {
+				var sessions []string
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					session := r.Header.Get("X-Opencode-Session")
+					sessions = append(sessions, session)
+					if session == rawClientSession {
+						t.Fatal("raw client identity reached the OpenCode transport")
 					}
-					if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
-						t.Fatalf("anthropic-version = %q", got)
+					if got := r.Header.Get("Authorization"); got != "Bearer zen-token" {
+						t.Fatalf("Authorization = %q", got)
 					}
-				} else if got := r.Header.Get("X-API-Key"); got != "" {
-					t.Fatalf("unexpected X-API-Key = %q", got)
+					if kind == protocolkind.Messages {
+						if got := r.Header.Get("X-API-Key"); got != "zen-token" {
+							t.Fatalf("X-API-Key = %q", got)
+						}
+						if got := r.Header.Get("anthropic-version"); got != "2023-06-01" {
+							t.Fatalf("anthropic-version = %q", got)
+						}
+					} else if got := r.Header.Get("X-API-Key"); got != "" {
+						t.Fatalf("unexpected X-API-Key = %q", got)
+					}
+					if mode.IsStreaming() {
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = w.Write([]byte("data: [DONE]\n\n"))
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{}`))
+				}))
+				defer srv.Close()
+				bundle := NewRuntime(srv.Client(), credentialResolver{})
+				target := provider.NewTargetSnapshot("zen", string(profile.ProviderSpecOpenCodeZen), srv.URL+"/v1", "env:ZEN_API_KEY", kind, contract, mode)
+				target.Model = "model"
+				backend, err := bundle.BackendResolver.ResolveBackend(target)
+				if err != nil {
+					t.Fatal(err)
 				}
-				w.Header().Set("Content-Type", "application/json")
-				switch kind {
-				case protocolkind.Messages:
-					_, _ = w.Write([]byte(`{"id":"msg_1","model":"model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
-				case protocolkind.Responses:
-					_, _ = w.Write([]byte(`{"id":"resp_1","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
-				default:
-					_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+				request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}})
+				for _, id := range []thread.ID{threadID, threadID, otherThreadID} {
+					doc, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ThreadID: id}, Canonical: request, Delivery: mode})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := backend.Transport.Send(context.Background(), doc); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}))
-			defer srv.Close()
-			bundle := NewRuntime(srv.Client(), credentialResolver{})
-			target := provider.NewTargetSnapshot("zen", string(profile.ProviderSpecOpenCodeZen), srv.URL+"/v1", "env:ZEN_API_KEY", kind, string(kind), delivery.BufferedDelivery())
-			target.Model = "model"
-			backend, err := bundle.BackendResolver.ResolveBackend(target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}})
-			doc, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := backend.Transport.Send(context.Background(), doc); err != nil {
-				t.Fatal(err)
-			}
-		})
+				if len(sessions) != 3 || sessions[0] != wantSession || sessions[1] != wantSession || sessions[2] != wantOtherSession {
+					t.Fatalf("OpenCode session projections = %#v", sessions)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenCodeTargetCharacterizationRecordReplayProjectsStableThread(t *testing.T) {
+	var sessions []string
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls++
+		sessions = append(sessions, request.Header.Get("X-Opencode-Session"))
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"parallel_tool_calls rejected"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"response","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	target := provider.NewTargetSnapshot("zen", string(profile.ProviderSpecOpenCodeZen), server.URL+"/v1", "env:ZEN_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := NewRuntime(server.Client(), credentialResolver{}).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := backend.CharacterizeTargetFact(context.Background(), provider.AcceptsParallelToolCallsFalse)
+	if !resolution.Conclusive || resolution.Value {
+		t.Fatalf("resolution = %#v, want conclusive false", resolution)
+	}
+	if len(sessions) != 2 || sessions[0] == "" || sessions[0] != sessions[1] {
+		t.Fatalf("characterization sessions = %#v", sessions)
 	}
 }
 

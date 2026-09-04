@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
@@ -61,7 +61,7 @@ func TestOpenAIEmitsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit(" Raw Key "), Delivery: delivery.BufferedDelivery()})
+			document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{CacheLocality: cachelocality.Explicit(" Raw Key ")}, Canonical: request, Delivery: delivery.BufferedDelivery()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func TestOpenAIBoundsPromptCacheKeyAcrossOfficialProtocols(t *testing.T) {
 				t.Fatal(err)
 			}
 			project := func(key string) string {
-				document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, CacheLocality: cachelocality.Explicit(key), Delivery: delivery.BufferedDelivery()})
+				document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{CacheLocality: cachelocality.Explicit(key)}, Canonical: request, Delivery: delivery.BufferedDelivery()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -143,7 +143,7 @@ func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			project := func(exchangeID, locality string, d delivery.Delivery) []byte {
-				document, _, err := backend.Codec.Encode(provider.Request{ExchangeID: exchangeID, Canonical: request, CacheLocality: cachelocality.Explicit(locality), Delivery: d})
+				document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality)}, Canonical: request, Delivery: d})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -274,7 +274,7 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 		Model: canonical.Specify("gpt-test"),
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn one")},
 	})
-	firstRequest := provider.Request{ExchangeID: "official-openai-capture", Canonical: turnOne, Delivery: delivery.BufferedDelivery()}
+	firstRequest := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "official-openai-capture"}, Canonical: turnOne, Delivery: delivery.BufferedDelivery()}
 	firstDocument, _, err := backend.Codec.Encode(firstRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous"},
 	})
-	prepared, err := session.Resume(turnTwo, session.Checkpoint{HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse})
+	prepared, err := continuity.Resume(turnTwo, continuity.Checkpoint{HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse})
 	if err != nil {
 		t.Fatal(err)
 	}

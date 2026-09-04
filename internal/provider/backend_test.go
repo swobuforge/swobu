@@ -26,6 +26,28 @@ func TestProviderContractsHaveNoResumptionSidecar(t *testing.T) {
 	}
 }
 
+func TestProviderRequestKeepsExecutionFactsInsideAttemptContext(t *testing.T) {
+	assertFields := func(name string, typ reflect.Type, want []string) {
+		t.Helper()
+		if typ.NumField() != len(want) {
+			t.Fatalf("%s has %d fields, want %d", name, typ.NumField(), len(want))
+		}
+		for index, field := range want {
+			if typ.Field(index).Name != field {
+				t.Fatalf("%s field %d = %q, want %q", name, index, typ.Field(index).Name, field)
+			}
+		}
+	}
+
+	assertFields("Request", reflect.TypeOf(Request{}), []string{
+		"Attempt", "Canonical", "TargetFacts", "PreviousHistory", "EncodeContext", "Delivery", "ToolNames",
+	})
+	assertFields("AttemptContext", reflect.TypeOf(AttemptContext{}), []string{
+		"ExchangeID", "ThreadID", "CacheLocality", "HasNextRouteCandidate",
+	})
+	assertFields("EncodeContext", reflect.TypeOf(EncodeContext{}), []string{"Context", "ResolveImage"})
+}
+
 func TestRequestDeliveryIsProviderFacingWireIntent(t *testing.T) {
 	req := Request{
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")}),

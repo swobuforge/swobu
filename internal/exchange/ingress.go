@@ -9,14 +9,15 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -33,7 +34,7 @@ type RequestIngress struct {
 type RuntimePoliciesSpec struct {
 	ObservationStore observation.Store
 	TrafficEvidence  observation.TrafficEventSink
-	CheckpointStore  session.Store
+	CheckpointStore  continuity.Store
 	ResponseIDs      ResponseIDGenerator
 	ImageFetcher     provider.ImageFetcher
 	PolicyResolver   WorkspacePolicyResolver
@@ -86,7 +87,7 @@ type ExecutionRuntime interface {
 
 func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies RuntimePoliciesSpec) RequestIngress {
 	if policies.CheckpointStore == nil {
-		policies.CheckpointStore = session.NewMemoryStore()
+		policies.CheckpointStore = continuity.NewMemoryStore()
 	}
 	if policies.ResponseIDs == nil {
 		policies.ResponseIDs = NewDefaultResponseIDGenerator()
@@ -117,6 +118,7 @@ type RequestInput struct {
 	ClientFamily    canonical.ClientFamily
 	ResponseFraming delivery.Framing
 	Timing          *trafficevidence.Timing
+	ThreadID        thread.ID
 	// ExchangeID is the request-scoped identifier used for event and decision
 	// tracing. Callers must supply one unique value per exchange run.
 	ExchangeID string
@@ -229,7 +231,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	// The normalized path is threaded into the exchange input so terminal evidence
 	// is complete on both success and failure — an exchange error finalizes the
 	// evidence inside runExchange, where it already holds the path.
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath)
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ThreadID)
 	if err != nil {
 		return out, err
 	}

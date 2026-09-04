@@ -3,7 +3,7 @@
 // It owns:
 //   - client ingress orchestration after wire decode;
 //   - explicit checkpoint lookup and exact unique current-head history lookup;
-//   - session Draft preparation, request-scoped MCP opening, and final freeze;
+//   - continuity Draft preparation, request-scoped MCP opening, and final freeze;
 //   - ordered monotonic candidate execution, cross-exchange exact-target
 //     backoff, semantic same-target request-shape recovery, and route failover;
 //   - provider-inflight traffic evidence after concrete target selection and
@@ -12,7 +12,7 @@
 //     provider ingress, client acceptance, and response-completion settlement;
 //   - exact-target selection of concrete OpenAI Responses continuation data;
 //   - one exchange-scoped read-through image fetch cache reused across attempts;
-//   - canonical response capture and atomic session start/head advancement before
+//   - canonical response capture and atomic Thread start/head advancement before
 //     terminal client publication;
 //   - delayed handoff for specifically required provider-hosted effects so an
 //     eligible terminal rejection can advance the route without mixing output;
@@ -32,7 +32,7 @@
 // backed by the existing fetch policy, limits, fetcher, inspection, and cache.
 // URL-native codecs preserve locators without invoking it; byte-only codecs
 // resolve only the URL images they must lower inline. Fetched bytes never become
-// checkpoint or session truth, and resolution is not a reducer phase or durable
+// checkpoint or Thread truth, and resolution is not a reducer phase or durable
 // state.
 //
 // It does not own routing policy, provider adapter semantics, canonical MCP
@@ -40,7 +40,7 @@
 // or generic tool-runtime infrastructure.
 //
 // Import rules:
-//   - exchange may import routing, provider, session, profile, observation,
+//   - exchange may import routing, provider, continuity, profile, observation,
 //     canonical domain, wire contracts, and MCP;
 //   - only adapters and bootstrap may import exchange.
 package exchange

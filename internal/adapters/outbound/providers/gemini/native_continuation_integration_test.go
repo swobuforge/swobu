@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -32,7 +32,7 @@ func TestStoredGeminiContinuationComposesSessionAuthorityWithPrivateLowering(t *
 	}, target.Model, []canonical.CanonicalItem{
 		canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one"),
 	}, canonical.Completed("completed"), canonical.NewUnknownTokenUsage())
-	checkpoint := session.Checkpoint{Request: turnOne, Response: turnOneResponse}
+	checkpoint := continuity.Checkpoint{Request: turnOne, Response: turnOneResponse}
 
 	newTurn := func(store canonical.Specified[bool]) canonical.CanonicalRequest {
 		return canonical.NewCanonicalRequest(canonical.RequestParams{
@@ -46,7 +46,7 @@ func TestStoredGeminiContinuationComposesSessionAuthorityWithPrivateLowering(t *
 	}
 
 	t.Run("same target lowers native interaction and keeps current material", func(t *testing.T) {
-		resolved, err := session.Resume(newTurn(canonical.Unspecified[bool]()), checkpoint)
+		resolved, err := continuity.Resume(newTurn(canonical.Unspecified[bool]()), checkpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func TestStoredGeminiContinuationComposesSessionAuthorityWithPrivateLowering(t *
 		{name: "store false", target: target, store: canonical.Specify(false)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resolved, err := session.Resume(newTurn(tc.store), checkpoint)
+			resolved, err := continuity.Resume(newTurn(tc.store), checkpoint)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestStoredGeminiFunctionContinuationPreservesCurrentScopeAndCorrelation(t *
 		},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_function_previous"},
 	})
-	resolved, err := session.Resume(current, session.Checkpoint{Request: firstRequest, Response: firstResponse})
+	resolved, err := continuity.Resume(current, continuity.Checkpoint{Request: firstRequest, Response: firstResponse})
 	if err != nil {
 		t.Fatal(err)
 	}

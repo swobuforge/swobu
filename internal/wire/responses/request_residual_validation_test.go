@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/continuity"
 )
 
 func TestResponsesAllErasedToolResultDoesNotClosePendingCall(t *testing.T) {
@@ -27,7 +27,7 @@ func TestResponsesAllUnknownRequestItemsRejectAfterSessionMaterialization(t *tes
 	if err != nil {
 		t.Fatalf("wire decoder rejected additive unknown item too early: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err == nil {
+	if _, err := continuity.Begin(decoded.Request.Request); err == nil {
 		t.Fatal("session accepted all-erased materialized request")
 	}
 }
@@ -42,7 +42,7 @@ func TestResponsesRequiredToolPolicyRejectsAllErasedToolsAfterSessionMaterializa
 	if err != nil {
 		t.Fatalf("wire decoder rejected residual environment too early: %v", err)
 	}
-	if _, err := session.Begin(decoded.Request.Request); err == nil {
+	if _, err := continuity.Begin(decoded.Request.Request); err == nil {
 		t.Fatal("required policy survived after every materialized tool was erased")
 	}
 }

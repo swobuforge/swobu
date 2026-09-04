@@ -40,11 +40,11 @@ func TestNoAuthStrategy(t *testing.T) {
 	}
 }
 
-func TestAuthStrategyDoesNotOverwriteExplicitHeader(t *testing.T) {
+func TestAuthStrategyOverridesProviderDocumentHeader(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
 	req.Header.Set("Authorization", "Bearer preexisting")
 	BearerAuthStrategy().Apply(req, "tok_123")
-	if got := req.Header.Get("Authorization"); got != "Bearer preexisting" {
+	if got := req.Header.Get("Authorization"); got != "Bearer tok_123" {
 		t.Fatalf("authorization=%q", got)
 	}
 }

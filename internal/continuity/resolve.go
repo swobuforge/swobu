@@ -1,4 +1,4 @@
-package session
+package continuity
 
 import (
 	"errors"
@@ -37,7 +37,7 @@ type materializedRequest struct {
 	previousHistory requestItemRange
 }
 
-// Draft is transient session composition state used only while request-scoped
+// Draft is transient continuity composition state used only while request-scoped
 // MCP preparation may still update the current prelude.
 type Draft struct {
 	current    canonical.CanonicalRequest
@@ -129,7 +129,7 @@ func Resume(request canonical.CanonicalRequest, checkpoint Checkpoint) (Resolved
 // request-scoped MCP context is finalized.
 func PrepareBegin(request canonical.CanonicalRequest) (Draft, error) {
 	if _, ok := request.PreviousResponse(); ok {
-		return Draft{}, errors.New("session begin request contains previous response")
+		return Draft{}, errors.New("thread begin request contains previous response")
 	}
 	current, err := materializeBeginRequest(request)
 	if err != nil {
@@ -167,7 +167,7 @@ func PrepareResume(request canonical.CanonicalRequest, checkpoint Checkpoint) (D
 	}
 	response := checkpoint.Response.Response()
 	if err := response.ValidateCommittedResponse(); err != nil {
-		return Draft{}, fmt.Errorf("invalid session checkpoint response reference: %w", err)
+		return Draft{}, fmt.Errorf("invalid thread checkpoint response reference: %w", err)
 	}
 	if hasExplicit && response.SwobuID != requestedSwobuResponseID {
 		return Draft{}, canonical.BadRequest("unknown previous_response_id")
@@ -195,7 +195,7 @@ func (d Draft) Finalize(prepared canonical.CanonicalRequest) (ResolvedRequest, e
 	}
 	_, originalHistory, err := canonical.SplitRequestPrelude(d.current.Items())
 	if err != nil {
-		return ResolvedRequest{}, fmt.Errorf("session draft current request is invalid: %w", err)
+		return ResolvedRequest{}, fmt.Errorf("continuity draft current request is invalid: %w", err)
 	}
 	_, preparedHistory, err := canonical.SplitRequestPrelude(prepared.Items())
 	if err != nil {

@@ -76,7 +76,7 @@ func TestDecodeChatWithReasoningCarrierStreamsOnePreludeBeforeAssistantOutput(t 
 	decoded, err := DecodeChatWithReasoningCarrier(
 		context.Background(),
 		Codec{Protocol: protocolkind.ChatCompletions},
-		provider.Request{ExchangeID: "exchange-stream", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")})},
+		provider.Request{Attempt: provider.AttemptContext{ExchangeID: "exchange-stream"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")})},
 		provider.StreamIngress{Stream: carrier.ByteStream{
 			Header: http.Header{"Content-Type": {"text/event-stream"}}, MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
 		}},
@@ -133,7 +133,7 @@ func TestDecodeChatWithReasoningCarrierBuffersOnePreludeBeforeAssistantOutput(t 
 	decoded, err := DecodeChatWithReasoningCarrier(
 		context.Background(),
 		Codec{Protocol: protocolkind.ChatCompletions},
-		provider.Request{ExchangeID: "exchange-buffered", Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")})},
+		provider.Request{Attempt: provider.AttemptContext{ExchangeID: "exchange-buffered"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("m")})},
 		provider.DocumentIngress{Document: carrier.NewDocument(
 			protocolkind.ChatCompletions,
 			"application/json",

@@ -1,0 +1,18 @@
+{
+  "schema": "swobu.provider-characterization/v1",
+  "provider": "OpenCode Zen",
+  "provider_spec": "opencode-zen",
+  "endpoint": "https://opencode.ai/zen/v1/chat/completions",
+  "protocol": "chat_completions",
+  "delivery": "buffered",
+  "model": "mimo-v2.5-free",
+  "observed_at": "2026-09-04T00:37:17Z",
+  "source": "live",
+  "request_count": 3,
+  "successful_decodes": 3,
+  "same_thread_stable": true,
+  "different_thread_distinct": true,
+  "raw_identity_absent": true,
+  "same_projection_sha256": "06bb459e8ef9d9fb820cd19824aa7e41d6e3663f0c152244bffbe750753254a1",
+  "other_projection_sha256": "97a93e0ba48814987b5c8ab809be09b9665d5ba64457e5131ad6645fe3fda67e"
+}

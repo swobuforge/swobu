@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -65,7 +66,7 @@ func TestRequestPathPublishesInflightEvidenceBeforeProviderReturns(t *testing.T)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := runExchange(context.Background(), runner, "req_inflight_live", "codex-tui/0.147.0", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses)
+		_, err := runExchange(context.Background(), runner, "req_inflight_live", "codex-tui/0.147.0", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{})
 		done <- err
 	}()
 

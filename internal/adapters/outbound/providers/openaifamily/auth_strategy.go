@@ -66,12 +66,9 @@ func AuthStrategyForHeader(header string, fallback AuthStrategy) AuthStrategy {
 	}
 }
 
-// Apply writes the token into the provider-selected header when missing.
+// Apply writes the transport-owned token into the provider-selected header.
 func (s AuthStrategy) Apply(req *http.Request, token string) {
 	if req == nil || s.Style == AuthStyleNone {
-		return
-	}
-	if got := req.Header.Get(string(s.Header)); got != "" {
 		return
 	}
 	switch s.Style {

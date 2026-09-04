@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -39,10 +39,11 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 		},
 	}), canonical.ResponseBinding{})
 	capture.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: response}
-	store := session.NewMemoryStore()
+	store := continuity.NewMemoryStore()
 	committer := &checkpointCommitter{
 		exchangeID: "gate_order", workspaceSlug: "alpha", store: store,
 		request: testCanonicalRequest("m"), historyScheme: testHistoryScheme,
+		threadID: testThreadID("gate-order"),
 	}
 	stream := newCheckpointTerminalGate(
 		capture,
@@ -58,15 +59,15 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 	if event.Kind != canonical.EventFinish {
 		t.Fatalf("first published terminal event = %s, want finish", event.Kind)
 	}
-	record, found, err := store.Get(context.Background(), "alpha", "swobu_gate_order")
+	record, found, err := store.GetCheckpoint(context.Background(), "alpha", "swobu_gate_order")
 	if err != nil || !found {
 		t.Fatalf("checkpoint at finish publication = (%t, %v), want addressable", found, err)
 	}
 	if record.History != nil {
 		t.Fatalf("optional history fingerprint = %#v, want absent", record.History)
 	}
-	if record.SessionID != session.ClientSessionID(record.ID) {
-		t.Fatalf("genesis session ID = %q, want checkpoint ID %q", record.SessionID, record.ID)
+	if record.ThreadID != testThreadID("gate-order") {
+		t.Fatal("checkpoint did not retain its resolved thread identity")
 	}
 }
 

@@ -10,11 +10,12 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -232,7 +233,7 @@ func TestChatGPTResponseIDDoesNotBecomeNativeContinuation(t *testing.T) {
 
 	raw := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_789\",\"model\":\"gpt-5.4-mini\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_789\",\"status\":\"completed\",\"output\":[]}}\n\n"
-	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{ExchangeID: "ex_store_false"}, provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_store_false"}}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream",
 		Body:      io.NopCloser(strings.NewReader(raw)),
 	}})
@@ -511,7 +512,7 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	rawTurnOne := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider_resp_previous\",\"model\":\"gpt-5.4-mini\",\"status\":\"in_progress\",\"store\":false}}\n\n" +
 		"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer one\"}]}}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider_resp_previous\",\"model\":\"gpt-5.4-mini\",\"status\":\"completed\",\"store\":false,\"output\":[]}}\n\n"
-	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{ExchangeID: "ex_turn_one", Canonical: turnOne}, provider.StreamIngress{Stream: carrier.ByteStream{
+	decoded, err := newBackendCodec("chatgpt").Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_turn_one"}, Canonical: turnOne}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream",
 		Body:      io.NopCloser(strings.NewReader(rawTurnOne)),
 	}})
@@ -529,11 +530,15 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 	if turnOneResponse.Response().Responses != nil {
 		t.Fatal("ChatGPT decoder minted native continuation during turn-one checkpoint commit")
 	}
-	store := session.NewMemoryStore()
-	if _, err := store.StartSession(context.Background(), "dev", session.Checkpoint{HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse}); err != nil {
+	store := continuity.NewMemoryStore()
+	threadID, err := thread.Derive("chatgpt-test/v1", "two-turn-replay")
+	if err != nil {
 		t.Fatal(err)
 	}
-	checkpoint, found, err := store.Get(context.Background(), "dev", "resp_previous")
+	if _, err := store.StartThread(context.Background(), "dev", continuity.Checkpoint{ThreadID: threadID, HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse}); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, found, err := store.GetCheckpoint(context.Background(), "dev", "resp_previous")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +552,7 @@ func TestChatGPTTwoTurnReplayOmitsPreviousResponseID(t *testing.T) {
 			SwobuID: "resp_previous",
 		},
 	})
-	prepared, err := session.Resume(turnTwo, checkpoint)
+	prepared, err := continuity.Resume(turnTwo, checkpoint)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 
 func beginMCPPreparation(s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
 	if s.draft == nil {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: MCP preparation requires a session draft")
+		return reducerOutcome{}, fmt.Errorf("exchange invariant: MCP preparation requires a continuity draft")
 	}
 	s.phase = preparingMCPPhase{}
 	// MCP preparation is deliberately exchange-scoped and precedes provider

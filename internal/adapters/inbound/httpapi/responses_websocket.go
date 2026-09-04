@@ -19,6 +19,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -157,6 +158,11 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadEndpoint("endpoint name is invalid"))))
 		return
 	}
+	transportHeaders, connectionThreadID, err := ingressTransportRequest(http.MethodPost, string(normalizedPath), parsedWorkspace.String(), r.Header, nil)
+	if err != nil {
+		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
+		return
+	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	incoming := make(chan string, 1)
@@ -207,13 +213,13 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		messageSequence++
 		exchangeID := connectionID + "/create/" + strconv.FormatUint(messageSequence, 10)
 		request := r.WithContext(ctx)
-		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, exchangeID, []byte(message)); err != nil && ctx.Err() == nil {
+		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, exchangeID, transportHeaders.Header, connectionThreadID, []byte(message)); err != nil && ctx.Err() == nil {
 			_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		}
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, raw []byte) error {
+func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, transportHeaders http.Header, threadID thread.ID, raw []byte) error {
 	if int64(len(raw)) > maxOperatorJSONBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
@@ -241,11 +247,12 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
 		Workspace:       workspace,
-		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), r.Header, payload),
+		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
 		ClientHandler:   trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
 		ClientFamily:    canonical.ClientFamilyResponses,
 		ResponseFraming: delivery.FramingWebSocket,
 		Timing:          &timing,
+		ThreadID:        threadID,
 		ExchangeID:      requestID,
 	})
 	if err != nil {

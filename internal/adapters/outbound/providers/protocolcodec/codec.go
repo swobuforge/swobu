@@ -7,6 +7,7 @@ package protocolcodec
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
@@ -22,11 +23,16 @@ import (
 
 // Codec lowers canonical semantics through one standard protocol family.
 type Codec struct {
-	Protocol         protocolkind.ProtocolKind
-	ChatDialect      ChatDialect
-	ResponsesDialect ResponsesDialect
-	MessagesDialect  MessagesDialect
+	Protocol              protocolkind.ProtocolKind
+	ChatDialect           ChatDialect
+	ResponsesDialect      ResponsesDialect
+	MessagesDialect       MessagesDialect
+	ProjectRequestHeaders RequestHeaderProjector
 }
+
+// RequestHeaderProjector adds provider-owned wire-envelope headers to the
+// already lowered document without authority over canonical or transport state.
+type RequestHeaderProjector func(provider.AttemptContext, http.Header) error
 
 // Encode implements provider.Codec.
 func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, error) {
@@ -52,7 +58,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 		document, result.Changes, err = CompileChatRequest(req, c.ChatDialect)
 		if err == nil {
 			if c.ChatDialect.DecorateAttempt != nil {
-				decoration, err = c.ChatDialect.DecorateAttempt(attemptContextFromRequest(req))
+				decoration, err = c.ChatDialect.DecorateAttempt(req.Attempt)
 				if err == nil && len(decoration.Fields) > 0 {
 					err = chatcompletions.ApplyAttemptDecoration(document.Payload, decoration.Fields)
 				}
@@ -70,7 +76,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 		document, result.Changes, err = CompileResponsesRequest(reqForLowering, c.ResponsesDialect)
 		if err == nil {
 			if c.ResponsesDialect.DecorateAttempt != nil {
-				decoration, err = c.ResponsesDialect.DecorateAttempt(attemptContextFromRequest(req))
+				decoration, err = c.ResponsesDialect.DecorateAttempt(req.Attempt)
 				if err == nil && len(decoration.Fields) > 0 {
 					err = responses.ApplyAttemptDecoration(document.Payload, decoration.Fields)
 				}
@@ -84,7 +90,7 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 		document, result.Changes, err = CompileMessagesRequest(req, c.MessagesDialect)
 		if err == nil {
 			if c.MessagesDialect.DecorateAttempt != nil {
-				decoration, err = c.MessagesDialect.DecorateAttempt(attemptContextFromRequest(req))
+				decoration, err = c.MessagesDialect.DecorateAttempt(req.Attempt)
 				if err == nil && len(decoration.Fields) > 0 {
 					err = messages.ApplyAttemptDecoration(document.Payload, decoration.Fields)
 				}
@@ -96,6 +102,10 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	default:
 		return carrier.Document{}, changes, canonical.BadEndpoint("selected provider protocol has no request codec")
 	}
+	if err != nil {
+		return carrier.Document{}, changes, err
+	}
+	result.Document, err = projectRequestHeaders(result.Document, req.Attempt, c.ProjectRequestHeaders)
 	if err != nil {
 		return carrier.Document{}, changes, err
 	}
@@ -111,11 +121,17 @@ func (c Codec) Encode(req provider.Request) (carrier.Document, []compat.Change, 
 	return result.Document, changes, err
 }
 
-func attemptContextFromRequest(req provider.Request) AttemptContext {
-	return AttemptContext{
-		CacheLocality:         req.CacheLocality,
-		HasNextRouteCandidate: req.EncodeContext.HasNextRouteCandidate,
+func projectRequestHeaders(document carrier.Document, attempt provider.AttemptContext, projector RequestHeaderProjector) (carrier.Document, error) {
+	if projector == nil {
+		return document, nil
 	}
+	if document.Header == nil {
+		document.Header = make(http.Header)
+	}
+	if err := projector(attempt, document.Header); err != nil {
+		return carrier.Document{}, err
+	}
+	return document, nil
 }
 
 // CompileResponsesRequest owns the single standard typed lowering sequence used
@@ -129,7 +145,7 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 		responses.EncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames},
 		req.Delivery,
 		&changes,
-		req.ExchangeID,
+		req.Attempt.ExchangeID,
 		responses.EncodeOptions{},
 		responses.CompileOptions{
 			ToolLowering:               responses.ProtocolToolLowering().Overlay(dialect.Tools),
@@ -164,7 +180,7 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 		req.ToolNames,
 		req.Delivery,
 		&changes,
-		req.ExchangeID,
+		req.Attempt.ExchangeID,
 		chatcompletions.CompileOptions{
 			Lowering:               chatcompletions.ProtocolLowering().Overlay(dialect.Lowering),
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
@@ -196,7 +212,7 @@ func CompileMessagesRequest(req provider.Request, dialect MessagesDialect) (mess
 		req.ToolNames,
 		req.Delivery,
 		&changes,
-		req.ExchangeID,
+		req.Attempt.ExchangeID,
 		messages.CompileOptions{
 			Lowering: messages.ProtocolLowering().Overlay(dialect.Lowering),
 		},
@@ -247,7 +263,7 @@ func (c Codec) decodeBase(ctx context.Context, request provider.Request, ingress
 }
 
 func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc carrier.Document) (wire.ProviderDecodeResult, error) {
-	exchangeID := request.ExchangeID
+	exchangeID := request.Attempt.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
@@ -262,7 +278,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 }
 
 func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request) (wire.ProviderDecodeResult, error) {
-	exchangeID := request.ExchangeID
+	exchangeID := request.Attempt.ExchangeID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, request.ToolNames, stream, exchangeID)

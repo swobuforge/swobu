@@ -9,15 +9,16 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/thread"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/session"
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
@@ -33,6 +34,7 @@ func runExchange(
 	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 	requestPath canonical.NormalizedPath,
+	explicitThreadID thread.ID,
 ) (RequestOutput, error) {
 	if err := validateCheckpointRuntime(runner); err != nil {
 		return RequestOutput{}, err
@@ -60,7 +62,8 @@ func runExchange(
 			mcpAccess:             decoded.MCPAccess,
 			explicitCacheLocality: decoded.CacheLocality,
 			workspace:             workspace, timing: timing,
-			requestPath: requestPath,
+			explicitThreadID: explicitThreadID,
+			requestPath:      requestPath,
 		},
 		swobuResponseID:  responseID,
 		phase:            startingPhase{},
@@ -343,23 +346,26 @@ func logInflightEvidenceFailure(requestID string, err error) {
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
 	case loadCheckpointCommand:
-		var record session.Checkpoint
-		var resolution session.HistoryResolution
+		var record continuity.Checkpoint
+		var resolution continuity.HistoryResolution
 		var current bool
 		var err error
 		if c.explicit {
 			var found bool
-			record, found, err = c.store.Get(ctx, c.workspaceSlug, c.reference)
+			record, found, err = c.store.GetCheckpoint(ctx, c.workspaceSlug, c.reference)
 			if found {
-				resolution = session.HistoryUniqueHead
-				current, err = c.store.IsCurrentHead(ctx, c.workspaceSlug, record.SessionID, record.ID)
+				resolution = continuity.HistoryUniqueHead
+				current, err = c.store.IsCurrentHead(ctx, c.workspaceSlug, record.ThreadID, record.ResponseID)
 			} else {
-				resolution = session.HistoryNotFound
+				resolution = continuity.HistoryNotFound
 			}
 		} else {
-			record, resolution, err = c.store.ResolveHeadByHistory(ctx, c.workspaceSlug, c.history)
+			record, resolution, err = c.store.ResolveHeadByHistory(ctx, c.workspaceSlug, c.history, c.preferred)
 		}
 		return checkpointLoaded{record: record, resolution: resolution, current: current, err: err}
+	case loadThreadCommand:
+		value, found, err := c.store.GetThread(ctx, c.workspaceSlug, c.threadID)
+		return threadLoaded{thread: value, found: found, err: err}
 	case prepareMCPCommand:
 		full, run, changes, err := mcp.Open(ctx, c.full, c.access)
 		return mcpPrepared{full: full, run: run, changes: changes, err: err}

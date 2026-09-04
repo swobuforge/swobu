@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/session"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -54,7 +54,7 @@ func TestResponsesContinuationConsumptionUsesVersionedCanonicalRefinement(t *tes
 		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous"},
 	})
-	prepared, err := session.Resume(turnTwo, session.Checkpoint{Request: turnOne, Response: turnOneResponse})
+	prepared, err := continuity.Resume(turnTwo, continuity.Checkpoint{Request: turnOne, Response: turnOneResponse})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestResponsesContinuationAfterLocalResultSendsOnlyFunctionOutput(t *testing
 	base := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("gpt-test"), Items: []canonical.CanonicalItem{
 		canonicaltest.ToolDeclarations(t, declaration), canonicaltest.Message(t, canonical.MessageRoleUser, "look it up"),
 	}})
-	prepared, err := session.Begin(base)
+	prepared, err := continuity.Begin(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,14 +154,14 @@ func TestOfficialOpenAIStoreFalseUsesFullHistoryWithoutNativeContinuation(t *tes
 		[]canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer one")},
 		canonical.Completed("completed"),
 	)
-	checkpoint := session.Checkpoint{Request: turnOne, Response: turnOneResponse}
+	checkpoint := continuity.Checkpoint{Request: turnOne, Response: turnOneResponse}
 	turnTwo := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model:            canonical.Specify("gpt-test"),
 		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous"},
 		Store:            canonical.Specify(false),
 	})
-	prepared, err := session.Resume(turnTwo, checkpoint)
+	prepared, err := continuity.Resume(turnTwo, checkpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
