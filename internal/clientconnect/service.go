@@ -23,24 +23,51 @@ func NewService() *Service {
 }
 
 func runLocalCommand(name string, args ...string) ([]byte, int, error) {
+	stdoutFile, err := os.CreateTemp("", "swobu-clientconnect-stdout-*")
+	if err != nil {
+		return nil, -1, err
+	}
+	stdoutPath := stdoutFile.Name()
+	defer os.Remove(stdoutPath)
+	defer stdoutFile.Close()
+
+	stderrFile, err := os.CreateTemp("", "swobu-clientconnect-stderr-*")
+	if err != nil {
+		return nil, -1, err
+	}
+	stderrPath := stderrFile.Name()
+	defer os.Remove(stderrPath)
+	defer stderrFile.Close()
+
 	cmd := exec.Command(name, args...)
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	err := cmd.Run()
-	stdout := stdoutBuf.Bytes()
-	stderr := stderrBuf.Bytes()
-	if err == nil {
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	runErr := cmd.Run()
+	if err := stdoutFile.Close(); err != nil {
+		return nil, -1, err
+	}
+	if err := stderrFile.Close(); err != nil {
+		return nil, -1, err
+	}
+	stdout, stdoutErr := os.ReadFile(stdoutPath)
+	if stdoutErr != nil {
+		return nil, -1, stdoutErr
+	}
+	stderr, stderrErr := os.ReadFile(stderrPath)
+	if stderrErr != nil {
+		return nil, -1, stderrErr
+	}
+	if runErr == nil {
 		return stdout, 0, nil
 	}
-	if exitError, ok := err.(*exec.ExitError); ok {
+	if exitError, ok := runErr.(*exec.ExitError); ok {
 		out := stdout
 		if len(bytes.TrimSpace(out)) == 0 && len(bytes.TrimSpace(stderr)) > 0 {
 			out = stderr
 		}
 		return out, exitError.ExitCode(), nil
 	}
-	return nil, -1, err
+	return nil, -1, runErr
 }
 
 // Discover returns all clients with a positive presence signal.
