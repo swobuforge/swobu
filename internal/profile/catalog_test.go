@@ -125,8 +125,8 @@ func TestCatalog_MetaModelAPIIsDerivedStreamingResponses(t *testing.T) {
 
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 41 {
-		t.Fatalf("provider profile count = %d, want 41", len(profiles))
+	if len(profiles) != 42 {
+		t.Fatalf("provider profile count = %d, want 42", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -150,7 +150,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		ProviderSpecGMI, ProviderSpecGroq, ProviderSpecFireworks,
 		ProviderSpecOpenRouter, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
-		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope,
+		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope, ProviderSpecCompactifAI,
 		ProviderSpecOpenCodeZen, ProviderSpecNous, ProviderSpecCommandCode, ProviderSpecVenice,
 	} {
 		if _, ok := seen[providerID]; !ok {
@@ -159,7 +159,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 38,
+		routing.ConnectionShapeStandard: 39,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -167,6 +167,29 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		if got := shapes[shape]; got != want {
 			t.Fatalf("connection shape %d count = %d, want %d", shape, got, want)
 		}
+	}
+}
+
+func TestCompactifAIProfileDeclaresExactSetupAndProtocols(t *testing.T) {
+	provider, ok := ProfileForSpec(string(ProviderSpecCompactifAI))
+	if !ok {
+		t.Fatal("CompactifAI profile is missing")
+	}
+	if provider.ProviderDisplayName != "CompactifAI" || provider.ConnectionShape != routing.ConnectionShapeStandard || provider.ModelDiscovery != ModelDiscoveryModeAdvisory || !provider.VisibleInOperatorUI {
+		t.Fatalf("CompactifAI profile = %#v", provider)
+	}
+	if provider.Locator.Kind != LocatorBaseURL || provider.Locator.Label != "base URL" || provider.Locator.Default != "https://api.compactif.ai/v1" {
+		t.Fatalf("CompactifAI locator = %#v", provider.Locator)
+	}
+	if provider.Credential.Requirement != CredentialRequired || provider.Credential.Authoring != CredentialAuthoringReference || provider.Credential.SuggestedEnvVar != "COMPACTIFAI_API_KEY" {
+		t.Fatalf("CompactifAI credential = %#v", provider.Credential)
+	}
+	if !slices.Equal(provider.SetupKeywords, []string{"CompactifAI", "Multiverse Computing", "Quasar"}) {
+		t.Fatalf("CompactifAI setup keywords = %#v", provider.SetupKeywords)
+	}
+	wantProtocols := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}
+	if got := ConcreteProviderProtocolsForSpec(string(ProviderSpecCompactifAI)); !slices.Equal(got, wantProtocols) {
+		t.Fatalf("CompactifAI protocols = %#v, want %#v", got, wantProtocols)
 	}
 }
 

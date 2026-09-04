@@ -1,0 +1,25 @@
+{
+  "schema": "swobu.provider-characterization/v1",
+  "provider": "CompactifAI",
+  "provider_spec": "compactifai",
+  "endpoint": "https://api.compactif.ai/v1/models",
+  "observed_at": "2026-09-04T10:19:00Z",
+  "source": "live",
+  "authentication": "bearer",
+  "catalog_exposes_cost_or_free_status": false,
+  "rows": [
+    {"id":"cai-deepseek-r1-0528-slim","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"cai-glm-5-1","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"cai-whisper-large-v3-turbo-slim","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":false,"supports_responses":false}},
+    {"id":"carina-60b","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"glm-5-1","owned_by":"zai-org","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"glm-5-2","owned_by":"zai-org","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"glm-5-3","owned_by":"zai-org","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"hypernova-60b","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"mistral-small-3-1","owned_by":"mistralai","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"nemotron-3-nano-omni","owned_by":"nvidia","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"quasar-438b","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"qwen-3-6-27b","owned_by":"multiverse_computing","capabilities":{"support_chat_completion":true,"supports_responses":true}},
+    {"id":"qwen-3-8-27b","owned_by":"Qwen","capabilities":{"support_chat_completion":true,"supports_responses":true}}
+  ]
+}

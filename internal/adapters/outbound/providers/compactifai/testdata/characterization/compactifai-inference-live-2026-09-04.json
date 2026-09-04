@@ -1,0 +1,28 @@
+{
+  "schema": "swobu.provider-characterization/v1",
+  "provider": "CompactifAI",
+  "provider_spec": "compactifai",
+  "endpoint": "https://api.compactif.ai/v1",
+  "observed_at": "2026-09-04T10:50:23Z",
+  "source": "live",
+  "models": [
+    {
+      "model": "quasar-438b",
+      "chat_buffered": true,
+      "chat_streaming": true,
+      "responses_buffered": true,
+      "responses_streaming": true,
+      "tool_loop": true,
+      "reasoning_content_observed": false
+    },
+    {
+      "model": "glm-5-2",
+      "chat_buffered": true,
+      "chat_streaming": true,
+      "responses_buffered": true,
+      "responses_streaming": true,
+      "tool_loop": true,
+      "reasoning_content_observed": false
+    }
+  ]
+}

@@ -1,15 +1,16 @@
 package chatcompletions
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
-func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
+func TestDecodeAndReencodeRequest_DropsUnknownWireField(t *testing.T) {
 	codec := testClientRequestDecoder{}
-	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"unexpected":true,"stream":true}`)
+	req := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}],"future_vendor_knob":{"enabled":true,"value":123},"stream":true}`)
 	got, delivery, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.ChatCompletions, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest() error = %v", err)
@@ -19,6 +20,20 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	}
 	if !delivery.IsStreaming() {
 		t.Fatalf("delivery is not streaming")
+	}
+	providerDocument, err := EncodeCarrier(got, delivery)
+	if err != nil {
+		t.Fatalf("EncodeCarrier() error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(providerDocument.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := payload["future_vendor_knob"]; exists {
+		t.Fatalf("unknown client field leaked to provider request: %s", providerDocument.RawBytes())
+	}
+	if payload["model"] != "claude" || payload["stream"] != true {
+		t.Fatalf("known Chat semantics changed: %#v", payload)
 	}
 }
 

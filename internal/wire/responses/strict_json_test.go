@@ -6,14 +6,15 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
-func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
+func TestDecodeAndReencodeRequest_DropsUnknownWireField(t *testing.T) {
 	codec := testClientRequestDecoder{}
-	req := []byte(`{"model":"gpt-4o-mini","input":"hi","unexpected":true}`)
+	req := []byte(`{"model":"gpt-4o-mini","input":"hi","future_vendor_knob":{"enabled":true,"value":123}}`)
 	got, _, err := codec.DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: req})
 	if err != nil {
 		t.Fatalf("DecodeClientRequest() error = %v", err)
@@ -29,6 +30,20 @@ func TestDecodeRequest_IgnoresUnknownField(t *testing.T) {
 	text, _ := message.Content()[0].Text()
 	if text.Text() != "hi" {
 		t.Fatalf("item text = %q, want %q", text.Text(), "hi")
+	}
+	providerDocument, err := EncodeCarrier(got, delivery.BufferedDelivery())
+	if err != nil {
+		t.Fatalf("EncodeCarrier() error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(providerDocument.RawBytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := payload["future_vendor_knob"]; exists {
+		t.Fatalf("unknown client field leaked to provider request: %s", providerDocument.RawBytes())
+	}
+	if payload["model"] != "gpt-4o-mini" {
+		t.Fatalf("known Responses model changed: %#v", payload)
 	}
 }
 

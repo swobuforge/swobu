@@ -98,6 +98,7 @@ workspaces:
               - {id: nvidia, model: publisher/model, connection: {nvidia: {credential: env:NVIDIA_API_KEY}}}
               - {id: ovhcloud, model: provider-selected-model, connection: {ovhcloud: {credential: env:OVH_AI_ENDPOINTS_ACCESS_TOKEN}}}
               - {id: modelscope, model: 'ZhipuAI/GLM-5.1:DashScope', connection: {modelscope: {credential: env:MODELSCOPE_TOKEN}}}
+              - {id: compactifai, model: quasar-438b, protocol: chat_completions, connection: {compactifai: {credential: env:COMPACTIFAI_API_KEY}}}
               - {id: runpod, model: served-model, protocol: responses_stream, connection: {runpod: {base_url: abc123, credential: env:RUNPOD_API_KEY}}}
               - {id: together, model: zai-org/GLM-5.1, connection: {together: {credential: env:TOGETHER_API_KEY}}}
               - {id: deepinfra, model: deploy_id:private, connection: {deepinfra: {credential: env:DEEPINFRA_TOKEN}}}

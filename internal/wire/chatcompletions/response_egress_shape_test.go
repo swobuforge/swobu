@@ -2,14 +2,80 @@ package chatcompletions
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	sse "github.com/swobuforge/swobu/internal/wire/framing/sse"
 )
+
+func TestChatBufferedResponseNormalizesNullToolCallsToAbsent(t *testing.T) {
+	providerDocument := carrier.Document{
+		Family: protocolkind.ChatCompletions,
+		Media:  "application/json",
+		Raw:    []byte(`{"id":"chatcmpl_affine","model":"m","choices":[{"message":{"role":"assistant","content":"OK","tool_calls":null},"finish_reason":"stop"}]}`),
+	}
+	decoded, err := (ProviderDocumentDecoder{}).DecodeProviderDocument(context.Background(), canonical.CanonicalRequest{}, nil, providerDocument, "ex_affine_null_tool_calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := canonical.ResponseBinding{SwobuID: canonical.NewSwobuResponseID("resp_affine"), TargetID: "target", TargetVersion: 1}
+	response, err := canonical.ProjectStream(context.Background(), canonical.NewBoundResponseIdentityStream(decoded.Stream, binding), binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := response.Items()
+	if len(items) != 1 {
+		t.Fatalf("canonical items = %#v, want one message", items)
+	}
+	message, ok := items[0].Message()
+	if !ok || len(message.Content()) != 1 {
+		t.Fatalf("canonical output = %#v, want one text message", items[0])
+	}
+	text, ok := message.Content()[0].Text()
+	if !ok || text.Text() != "OK" {
+		t.Fatalf("canonical text = %#v, want OK", message.Content())
+	}
+	for _, item := range items {
+		if _, ok := item.ToolCall(); ok {
+			t.Fatalf("null tool_calls created canonical tool call: %#v", item)
+		}
+	}
+	if response.Completion() != canonical.Completed("stop") {
+		t.Fatalf("completion = %#v, want stop", response.Completion())
+	}
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, *response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Changes) != 0 || len(encoded.Changes) != 0 {
+		t.Fatalf("unexpected compatibility changes: decode=%#v encode=%#v", decoded.Changes, encoded.Changes)
+	}
+	var envelope struct {
+		Choices []struct {
+			Message map[string]json.RawMessage `json:"message"`
+			Finish  string                     `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(encoded.Document.RawBytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Choices) != 1 || envelope.Choices[0].Finish != "stop" {
+		t.Fatalf("reconstructed completion = %s", encoded.Document.RawBytes())
+	}
+	if _, exists := envelope.Choices[0].Message["tool_calls"]; exists {
+		t.Fatalf("reconstructed assistant message retained tool_calls: %s", encoded.Document.RawBytes())
+	}
+	var reconstructedText string
+	if err := json.Unmarshal(envelope.Choices[0].Message["content"], &reconstructedText); err != nil || reconstructedText != "OK" {
+		t.Fatalf("reconstructed assistant text = %q, error = %v", reconstructedText, err)
+	}
+}
 
 func TestChatStreamEncoderEmitsOnlyStreamChoiceShape(t *testing.T) {
 	inputTokens, outputTokens, reasoningTokens := 11, 7, 3
