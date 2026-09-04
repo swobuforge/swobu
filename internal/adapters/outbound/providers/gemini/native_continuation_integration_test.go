@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 

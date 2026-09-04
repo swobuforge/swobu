@@ -8,11 +8,11 @@ import (
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
-	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 

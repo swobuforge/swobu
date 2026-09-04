@@ -5,8 +5,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
-	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/continuity"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
 func TestResponsesAllErasedToolResultDoesNotClosePendingCall(t *testing.T) {

@@ -113,7 +113,7 @@ func TestResponsesCodec_EncodeResponse_MapsReasoningUsage(t *testing.T) {
 	assertUsageFieldNumber(t, dto, "usage.output_tokens_details.reasoning_tokens", 4)
 }
 
-func TestOpenAIFamilyCodecsDeriveProtocolTotalFromCanonicalCounters(t *testing.T) {
+func TestOpenAIProtocolCodecsDeriveProtocolTotalFromCanonicalCounters(t *testing.T) {
 	input, outputTokens := 10, 7
 	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{
 		InputTokens: &input, OutputTokens: &outputTokens,
