@@ -5,7 +5,7 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestCockpit_CtrlCStopsApp(t *testing.T) {

@@ -1,7 +1,0 @@
-  help
-
-     version           swobu unknown
-
-     community         unavailable · link missing
-     issue             unavailable · link missing
-     diagnostics       copied · paste into issue/Discord                    copy ↵

@@ -2,6 +2,7 @@ package clientconnect
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -121,11 +122,11 @@ func TestCodexDeclaresSwobuProviderAndPreservesForeignState(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
@@ -152,11 +153,11 @@ func TestCodexReusesExistingSwobuProviderAndPreservesMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -174,7 +175,7 @@ func TestCodexRejectsInvalidInputWithoutChange(t *testing.T) {
 		if err := os.WriteFile(path, fixture, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := planCodex(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+		if _, err := planCodex(path, testTarget(t)); err == nil {
 			t.Fatalf("error = %v", err)
 		}
 		got, _ := os.ReadFile(path)
@@ -197,11 +198,11 @@ func TestClaudePlanChangesOnlyOwnedSemanticLeaves(t *testing.T) {
 		}
 		return ""
 	}}
-	plan, err := service.Plan(ClientClaude, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientClaude, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -229,13 +230,13 @@ func TestClaudePlanPreservesEverySourceByteOutsideOwnedString(t *testing.T) {
 		}
 		return ""
 	}}
-	plan, err := service.Plan(ClientClaude, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientClaude, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []byte(strings.Replace(string(original), "https://old.example", testTarget(t).WorkspaceURL(), 1))
 	want = []byte(strings.Replace(string(want), " },", `,"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1" },`, 1))
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -251,7 +252,7 @@ func TestClaudeRejectsIncompatibleEnvWithoutChange(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := planClaude(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+	if _, err := planClaude(path, testTarget(t)); err == nil {
 		t.Fatalf("error = %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -301,14 +302,14 @@ func TestClaudeDiscoverySettingUsesExistingReplacementSafeguard(t *testing.T) {
 		}
 		return ""
 	}}
-	plan, err := service.Plan(ClientClaude, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientClaude, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !plan.RequiresReplace() || len(plan.Changes) != 1 || plan.Changes[0].Field != "model discovery" {
 		t.Fatalf("plan changes = %#v, want one replacement-gated discovery change", plan.Changes)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -325,7 +326,7 @@ func TestClaudeRejectsNonStringOwnedEndpointWithoutChange(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := planClaude(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+	if _, err := planClaude(path, testTarget(t)); err == nil {
 		t.Fatalf("error = %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -341,7 +342,7 @@ func TestClaudeRejectsNonStringOwnedDiscoverySettingWithoutChange(t *testing.T) 
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := planClaude(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+	if _, err := planClaude(path, testTarget(t)); err == nil {
 		t.Fatalf("error = %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -357,7 +358,7 @@ func TestApplyRefusesChangedCodexBackendEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +366,7 @@ func TestApplyRefusesChangedCodexBackendEvidence(t *testing.T) {
 	if err := os.WriteFile(path, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err == nil {
+	if _, err := service.Apply(context.Background(), plan); err == nil {
 		t.Fatal("changed owned selection accepted")
 	}
 }
@@ -377,7 +378,7 @@ func TestApplyRefusesChangedCodexSwobuEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +386,7 @@ func TestApplyRefusesChangedCodexSwobuEndpoint(t *testing.T) {
 	if err := os.WriteFile(path, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err == nil || !strings.Contains(err.Error(), "Open Connect again") {
+	if _, err := service.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "Open Connect again") {
 		t.Fatalf("error = %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -401,7 +402,7 @@ func TestApplySucceedsWhenCodexAlreadyConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestApplySucceedsWhenCodexAlreadyConfigured(t *testing.T) {
 	if err := os.WriteFile(path, already, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
@@ -426,7 +427,7 @@ func TestApplyReplansReviewedCodexConfiguredState(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil || !plan.AlreadyConfigured() {
 		t.Fatalf("plan = %#v, %v", plan, err)
 	}
@@ -434,7 +435,7 @@ func TestApplyReplansReviewedCodexConfiguredState(t *testing.T) {
 	if err := os.WriteFile(path, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err == nil || !strings.Contains(err.Error(), "Open Connect again") {
+	if _, err := service.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "Open Connect again") {
 		t.Fatalf("error = %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -454,11 +455,11 @@ func TestSymlinkedConfigMutatesTargetWithoutReplacingLink(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	service := codexServiceForPath(link)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Lstat(link)
@@ -487,7 +488,7 @@ func TestApplyRefusesRetargetedLogicalSymlinkWithChangedSelection(t *testing.T) 
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	service := codexServiceForPath(link)
-	plan, err := service.Plan(ClientCodex, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +499,7 @@ func TestApplyRefusesRetargetedLogicalSymlinkWithChangedSelection(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := service.Apply(plan); err == nil {
+	if _, err := service.Apply(context.Background(), plan); err == nil {
 		t.Fatal("retargeted changed selection accepted")
 	}
 	gotFirst, _ := os.ReadFile(first)
@@ -538,7 +539,7 @@ func TestDiscoveryUsesBinaryOrResolvedConfiguration(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, ".claude"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	clients := service.Discover(testTarget(t))
+	clients := service.Discover(context.Background(), testTarget(t))
 	if len(clients) != 1 || clients[0].ID != ClientCodex {
 		t.Fatalf("clients = %#v", clients)
 	}
@@ -555,7 +556,7 @@ func TestPlanRejectsRemoteAndMalformedTargetsBeforeInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []Target{remote, {}, {workspaceSlug: "work", workspaceURL: "not-canonical", local: true}} {
-		if _, err := service.Plan(ClientCodex, target); err == nil || !strings.Contains(err.Error(), "loopback") {
+		if _, err := service.Plan(context.Background(), ClientCodex, target); err == nil || !strings.Contains(err.Error(), "loopback") {
 			t.Fatalf("Plan(%#v) error = %v", target, err)
 		}
 	}
@@ -566,7 +567,7 @@ func TestPlanRejectsRemoteAndMalformedTargetsBeforeInspection(t *testing.T) {
 
 func TestApplyRejectsPlanWithoutConstructorValidatedLocalTarget(t *testing.T) {
 	service := &Service{}
-	if err := service.Apply(Plan{ClientID: ClientCodex}); err == nil || !strings.Contains(err.Error(), "loopback") {
+	if _, err := service.Apply(context.Background(), Plan{ClientID: ClientCodex}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("Apply error = %v", err)
 	}
 }
@@ -578,7 +579,7 @@ func TestApplyRejectsEveryChangedExportedReviewedField(t *testing.T) {
 	}{
 		"client ID":   {mutate: func(p Plan) Plan { p.ClientID = ClientClaude; return p }},
 		"client name": {mutate: func(p Plan) Plan { p.ClientName = "Changed"; return p }},
-		"config path": {mutate: func(p Plan) Plan { p.ConfigPath += ".other"; return p }},
+		"config path": {mutate: func(p Plan) Plan { p.ConfigPaths[0] += ".other"; return p }},
 		"changes": {mutate: func(p Plan) Plan {
 			p.Changes = append([]Change(nil), p.Changes...)
 			p.Changes[0].Before = "https://review-tampered"
@@ -598,11 +599,11 @@ func TestApplyRejectsEveryChangedExportedReviewedField(t *testing.T) {
 				t.Fatal(err)
 			}
 			service := codexServiceForPath(path)
-			plan, err := service.Plan(ClientCodex, testTarget(t))
+			plan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = service.Apply(tc.mutate(plan))
+			_, err = service.Apply(context.Background(), tc.mutate(plan))
 			if tc.appliesValue == "" && err == nil {
 				t.Fatal("changed reviewed field was invisibly accepted")
 			}

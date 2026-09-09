@@ -29,6 +29,10 @@ func runShare(ctx context.Context, client *http.Client, stdout, stderr io.Writer
 			fmt.Fprintln(stderr, err)
 			return ExitDown
 		}
+		if err := requireCompatibleControlPlane(ctx, client, startup.Addr); err != nil {
+			fmt.Fprintln(stderr, err)
+			return ExitDown
+		}
 		if err := operatorclient.New(client, platformconfig.BaseURL(startup.Addr)).RevokeShare(ctx, args[1]); err != nil {
 			fmt.Fprintln(stderr, err)
 			return ExitDown
@@ -57,6 +61,10 @@ func runShare(ctx context.Context, client *http.Client, stdout, stderr io.Writer
 	}
 	startup, err := platformconfig.ResolveStartupConfig("")
 	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return ExitDown
+	}
+	if err := requireCompatibleControlPlane(ctx, client, startup.Addr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return ExitDown
 	}

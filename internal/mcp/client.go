@@ -170,7 +170,7 @@ func declarationFromSDKTool(source canonical.MCPToolSource, tool *mcp.Tool) (can
 	if err != nil {
 		return canonical.ToolDeclaration{}, nil, err
 	}
-	declaration, err := canonical.NewFunctionTool(key, tool.Description, input, canonical.Unspecified[bool]())
+	declaration, err := canonical.NewFunctionTool(key, tool.Description, input, canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled})
 	if err != nil {
 		return canonical.ToolDeclaration{}, nil, err
 	}

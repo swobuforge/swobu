@@ -1,0 +1,87 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - 'candidate/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Product version, including v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      GOWORK: off
+      GOENV: off
+      GOFLAGS: ""
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+      TZ: UTC
+      LC_ALL: C
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Resolve version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF_NAME" in
+            push:candidate/swobu-v*) version="${GITHUB_REF_NAME#candidate/swobu-}" ;;
+            workflow_dispatch:*) version="$DISPATCH_VERSION" ;;
+            *) echo "unsupported release trigger: $GITHUB_EVENT_NAME:$GITHUB_REF_NAME" >&2; exit 1 ;;
+          esac
+          case "$version" in
+            v*) printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV" ;;
+            *) echo "invalid product version: $version" >&2; exit 1 ;;
+          esac
+      - name: Check source
+        run: |
+          go mod download
+          go mod verify
+          make check
+      - name: Build artifacts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          make release-build \
+            SWOBU_VERSION="$VERSION" \
+            SOURCE_COMMIT="$GITHUB_SHA" \
+            SOURCE_TREE="$(git rev-parse HEAD^{tree})" \
+            RELEASE_OUTPUT="$RUNNER_TEMP/release"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Check artifacts
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release"
+          sha256sum --check checksums.txt
+          smoke="$(mktemp -d)"
+          tar -xzf "swobu_${VERSION}_linux_amd64.tar.gz" -C "$smoke"
+          test "$("$smoke/swobu" --version)" = "$VERSION"
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: ${{ runner.temp }}/release/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          compression-level: 0

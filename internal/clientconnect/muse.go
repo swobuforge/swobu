@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,8 +39,8 @@ var museSwobuModelCatalog = []museModelCatalogEntry{{
 	Visibility:   "visible",
 	DisplayOrder: 0,
 	IsDefault:    true,
-	ContextLimit: 1048576,
-	OutputLimit:  131072,
+	ContextLimit: 1000000,
+	OutputLimit:  64000,
 	Description:  "Muse Spark via Swobu",
 }}
 
@@ -79,7 +80,7 @@ func musePresent(s *Service) (bool, error) {
 	return false, nil
 }
 
-func planMuseCurrent(s *Service, target Target) (plannedMutation, error) {
+func planMuseCurrent(_ context.Context, s *Service, target Target) (plannedMutation, error) {
 	path, err := s.musePath()
 	if err != nil {
 		return plannedMutation{}, err
@@ -90,40 +91,40 @@ func planMuseCurrent(s *Service, target Target) (plannedMutation, error) {
 func planMuse(path string, target Target) (plannedMutation, error) {
 	file, err := inspectForeignFile(path, []byte("{}\n"))
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	editor := jsonEditor{}
 	provider, providerExists, err := editor.String(file.raw, keyPath{"provider"})
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	model, modelExists, err := editor.String(file.raw, keyPath{"model"})
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	endpoint, endpointExists, err := editor.String(file.raw, keyPath{"endpoint_transport", "base_url"})
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	auth, authExists, err := editor.String(file.raw, keyPath{"endpoint_transport", "auth"})
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	var catalog []museModelCatalogEntry
 	catalogExists, err := editor.Value(file.raw, keyPath{"model_catalog"}, &catalog)
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	var catalogValue any
 	if catalogExists {
 		if _, err := editor.Value(file.raw, keyPath{"model_catalog"}, &catalogValue); err != nil {
-			return plannedMutation{}, museNoChange(err)
+			return plannedMutation{}, museProblem(err)
 		}
 	}
 	var schemaVersion any
 	schemaExists, err := editor.Value(file.raw, keyPath{"schema_version"}, &schemaVersion)
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 
 	wantedEndpoint := target.WorkspaceURL() + "/v1"
@@ -139,7 +140,7 @@ func planMuse(path string, target Target) (plannedMutation, error) {
 	if !schemaExists {
 		changes = append(changes, Change{Field: "schema version", After: "1"})
 	}
-	plan := Plan{ConfigPath: file.logical, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
@@ -156,21 +157,21 @@ func planMuse(path string, target Target) (plannedMutation, error) {
 	} {
 		next, err = editor.SetString(next, edit.path, edit.value)
 		if err != nil {
-			return plannedMutation{}, museNoChange(err)
+			return plannedMutation{}, museProblem(err)
 		}
 	}
 	catalogJSON, _ := json.Marshal(museSwobuModelCatalog)
 	next, err = editor.SetValue(next, keyPath{"model_catalog"}, catalogJSON)
 	if err != nil {
-		return plannedMutation{}, museNoChange(err)
+		return plannedMutation{}, museProblem(err)
 	}
 	if !schemaExists {
 		next, err = editor.SetValue(next, keyPath{"schema_version"}, []byte("1"))
 		if err != nil {
-			return plannedMutation{}, museNoChange(err)
+			return plannedMutation{}, museProblem(err)
 		}
 	}
-	return plannedMutation{plan: plan, apply: func() error { return file.replace(next) }}, nil
+	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
 }
 
 func museCatalogValue(catalog []museModelCatalogEntry) any {
@@ -188,6 +189,6 @@ func encodeMuseCatalogValue(catalog any) string {
 	return string(raw)
 }
 
-func museNoChange(err error) error {
-	return fmt.Errorf("Muse Code configuration %v. Nothing changed.", err)
+func museProblem(err error) error {
+	return fmt.Errorf("Muse Code configuration: %w", err)
 }

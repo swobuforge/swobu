@@ -29,10 +29,8 @@ type checkpointCaptureSnapshot struct {
 //
 // It folds each event incrementally into a canonical.ResponseProjector as the
 // stream is read — it does NOT retain the event slice. Per-response memory
-// therefore scales with completed item count, not with streamed delta count
-// (epic-50 task 010). The terminal snapshot is materialized once from the
-// folded state, producing the same projection the prior retain-and-reproject
-// path did.
+// therefore scales with completed item count, not with streamed delta count.
+// The terminal snapshot is materialized once from the folded state.
 type checkpointCaptureResponseStream struct {
 	upstream  canonical.ResponseStream
 	binding   canonical.ResponseBinding

@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 )
@@ -39,7 +40,7 @@ func claudePresent(s *Service) (bool, error) {
 	return binaryOrRegularFilePresent(s, "claude", path)
 }
 
-func planClaudeCurrent(s *Service, target Target) (plannedMutation, error) {
+func planClaudeCurrent(_ context.Context, s *Service, target Target) (plannedMutation, error) {
 	path, err := s.claudePath()
 	if err != nil {
 		return plannedMutation{}, err
@@ -50,20 +51,20 @@ func planClaudeCurrent(s *Service, target Target) (plannedMutation, error) {
 func planClaude(path string, target Target) (plannedMutation, error) {
 	file, err := inspectForeignFile(path, []byte("{}\n"))
 	if err != nil {
-		return plannedMutation{}, claudeNoChange(err)
+		return plannedMutation{}, claudeProblem(err)
 	}
 	editor := jsonEditor{}
 	endpoint, endpointExists, err := editor.String(file.raw, claudeEndpointPath)
 	if err != nil {
-		return plannedMutation{}, claudeNoChange(err)
+		return plannedMutation{}, claudeProblem(err)
 	}
 	discovery, discoveryExists, err := editor.String(file.raw, claudeDiscoveryPath)
 	if err != nil {
-		return plannedMutation{}, claudeNoChange(err)
+		return plannedMutation{}, claudeProblem(err)
 	}
 	changes := semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())
 	changes = append(changes, semanticChange("model discovery", discovery, discoveryExists, "1")...)
-	plan := Plan{ConfigPath: file.logical, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
@@ -74,9 +75,9 @@ func planClaude(path string, target Target) (plannedMutation, error) {
 		jsonStringChange{path: claudeDiscoveryPath, value: "1"},
 	)
 	if err != nil {
-		return plannedMutation{}, claudeNoChange(err)
+		return plannedMutation{}, claudeProblem(err)
 	}
-	return plannedMutation{plan: plan, apply: func() error { return file.replace(next) }}, nil
+	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
 }
 
-func claudeNoChange(err error) error { return fmt.Errorf("Claude Code %v. Nothing changed.", err) }
+func claudeProblem(err error) error { return fmt.Errorf("Claude Code: %w", err) }

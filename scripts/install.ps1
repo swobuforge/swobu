@@ -14,7 +14,7 @@ $RepoOwner = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { 'swobuforge' }
 $RepoName = if ($env:REPO_NAME) { $env:REPO_NAME } else { 'swobu' }
 $ProjectName = if ($env:PROJECT_NAME) { $env:PROJECT_NAME } else { 'swobu' }
 $BinName = if ($env:BIN_NAME) { $env:BIN_NAME } else { 'swobu' }
-$InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } elseif ($BinDir) { $BinDir } else { Join-Path $HOME 'AppData/Local/Programs/swobu/bin' }
+$InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } elseif ($BinDir) { $BinDir } elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs/swobu/bin' } else { throw 'error: LOCALAPPDATA is required for the default installation path' }
 if (-not $Version -and $env:VERSION) { $Version = $env:VERSION }
 if (-not $DryRun -and $env:DRY_RUN) { $DryRun = [System.Convert]::ToBoolean($env:DRY_RUN) }
 if (-not $Checksum -and $env:EXPECTED_SHA256) { $Checksum = $env:EXPECTED_SHA256 }
@@ -40,7 +40,7 @@ function Show-Usage {
 Install swobu from GitHub Releases.
 
 Usage:
-  install.ps1 [-Version vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun] [-NoStart] [-Verbose]
+  install.ps1 [-Version swobu-vX.Y.Z] [-BinDir /path] [-Checksum <sha256>] [-DryRun] [-NoStart] [-Verbose]
 
 Environment overrides:
   REPO_OWNER, REPO_NAME, PROJECT_NAME, BIN_NAME, INSTALL_DIR, VERSION, DRY_RUN, EXPECTED_SHA256, VERBOSE, START_SWOBU
@@ -54,6 +54,104 @@ function Normalize-Sha256 {
     Die "invalid sha256 value: $Value"
   }
   return $trimmed
+}
+
+function Normalize-Version {
+  param([Parameter(Mandatory = $true)][string]$Value)
+  return ($Value.Trim() -replace '^swobu-', '') -replace '^v', ''
+}
+
+function Assert-ValidVersion {
+  param([Parameter(Mandatory = $true)][string]$Value)
+  if ($Value -notmatch '^(swobu-v|v?)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
+    Die "invalid version: $Value (expected swobu-vX.Y.Z[-prerelease])"
+  }
+}
+
+function Resolve-Architecture {
+  param([Parameter(Mandatory = $true)][string]$Architecture)
+  switch ($Architecture.ToLowerInvariant()) {
+    'x64' { return 'amd64' }
+    'arm64' { return 'arm64' }
+    default { Die "unsupported architecture: $Architecture (supported: amd64, arm64)" }
+  }
+}
+
+function Get-BinaryVersion {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  try {
+    $output = (& $Path --version 2>$null) -join "`n"
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $output.Trim()
+  }
+  catch {
+    return $null
+  }
+}
+
+function Assert-BinaryVersion {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+    [Parameter(Mandatory = $true)][string]$Description
+  )
+  $actualVersion = Get-BinaryVersion -Path $Path
+  if ([string]::IsNullOrWhiteSpace($actualVersion)) {
+    Die "$Description failed '$BinName --version'"
+  }
+  if ((Normalize-Version -Value $actualVersion) -ne (Normalize-Version -Value $ExpectedVersion)) {
+    Die "$Description reported $actualVersion, expected $ExpectedVersion"
+  }
+}
+
+function Assert-StandaloneTarget {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if (-not $item) { return }
+  if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Die "$Path is a reparse point; refusing to manage an indirect executable"
+  }
+  if ($item.PSIsContainer) {
+    Die "$Path exists and is a directory"
+  }
+}
+
+function Restore-PreviousExecutable {
+  param(
+    [Parameter(Mandatory = $true)][string]$PreviousPath,
+    [Parameter(Mandatory = $true)][string]$InstallPath,
+    [Parameter(Mandatory = $true)][string]$ActivationError
+  )
+  try {
+    Move-Item -LiteralPath $PreviousPath -Destination $InstallPath -ErrorAction Stop
+  }
+  catch {
+    throw "error: $ActivationError; restoration also failed: $($_.Exception.Message); previous executable remains at $PreviousPath"
+  }
+}
+
+function Diagnose-Path {
+  param(
+    [Parameter(Mandatory = $true)][string]$InstallDir,
+    [Parameter(Mandatory = $true)][string]$InstallPath
+  )
+  $pathValue = if ($null -ne $env:PATH) { $env:PATH } else { '' }
+  $pathEntries = ($pathValue -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+  if (-not ($pathEntries | Where-Object { [string]::Equals($_.TrimEnd('\'), $InstallDir.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase) })) {
+    Say ''
+    Warn "$InstallDir is not on your PATH."
+    Say "Add it:"
+    Say "  `$env:Path = ""$InstallDir;`$env:Path"""
+    Say "Persist it:"
+    Say "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$InstallDir', 'User')"
+    return
+  }
+  $resolved = Get-Command "$BinName.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($resolved -and -not [string]::Equals($resolved.Source, $InstallPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Say ''
+    Warn "$($resolved.Source) shadows $InstallPath on PATH."
+    Say "Move $InstallDir before $(Split-Path -Parent $resolved.Source) in PATH."
+  }
 }
 
 function Get-ExpectedChecksumFromFile {
@@ -124,6 +222,31 @@ if ($Help) {
   exit 0
 }
 
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+  Assert-ValidVersion -Value $Version
+}
+
+Say "Swobu installer"
+Say ''
+Step "Preparing install directory... $InstallDir"
+$installPath = Join-Path $InstallDir ("$BinName.exe")
+if (-not $DryRun) {
+  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+  Assert-StandaloneTarget -Path $installPath
+  $previousFiles = @(Get-ChildItem -LiteralPath $InstallDir -Filter ".$BinName.previous.*.exe" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+  if (-not (Test-Path -LiteralPath $installPath) -and $previousFiles.Count -gt 0) {
+    $recoveryPath = $previousFiles[0].FullName
+    Step "Recovering interrupted installation from $recoveryPath"
+    try {
+      Move-Item -LiteralPath $recoveryPath -Destination $installPath -ErrorAction Stop
+    }
+    catch {
+      throw "error: failed to restore interrupted installation from $recoveryPath to ${installPath}: $($_.Exception.Message)"
+    }
+    Assert-StandaloneTarget -Path $installPath
+  }
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $latestUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
   Step "Resolving latest release..."
@@ -133,16 +256,14 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
   }
   $Version = [string]$latest.tag_name
 }
+Assert-ValidVersion -Value $Version
 
 $os = 'windows'
 $archRaw = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-switch ($archRaw) {
-  'x64' { $arch = 'amd64' }
-  'arm64' { $arch = 'arm64' }
-  default { Die "unsupported architecture: $archRaw (supported: amd64, arm64)" }
-}
+$arch = Resolve-Architecture -Architecture $archRaw
 
-$archive = "${ProjectName}_${Version}_${os}_${arch}.zip"
+$productVersion = $Version -replace '^swobu-', ''
+$archive = "${ProjectName}_${productVersion}_${os}_${arch}.zip"
 $baseUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version"
 $archiveUrl = "$baseUrl/$archive"
 $checksumsUrl = "$baseUrl/checksums.txt"
@@ -163,13 +284,26 @@ if ($DryRun) {
   exit 0
 }
 
-Say "Swobu installer"
-Say ''
 Step "Detecting platform... $os $arch"
-Step "Preparing install directory... $InstallDir"
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$freshInstall = -not (Test-Path -LiteralPath $installPath)
+if (-not $freshInstall) {
+  $existingVersion = Get-BinaryVersion -Path $installPath
+  if (-not [string]::IsNullOrWhiteSpace($existingVersion)) {
+    Step "Found existing ${BinName}: $existingVersion"
+    if ((Normalize-Version -Value $existingVersion) -eq (Normalize-Version -Value $Version)) {
+      Diagnose-Path -InstallDir $InstallDir -InstallPath $installPath
+      Ok "$BinName $Version is already installed."
+      exit 0
+    }
+  }
+  else {
+    Step "Found existing $BinName at $installPath"
+  }
+}
 $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("swobu-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+$stagePath = Join-Path $InstallDir (".$BinName.new." + [System.Guid]::NewGuid().ToString('N') + '.exe')
+$previousPath = $null
 
 try {
   $archivePath = Join-Path $tmpRoot $archive
@@ -197,36 +331,52 @@ try {
   $sourceExe = Join-Path $extractDir ("$BinName.exe")
   Extract-ZipEntrySafely -ArchivePath $archivePath -EntryName "$BinName.exe" -DestinationPath $sourceExe
 
-  $installPath = Join-Path $InstallDir ("$BinName.exe")
-  if (Test-Path -Path $installPath -PathType Container) {
-    Die "$installPath exists and is a directory"
+  Step "Staging $BinName in $InstallDir"
+  Copy-Item -LiteralPath $sourceExe -Destination $stagePath
+  Step 'Checking staged executable'
+  Assert-BinaryVersion -Path $stagePath -ExpectedVersion $Version -Description 'staged executable'
+
+  Step "Activating $installPath"
+  if (-not $freshInstall) {
+    $previousPath = Join-Path $InstallDir (".$BinName.previous." + [System.Guid]::NewGuid().ToString('N') + '.exe')
+    Move-Item -LiteralPath $installPath -Destination $previousPath
   }
-  if (Test-Path -Path $installPath -PathType Leaf) {
-    $existingVersion = (& $installPath --version 2>$null) -join "`n"
-    if (-not [string]::IsNullOrWhiteSpace($existingVersion)) {
-      Step "Found existing ${BinName}: $existingVersion"
-    }
-    else {
-      Step "Found existing $BinName at $installPath"
-    }
-  }
-  $tmpInstallPath = Join-Path $InstallDir (".$BinName.exe.tmp")
-  Step "Installing to $installPath"
-  Copy-Item -Path $sourceExe -Destination $tmpInstallPath -Force
-  Move-Item -Path $tmpInstallPath -Destination $installPath -Force
-  Step 'Checking installation'
   try {
-    & $installPath --version *> $null
-    $InstallationVerified = $true
-    Ok "$BinName $Version installed"
+    Move-Item -LiteralPath $stagePath -Destination $installPath
   }
   catch {
-    $InstallationVerified = $false
-    Warn "$BinName was installed, but '$BinName --version' failed."
-    Say "Try:"
-    Say "  $installPath --version"
+    if ($previousPath -and (Test-Path -LiteralPath $previousPath) -and -not (Test-Path -LiteralPath $installPath)) {
+      Restore-PreviousExecutable -PreviousPath $previousPath -InstallPath $installPath -ActivationError "failed to activate staged executable: $($_.Exception.Message)"
+    }
+    throw
   }
-  if ($InstallationVerified -and $StartSwobu) {
+
+  try {
+    Step 'Checking installed executable'
+    Assert-BinaryVersion -Path $installPath -ExpectedVersion $Version -Description 'installed executable'
+  }
+  catch {
+    if ($previousPath -and (Test-Path -LiteralPath $previousPath)) {
+      Remove-Item -LiteralPath $installPath -Force -ErrorAction SilentlyContinue
+      Restore-PreviousExecutable -PreviousPath $previousPath -InstallPath $installPath -ActivationError "installed executable verification failed: $($_.Exception.Message)"
+    }
+    else {
+      Remove-Item -LiteralPath $installPath -Force -ErrorAction SilentlyContinue
+    }
+    throw
+  }
+
+  Ok "$BinName $Version installed"
+  if ($previousPath) {
+    Remove-Item -LiteralPath $previousPath -Force -ErrorAction SilentlyContinue
+  }
+  Get-ChildItem -LiteralPath $InstallDir -Filter ".$BinName.previous.*.exe" -File -ErrorAction SilentlyContinue | ForEach-Object {
+    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+  }
+
+  Diagnose-Path -InstallDir $InstallDir -InstallPath $installPath
+
+  if ($freshInstall -and $StartSwobu) {
     Say ''
     Step 'Starting Swobu'
     try {
@@ -243,24 +393,16 @@ try {
       Say "  $installPath"
     }
   }
-  elseif ($InstallationVerified) {
+  elseif ($freshInstall) {
     Say ''
     Say 'Start Swobu:'
     Say "  $installPath"
   }
-
-  $pathValue = if ($null -ne $env:PATH) { $env:PATH } else { '' }
-  $pathEntries = ($pathValue -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
-  if ($pathEntries -notcontains $InstallDir) {
-    Say ''
-    Warn "$InstallDir is not on your PATH."
-    Say "Add it:"
-    Say "  `$env:Path = ""$InstallDir;`$env:Path"""
-    Say "Persist it:"
-    Say "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$InstallDir', 'User')"
-  }
 }
 finally {
+  if ($stagePath -and (Test-Path -LiteralPath $stagePath)) {
+    Remove-Item -LiteralPath $stagePath -Force -ErrorAction SilentlyContinue
+  }
   if (Test-Path -Path $tmpRoot) {
     Remove-Item -Path $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
   }

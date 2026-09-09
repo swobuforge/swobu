@@ -112,7 +112,7 @@ func chatCompletion(reason string) canonical.Completion {
 func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto responseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
-		return nil, canonical.InternalError("chat completions response is invalid JSON")
+		return nil, canonical.InternalErrorWithCause("chat completions response is invalid JSON", err)
 	}
 	if len(dto.Choices) == 0 {
 		return nil, canonical.InternalError("chat completions response is missing choices")
@@ -269,7 +269,7 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		}
 		var chunk responseBody
 		if err := json.Unmarshal(rawChunk, &chunk); err != nil {
-			return canonical.Event{}, canonical.InternalError("chat completions stream chunk is invalid JSON")
+			return canonical.Event{}, canonical.InternalErrorWithCause("chat completions stream chunk is invalid JSON", err)
 		}
 		if err := s.admitResponseIdentity(chunk.ID, chunk.Model); err != nil {
 			return canonical.Event{}, err

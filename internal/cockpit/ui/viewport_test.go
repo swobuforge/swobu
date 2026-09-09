@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestViewport_ResetInitializesScrollState(t *testing.T) {

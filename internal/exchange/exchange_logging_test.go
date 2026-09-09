@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 )
@@ -226,6 +227,67 @@ func TestProviderAttemptLoggingWarnsForTypedBackendRejectionBeforeHandoff(t *tes
 	assertLogField(t, entries[0], "status_code", float64(401))
 	if strings.Contains(logs.String(), "authentication_error") {
 		t.Fatalf("logs exposed backend prose: %s", logs.String())
+	}
+}
+
+func TestProviderAttemptLoggingPreservesOnlyStructuredProviderDiagnostics(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	attempt := providerCallAttempt{target: provider.TargetSnapshot{TargetID: "target-a", ProviderSpec: "custom", Model: "model-a"}}
+	state := exchangeState{input: exchangeInput{exchangeID: "request-a"}}
+	err := canonical.NewStructuredBackendError("target-a", protocolkind.Responses, 429, canonical.BackendErrorDetail{
+		Type: "usage_limit_reached", Code: "quota", Message: "limit reached", RequestID: "req_provider",
+	}, "")
+	logProviderAttemptFailedBeforeHandoff(state, 1, attempt, responseFailure("provider_stream_decode", err))
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 2 {
+		t.Fatalf("entries = %#v, want stable failure and debug detail", entries)
+	}
+	var stable, detail map[string]any
+	for _, entry := range entries {
+		if entry["event"] == "provider_error_detail" {
+			detail = entry
+		} else {
+			stable = entry
+		}
+	}
+	assertLogField(t, stable, "backend_error_type", "usage_limit_reached")
+	assertLogField(t, stable, "backend_error_code", "quota")
+	assertLogField(t, stable, "backend_request_id", "req_provider")
+	if _, exists := stable["backend_error_message"]; exists {
+		t.Fatalf("stable failure exposed provider message: %#v", stable)
+	}
+	assertLogField(t, detail, "event", "provider_error_detail")
+	assertLogField(t, detail, "backend_error_message", "limit reached")
+}
+
+func TestProviderAttemptLoggingEmitsPrivateDecoderCauseOnlyAtDebug(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	attempt := providerCallAttempt{target: provider.TargetSnapshot{TargetID: "target-a"}}
+	state := exchangeState{input: exchangeInput{exchangeID: "request-a"}}
+	logProviderAttemptFailedBeforeHandoff(state, 1, attempt, responseFailure("provider_stream_decode",
+		canonical.InternalErrorWithCause("responses stream event is invalid JSON", errors.New("invalid character 'x'"))))
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 2 {
+		t.Fatalf("entries = %#v", entries)
+	}
+	for _, entry := range entries {
+		if entry["event"] == "provider_decoder_diagnostic" {
+			assertLogField(t, entry, "diagnostic_error", "invalid character 'x'")
+			continue
+		}
+		if _, exists := entry["diagnostic_error"]; exists {
+			t.Fatalf("stable failure exposed decoder cause: %#v", entry)
+		}
 	}
 }
 

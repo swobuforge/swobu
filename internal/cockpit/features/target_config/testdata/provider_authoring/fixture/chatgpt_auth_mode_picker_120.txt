@@ -1,12 +1,11 @@
-  new target · ChatGPT                                                                                    cancel ↵
-     provider          ChatGPT                                                                            change ↵
+  new target · OpenAI · ChatGPT subscription                                                              cancel ↵
+     provider          OpenAI · ChatGPT subscription                                                      change ↵
      authentication    browser login                                                                      close ↵
       > browser login                                                                                     sign in ↵
         device code                                                                                       sign in ↵
      model             waiting for setup
      routing           fallback after step 1                                                              change ↵
      create                                                                                               complete setup
-
 
 
 

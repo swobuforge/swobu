@@ -256,9 +256,9 @@ func catalog() []Profile {
 			ProviderID:          ProviderSpecOpenAI,
 			ConnectionShape:     routing.ConnectionShapeStandard,
 			ModelDiscovery:      ModelDiscoveryModeAdvisory,
-			ProviderDisplayName: "OpenAI",
+			ProviderDisplayName: "OpenAI API",
 			SetupHint:           "API key",
-			SetupKeywords:       []string{"credential", "model", "protocol"},
+			SetupKeywords:       []string{"OpenAI", "API", "API key", "Codex"},
 			Locator: LocatorSpec{
 				Kind:    LocatorFixed,
 				Default: "https://api.openai.com/v1",
@@ -266,6 +266,23 @@ func catalog() []Profile {
 			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENAI_API_KEY"},
 			VisibleInOperatorUI: true,
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
+		},
+		{
+			ProviderID:          ProviderSpecChatGPT,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "OpenAI · ChatGPT subscription",
+			SetupHint:           "browser login",
+			SetupKeywords:       []string{"OpenAI", "ChatGPT", "Codex", "subscription", "OAuth", "sign in", "browser login", "device code"},
+			Locator: LocatorSpec{
+				Kind:    LocatorFixed,
+				Default: "https://chatgpt.com/backend-api/codex",
+			},
+			// Browser login writes the durable credential reference; it is not a
+			// generic API-key authoring flow.
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 		},
 		{
 			ProviderID:          ProviderSpecMeta,
@@ -283,23 +300,6 @@ func catalog() []Profile {
 			ProviderProtocols: []ProviderProtocolSpec{
 				streamingProtocol("responses_stream", protocolkind.Responses),
 			},
-		},
-		{
-			ProviderID:          ProviderSpecChatGPT,
-			ConnectionShape:     routing.ConnectionShapeStandard,
-			ModelDiscovery:      ModelDiscoveryModeAdvisory,
-			ProviderDisplayName: "ChatGPT",
-			SetupHint:           "browser login",
-			SetupKeywords:       []string{"sign in", "model", "protocol"},
-			Locator: LocatorSpec{
-				Kind:    LocatorFixed,
-				Default: "https://api.openai.com/v1",
-			},
-			// Browser login writes the durable credential reference; it is not a
-			// generic API-key authoring flow.
-			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive},
-			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsChatGPT),
 		},
 		{
 			ProviderID:          ProviderSpecGemini,

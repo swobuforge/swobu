@@ -47,3 +47,12 @@ func TestDecodeHTTPResponseContentEncodingPreservesResponseOnError(t *testing.T)
 		t.Fatalf("response = %#v, want original response with owned body", got)
 	}
 }
+
+func TestReadBackendHTTPErrorBoundsOpaqueBody(t *testing.T) {
+	body := strings.Repeat("x", maxUnexpectedStreamingEvidence+128)
+	resp := &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+	err := ReadBackendHTTPError(resp, "target-a")
+	if len(err.Message) != maxUnexpectedStreamingEvidence {
+		t.Fatalf("captured body bytes = %d, want %d", len(err.Message), maxUnexpectedStreamingEvidence)
+	}
+}

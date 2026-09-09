@@ -104,7 +104,7 @@ func TestBindingsRetainOnlyLinearPerToolIdentityAtCatalogLimit(t *testing.T) {
 			"mcp/docs", canonical.ToolKindFunction, fmt.Sprintf("tool_%03d", index),
 		)
 		declaration, err := canonical.NewFunctionTool(
-			key, "", schema, canonical.Unspecified[bool](),
+			key, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -785,7 +785,7 @@ func TestOpenWithoutMCPReturnsNoRuntime(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "local")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	function, _ := canonical.NewFunctionTool(
-		key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool](),
+		key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 	)
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{function})
 	item, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
@@ -841,8 +841,8 @@ func runtimeTestRequest(t *testing.T) (canonical.CanonicalRequest, canonical.Too
 	localKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "local")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	schema := canonical.NewToolSchemaObject(schemaObject)
-	remoteFunction, _ := canonical.NewFunctionTool(remoteKey, "", schema, canonical.Unspecified[bool]())
-	localFunction, _ := canonical.NewFunctionTool(localKey, "", schema, canonical.Unspecified[bool]())
+	remoteFunction, _ := canonical.NewFunctionTool(remoteKey, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
+	localFunction, _ := canonical.NewFunctionTool(localKey, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	source, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
 	namespace, _ := canonical.NewMCPToolSource(sourceKey, "", source, []canonical.ToolDeclaration{remoteFunction})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{namespace, localFunction})
@@ -933,7 +933,7 @@ func runtimeTestRequiredSourceRequest(
 			"mcp/"+name, canonical.ToolKindFunction, "call",
 		)
 		tool, _ := canonical.NewFunctionTool(
-			toolKey, "", schema, canonical.Unspecified[bool](),
+			toolKey, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 		)
 		source, _ := newTestMCPURL(
 			"https://"+name+".example.test/rpc",
@@ -972,7 +972,7 @@ func runtimeTestCatalogWithDescription(
 	)
 	tool, err := canonical.NewFunctionTool(
 		key, description, canonical.NewToolSchemaObject(schemaObject),
-		canonical.Unspecified[bool](),
+		canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1000,7 +1000,7 @@ func runtimeTestCatalog(
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	function, err := canonical.NewFunctionTool(
 		remoteKey, toolDescription, canonical.NewToolSchemaObject(schemaObject),
-		canonical.Unspecified[bool](),
+		canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 	)
 	if err != nil {
 		t.Fatal(err)

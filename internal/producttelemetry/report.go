@@ -11,7 +11,7 @@ import (
 const (
 	// productReportSchemaVersion is the closed-schema version this client emits.
 	// The Worker rejects any other value.
-	productReportSchemaVersion = 2
+	productReportSchemaVersion = 3
 	// productReportMaxBytes bounds a serialized report. The Worker also rejects
 	// payloads above 64 KiB; the client enforces the same ceiling before sending.
 	productReportMaxBytes = 64 * 1024
@@ -131,6 +131,7 @@ const (
 	reportClientFamilyCline      reportClientFamily = "cline"
 	reportClientFamilyOpenCode   reportClientFamily = "opencode"
 	reportClientFamilyAider      reportClientFamily = "aider"
+	reportClientFamilyVSCode     reportClientFamily = "vscode"
 	reportClientFamilyOther      reportClientFamily = "other"
 	reportClientFamilyUnknown    reportClientFamily = "unknown"
 )

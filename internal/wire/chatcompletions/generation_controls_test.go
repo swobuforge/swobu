@@ -137,11 +137,11 @@ func TestDecodeRequest_MaxCompletionTokensExplicitlyPrecedesLegacyMaxTokens(t *t
 
 func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "reply_shape",
-		Description: "structured reply",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
-		Strict:      true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply_shape",
+		Description:    "structured reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
@@ -207,7 +207,7 @@ func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 	format := got.OutputFormat()
-	if format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" || format.Description != "structured reply" || format.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !format.Strict {
+	if format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" || format.Description != "structured reply" || format.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || format.Conformance() != canonical.SchemaConformanceEnforced {
 		t.Fatalf("output format = %#v, want json schema", format)
 	}
 }
@@ -220,12 +220,56 @@ func TestChatCompletionsJSONObjectRoundTrips(t *testing.T) {
 	if decoded.Kind != canonical.OutputFormatJSONObject {
 		t.Fatalf("decoded format = %#v", decoded)
 	}
-	encoded, err := encodeChatCompletionsOutputFormat(decoded)
+	encoded, err := DefaultOutputFormatLowering(decoded, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(encoded) != `{"type":"json_object"}` {
 		t.Fatalf("encoded format = %s", encoded)
+	}
+}
+
+func TestChatCompletionsLoweringSynthesizesRequiredSchemaName(t *testing.T) {
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:           canonical.OutputFormatJSONSchema,
+		Schema:         canonical.NewRawJSONObject(`{"type":"object"}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := DefaultOutputFormatLowering(format, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto chatCompletionsResponseFormatDTO
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.JSONSchema == nil || dto.JSONSchema.Name != "swobu_output" {
+		t.Fatalf("target-local schema name = %#v", dto.JSONSchema)
+	}
+}
+
+func TestChatCompletionsOutputFormatSerializerDoesNotSynthesizeSchemaName(t *testing.T) {
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
+		Kind:           canonical.OutputFormatJSONSchema,
+		Schema:         canonical.NewRawJSONObject(`{"type":"object"}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encodeChatCompletionsOutputFormat(format, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto chatCompletionsResponseFormatDTO
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.JSONSchema == nil || dto.JSONSchema.Name != "" {
+		t.Fatalf("leaf serializer synthesized schema name: %#v", dto.JSONSchema)
 	}
 }
 

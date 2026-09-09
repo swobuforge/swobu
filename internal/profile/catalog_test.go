@@ -210,7 +210,7 @@ func TestCustomEndpointLoopbackCredentialPolicyParsesHostname(t *testing.T) {
 func TestCatalog_DefaultsAndCredentialPolicy(t *testing.T) {
 	t.Parallel()
 
-	if got := DefaultExecuteBaseURL("chatgpt"); got != "https://api.openai.com/v1" {
+	if got := DefaultExecuteBaseURL("chatgpt"); got != "https://chatgpt.com/backend-api/codex" {
 		t.Fatalf("chatgpt default base URL = %q", got)
 	}
 	chatgpt, ok := profileFor("chatgpt")
@@ -559,8 +559,8 @@ func TestCatalog_ProviderSetupKeywordsAreSearchOnly(t *testing.T) {
 		"ollama":     "model, protocol",
 		"lmstudio":   "local, model, Responses, Chat Completions, Messages, Codex, Claude Code",
 		"vllm":       "inference, server, Responses, Chat Completions, Messages, Codex, Claude Code",
-		"openai":     "credential, model, protocol",
-		"chatgpt":    "sign in, model, protocol",
+		"openai":     "OpenAI, API, API key, Codex",
+		"chatgpt":    "OpenAI, ChatGPT, Codex, subscription, OAuth, sign in, browser login, device code",
 		"anthropic":  "credential, model, protocol",
 		"openrouter": "credential, model, protocol",
 		"bedrock":    "region, Bedrock API key, AWS credentials, model, protocol",
@@ -592,7 +592,7 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		"stepfun":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.stepfun.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "STEP_API_KEY"}, "model"},
 		"together":    {LocatorSpec{Kind: LocatorFixed, Default: "https://api.together.ai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "TOGETHER_API_KEY"}, "model"},
 		"openai":      {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENAI_API_KEY"}, "model"},
-		"chatgpt":     {LocatorSpec{Kind: LocatorFixed, Default: "https://api.openai.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive}, "model"},
+		"chatgpt":     {LocatorSpec{Kind: LocatorFixed, Default: "https://chatgpt.com/backend-api/codex"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringInteractive}, "model"},
 		"gemini":      {LocatorSpec{Kind: LocatorFixed, Default: "https://generativelanguage.googleapis.com/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key"}, "model"},
 		"anthropic":   {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
 		"openrouter":  {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},

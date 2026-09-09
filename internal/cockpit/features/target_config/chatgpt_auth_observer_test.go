@@ -10,8 +10,8 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 type authCommandsStub struct {

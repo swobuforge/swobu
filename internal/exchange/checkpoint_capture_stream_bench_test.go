@@ -8,14 +8,6 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
-// checkpointCaptureResponseStream is the per-request accumulator that backs
-// every client handoff (handoffResponseStream wraps it unconditionally). These
-// benchmarks give the before/after evidence for epic-50 task 010: the stream
-// retains every canonical event for the whole response (checkpoint_capture_stream.go:61)
-// and deep-copies the slice again at the terminal boundary (:70).
-
-// deltaChunk is the text payload of one streamed text delta. Real providers
-// chunk a response into many deltas of this order of size.
 const deltaChunk = "benchmark-stream-chunk-payload"
 
 // responseIdentity is the binding every test response carries. The capture
@@ -88,9 +80,6 @@ func drainCapture(tb testing.TB, events []canonical.Event) checkpointCaptureSnap
 	return capture.snapshot()
 }
 
-// BenchmarkCheckpointCaptureStream measures the per-response memory cost of the
-// checkpoint capture stream across streamed lengths. After task 010, memory
-// must scale with completed item count (here: 1), not with delta count.
 func BenchmarkCheckpointCaptureStream(b *testing.B) {
 	for _, deltaCount := range []int{16, 512, 4096} {
 		events := syntheticResponseEvents(deltaCount)

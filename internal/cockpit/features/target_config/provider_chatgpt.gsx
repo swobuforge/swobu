@@ -102,7 +102,7 @@ func ChatGPTAuthCancel(w *TargetConfig) *ui.SelectableRow {
 
 func ChatGPTAuthSignedIn(w *TargetConfig) *ui.SelectableRow {
 	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-signed-in"), "authentication", "signed in", "reconnect ↵", w.startInteractiveAuth)
-	row.AutoFocus = true
+	row.AutoFocus = false
 	return row
 }
 

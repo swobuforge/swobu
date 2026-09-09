@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"fmt"
 	"slices"
 )
@@ -45,11 +46,11 @@ type Change struct {
 // Changes is the sole mutation truth used by preview, replacement admission,
 // freshness comparison, and Apply.
 type Plan struct {
-	ClientID   ClientID
-	ClientName string
-	ConfigPath string
-	Target     Target
-	Changes    []Change
+	ClientID    ClientID
+	ClientName  string
+	ConfigPaths []string
+	Target      Target
+	Changes     []Change
 }
 
 func semanticChange(field, before string, exists bool, after string) []Change {
@@ -59,8 +60,8 @@ func semanticChange(field, before string, exists bool, after string) []Change {
 	return []Change{{Field: field, Before: before, After: after, BeforeExists: exists}}
 }
 
-// AlreadyConfigured reports that inspection found the intended binding and no
-// write is necessary.
+// AlreadyConfigured reports that the adapter-owned persistent default contains
+// the intended binding and needs no write.
 func (p Plan) AlreadyConfigured() bool { return len(p.Changes) == 0 }
 
 // RequiresReplace reports that at least one reviewed mutation replaces an
@@ -76,7 +77,7 @@ func (p Plan) RequiresReplace() bool {
 
 func (p Plan) equal(other Plan) bool {
 	return p.ClientID == other.ClientID && p.ClientName == other.ClientName &&
-		p.ConfigPath == other.ConfigPath && p.Target == other.Target &&
+		slices.Equal(p.ConfigPaths, other.ConfigPaths) && p.Target == other.Target &&
 		slices.Equal(p.Changes, other.Changes)
 }
 
@@ -88,5 +89,5 @@ func (p Plan) withClient(adapter adapter) Plan {
 
 type plannedMutation struct {
 	plan  Plan
-	apply func() error
+	apply func(context.Context) error
 }

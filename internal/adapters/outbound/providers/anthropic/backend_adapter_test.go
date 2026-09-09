@@ -3,12 +3,14 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -110,6 +112,29 @@ func TestSendProviderRequest_UsesContractDeliveryForStreamingRequests(t *testing
 	}
 	if !strings.Contains(body, `"tools":[`) {
 		t.Fatalf("request body = %s, want tools surface preserved", body)
+	}
+}
+
+func TestSendProviderRequest_PromotesOrdinaryMessagesHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "10")
+		w.WriteHeader(529)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"overloaded_error","message":"try later"},"request_id":"req_provider"}`)
+	}))
+	defer server.Close()
+
+	exec := NewBackendAdapter(profile.ProviderSpecAnthropic, server.Client(), staticCredentialProvider{token: "test-token"})
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecAnthropic), server.URL, "env:TOKEN", protocolkind.Messages, "messages", delivery.BufferedDelivery())
+	target.Model = "claude"
+	doc := carrier.NewDocument(protocolkind.Messages, "application/json", nil, []byte(`{"model":"claude"}`), carrier.Meta{})
+	_, err := exec.Send(context.Background(), target, doc)
+	var backendErr canonical.BackendError
+	if !errors.As(err, &backendErr) || backendErr.ProviderError == nil {
+		t.Fatalf("error = %#v, want structured backend error", err)
+	}
+	detail := backendErr.ProviderError
+	if backendErr.TargetID != "backend-a" || backendErr.SourceProtocol != protocolkind.Messages || backendErr.StatusCode != 529 || backendErr.RetryAfterHeaderValue != "10" || detail.Type != "overloaded_error" || detail.Message != "try later" || detail.RequestID != "req_provider" {
+		t.Fatalf("structured backend error = %#v", backendErr)
 	}
 }
 

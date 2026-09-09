@@ -135,9 +135,10 @@ type ToolLowering struct {
 // overlays sparse provider divergences onto the total protocol baseline before
 // request encoding; compilers accept only the resulting total value.
 type Lowering struct {
-	Tools     ToolLowering
-	Reasoning ReasoningLoweringRule
-	Message   MessageLoweringRule
+	Tools        ToolLowering
+	Reasoning    ReasoningLoweringRule
+	Message      MessageLoweringRule
+	OutputFormat OutputFormatTransformer
 }
 
 // Overlay replaces only explicitly supplied semantic slots.
@@ -148,6 +149,9 @@ func (l Lowering) Overlay(override Lowering) Lowering {
 	}
 	if override.Message != nil {
 		l.Message = override.Message
+	}
+	if override.OutputFormat != nil {
+		l.OutputFormat = override.OutputFormat
 	}
 	return l
 }
@@ -380,7 +384,8 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		document.MaxCompletionTokens = maxTokens
 		document.MaxTokens = nil
 	}
-	if responseFormat, err := encodeChatCompletionsOutputFormat(req.OutputFormat()); err != nil {
+	outputFormat := req.OutputFormat()
+	if responseFormat, err := lowering.OutputFormat(outputFormat, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	} else if len(responseFormat) > 0 {
 		payload["response_format"] = json.RawMessage(responseFormat)
@@ -405,7 +410,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 }
 
 func (l Lowering) resolved() bool {
-	return l.Tools.resolved() && l.Reasoning != nil && l.Message != nil
+	return l.Tools.resolved() && l.Reasoning != nil && l.Message != nil && l.OutputFormat != nil
 }
 
 func (l ToolLowering) resolved() bool {

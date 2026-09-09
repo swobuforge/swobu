@@ -23,6 +23,7 @@ type EncodeOptions struct {
 // shared Responses compiler still owns traversal and dependent policy order.
 type CompileOptions struct {
 	ToolLowering               ToolLowering
+	OutputFormatLowering       OutputFormatTransformer
 	HistoryMessageRole         HistoryMessageRoleTransformer
 	PrependInstructionsToInput bool
 	OmitInclude                bool
@@ -90,7 +91,7 @@ type ProviderRequestDocument struct {
 
 // swobu:lint ignore function-complexity because=Responses encoding lowers every canonical request band into one atomic wire document.
 func EncodeCarrierWithChanges(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions) (carrier.Document, error) {
-	document, err := CompileProviderRequestDocument(input, d, changeLog, exchangeID, options, CompileOptions{ToolLowering: DefaultToolLowering()})
+	document, err := CompileProviderRequestDocument(input, d, changeLog, exchangeID, options, CompileOptions{ToolLowering: DefaultToolLowering(), OutputFormatLowering: DefaultOutputFormatLowering})
 	if err != nil {
 		return carrier.Document{}, err
 	}
@@ -100,6 +101,9 @@ func EncodeCarrierWithChanges(input EncodeInput, d delivery.Delivery, changeLog 
 // CompileProviderRequestDocument lowers one exact target dialect before the
 // single serialization boundary.
 func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, changeLog *[]compat.Change, exchangeID string, options EncodeOptions, compile CompileOptions) (ProviderRequestDocument, error) {
+	if compile.OutputFormatLowering == nil {
+		compile.OutputFormatLowering = DefaultOutputFormatLowering
+	}
 	req := input.Request
 	switch d.Mode {
 	case delivery.Buffered, delivery.Streaming:
@@ -224,7 +228,8 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		}
 		payload["include"] = include
 	}
-	if text, err := encodeResponsesOutputFormat(req.OutputFormat()); err != nil {
+	outputFormat := req.OutputFormat()
+	if text, err := compile.OutputFormatLowering(outputFormat, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	} else if text != nil {
 		payload["text"] = text
@@ -689,7 +694,7 @@ func encodeConversation(items, correlationItems []canonical.CanonicalItem, tools
 			if replay, ok := reasoning.Opaque().Responses(); ok {
 				hasResponsesReplay = true
 				item["encrypted_content"] = replay.EncryptedContent
-				// RFC G2 §7.5: replay the paired Responses wire id verbatim when it
+				// Replay the paired Responses wire id verbatim when it
 				// was preserved. Idless replay stays idless. The id rides only with
 				// encrypted content (see OpaqueThinking invariant), so this never
 				// revives an id from a non-Responses branch.

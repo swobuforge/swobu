@@ -230,7 +230,7 @@ func (s *messagesResponseHistoryState) appendItem(item canonical.CanonicalItem) 
 		}
 		var native messagesResponsePartDTO
 		if err := json.Unmarshal(opaque, &native); err != nil {
-			return canonical.InternalError("messages opaque thinking is invalid")
+			return canonical.InternalErrorWithCause("messages opaque thinking is invalid", err)
 		}
 		if native.Type == "redacted_thinking" {
 			s.content = append(s.content, native)

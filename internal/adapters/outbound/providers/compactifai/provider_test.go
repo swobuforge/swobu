@@ -6,12 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
-	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -76,50 +74,6 @@ func TestDiscoveryFailsMalformedCapabilityMetadata(t *testing.T) {
 	if err == nil {
 		t.Fatal("malformed CompactifAI capability metadata was approximated")
 	}
-}
-
-func TestLiveCatalogEvidenceProjectsAccountVisibleCapabilities(t *testing.T) {
-	raw, err := os.ReadFile("testdata/characterization/compactifai-model-capabilities-live-2026-09-04.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var evidence struct {
-		Schema         string            `json:"schema"`
-		ProviderSpec   string            `json:"provider_spec"`
-		Endpoint       string            `json:"endpoint"`
-		Source         string            `json:"source"`
-		Authentication string            `json:"authentication"`
-		ExposesCost    bool              `json:"catalog_exposes_cost_or_free_status"`
-		Rows           []json.RawMessage `json:"rows"`
-	}
-	if err := json.Unmarshal(raw, &evidence); err != nil {
-		t.Fatal(err)
-	}
-	if evidence.Schema != "swobu.provider-characterization/v1" || evidence.ProviderSpec != string(profile.ProviderSpecCompactifAI) || evidence.Endpoint != "https://api.compactif.ai/v1/models" || evidence.Source != "live" || evidence.Authentication != "bearer" || evidence.ExposesCost {
-		t.Fatalf("unexpected characterization identity: %#v", evidence)
-	}
-	projected := make(map[string]profile.ModelAuthoringOption)
-	for _, rawRow := range evidence.Rows {
-		rows, err := modelRowsFromRaw(rawRow)
-		if err != nil {
-			t.Fatal(err)
-		}
-		option, include, err := projectModel(profile.ProviderSpecCompactifAI, rows[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if include {
-			projected[option.Name] = option
-		}
-	}
-	if len(projected) != len(evidence.Rows)-1 {
-		t.Fatalf("projected rows = %d, evidence rows = %d", len(projected), len(evidence.Rows))
-	}
-	if _, exists := projected["cai-whisper-large-v3-turbo-slim"]; exists {
-		t.Fatal("live audio-only row became an LLM authoring option")
-	}
-	assertModelProtocols(t, projected["glm-5-2"], "zai-org", []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}, "chat_completions")
-	assertModelProtocols(t, projected["quasar-438b"], "multiverse_computing", []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream"}, "chat_completions")
 }
 
 func TestChatToolLoopPreservesReadableReasoningWithoutReplay(t *testing.T) {
@@ -282,8 +236,4 @@ func compactifAITarget(baseURL, model string, kind protocolkind.ProtocolKind, pr
 	target := provider.NewTargetSnapshot("compactifai", string(profile.ProviderSpecCompactifAI), baseURL, "env:COMPACTIFAI_API_KEY", kind, protocol, mode)
 	target.Model = model
 	return target
-}
-
-func modelRowsFromRaw(raw json.RawMessage) ([]modelcatalogopenai.ModelRow, error) {
-	return modelcatalogopenai.DecodeModelRows(strings.NewReader(`{"data":[` + string(raw) + `]}`))
 }

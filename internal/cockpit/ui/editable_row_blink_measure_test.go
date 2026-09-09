@@ -8,19 +8,6 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 )
 
-// TestEditableRowBlinkGatedByEditMode is the epic-50 task-040 closure guard.
-//
-// 040 hypothesized that a view-mode EditableRow (the normal idle state of every
-// editable field on screen) leaks its 500ms cursor-blink OnTimer into the app
-// event loop, marking the whole app dirty twice a second at idle. The blink
-// watcher is in fact ALREADY gated: InlineEditor.input is created lazily in
-// Open() (ensureInput), and Watchers() returns nil until then, so go-tui never
-// collects a blink timer for a row that is not being edited. Measured at idle:
-// 0 blink-driven events over a 3s window vs ~2 events per 1.1s while editing.
-//
-// This test pins BOTH halves of that invariant so it cannot silently regress:
-// the fast structural assertion (view nil / edit one) is the real guard; the
-// timed confirmation is skipped under -short because it spans blink intervals.
 func TestEditableRowBlinkGatedByEditMode(t *testing.T) {
 	value := tui.NewState("standby")
 	row := NewEditableRow("blink-gate", "field", value)

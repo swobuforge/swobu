@@ -116,7 +116,7 @@ func ProjectionBasis(t testing.TB, model string) []ProjectionWitness {
 	reasoning, _ := canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(budget)})
 
 	jsonObject, _ := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONObject})
-	jsonSchema, _ := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
+	jsonSchema, _ := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`), SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI}})
 	textFormat, _ := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatText})
 
 	base := func(items []canonical.CanonicalItem) canonical.RequestParams {

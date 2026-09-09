@@ -2,6 +2,7 @@ package producttelemetry
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,7 @@ func TestReportUploader_PostsJSONAndAccepts2xx(t *testing.T) {
 	if gotCT != "application/json" {
 		t.Fatalf("content-type = %q, want application/json", gotCT)
 	}
-	if !strings.Contains(string(gotBody), `"schema":2`) {
+	if !strings.Contains(string(gotBody), fmt.Sprintf(`"schema":%d`, productReportSchemaVersion)) {
 		t.Fatalf("body missing schema: %s", gotBody)
 	}
 }

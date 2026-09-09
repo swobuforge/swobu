@@ -190,7 +190,7 @@ func nativeDiscoveryRequest(t *testing.T) (canonical.CanonicalRequest, canonical
 	}
 	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "weather")
 	functionSchema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	function, err := canonical.NewFunctionTool(functionKey, "weather", canonical.NewToolSchemaObject(functionSchema), canonical.Unspecified[bool]())
+	function, err := canonical.NewFunctionTool(functionKey, "weather", canonical.NewToolSchemaObject(functionSchema), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	if err != nil {
 		t.Fatal(err)
 	}

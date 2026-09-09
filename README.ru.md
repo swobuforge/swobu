@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · **Русский** · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Один endpoint для Claude Code, Codex и других AI-агентов: DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock и другие — с автоматическим роутингом, балансировкой и failover.**
 
 Сделайте AI-вычисления маршрутизируемым ресурсом. Агент запрашивает имя модели; Swobu превращает его в route через провайдеров, аккаунты, регионы и локальные серверы, а под капотом выполняет балансировку, failover, преобразование reasoning и семантическую совместимость протоколов.
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="AI-агент использует route Swobu с балансировкой и failover" width="1280">
-</p>
 
 [Документация](https://swobu.com/docs/) · [Быстрый старт](https://swobu.com/docs/start/first-route/) · [Релизы](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@
 Для агента **route Swobu выглядит как модель**.
 
 За этим именем может стоять один endpoint, одна и та же модель в нескольких местах или pool из разных провайдеров.
+
+Диаграммы ниже показывают примеры конфигурации. Выбирайте модели, доступные у ваших провайдеров.
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ free
 
 ## Старт одной командой
 
+macOS, Linux или WSL:
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 Установщик запускает Swobu и открывает **Cockpit** — терминальный интерфейс.
@@ -167,56 +173,6 @@ Swobu
 
 ---
 
-### Намерение reasoning путешествует вместе с запросом
-
-Разные провайдеры выражают reasoning по-разному.
-
-Один API принимает effort level. Другой открывает token budget. Третий кодирует reasoning совершенно иной формой запроса.
-
-Swobu рассматривает reasoning как семантическую capability и преобразует его там, где существует осмысленное эквивалентное представление.
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-Вам не должно приходиться обучать каждый агент диалекту API каждого провайдера.
-
----
-
-### Совместимость делает роутинг возможным
-
-Отправить тот же JSON на другой URL легко.
-
-Безопасно перенести запрос агента между API — нет.
-
-Провайдеры расходятся в том, как они реализуют:
-
-- tools и function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- нативные capability провайдера
-- детали протокола и edge cases
-
-Swobu преобразует запросы, когда может сохранить их смысл.
-
-Targets, которые не способны представить необходимую семантику, можно исключить вместо того, чтобы молча ухудшать запрос.
-
-Совместимость — не та часть продукта, о которой вы должны постоянно думать. Это инфраструктура, делающая роутинг надёжным.
-
----
-
 ## Одна граница, несколько протоколов
 
 ```text
@@ -254,50 +210,7 @@ Other agents ┘                ├─ Gemini
 
 Swobu поддерживает локальный inference, frontier API, hyperscalers, специализированные inference-платформы и агрегаторы.
 
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**Aggregation:** OpenRouter · Custom Endpoint
-
-Каталог, число провайдеров, матрица протоколов и README assets генерируются из provider registry Swobu.
-
----
-
-## Нативные capabilities остаются нативными
-
-Swobu не сводит всех провайдеров к наименьшему общему знаменателю.
-
-Если выбранный target предоставляет полезную native capability, которую Swobu понимает, она может оставаться доступной через compatibility boundary.
-
-Например, provider-native web search там, где он поддерживается.
-
-Принцип прост:
-
-> **сохранять полезную семантику, когда это возможно; явно падать, когда её нельзя представить.**
-
----
-
-## Построено против реальных несовместимостей
-
-Swobu существует потому, что “OpenAI-compatible” часто перестаёт быть совместимым ровно там, где агенты начинают делать что-то интересное.
-
-Swobu тестируется на реальных сбоях, связанных с:
-
-- reasoning controls
-- tool definitions
-- malformed или unsupported fields
-- message replay
-- model discovery
-- streaming behavior
-- cross-protocol translation
-- provider-specific request restrictions
-
-[Заметки о совместимости →](https://swobu.com/docs/)
+[Список провайдеров и инструкции по настройке доступны в документации.](https://swobu.com/docs/)
 
 ---
 
@@ -309,7 +222,7 @@ Swobu тестируется на реальных сбоях, связанны�
 
 ### Бесплатный pool между провайдерами
 
-Объедините регулярно доступную бесплатные вычислительные ресурсы за одним именем модели.
+Объедините регулярно доступные бесплатные вычислительные ресурсы за одним именем модели.
 
 ### Сначала local, cloud при необходимости
 
@@ -341,28 +254,14 @@ Swobu публикует версионированные бинарники д�
 
 [Последний релиз →](https://github.com/swobuforge/swobu/releases/latest)
 
-Установка из исходников:
+Сборка из исходников:
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## Статус
-
-Роутинг, поведение совместимости и интеграции провайдеров продолжают развиваться, пока стабилизируются абстракции.
-
-Bug reports и compatibility reports приветствуются.
-
-[Открыть issue →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Текущая архитектура Swobu была перестроена во время OpenAI Build Week 2026 с использованием GPT 5.6 Sol.
-</details>
 
 ---
 

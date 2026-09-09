@@ -72,7 +72,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change) (canonical.ResponseStream, error) {
 	var dto bufferedResponseBody
 	if err := json.Unmarshal(raw, &dto); err != nil {
-		return nil, canonical.InternalError("messages response is invalid JSON")
+		return nil, canonical.InternalErrorWithCause("messages response is invalid JSON", err)
 	}
 	usage := extractMessagesUsage(raw).canonical()
 	items := make([]canonical.CanonicalItem, 0, len(dto.Content))
@@ -92,7 +92,7 @@ func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequ
 	for index, rawBlock := range dto.Content {
 		var block bufferedContentBlockBody
 		if err := json.Unmarshal(rawBlock, &block); err != nil {
-			return nil, canonical.InternalError("messages response content block is invalid")
+			return nil, canonical.InternalErrorWithCause("messages response content block is invalid", err)
 		}
 		blockType := strings.TrimSpace(block.Type) // swobu:io-string source=boundary // swobu:io-string source=provider-wire
 		if blockType == "" {

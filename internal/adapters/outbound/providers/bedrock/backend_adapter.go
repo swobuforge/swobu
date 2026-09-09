@@ -49,9 +49,12 @@ func NewRuntime(providerID profile.ProviderID, client *http.Client, credentials 
 
 // ResolveBackend composes one exact Bedrock Mantle backend.
 func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider.Backend, error) {
-	codec := provider.Codec(protocolcodec.Codec{Protocol: target.ProtocolKind})
-	switch target.ProtocolKind {
-	case protocolkind.Messages:
+	protocol := protocolcodec.Codec{Protocol: target.ProtocolKind}
+	if target.ProtocolKind == protocolkind.Messages {
+		protocol.MessagesDialect.Lowering.OutputFormat = protocolcodec.MessagesOmitOutputFormat
+	}
+	codec := provider.Codec(protocol)
+	if target.ProtocolKind == protocolkind.Messages {
 		codec = mantleMessagesCodec{Codec: codec}
 	}
 	backend := provider.Backend{Target: target.Clone(), Codec: codec, Transport: provider.BindTransport(target, e.Send)}
@@ -121,6 +124,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	if resp.StatusCode >= 400 {
 		defer func() { _ = resp.Body.Close() }()
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
+		backendErr = protocolcodec.ParseBackendError(backendErr, target.ProtocolKind, resp.Header.Get("x-request-id"))
 		// The resolver owns URL derivation; recompute the operation label for the
 		// diagnostic from the protocol kind so this call site owns no URL parsing.
 		requestPath, _ := profile.ProviderRequestPath(string(profile.ProviderSpecBedrock), target.ProtocolKind)

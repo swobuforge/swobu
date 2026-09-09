@@ -29,10 +29,8 @@ func (r Route) Spec() RouteSpec {
 		spec.Tiers[tierIndex].Targets = make([]TargetSpec, len(tier.targets))
 		for targetIndex, target := range tier.targets {
 			spec.Tiers[tierIndex].Targets[targetIndex] = TargetSpec{
-				ID: target.id,
-				Settings: TargetSettings{
-					Model: target.model, Protocol: target.protocol, Connection: target.connection,
-				},
+				ID:       target.id,
+				Settings: TargetSettings{Model: target.model, Protocol: target.protocol, Connection: target.connection},
 			}
 		}
 	}

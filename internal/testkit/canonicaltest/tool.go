@@ -12,7 +12,15 @@ func MustRequestToolKey(kind canonical.ToolKind, name string) canonical.ToolKey 
 }
 
 func MustFunctionTool(key canonical.ToolKey, description string, schema canonical.ToolSchema, strict canonical.Specified[bool]) canonical.ToolDeclaration {
-	declaration, err := canonical.NewFunctionTool(key, description, schema, strict)
+	conformance := canonical.SchemaConformanceDefault
+	if value, ok := strict.Get(); ok {
+		if value {
+			conformance = canonical.SchemaConformanceEnforced
+		} else {
+			conformance = canonical.SchemaConformanceRelaxed
+		}
+	}
+	declaration, err := canonical.NewFunctionTool(key, description, schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic, Conformance: conformance})
 	if err != nil {
 		panic(err)
 	}

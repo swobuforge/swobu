@@ -136,7 +136,7 @@ func logProviderAttemptCommandResult(state exchangeState, call callProviderComma
 			"failure_class", failureClass, "failure_stage", "provider_transport")
 		var backendErr canonical.BackendError
 		if errors.As(failed.failure.Cause(), &backendErr) {
-			attrs = append(attrs, "status_code", backendErr.StatusCode)
+			attrs = appendBackendErrorMetadata(attrs, backendErr)
 		}
 		if level == slog.LevelDebug {
 			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt canceled", anyAttrs(attrs)...)
@@ -175,6 +175,11 @@ func observeProviderAttemptTerminal(state exchangeState, attemptID providerCallA
 			"error_type", safeErrorType(snapshot.Err),
 		)
 		attrs, level := appendTypedTerminalError(attrs, snapshot.Err)
+		var backendErr canonical.BackendError
+		if errors.As(snapshot.Err, &backendErr) {
+			logStructuredProviderErrorDetail(state, attemptID, attempt, backendErr)
+		}
+		logPrivateDiagnosticCause(state, attemptID, attempt, snapshot.Err)
 		slog.LogAttrs(context.Background(), level, "provider attempt aborted after handoff", anyAttrs(attrs)...)
 	})
 }
@@ -201,11 +206,10 @@ func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID provid
 	} else {
 		var backendErr canonical.BackendError
 		if errors.As(err, &backendErr) {
-			attrs = append(attrs,
-				"error_origin", string(canonical.ErrorOriginBackend),
-				"status_code", backendErr.StatusCode,
-			)
+			attrs = appendBackendErrorMetadata(attrs, backendErr)
+			logStructuredProviderErrorDetail(state, attemptID, attempt, backendErr)
 		}
+		logPrivateDiagnosticCause(state, attemptID, attempt, err)
 	}
 	if level == slog.LevelDebug {
 		slog.LogAttrs(context.Background(), level, "provider attempt canceled before handoff", anyAttrs(attrs)...)
@@ -214,16 +218,25 @@ func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID provid
 	slog.LogAttrs(context.Background(), level, "provider attempt failed before handoff", anyAttrs(attrs)...)
 }
 
+func logPrivateDiagnosticCause(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, err error) {
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.DiagnosticCause == nil {
+		return
+	}
+	slog.Debug("provider decoder diagnostic",
+		"component", "exchange", "event", "provider_decoder_diagnostic",
+		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
+		"diagnostic_error", canonicalErr.DiagnosticCause,
+	)
+}
+
 func appendTypedTerminalError(attrs []any, err error) ([]any, slog.Level) {
 	if errors.Is(err, context.Canceled) {
 		return append(attrs, "error_origin", "client"), slog.LevelDebug
 	}
 	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
-		return append(attrs,
-			"error_origin", string(canonical.ErrorOriginBackend),
-			"status_code", backendErr.StatusCode,
-		), slog.LevelWarn
+		return appendBackendErrorMetadata(attrs, backendErr), slog.LevelWarn
 	}
 	var canonicalErr canonical.Error
 	if errors.As(err, &canonicalErr) {
@@ -234,6 +247,42 @@ func appendTypedTerminalError(attrs []any, err error) ([]any, slog.Level) {
 		), slog.LevelError
 	}
 	return attrs, slog.LevelError
+}
+
+func appendBackendErrorMetadata(attrs []any, backendErr canonical.BackendError) []any {
+	attrs = append(attrs, "error_origin", string(canonical.ErrorOriginBackend), "status_code", backendErr.StatusCode)
+	if backendErr.SourceProtocol != "" {
+		attrs = append(attrs, "source_protocol", backendErr.SourceProtocol.String())
+	}
+	if backendErr.ProviderError == nil {
+		return attrs
+	}
+	detail := backendErr.ProviderError
+	if detail.Type != "" {
+		attrs = append(attrs, "backend_error_type", detail.Type)
+	}
+	if detail.Code != "" {
+		attrs = append(attrs, "backend_error_code", detail.Code)
+	}
+	if detail.RequestID != "" {
+		attrs = append(attrs, "backend_request_id", detail.RequestID)
+	}
+	return attrs
+}
+
+func logStructuredProviderErrorDetail(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, backendErr canonical.BackendError) {
+	if backendErr.ProviderError == nil {
+		return
+	}
+	detail := backendErr.ProviderError
+	attrs := []any{
+		"component", "exchange", "event", "provider_error_detail",
+		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
+		"backend_error_type", detail.Type, "backend_error_code", detail.Code,
+		"backend_error_message", detail.Message, "backend_error_param", detail.Param,
+		"backend_request_id", detail.RequestID, "source_protocol", backendErr.SourceProtocol.String(),
+	}
+	slog.LogAttrs(context.Background(), slog.LevelDebug, "structured provider error detail", anyAttrs(attrs)...)
 }
 
 func safeErrorType(err error) string {

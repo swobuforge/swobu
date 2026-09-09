@@ -335,7 +335,7 @@ func TestServiceStartAuthorizeURL_DefaultOriginatorMatchesCodex(t *testing.T) {
 		t.Fatalf("parse authorize url: %v", err)
 	}
 	if got := strings.TrimSpace(u.Query().Get("originator")); got != "codex_cli_rs" { // swobu:io-string source=domain
-		t.Fatalf("originator=%q", got)
+		t.Fatalf("originator=%q want codex_cli_rs", got)
 	}
 }
 
@@ -426,10 +426,10 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	}
 }
 
-func TestServiceSessionSuccess_PlanTierIncludedInCredentialRefWhenPresent(t *testing.T) {
+func TestServiceSessionSuccess_UnknownPlanDoesNotChangeCredentialNamespace(t *testing.T) {
 	t.Parallel()
 
-	idToken := testJWTWithPlanType("plus")
+	idToken := testJWTWithPlanType("enterprise-next")
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"at_test","id_token":"` + idToken + `"}`))
@@ -462,7 +462,7 @@ func TestServiceSessionSuccess_PlanTierIncludedInCredentialRefWhenPresent(t *tes
 	if status.State != SessionSucceeded {
 		t.Fatalf("state=%s", status.State)
 	}
-	if !strings.HasPrefix(status.CredentialRef, "secret:chatgpt/plus/sess_") {
+	if !strings.HasPrefix(status.CredentialRef, "secret:chatgpt/sess_") {
 		t.Fatalf("credential ref=%q", status.CredentialRef)
 	}
 }

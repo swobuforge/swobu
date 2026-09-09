@@ -1,5 +1,5 @@
-  new target · ChatGPT                                                                                    cancel ↵
-     provider          ChatGPT                                                                            change ↵
+  new target · OpenAI · ChatGPT subscription                                                              cancel ↵
+     provider          OpenAI · ChatGPT subscription                                                      change ↵
      authentication    browser login                                                                      close ↵
       > browser login                                                                                     switch ↵
         device code                                                                                       switch ↵
@@ -8,7 +8,6 @@
         &response_type=code&scope=openid%20profile%20email&state=fixture-state
      status            waiting for login                                                                  refresh ↵
      cancel                                                                                               cancel ↵
-
 
 
 

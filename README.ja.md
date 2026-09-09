@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · **日本語** · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code、Codex、その他の AI エージェントを 1 つのエンドポイントから DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock などへルーティング。負荷分散とフェイルオーバーも自動化します。**
 
 AI の計算資源をルーティング可能にします。エージェントはモデル名を指定するだけ。Swobu がその名前を、プロバイダー、アカウント、リージョン、ローカルサーバーをまたぐルートへ変換し、負荷分散、フェイルオーバー、reasoning の変換、意味を保つプロトコル互換性を裏側で処理します。
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="Swobu のルートで負荷分散とフェイルオーバーを行う AI エージェント" width="1280">
-</p>
 
 [ドキュメント](https://swobu.com/docs/) · [クイックスタート](https://swobu.com/docs/start/first-route/) · [リリース](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@ AI の計算資源をルーティング可能にします。エージェント�
 エージェントから見ると、Swobu の**ルートは 1 つのモデルのように見えます**。
 
 その名前の裏側には、単一エンドポイント、複数の場所で利用できる同一モデル、あるいはプロバイダーをまたぐプールを置けます。
+
+以下の図は構成例です。各プロバイダーで利用可能なモデルを選択してください。
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ free
 
 ## 1 コマンドで開始
 
+macOS、Linux、WSL:
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 インストーラーが Swobu を起動し、ターミナル UI の **Cockpit** を開きます。
@@ -167,56 +173,6 @@ Swobu
 
 ---
 
-### reasoning の意図もリクエストと一緒に移動する
-
-reasoning の表現方法はプロバイダーごとに違います。
-
-ある API は effort level を受け取り、別の API は token budget を公開し、さらに別の API はまったく異なるリクエスト形状で reasoning を表します。
-
-Swobu は reasoning を意味的な capability として扱い、意味のある対応表現が存在する場合に変換します。
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-プロバイダーを変えるたびに、すべてのエージェントへ別の API 方言を教える必要はありません。
-
----
-
-### 互換性があるからルーティングできる
-
-同じ JSON を別 URL に送るだけなら簡単です。
-
-エージェントのリクエストを API 間で安全に移動させるのは簡単ではありません。
-
-プロバイダー間では次の点が食い違います。
-
-- tools / function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- プロバイダー固有 capability
-- プロトコルの細部や edge case
-
-意味を保てる場合、Swobu はリクエストを変換します。
-
-必要な意味を表現できない target は、黙って劣化させるのではなく候補から外せます。
-
-互換性は毎回考え続けるべき製品機能ではありません。信頼できるルーティングを成立させる基盤です。
-
----
-
 ## 1 つの境界、複数のプロトコル
 
 ```text
@@ -254,50 +210,7 @@ Swobu は現在、以下を含む複数プロトコルのプロバイダー統�
 
 Swobu はローカル推論、frontier API、ハイパースケーラー、特化型推論プラットフォーム、アグリゲーターに対応しています。
 
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**Aggregation:** OpenRouter · Custom Endpoint
-
-カタログ、プロバイダー数、プロトコルマトリクス、README のアセットは Swobu の provider registry から生成されます。
-
----
-
-## ネイティブ capability はネイティブのまま
-
-Swobu はすべてのプロバイダーを最小共通機能へ落としません。
-
-選択された target が Swobu の理解できる有用なネイティブ capability を公開していれば、その capability を互換境界越しに維持できます。
-
-対応プロバイダーの provider-native web search もその一例です。
-
-原則は単純です。
-
-> **有用な意味を保てるなら保つ。表現できないなら明確に失敗する。**
-
----
-
-## 実際の非互換性を前提に構築
-
-Swobu が存在する理由は、「OpenAI-compatible」がエージェントの処理が面白くなる地点で互換ではなくなることが多いからです。
-
-実際の失敗例に対してテストしています。
-
-- reasoning controls
-- tool definitions
-- malformed / unsupported fields
-- message replay
-- model discovery
-- streaming behavior
-- cross-protocol translation
-- provider-specific request restrictions
-
-[互換性ノート →](https://swobu.com/docs/)
+[対応プロバイダーと設定方法はドキュメントを参照してください。](https://swobu.com/docs/)
 
 ---
 
@@ -341,28 +254,14 @@ Swobu は Linux、macOS、Windows 向けのバージョン付きバイナリと 
 
 [最新リリース →](https://github.com/swobuforge/swobu/releases/latest)
 
-ソースからインストール：
+ソースからビルド：
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## ステータス
-
-抽象化を固めながら、ルーティング、互換動作、プロバイダー統合は現在も進化しています。
-
-バグ報告、互換性レポートを歓迎します。
-
-[Issue を開く →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Swobu の現在のアーキテクチャは OpenAI Build Week 2026 中に GPT 5.6 Sol を使って再構築されました。
-</details>
 
 ---
 

@@ -109,7 +109,7 @@ func targetFactFixture(model string, fact provider.TargetFact) (canonical.Canoni
 			return canonical.CanonicalRequest{}, false
 		}
 		schema := canonical.NewToolSchemaObject(schemaObject)
-		tool, err := canonical.NewFunctionTool(key, "Fact fixture", schema, canonical.Unspecified[bool]())
+		tool, err := canonical.NewFunctionTool(key, "Fact fixture", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled})
 		if err != nil {
 			return canonical.CanonicalRequest{}, false
 		}
@@ -140,7 +140,7 @@ func targetFactFixture(model string, fact provider.TargetFact) (canonical.Canoni
 		if schemaErr != nil {
 			return canonical.CanonicalRequest{}, false
 		}
-		tool, toolErr := canonical.NewFunctionTool(key, "Fact fixture", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+		tool, toolErr := canonical.NewFunctionTool(key, "Fact fixture", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled})
 		if toolErr != nil {
 			return canonical.CanonicalRequest{}, false
 		}

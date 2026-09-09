@@ -100,11 +100,15 @@ type ToolLowering struct {
 // Messages request payload.
 type ReasoningTransformer func(payload map[string]any, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error
 
+// OutputFormatTransformer projects output intent for one concrete Messages target.
+type OutputFormatTransformer func(canonical.OutputFormat, *[]compat.Change) (json.RawMessage, error)
+
 // Lowering is the resolved Messages semantic algebra. Every slot is total
 // before request encoding begins.
 type Lowering struct {
-	Tools     ToolLowering
-	Reasoning ReasoningTransformer
+	Tools        ToolLowering
+	Reasoning    ReasoningTransformer
+	OutputFormat OutputFormatTransformer
 }
 
 // Overlay replaces only explicitly supplied semantic slots.
@@ -112,6 +116,9 @@ func (l Lowering) Overlay(override Lowering) Lowering {
 	l.Tools = l.Tools.Overlay(override.Tools)
 	if override.Reasoning != nil {
 		l.Reasoning = override.Reasoning
+	}
+	if override.OutputFormat != nil {
+		l.OutputFormat = override.OutputFormat
 	}
 	return l
 }
@@ -259,7 +266,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err := lowering.Reasoning(payload, req.Reasoning(), changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	responseFormat, err := encodeMessagesOutputFormat(req.OutputFormat(), changeLog)
+	responseFormat, err := lowering.OutputFormat(req.OutputFormat(), changeLog)
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
@@ -274,9 +281,6 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 		}
 		outputConfig["format"] = format
 		payload["output_config"] = outputConfig
-		if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestOutputFormat, compat.Approximation); err != nil {
-			return ProviderRequestDocument{}, err
-		}
 	}
 	choice, err := encodeMessagesToolChoice(policy, toolProjection.lowered, names, changeLog, exchangeID)
 	if err != nil {
@@ -296,7 +300,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 }
 
 func (l Lowering) resolved() bool {
-	return l.Tools.resolved() && l.Reasoning != nil
+	return l.Tools.resolved() && l.Reasoning != nil && l.OutputFormat != nil
 }
 
 func (l ToolLowering) resolved() bool {
@@ -744,7 +748,19 @@ func DefaultToolLowering() ToolLowering {
 		if err != nil {
 			return ToolProjection{}, nil, err
 		}
-		return messagesCallableProjection(encoded, "tool_use", "tool_result"), nil, nil
+		exact := wire.SchemaContractExact(decl.SchemaContract(), canonical.SchemaProfileAnthropic)
+		if exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			strict := true
+			encoded.Strict = &strict
+		} else if decl.Conformance() != canonical.SchemaConformanceDefault || !exact {
+			strict := false
+			encoded.Strict = &strict
+		}
+		var changes []compat.Change
+		if !exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			changes = []compat.Change{compat.NewApproximation(canonical.RequestToolsSchemaConformance, canonical.ToolOccurrence(tool.Key()))}
+		}
+		return messagesCallableProjection(encoded, "tool_use", "tool_result"), changes, nil
 	}
 	discovery := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		decl, ok := tool.Discovery()
@@ -838,6 +854,7 @@ func DefaultLowering() Lowering {
 		Reasoning: func(payload map[string]any, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error {
 			return encodeMessagesReasoning(payload, reasoning, false, changeLog)
 		},
+		OutputFormat: encodeMessagesOutputFormat,
 	}
 }
 
@@ -850,16 +867,6 @@ func OmitAdaptiveReasoning(payload map[string]any, reasoning canonical.Reasoning
 func compileMessagesTools(tools []canonical.ToolDeclaration, deferred map[canonical.ToolKey]struct{}, names wire.ToolNames, changeLog *[]compat.Change, exchangeID string, lowering ToolLowering) ([]ProviderRequestTool, compiledToolProjection, error) {
 	if len(tools) == 0 {
 		return nil, compiledToolProjection{occurrences: make(map[canonical.ToolKey]ToolProjection)}, nil
-	}
-	for _, tool := range tools {
-		if decl, ok := tool.Function(); ok {
-			if strict, specified := decl.Strict().Get(); specified && strict {
-				if err := appendMessagesRequestChange(changeLog, exchangeID, canonical.RequestToolsSchemaStrict, compat.Omission); err != nil {
-					return nil, compiledToolProjection{}, err
-				}
-				break
-			}
-		}
 	}
 	out := make([]ProviderRequestTool, 0, len(tools))
 	compiled := compiledToolProjection{lowered: wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(tools))}, occurrences: make(map[canonical.ToolKey]ToolProjection, len(tools))}
@@ -1006,11 +1013,8 @@ func encodeMessagesFunctionTool(declaration canonical.ToolDeclaration, decl cano
 	if name == "" {
 		return ProviderRequestTool{}, canonical.BadRequest("messages protocol tool declarations require a name")
 	}
-	return ProviderRequestTool{
-		Name:        name,
-		Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
-		InputSchema: schema,
-	}, nil
+	tool := ProviderRequestTool{Name: name, Description: strings.TrimSpace(decl.Description()), InputSchema: schema} // swobu:io-string source=boundary
+	return tool, nil
 }
 
 func messagesToolSchema(schema canonical.ToolSchema) (json.RawMessage, error) {

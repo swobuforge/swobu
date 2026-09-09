@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://swobu.com/contracts/product-report-v2.schema.json",
+  "title": "ProductReportV2",
+  "description": "Launch product-telemetry contract. Closed, content-free, bounded, and immutable after publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "report_id", "report_created_at", "install_id", "runtime", "installation_age_bucket", "traffic", "overflow_count"],
+  "properties": {
+    "schema": { "const": 2 },
+    "report_id": { "type": "string", "pattern": "^[0-9a-f]{32}$", "maxLength": 32 },
+    "report_created_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "maxLength": 20 },
+    "install_id": { "type": "string", "pattern": "^[0-9a-f]{32}$", "maxLength": 32 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "os", "arch"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[!-~]{1,64}$" },
+        "os": { "type": "string", "minLength": 1, "maxLength": 16, "pattern": "^[a-z0-9]+$" },
+        "arch": { "type": "string", "minLength": 1, "maxLength": 16, "pattern": "^[a-z0-9]+$" }
+      }
+    },
+    "installation_age_bucket": { "enum": ["", "<1d", "1_7d", "8_30d", "31_90d", "90d_plus"] },
+    "traffic": {
+      "type": "array",
+      "maxItems": 74,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "client_family", "requested_model", "resolved_model", "client_protocol", "target_protocol", "operation", "provider", "result",
+          "status_code", "delivery_kind", "canonical_error_code", "attempt_count",
+          "fallback_recovered", "continuity_recovered", "cross_protocol", "wire_mutated",
+          "count", "duration_ms", "ttfb_ms"
+        ],
+        "properties": {
+          "client_family": { "enum": ["codex", "claude_code", "cline", "opencode", "aider", "other", "unknown"] },
+          "requested_model": { "enum": ["default", "configured", "custom", "unknown"] },
+          "resolved_model": { "enum": ["configured", "unknown"] },
+          "client_protocol": { "type": "string", "minLength": 1, "maxLength": 48, "pattern": "^[a-z0-9_/-]+$" },
+          "target_protocol": { "enum": ["chat_completions", "responses", "messages", "interactions"] },
+          "operation": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9_/-]+$" },
+          "provider": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z][a-z0-9_-]*$" },
+          "result": { "enum": ["success", "swobu_error", "backend_error", "cancelled", "unsupported_operation", "unsupported_delivery_variant", "not_implemented"] },
+          "status_code": { "oneOf": [{ "type": "integer", "const": 0 }, { "type": "integer", "minimum": 100, "maximum": 599 }] },
+          "delivery_kind": { "type": "string", "minLength": 1, "maxLength": 48, "pattern": "^[a-z][a-z0-9_]*$" },
+          "canonical_error_code": { "type": "string", "maxLength": 64, "pattern": "^$|^[A-Z][A-Z0-9_]*$" },
+          "attempt_count": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+          "fallback_recovered": { "type": "boolean" },
+          "continuity_recovered": { "type": "boolean" },
+          "cross_protocol": { "type": "boolean" },
+          "wire_mutated": { "type": "boolean" },
+          "count": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+          "duration_ms": { "$ref": "#/$defs/histogram6" },
+          "ttfb_ms": { "$ref": "#/$defs/histogram6" }
+        }
+      }
+    },
+    "overflow_count": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+  },
+  "$defs": {
+    "histogram6": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+    }
+  }
+}

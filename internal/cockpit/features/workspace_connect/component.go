@@ -1,6 +1,7 @@
 package workspace_connect
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -10,9 +11,9 @@ import (
 )
 
 type connectOperations interface {
-	Discover(target clientconnect.Target) []clientconnect.Client
-	Plan(clientID clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error)
-	Apply(plan clientconnect.Plan) error
+	Discover(context.Context, clientconnect.Target) []clientconnect.Client
+	Plan(context.Context, clientconnect.ClientID, clientconnect.Target) (clientconnect.Plan, error)
+	Apply(context.Context, clientconnect.Plan) (clientconnect.Plan, error)
 }
 
 type observationKind uint8
@@ -68,6 +69,8 @@ type Disclosure struct {
 	Feedback           *tui.State[copyFeedback]
 	app                *tui.App
 	endpointGeneration uint64
+	endpointContext    context.Context
+	endpointCancel     context.CancelFunc
 }
 
 func New(target clientconnect.Target, ops connectOperations) *Disclosure {
@@ -105,6 +108,7 @@ func (d *Disclosure) BindApp(app *tui.App) {
 }
 
 func (d *Disclosure) UnbindApp() {
+	d.cancelEndpoint()
 	d.endpointGeneration++
 	d.app = nil
 }
@@ -134,6 +138,7 @@ func (d *Disclosure) Back() bool {
 		return true
 	}
 	if d.EndpointOpen.Get() {
+		d.cancelEndpoint()
 		d.endpointGeneration++
 		d.closeChildren()
 		d.DiscoveryPending.Set(false)
@@ -173,12 +178,15 @@ func (d *Disclosure) hasLiveApp() bool {
 func (d *Disclosure) toggleEndpoint() {
 	opening := !d.EndpointOpen.Get()
 	if opening {
+		d.cancelEndpoint()
+		d.endpointContext, d.endpointCancel = context.WithCancel(context.Background())
 		d.endpointGeneration++
 		d.EndpointOpen.Set(true)
 		d.DiscoveryPending.Set(true)
 		d.Observations.Set(nil)
 		d.startDiscovery(d.endpointGeneration)
 	} else {
+		d.cancelEndpoint()
 		d.endpointGeneration++
 		d.closeChildren()
 		d.DiscoveryPending.Set(false)
@@ -186,11 +194,27 @@ func (d *Disclosure) toggleEndpoint() {
 	}
 }
 
+func (d *Disclosure) cancelEndpoint() {
+	if d.endpointCancel != nil {
+		d.endpointCancel()
+	}
+	d.endpointContext = nil
+	d.endpointCancel = nil
+}
+
+func (d *Disclosure) operationContext() context.Context {
+	if d.endpointContext != nil {
+		return d.endpointContext
+	}
+	return context.Background()
+}
+
 func (d *Disclosure) startDiscovery(endpointGen uint64) {
 	target := d.Target
 	ops := d.Ops
+	ctx := d.operationContext()
 	if !d.hasLiveApp() {
-		clients := ops.Discover(target)
+		clients := ops.Discover(ctx, target)
 		obsList := make([]clientObservation, len(clients))
 		for i, c := range clients {
 			obsList[i] = clientObservation{
@@ -199,10 +223,10 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 			}
 		}
 		for i, c := range clients {
-			plan, err := ops.Plan(c.ID, target)
+			plan, err := ops.Plan(ctx, c.ID, target)
 			if err != nil {
 				obsList[i].Kind = observationFailed
-				obsList[i].Err = err.Error()
+				obsList[i].Err = inspectionError(err)
 			} else if plan.AlreadyConfigured() {
 				obsList[i].Kind = observationMatch
 				obsList[i].Plan = plan
@@ -218,7 +242,7 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 
 	app := d.app
 	go func() {
-		clients := ops.Discover(target)
+		clients := ops.Discover(ctx, target)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
 				return
@@ -235,18 +259,18 @@ func (d *Disclosure) startDiscovery(endpointGen uint64) {
 
 			// Launch parallel Plan inspections for each discovered client
 			for _, c := range clients {
-				d.launchInspection(endpointGen, c.ID, target, ops, app)
+				d.launchInspection(ctx, endpointGen, c.ID, target, ops, app)
 			}
 		})
 	}()
 }
 
-func (d *Disclosure) launchInspection(endpointGen uint64, clientID clientconnect.ClientID, target clientconnect.Target, ops connectOperations, app *tui.App) {
+func (d *Disclosure) launchInspection(ctx context.Context, endpointGen uint64, clientID clientconnect.ClientID, target clientconnect.Target, ops connectOperations, app *tui.App) {
 	if app == nil {
 		return
 	}
 	go func() {
-		plan, err := ops.Plan(clientID, target)
+		plan, err := ops.Plan(ctx, clientID, target)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
 				return
@@ -256,7 +280,7 @@ func (d *Disclosure) launchInspection(endpointGen uint64, clientID clientconnect
 				if obsList[i].Client.ID == clientID {
 					if err != nil {
 						obsList[i].Kind = observationFailed
-						obsList[i].Err = err.Error()
+						obsList[i].Err = inspectionError(err)
 						obsList[i].Plan = clientconnect.Plan{}
 					} else if plan.AlreadyConfigured() {
 						obsList[i].Kind = observationMatch
@@ -317,6 +341,7 @@ func (d *Disclosure) chooseClient(clientID clientconnect.ClientID) {
 	endpointGen := d.endpointGeneration
 	target := d.Target
 	ops := d.Ops
+	ctx := d.operationContext()
 
 	obsList := append([]clientObservation(nil), d.Observations.Get()...)
 	for i := range obsList {
@@ -329,13 +354,13 @@ func (d *Disclosure) chooseClient(clientID clientconnect.ClientID) {
 	d.Observations.Set(obsList)
 
 	if !d.hasLiveApp() {
-		plan, err := ops.Plan(clientID, target)
+		plan, err := ops.Plan(ctx, clientID, target)
 		obsList = append([]clientObservation(nil), d.Observations.Get()...)
 		for i := range obsList {
 			if obsList[i].Client.ID == clientID {
 				if err != nil {
 					obsList[i].Kind = observationFailed
-					obsList[i].Err = err.Error()
+					obsList[i].Err = inspectionError(err)
 					obsList[i].Plan = clientconnect.Plan{}
 				} else if plan.AlreadyConfigured() {
 					obsList[i].Kind = observationMatch
@@ -351,7 +376,11 @@ func (d *Disclosure) chooseClient(clientID clientconnect.ClientID) {
 		return
 	}
 
-	d.launchInspection(endpointGen, clientID, target, ops, d.app)
+	d.launchInspection(ctx, endpointGen, clientID, target, ops, d.app)
+}
+
+func inspectionError(err error) string {
+	return err.Error() + "\nNothing changed."
 }
 
 func (d *Disclosure) openManualSetup() {
@@ -377,6 +406,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 	plan := targetObs.Plan
 	endpointGen := d.endpointGeneration
 	ops := d.Ops
+	ctx := d.operationContext()
 
 	nextObsList := append([]clientObservation(nil), obsList...)
 	nextObsList[targetIdx].Applying = true
@@ -384,29 +414,16 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 	d.Observations.Set(nextObsList)
 
 	if !d.hasLiveApp() {
-		err := ops.Apply(plan)
+		verified, err := ops.Apply(ctx, plan)
 		updated := append([]clientObservation(nil), d.Observations.Get()...)
 		for i := range updated {
 			if updated[i].Client.ID == clientID {
-				updated[i].Applying = false
-				if err != nil {
-					updated[i].Err = err.Error()
-				} else {
-					updated[i].Kind = observationMatch
-					updated[i].Plan = clientconnect.Plan{
-						ClientID:   plan.ClientID,
-						ClientName: plan.ClientName,
-						ConfigPath: plan.ConfigPath,
-						Target:     plan.Target,
-						Changes:    nil,
-					}
-					updated[i].Err = ""
-				}
+				storeApplyResult(&updated[i], verified, err)
 				break
 			}
 		}
 		d.Observations.Set(updated)
-		if err == nil && d.Child.Get().isClient(clientID) {
+		if err == nil && verified.AlreadyConfigured() && d.Child.Get().isClient(clientID) {
 			d.closeChildScope()
 		}
 		return
@@ -414,7 +431,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 
 	app := d.app
 	go func() {
-		err := ops.Apply(plan)
+		verified, err := ops.Apply(ctx, plan)
 		app.QueueUpdate(func() {
 			if d.endpointGeneration != endpointGen || !d.EndpointOpen.Get() {
 				return
@@ -422,29 +439,36 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 			updated := append([]clientObservation(nil), d.Observations.Get()...)
 			for i := range updated {
 				if updated[i].Client.ID == clientID {
-					updated[i].Applying = false
-					if err != nil {
-						updated[i].Err = err.Error()
-					} else {
-						updated[i].Kind = observationMatch
-						updated[i].Plan = clientconnect.Plan{
-							ClientID:   plan.ClientID,
-							ClientName: plan.ClientName,
-							ConfigPath: plan.ConfigPath,
-							Target:     plan.Target,
-							Changes:    nil,
-						}
-						updated[i].Err = ""
-					}
+					storeApplyResult(&updated[i], verified, err)
 					break
 				}
 			}
 			d.Observations.Set(updated)
-			if err == nil && d.Child.Get().isClient(clientID) {
+			if err == nil && verified.AlreadyConfigured() && d.Child.Get().isClient(clientID) {
 				d.closeChildScope()
 			}
 		})
 	}()
+}
+
+func storeApplyResult(observation *clientObservation, verified clientconnect.Plan, err error) {
+	observation.Applying = false
+	if len(verified.ConfigPaths) == 0 && verified.ClientID == "" {
+		observation.Kind = observationFailed
+		observation.Plan = clientconnect.Plan{}
+	} else {
+		observation.Plan = verified
+		if verified.AlreadyConfigured() {
+			observation.Kind = observationMatch
+		} else {
+			observation.Kind = observationNeedsChange
+		}
+	}
+	if err != nil {
+		observation.Err = err.Error()
+	} else {
+		observation.Err = ""
+	}
 }
 
 func (d *Disclosure) copyItem(key, value string) {
@@ -479,6 +503,14 @@ func shortLocus(path string) string {
 		}
 	}
 	return path
+}
+
+func shortLoci(paths []string) string {
+	short := make([]string, len(paths))
+	for i, path := range paths {
+		short[i] = shortLocus(path)
+	}
+	return strings.Join(short, ", ")
 }
 
 func displayChange(target clientconnect.Target, change clientconnect.Change) string {

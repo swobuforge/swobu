@@ -10,7 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	overviewsection "github.com/swobuforge/swobu/internal/cockpit/sections/workspace_overview"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 type workspaceCreateCommands struct {

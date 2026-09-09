@@ -1,5 +1,4 @@
 # Anthropic backend
 
-Use Anthropic-compatible routing in Swobu and verify request family compatibility (`/v1/messages`).
-
-If behavior is inconsistent across clients, report the exact client/backend pair and request family.
+Select Anthropic in Cockpit, add an API-key credential, and choose a model.
+Clients connect to the workspace endpoint; Swobu owns backend authentication.

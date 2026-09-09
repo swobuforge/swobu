@@ -22,6 +22,16 @@ const (
 	messagesImageSourceBase64 messagesImageSourceType = "base64"
 )
 
+func messagesToolConformance(strict *bool) canonical.SchemaConformance {
+	if strict == nil {
+		return canonical.SchemaConformanceDefault
+	}
+	if *strict {
+		return canonical.SchemaConformanceEnforced
+	}
+	return canonical.SchemaConformanceRelaxed
+}
+
 func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
 	var dto messagesRequestDTO
 	if err := shared.DecodeExtensibleRequestObject(doc.RawBytes(), &dto, "messages request"); err != nil {
@@ -295,7 +305,7 @@ func decodeMessagesItems(raw json.RawMessage, msgIdx int, role string, tools []c
 				toolUseID = openaiwire.GeneratedToolUseID(msgIdx, partIdx)
 			}
 			pending = append(pending, toolUseID)
-			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, name, canonical.ToolKindFunction)
+			toolKey, err := canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
 			if err != nil {
 				return canonical.BadRequest("messages request tool_use has an invalid tool identity")
 			}
@@ -587,7 +597,7 @@ func decodeMessagesTools(tools []ProviderRequestTool, changeLog *[]compat.Change
 		if err != nil {
 			return nil, nil, err
 		}
-		declaration, err := canonical.NewFunctionTool(id, tool.Description, schema, canonical.Unspecified[bool]())
+		declaration, err := canonical.NewFunctionTool(id, tool.Description, schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic, Conformance: messagesToolConformance(tool.Strict)})
 		if err != nil {
 			return nil, nil, err
 		}

@@ -34,7 +34,7 @@ Usage:
   install.sh [options]
 
 Options:
-  --version <tag>       Install a specific version, e.g. v0.3.1
+  --version <tag>       Install a specific release, e.g. swobu-v2.0.1
   --bin-dir <path>      Install directory. Default: $HOME/.local/bin
   --checksum <sha256>   Require an exact SHA-256 checksum
   --dry-run             Show what would happen without installing
@@ -84,6 +84,13 @@ detect_os() {
 
 detect_arch() {
   arch="$(uname -m)"
+  if [ "$(detect_os)" = "darwin" ] && [ "$arch" = "x86_64" ] && have_cmd sysctl; then
+    translated="$(sysctl -in sysctl.proc_translated 2>/dev/null || true)"
+    if [ "$translated" = "1" ]; then
+      printf "arm64"
+      return
+    fi
+  fi
   case "$arch" in
     x86_64|amd64) printf "amd64" ;;
     arm64|aarch64) printf "arm64" ;;
@@ -190,6 +197,69 @@ normalize_hex256() {
   die "invalid sha256 value: $1"
 }
 
+normalize_version() {
+  printf '%s' "$1" | sed 's/^swobu-//; s/^v//'
+}
+
+validate_version() {
+  if ! printf '%s' "$1" | grep -Eq '^(swobu-v|v?)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'; then
+    die "invalid version: $1 (expected swobu-vX.Y.Z[-prerelease])"
+  fi
+}
+
+read_binary_version() {
+  binary_path="$1"
+  "$binary_path" --version 2>/dev/null | head -n 1 | tr -d '\r'
+}
+
+print_path_help() {
+  case "${SHELL:-}" in
+    */zsh) profile="$HOME/.zshrc" ;;
+    */bash) profile="$HOME/.bashrc" ;;
+    */fish)
+      say ""
+      warn "$INSTALL_DIR is not on your PATH."
+      say "For fish, run:"
+      say "  fish_add_path $INSTALL_DIR"
+      return
+      ;;
+    *) profile="$HOME/.profile" ;;
+  esac
+  say ""
+  warn "$INSTALL_DIR is not on your PATH."
+  say "Add it:"
+  say "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> $profile"
+  say "  . $profile"
+}
+
+diagnose_path() {
+  path_case=":${PATH:-}:"
+  case "$path_case" in
+    *":$INSTALL_DIR:"*)
+      resolved="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+      if [ -n "$resolved" ] && [ "$resolved" != "$install_path" ]; then
+        say ""
+        warn "$resolved shadows $install_path on PATH."
+        say "Move $INSTALL_DIR before $(dirname "$resolved") in PATH."
+      fi
+      ;;
+    *) print_path_help ;;
+  esac
+}
+
+require_binary_version() {
+  binary_path="$1"
+  expected_version="$2"
+  description="$3"
+  actual_version="$(read_binary_version "$binary_path" || true)"
+  if [ -z "$actual_version" ]; then
+    die "$description failed '$BIN_NAME --version'"
+  fi
+  if [ "$(normalize_version "$actual_version")" != "$(normalize_version "$expected_version")" ]; then
+    die "$description reported $actual_version, expected $expected_version"
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version)
@@ -231,6 +301,16 @@ done
 
 os="$(detect_os)"
 arch="$(detect_arch)"
+if [ -n "$VERSION" ]; then
+  validate_version "$VERSION"
+fi
+install_path="$INSTALL_DIR/$BIN_NAME"
+if [ -L "$install_path" ]; then
+  die "$install_path is a symlink; refusing to manage an indirect executable"
+fi
+if [ -e "$install_path" ] && [ ! -f "$install_path" ]; then
+  die "$install_path exists but is not a regular file"
+fi
 tmp_root="$(mktemp -d)"
 tmp_install=""
 cleanup() {
@@ -244,7 +324,9 @@ trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
 tag="$(resolve_version)"
-archive="${PROJECT_NAME}_${tag}_${os}_${arch}.tar.gz"
+validate_version "$tag"
+product_version="${tag#swobu-}"
+archive="${PROJECT_NAME}_${product_version}_${os}_${arch}.tar.gz"
 base_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$tag"
 archive_url="$base_url/$archive"
 checksums_url="$base_url/checksums.txt"
@@ -270,6 +352,30 @@ step "Detecting platform... $os $arch"
 step "Resolving release... $tag"
 step "Preparing install directory... $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR" || die "failed to create install directory: $INSTALL_DIR"
+fresh_install=true
+if [ -e "$install_path" ]; then
+  fresh_install=false
+  existing_version="$(read_binary_version "$install_path" || true)"
+  if [ -n "$existing_version" ]; then
+    step "Found existing $BIN_NAME: $existing_version"
+    if [ "$(normalize_version "$existing_version")" = "$(normalize_version "$tag")" ]; then
+      diagnose_path
+      ok "$BIN_NAME $tag is already installed."
+      exit 0
+    fi
+  else
+    step "Found existing $BIN_NAME at $install_path"
+  fi
+fi
+if [ ! -w "$INSTALL_DIR" ]; then
+  die "install directory is not writable: $INSTALL_DIR
+
+Try:
+  install.sh --bin-dir /path/you/can/write
+
+Or:
+  sudo INSTALL_DIR=/usr/local/bin sh install.sh"
+fi
 
 archive_path="$tmp_root/$archive"
 checksums_path="$tmp_root/checksums.txt"
@@ -320,45 +426,24 @@ if [ -L "$extract_dir/$BIN_NAME" ]; then
   die "refusing symlink binary payload: $BIN_NAME"
 fi
 
-install_path="$INSTALL_DIR/$BIN_NAME"
-if [ -d "$install_path" ]; then
-  die "$install_path exists and is a directory"
-fi
-if [ ! -w "$INSTALL_DIR" ]; then
-  die "install directory is not writable: $INSTALL_DIR
-
-Try:
-  install.sh --bin-dir /path/you/can/write
-
-Or:
-  sudo INSTALL_DIR=/usr/local/bin sh install.sh"
-fi
-if [ -x "$install_path" ]; then
-  existing_version="$("$install_path" --version 2>/dev/null || true)"
-  if [ -n "$existing_version" ]; then
-    step "Found existing $BIN_NAME: $existing_version"
-  else
-    step "Found existing $BIN_NAME at $install_path"
-  fi
-fi
-tmp_install="$INSTALL_DIR/.${BIN_NAME}.tmp.$$"
-step "Installing to $install_path"
+tmp_install="$INSTALL_DIR/.${BIN_NAME}.new.$$"
+step "Staging $BIN_NAME in $INSTALL_DIR"
 cp "$extract_dir/$BIN_NAME" "$tmp_install"
 chmod 0755 "$tmp_install"
+step "Checking staged executable"
+require_binary_version "$tmp_install" "$tag" "staged executable"
+step "Activating $install_path"
 mv -f "$tmp_install" "$install_path"
-step "Checking installation"
-if "$install_path" --version >/dev/null 2>&1; then
-  installation_verified=true
-  ok "$BIN_NAME $tag installed"
-else
-  installation_verified=false
-  warn "$BIN_NAME was installed, but '$BIN_NAME --version' failed."
-  say "Try:"
-  say "  $install_path --version"
-fi
+step "Checking installed executable"
+require_binary_version "$install_path" "$tag" "installed executable"
+installation_verified=true
+ok "$BIN_NAME $tag installed"
 
 start_swobu() {
   if [ "$installation_verified" != "true" ]; then
+    return
+  fi
+  if [ "$fresh_install" != "true" ]; then
     return
   fi
   if [ "$START_SWOBU" != "true" ]; then
@@ -367,7 +452,6 @@ start_swobu() {
     say "  $install_path"
     return
   fi
-
 	if ! ( : </dev/tty >/dev/tty ) 2>/dev/null; then
 		say ""
 		warn "Swobu was installed, but this session has no controlling terminal."
@@ -385,30 +469,6 @@ start_swobu() {
 	fi
 }
 
+diagnose_path
+
 start_swobu
-
-print_path_help() {
-  case "${SHELL:-}" in
-    */zsh) profile="$HOME/.zshrc" ;;
-    */bash) profile="$HOME/.bashrc" ;;
-    */fish)
-      say ""
-      warn "$INSTALL_DIR is not on your PATH."
-      say "For fish, run:"
-      say "  fish_add_path $INSTALL_DIR"
-      return
-      ;;
-    *) profile="$HOME/.profile" ;;
-  esac
-  say ""
-  warn "$INSTALL_DIR is not on your PATH."
-  say "Add it:"
-  say "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> $profile"
-  say "  . $profile"
-}
-
-path_case=":${PATH:-}:"
-case "$path_case" in
-  *":$INSTALL_DIR:"*) ;;
-  *) print_path_help ;;
-esac

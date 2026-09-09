@@ -62,7 +62,7 @@ func TestDeferredFunctionRefinementRemainsNativeFromEveryRequestDeclarationCarri
 func TestStandaloneDiscoveryResultWithoutDeclarationProjectionIsOmitted(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "loaded")
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	tool, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
+	tool, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schema), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{tool})
 	refinements, _ := canonical.NewToolVisibilityRefinements(set, []canonical.ToolKey{key})
 	callID, _ := canonical.NewToolCallID("search_1")

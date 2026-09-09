@@ -28,38 +28,39 @@ func ClientHeaderRow(d *Disclosure, id clientconnect.ClientID, name string) *coc
 	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(id), name, "", "close ↵", d.closeChildScope))
 }
 
-func CheckingClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "checking…", func() { d.chooseClient(obs.Client.ID) }))
-}
-
-func ConfiguredClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configured ↵", func() { d.chooseClient(obs.Client.ID) }))
-}
-
-func NeedsChangeClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	if obs.Applying {
-		return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configuring…", func() { d.chooseClient(obs.Client.ID) }))
-	}
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "configure ↵", func() { d.chooseClient(obs.Client.ID) }))
-}
-
-func FailedClientRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:client:"+string(obs.Client.ID), obs.Client.Name, "", "retry ↵", func() { d.chooseClient(obs.Client.ID) }))
-}
-
 func PlanActionRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRow {
 	if obs.Applying {
-		return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLocus(obs.Plan.ConfigPath), "configuring…", nil))
+		return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLoci(obs.Plan.ConfigPaths), "configuring…", nil))
 	}
 	action := "apply ↵"
 	if obs.Plan.RequiresReplace() {
 		action = "replace ↵"
 	}
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLocus(obs.Plan.ConfigPath), action, func() { d.applyPlan(obs.Client.ID) }))
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLoci(obs.Plan.ConfigPaths), action, func() { d.applyPlan(obs.Client.ID) }))
 }
 
 func ManualCopyRow(d *Disclosure, key, label, displayValue, copyValue string) *cockpitui.SelectableRow {
 	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:manual:"+key, label, displayValue, d.copyAction(key), func() { d.copyItem(key, copyValue) }))
+}
+
+func ClientPicker(d *Disclosure) *cockpitui.SearchPicker {
+	observations := d.Observations.Get()
+	options := make([]cockpitui.SearchOption, 0, len(observations))
+	for _, obs := range observations {
+		action := "checking…"
+		switch obs.Kind {
+		case observationMatch:
+			action = "configured ↵"
+		case observationNeedsChange:
+			action = "configure ↵"
+			if obs.Applying { action = "configuring…" }
+		case observationFailed:
+			action = "retry ↵"
+		}
+		options = append(options, cockpitui.SearchOption{ID: string(obs.Client.ID), Label: obs.Client.Name, Keywords: []string{string(obs.Client.ID)}, Action: action})
+	}
+	picker := cockpitui.NewSearchPicker("workspace-connect:clients", "client", options, func(sel cockpitui.Selection) { d.chooseClient(clientconnect.ClientID(sel.Value)) }, func() { d.Back() })
+	return picker
 }
 
 templ FindingClientsRow() {
@@ -110,6 +111,9 @@ templ (d *Disclosure) Render() {
 				if d.DiscoveryPending.Get() {
 					@FindingClientsRow()
 				}
+				if d.Child.Get().kind == childNone && !d.DiscoveryPending.Get() {
+					@ClientPicker(d)
+				}
 				for _, obs := range d.Observations.Get() {
 					if d.Child.Get().isClient(obs.Client.ID) {
 						@ClientHeaderRow(d, obs.Client.ID, obs.Client.Name)
@@ -118,28 +122,15 @@ templ (d *Disclosure) Render() {
 								@CheckingConfigRow()
 							} else if obs.Kind == observationMatch {
 								@InertRow("status", "current")
+								if obs.Err != "" { @DetailRow(obs.Err) }
 							} else if obs.Kind == observationFailed {
 								@DetailRow(obs.Err)
 							} else if obs.Kind == observationNeedsChange {
-								for _, change := range obs.Plan.Changes {
-									@PlanChangeRow(change.Field, displayChange(d.Target, change))
-								}
+								for _, change := range obs.Plan.Changes { @PlanChangeRow(change.Field, displayChange(d.Target, change)) }
 								@PlanActionRow(d, obs)
-								if obs.Err != "" {
-									@DetailRow(obs.Err)
-								}
+								if obs.Err != "" { @DetailRow(obs.Err) }
 							}
 						</div>
-					} else {
-						if obs.Kind == observationChecking {
-							@CheckingClientRow(d, obs)
-						} else if obs.Kind == observationMatch {
-							@ConfiguredClientRow(d, obs)
-						} else if obs.Kind == observationNeedsChange {
-							@NeedsChangeClientRow(d, obs)
-						} else if obs.Kind == observationFailed {
-							@FailedClientRow(d, obs)
-						}
 					}
 				}
 				if d.Child.Get().isManual() {
@@ -166,7 +157,7 @@ templ (d *Disclosure) Render() {
 							@DetailRow("copy failed · run swobu doctor --copy")
 						}
 					</div>
-				} else {
+				} else if d.Child.Get().kind == childNone {
 					@OtherClientsRow(d)
 				}
 			</div>

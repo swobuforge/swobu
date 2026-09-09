@@ -91,7 +91,20 @@ func DefaultToolLowering() ToolLowering {
 		if err != nil {
 			return ToolProjection{}, nil, err
 		}
-		return functionToolProjection(encoded), nil, nil
+		decl, _ := tool.Function()
+		exact := wire.SchemaContractExact(decl.SchemaContract(), canonical.SchemaProfileOpenAI)
+		if exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			strict := true
+			encoded.Strict = &strict
+		} else if decl.Conformance() != canonical.SchemaConformanceDefault || !exact {
+			strict := false
+			encoded.Strict = &strict
+		}
+		var changes []compat.Change
+		if !exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			changes = []compat.Change{compat.NewApproximation(canonical.RequestToolsSchemaConformance, canonical.ToolOccurrence(tool.Key()))}
+		}
+		return functionToolProjection(encoded), changes, nil
 	}
 	nativeCustom := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		encoded, err := encodeResponsesTool(tool, ctx.Names)
@@ -356,7 +369,15 @@ func (p responsesToolProjection) historicalProjection(call canonical.ToolCallIte
 		return projection, nil
 	}
 	switch key.Kind() {
-	case canonical.ToolKindFunction, canonical.ToolKindCustom:
+	case canonical.ToolKindFunction:
+		name, err := wire.EncodeToolName(names, key)
+		if err != nil {
+			return ToolProjection{}, err
+		}
+		projection := functionToolProjection(ProviderRequestTool{Type: "function", Name: name})
+		projection.Fragments = nil
+		return projection, nil
+	case canonical.ToolKindCustom:
 		return ToolProjection{}, nil
 	case canonical.ToolKindWebSearch:
 		projection, _, err := p.lowering.WebSearch(ToolLoweringContext{Names: names}, canonical.NewWebSearchDeclaration())
@@ -460,7 +481,7 @@ func resolveHistoricalResponsesFunctionCall(tools []canonical.ToolDeclaration, n
 				return declaration.Key(), nil
 			}
 		}
-		return canonical.ResolveHistoricalToolKeyByName(tools, name, canonical.ToolKindFunction)
+		return canonical.ToolIdentityFromWire(name, canonical.ToolKindFunction)
 	}
 	historical, err := canonical.HistoricalScopedToolKey(namespace, name, canonical.ToolKindFunction)
 	if err != nil {
@@ -470,6 +491,20 @@ func resolveHistoricalResponsesFunctionCall(tools []canonical.ToolDeclaration, n
 		return declaration.Key(), nil
 	}
 	return historical, nil
+}
+
+// resolveHistoricalResponsesCustomCall resolves the flat source alias only
+// against declarations already decoded for this transcript position. Later
+// declarations cannot retroactively change the historical identity.
+func resolveHistoricalResponsesCustomCall(tools []canonical.ToolDeclaration, name string) (canonical.ToolKey, error) {
+	declaration, _, err := canonical.ResolveToolDeclarationByName(tools, name, canonical.ToolTypeCustom)
+	if err == nil {
+		return declaration.Key(), nil
+	}
+	if strings.Contains(err.Error(), "ambiguous") {
+		return canonical.ToolKey{}, err
+	}
+	return canonical.ToolIdentityFromWire(name, canonical.ToolKindCustom)
 }
 
 func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl canonical.FunctionTool, names wire.ToolNames) (ProviderRequestTool, error) {
@@ -492,9 +527,6 @@ func encodeResponsesFunctionTool(declaration canonical.ToolDeclaration, decl can
 		Parameters:  parameters,
 		CallType:    "function_call",
 		ResultType:  "function_call_output",
-	}
-	if strict, ok := decl.Strict().Get(); ok {
-		wire.Strict = &strict
 	}
 	return wire, nil
 }

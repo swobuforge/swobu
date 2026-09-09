@@ -3,6 +3,7 @@ package chatcompletions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -13,6 +14,30 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
+
+func TestChatCompletionMalformedJSONRetainsPrivateCause(t *testing.T) {
+	const secret = "provider-secret"
+	_, err := decodeResponseBuffered(context.Background(), canonical.CanonicalRequest{}, nil, []byte(`{"value":"`+secret+`"`), "ex", nil)
+	assertSafeDecoderCause(t, err, "chat completions response is invalid JSON", secret)
+
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{
+		MediaType: "text/event-stream",
+		Body:      io.NopCloser(strings.NewReader("data: {\"value\":\"" + secret + "\"\n\n")),
+	}, "ex", nil)
+	_, err = stream.Next(context.Background())
+	assertSafeDecoderCause(t, err, "chat completions stream chunk is invalid JSON", secret)
+}
+
+func assertSafeDecoderCause(t *testing.T, err error, safeMessage, secret string) {
+	t.Helper()
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.DiagnosticCause == nil {
+		t.Fatalf("error = %#v, want canonical error with diagnostic cause", err)
+	}
+	if !strings.Contains(err.Error(), safeMessage) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("public error = %q, want safe message without provider content", err)
+	}
+}
 
 func TestChatResponseUnknownOnlyCallCannotSatisfyToolCallsFinish(t *testing.T) {
 	var changes []compat.Change
@@ -57,7 +82,7 @@ func TestStreamedToolArgumentErrorKindDoesNotExposeArguments(t *testing.T) {
 func TestChatStreamRejectsContradictoryTypeAfterToolAdmission(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	tools, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})
@@ -91,7 +116,7 @@ func TestChatStreamRejectsReclassifiedUnknownToolOccurrence(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 			schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-			declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+			declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 			set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 			tools, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})
@@ -758,7 +783,7 @@ func chatStreamFunctionRequests(t *testing.T, names ...string) canonical.Canonic
 	declarations := make([]canonical.ToolDeclaration, 0, len(names))
 	for _, name := range names {
 		key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, name)
-		declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+		declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 		declarations = append(declarations, declaration)
 	}
 	set, _ := canonical.NewToolSet(declarations)
@@ -779,7 +804,7 @@ func chatStreamMixedToolRequest(t *testing.T) canonical.CanonicalRequest {
 	t.Helper()
 	functionKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	function, _ := canonical.NewFunctionTool(functionKey, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+	function, _ := canonical.NewFunctionTool(functionKey, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	customKey, _ := canonical.NewRequestToolKey(canonical.ToolKindCustom, "shell")
 	custom, _ := canonical.NewCustomTool(customKey, "", canonical.EmptyToolFormat())
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{function, custom})

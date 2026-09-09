@@ -1,27 +1,19 @@
-// Package httpapi implements the client-facing HTTP protocol surface.
+// Package httpapi serves Swobu HTTP endpoints.
 //
-// It owns endpoint-qualified path splitting and transport framing at the HTTP
-// edge. Protocol-family codecs are delegated to shared protocol codec packages.
-// It also
-// owns HTTP rendering of daemon operator control routes such as status,
-// workspaces, model catalog, and protocol model-discovery routes. Workspace
-// commands use method-aware http.ServeMux patterns and Request.PathValue.
-// Operator JSON commands share one bounded control-message envelope established
-// before extensible-object decoding or application dispatch.
-// Typed JSON request objects follow the extensible-member contract: additive
-// members are ignored, while malformed known fields, non-object bodies, and
-// trailing values fail. Durable configuration is
-// a separate closed schema and does not inherit this HTTP compatibility rule.
-// Transport shape belongs at the edge even when runtime truth is produced
-// elsewhere. WebSocket delivery consumes a message stream whose Next boundary
-// is one protocol message; it never invents messages from io.Reader chunks.
-// One connection-owned reader cancels the connection context on disconnect,
-// while response.create exchanges are processed serially with distinct
-// exchange identities. Responses WebSocket validates a loopback TCP peer,
-// literal loopback request authority, and exact browser origin before upgrade;
-// native loopback clients may omit Origin. Forwarded headers are not trust
-// inputs. This package must not take on provider-dialect logic or redefine
-// canonical request semantics. Terminal backend failures preserve their body in
-// the client response and traffic evidence, while ordinary request-outcome logs
-// remain metadata-only: status, origin, target, and normalized error category.
+// This edge owns path splitting, transport framing, and bounded operator JSON
+// envelopes; protocol codecs and application services own request semantics.
+// Operator JSON accepts additive members but rejects malformed known fields,
+// non-object bodies, and trailing values. Durable configuration remains a
+// separate closed schema.
+//
+// Responses WebSocket upgrades require a loopback TCP peer, literal loopback
+// authority, and exact browser origin; native clients may omit Origin.
+// Forwarded headers are not trust inputs. Disconnect cancels the connection
+// context, and exchanges run serially with distinct identities. Stream reads
+// yield protocol messages, never arbitrary byte chunks treated as messages.
+//
+// Backend failures are projected into the ingress protocol's JSON error
+// contract. Recognized structured provider detail may preserve its message;
+// opaque bodies are never mislabeled or exposed as client-native structure.
+// Ordinary request-outcome logs contain metadata only, not response bodies.
 package httpapi

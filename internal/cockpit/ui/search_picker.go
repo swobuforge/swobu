@@ -51,6 +51,7 @@ type SearchOption struct {
 	Label    string
 	Value    string
 	Keywords []string
+	Action   string
 }
 
 // valueOrID returns the canonical value, falling back to ID when unset so
@@ -131,7 +132,7 @@ func (p *SearchPicker) filteredOptions() []SearchOption {
 			continue
 		}
 		if choiceItemMatches(item, p.Query.Get()) {
-			filtered = append(filtered, SearchOption{ID: item.Key, Label: item.Label, Keywords: item.Keywords})
+			filtered = append(filtered, SearchOption{ID: item.Key, Label: item.Label, Value: item.Value, Keywords: item.Keywords, Action: item.Action})
 		}
 	}
 	return filtered
@@ -190,11 +191,15 @@ func (p *SearchPicker) choiceItems() []ChoiceItem {
 	items := make([]ChoiceItem, 0, len(p.Options))
 	for i, opt := range p.Options {
 		option := opt
+		action := option.Action
+		if action == "" {
+			action = "select ↵"
+		}
 		items = append(items, ChoiceItem{
 			Key:      searchPickerOptionKey(option, i),
 			Label:    option.Label,
 			Value:    option.valueOrID(),
-			Action:   "select ↵",
+			Action:   action,
 			Keywords: option.Keywords,
 			Choose: func() {
 				if p.OnSelect != nil {

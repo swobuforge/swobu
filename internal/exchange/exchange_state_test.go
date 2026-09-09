@@ -1117,7 +1117,7 @@ func TestBackendRejectionStatusesDoNotAdvanceRoute(t *testing.T) {
 	}
 }
 
-func TestBedrockMantleStrictStructuredOutputExecutesWithoutFallback(t *testing.T) {
+func TestBedrockMantleOmitsUnsupportedStructuredOutputWithoutFallback(t *testing.T) {
 	targetID, _ := routing.ParseTargetID("mantle-a")
 	model, _ := routing.ParseUpstreamModel("model-a")
 	region, _ := routing.ParseBedrockRegion("us-east-1")
@@ -1149,10 +1149,10 @@ func TestBedrockMantleStrictStructuredOutputExecutesWithoutFallback(t *testing.T
 		t.Fatal(err)
 	}
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:   canonical.OutputFormatJSONSchema,
-		Name:   "reply",
-		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
-		Strict: true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object"}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1200,8 +1200,8 @@ func TestBedrockMantleStrictStructuredOutputExecutesWithoutFallback(t *testing.T
 	if !reflect.DeepEqual(transported, []string{targetID.String()}) {
 		t.Fatalf("transported targets = %v, want only Mantle target", transported)
 	}
-	if !strings.Contains(providerDocument, `"output_config"`) || !strings.Contains(providerDocument, `"json_schema"`) {
-		t.Fatalf("Mantle request lost strict structured output: %s", providerDocument)
+	if strings.Contains(providerDocument, `"output_config"`) || strings.Contains(providerDocument, `"json_schema"`) {
+		t.Fatalf("Mantle request contains unsupported structured output: %s", providerDocument)
 	}
 }
 

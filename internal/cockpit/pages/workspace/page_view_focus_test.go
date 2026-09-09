@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestPage_FirstFrameSelectsWorkspaceDisclosure(t *testing.T) {

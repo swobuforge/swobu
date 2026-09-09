@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -72,6 +74,54 @@ type serialWebsocketIngress struct {
 	mu        sync.Mutex
 	active    int
 	maxActive int
+}
+
+func TestWebsocketErrorEventUsesGatewayFallbackAndStructuredTruth(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+		wantMsg    string
+	}{
+		{name: "statusless", err: canonical.NewBackendError("target-a", 0, "opaque body", ""), wantStatus: http.StatusBadGateway, wantCode: "provider_error", wantMsg: http.StatusText(http.StatusBadGateway)},
+		{name: "structured", err: canonical.NewStructuredBackendError("target-a", protocolkind.Responses, 429, canonical.BackendErrorDetail{Code: "quota", Message: "slow down"}, ""), wantStatus: 429, wantCode: "quota", wantMsg: "slow down"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var event responsesWebsocketErrorDTO
+			if err := json.Unmarshal(websocketErrorEvent(test.err), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.StatusCode != test.wantStatus || event.Error.Code != test.wantCode || event.Error.Message != test.wantMsg {
+				t.Fatalf("event = %#v", event)
+			}
+		})
+	}
+}
+
+func TestResponsesWebsocket_PreHandoffFailureEmitsExactlyOneErrorFrame(t *testing.T) {
+	ingress := staticRequestIngress{err: canonical.NewStructuredBackendError("target-a", protocolkind.Responses, 429, canonical.BackendErrorDetail{Code: "quota", Message: "slow down"}, "")}
+	server := httptest.NewServer(newTestHandler(ingress))
+	defer server.CloseClientConnections()
+	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/c/alpha/responses", "", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := websocket.Message.Send(conn, `{"type":"response.create","model":"m","input":"hi","stream":true}`); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+	var message string
+	if err := websocket.Message.Receive(conn, &message); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message, `"type":"error"`) || !strings.Contains(message, `"code":"quota"`) {
+		t.Fatalf("first frame = %s", message)
+	}
+	if err := websocket.Message.Receive(conn, &message); err == nil {
+		t.Fatalf("duplicate error frame = %s", message)
+	}
 }
 
 func (i *serialWebsocketIngress) HandleRequest(ctx context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {

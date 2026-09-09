@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 )
@@ -36,7 +37,7 @@ func codexPresent(s *Service) (bool, error) {
 	return binaryOrRegularFilePresent(s, "codex", path)
 }
 
-func planCodexCurrent(s *Service, target Target) (plannedMutation, error) {
+func planCodexCurrent(_ context.Context, s *Service, target Target) (plannedMutation, error) {
 	path, err := s.codexPath()
 	if err != nil {
 		return plannedMutation{}, err
@@ -47,28 +48,28 @@ func planCodexCurrent(s *Service, target Target) (plannedMutation, error) {
 func planCodex(path string, target Target) (plannedMutation, error) {
 	file, err := inspectForeignFile(path, nil)
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	editor := tomlEditor{}
 	model, modelExists, err := editor.String(file.raw, keyPath{"model"})
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	provider, providerExists, err := editor.String(file.raw, keyPath{"model_provider"})
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	endpoint, endpointExists, err := editor.String(file.raw, codexEndpointPath)
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	_, nameExists, err := editor.String(file.raw, keyPath{"model_providers", "swobu", "name"})
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	wire, wireExists, err := editor.String(file.raw, keyPath{"model_providers", "swobu", "wire_api"})
 	if err != nil {
-		return plannedMutation{}, codexNoChange(err)
+		return plannedMutation{}, codexProblem(err)
 	}
 	changes := semanticChange("backend", provider+"/"+model, providerExists || modelExists, "swobu/default")
 	changes = append(changes, semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())...)
@@ -76,7 +77,7 @@ func planCodex(path string, target Target) (plannedMutation, error) {
 		changes = append(changes, semanticChange("provider name", "", false, "Swobu")...)
 	}
 	changes = append(changes, semanticChange("protocol", wire, wireExists, "responses")...)
-	plan := Plan{ConfigPath: file.logical, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
@@ -98,12 +99,12 @@ func planCodex(path string, target Target) (plannedMutation, error) {
 	for _, change := range edits {
 		next, err = editor.SetString(next, change.path, change.value)
 		if err != nil {
-			return plannedMutation{}, codexNoChange(err)
+			return plannedMutation{}, codexProblem(err)
 		}
 	}
-	return plannedMutation{plan: plan, apply: func() error { return file.replace(next) }}, nil
+	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
 }
 
-func codexNoChange(err error) error {
-	return fmt.Errorf("Codex configuration %v. Nothing changed.", err)
+func codexProblem(err error) error {
+	return fmt.Errorf("Codex configuration: %w", err)
 }

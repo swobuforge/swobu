@@ -48,16 +48,16 @@ func (f *TargetFacts) read(fact TargetFact) bool {
 	return value
 }
 
-func (f *TargetFacts) AcceptsParallelToolCallsFalse() bool {
+func (f *TargetFacts) UseParallelToolCallsFalse() bool {
 	return f.read(AcceptsParallelToolCallsFalse)
 }
-func (f *TargetFacts) AcceptsMaxCompletionTokens() bool { return f.read(AcceptsMaxCompletionTokens) }
-func (f *TargetFacts) AcceptsReasoningEffortMax() bool  { return f.read(AcceptsReasoningEffortMax) }
-func (f *TargetFacts) AcceptsReasoningDisabled() bool   { return f.read(AcceptsReasoningDisabled) }
-func (f *TargetFacts) AcceptsFunctionCallOutputArray() bool {
+func (f *TargetFacts) UseMaxCompletionTokens() bool { return f.read(AcceptsMaxCompletionTokens) }
+func (f *TargetFacts) UseReasoningEffortMax() bool  { return f.read(AcceptsReasoningEffortMax) }
+func (f *TargetFacts) UseReasoningDisabled() bool   { return f.read(AcceptsReasoningDisabled) }
+func (f *TargetFacts) UseFunctionCallOutputArray() bool {
 	return f.read(AcceptsFunctionCallOutputArray)
 }
-func (f *TargetFacts) AcceptsChatStreamIncludeUsage() bool {
+func (f *TargetFacts) UseChatStreamIncludeUsage() bool {
 	return f.read(AcceptsChatStreamIncludeUsage)
 }
 

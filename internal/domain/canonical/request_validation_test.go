@@ -134,7 +134,7 @@ func TestValidateMaterializedRequestAcceptsRequestScopedDirectiveWithTools(t *te
 	directive := mustValidationScopedMessage(t, MessageRoleSystem, "use search")
 	key, _ := NewRequestToolKey(ToolKindFunction, "search")
 	schemaObject, _ := ParseJSONObject([]byte(`{"type":"object"}`))
-	declaration, _ := NewFunctionTool(key, "", NewToolSchemaObject(schemaObject), Unspecified[bool]())
+	declaration, _ := NewFunctionTool(key, "", NewToolSchemaObject(schemaObject), SchemaContract{Profile: SchemaProfileAnthropic})
 	set, _ := NewToolSet([]ToolDeclaration{declaration})
 	tools, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
 	request := NewCanonicalRequest(RequestParams{Items: []CanonicalItem{tools, directive}})

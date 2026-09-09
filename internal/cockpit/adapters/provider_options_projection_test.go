@@ -23,3 +23,20 @@ func TestOperatorProviderOptionsAreAlphabeticalByDisplayName(t *testing.T) {
 		t.Fatalf("provider options = %q, want alphabetical order %q", got, want)
 	}
 }
+
+func TestOperatorProviderOptionsKeepOpenAIChoicesAdjacent(t *testing.T) {
+	options := operatorProviderOptions()
+	for index, option := range options {
+		if option.ProviderSpec != "openai" {
+			continue
+		}
+		if index+1 >= len(options) || options[index+1].ProviderSpec != "chatgpt" {
+			t.Fatalf("openai options are not adjacent: %#v", options)
+		}
+		if option.DisplayName != "OpenAI API" || options[index+1].DisplayName != "OpenAI · ChatGPT subscription" {
+			t.Fatalf("OpenAI labels = %q, %q", option.DisplayName, options[index+1].DisplayName)
+		}
+		return
+	}
+	t.Fatal("openai provider option missing")
+}

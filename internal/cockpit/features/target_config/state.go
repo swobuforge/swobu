@@ -226,6 +226,10 @@ func (w *TargetConfig) usesManualModelInput() bool {
 	return profile.ModelDiscoveryModeForSpec(w.Draft.Get().ProviderSpec) == profile.ModelDiscoveryModeNone
 }
 
+func (w *TargetConfig) permitsManualModelRecovery() bool {
+	return w.catalogFailed() && profile.ModelDiscoveryModeForSpec(w.Draft.Get().ProviderSpec) == profile.ModelDiscoveryModeAdvisory
+}
+
 func (w *TargetConfig) catalogResult() readmodel.ModelCatalogReadModel { return w.Catalog.Get().Result }
 func (w *TargetConfig) catalogLoading() bool                           { return w.Catalog.Get().Loading }
 func (w *TargetConfig) catalogFailed() bool                            { return w.Catalog.Get().Err != "" }

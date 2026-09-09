@@ -119,7 +119,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return nil, provider.AttemptMayHaveExecuted(httpedge.ReadBackendHTTPError(resp, target.TargetID))
+		return nil, provider.AttemptMayHaveExecuted(protocolcodec.ParseBackendError(httpedge.ReadBackendHTTPError(resp, target.TargetID), protocolkind.Messages, resp.Header.Get("request-id")))
 	}
 	if httpedge.IsEventStreamContentType(resp.Header.Get("Content-Type")) {
 		return provider.StreamIngress{Stream: carrier.ByteStream{

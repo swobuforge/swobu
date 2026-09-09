@@ -1051,6 +1051,19 @@ func TestInteractionsStreamReportsUnexpectedEOFAsTerminalError(t *testing.T) {
 	}
 }
 
+func TestInteractionsStreamMalformedJSONRetainsPrivateCause(t *testing.T) {
+	const secret = "provider-secret"
+	stream := decodeGeminiStream(t, "data: {\"value\":\""+secret+"\"\n\n")
+	_, err := stream.Next(context.Background())
+	var canonicalErr canonical.Error
+	if !errors.As(err, &canonicalErr) || canonicalErr.DiagnosticCause == nil {
+		t.Fatalf("error = %#v, want canonical error with diagnostic cause", err)
+	}
+	if !strings.Contains(err.Error(), "Gemini Interactions stream frame is invalid JSON") || strings.Contains(err.Error(), secret) {
+		t.Fatalf("public error = %q, want safe message without provider content", err)
+	}
+}
+
 func decodeGeminiStream(t *testing.T, raw string) *interactionsStream {
 	t.Helper()
 	return decodeGeminiStreamForRequest(t, canonical.NewCanonicalRequest(canonical.RequestParams{

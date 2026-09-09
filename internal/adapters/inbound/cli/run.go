@@ -52,9 +52,14 @@ type Runner struct {
 	ConnectOperations   connectOperations
 	ConnectAttach       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
 	ConnectWorkspaces   connectWorkspaceLister
+	UpdateExecutable    func() (string, error)
+	RunInstaller        func(context.Context, *http.Client, string, io.Writer, io.Writer) error
 }
 
-// daemon control, explicit lifecycle commands, and go-tui launch handoff.
+// Run dispatches explicit CLI commands or starts the interactive Cockpit.
+// Explicit commands retain their own exit-code and output contracts; the
+// argument-free path attaches to or starts the daemon before handing the same
+// process streams to Cockpit.
 func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	stdin := r.Stdin
 	if stdin == nil {
@@ -218,6 +223,8 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		return runStatus(ctx, client, stdout, stderr, args[1:])
 	case "telemetry":
 		return runTelemetry(ctx, client, stdout, stderr, args[1:])
+	case "update":
+		return runUpdate(ctx, stdout, stderr, args[1:], runner)
 	case "connect":
 		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
 	case "share":

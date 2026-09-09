@@ -1,8 +1,11 @@
 package producttelemetry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -118,6 +121,49 @@ func TestRuntimeDebugConstructsWithoutTransmission(t *testing.T) {
 	}
 }
 
+func TestStartRuntimeDevOutputsReportWithoutTransmission(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir())
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		calls.Add(1)
+	}))
+	defer server.Close()
+	t.Setenv("SWOBU_TELEMETRY_ENDPOINT_URL", server.URL)
+
+	var output bytes.Buffer
+	runtime := StartRuntime("dev", slog.New(slog.NewTextHandler(&output, nil)))
+	runtime.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
+		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	runtime.Close()
+
+	if calls.Load() != 0 {
+		t.Fatalf("development runtime transmitted %d reports", calls.Load())
+	}
+	if !bytes.Contains(output.Bytes(), []byte("product telemetry debug report")) {
+		t.Fatalf("development runtime did not output its constructed report: %s", output.String())
+	}
+}
+
+func TestStartRuntimeReleasedVersionUploadsReport(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir())
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	t.Setenv("SWOBU_TELEMETRY_ENDPOINT_URL", server.URL)
+
+	runtime := StartRuntime("0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runtime.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
+		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	runtime.Close()
+
+	if calls.Load() != 1 {
+		t.Fatalf("released runtime transmitted %d reports, want 1", calls.Load())
+	}
+}
+
 func TestRuntimeCloseDrainsAcceptedEventsAndBoundsFlush(t *testing.T) {
 	requestStarted := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +212,7 @@ func TestRuntimeInspectIsObservationalAndDoesNotTransmit(t *testing.T) {
 		t.Fatalf("traffic=%d calls=%d", len(report.Traffic), calls.Load())
 	}
 	if report.ReportID == "" || report.ReportCreatedAt == "" || r == nil {
-		t.Fatalf("inspect did not return a valid V2 preview: %+v", report)
+		t.Fatalf("inspect did not return a valid current-schema preview: %+v", report)
 	}
 }
 

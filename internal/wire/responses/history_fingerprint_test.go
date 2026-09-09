@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -17,6 +18,32 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
+
+func TestResponsesLiteHistoryRebasePreservesBaseInstructions(t *testing.T) {
+	first := decodeResponsesLiteFingerprintRequest(t, `{"model":"m","input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"CODEX_BASE"}]},{"type":"message","role":"user","content":"one"}]}`)
+	response := canonicaltest.Response(t, "swobu_lite_1", "m", []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleAssistant, "answer")}, canonical.Completed("completed"))
+	encoded, err := (ResponseDocumentEncoder{}).EncodeResponseDocument(canonical.CanonicalRequest{}, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := historyfingerprint.Advance(nil, first.RequestFingerprint, *encoded.ResponseFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := decodeResponsesLiteFingerprintRequest(t, `{"model":"m","input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"CODEX_BASE"}]},{"type":"message","role":"user","content":"one"},{"type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"type":"message","role":"user","content":"two"}]}`)
+
+	if second.RebasedRequest == nil || second.RebasedRequest.Previous != want {
+		t.Fatalf("rebased=%#v want=%#v", second.RebasedRequest, want)
+	}
+	items := second.RebasedRequest.Request.Items()
+	if len(items) != 2 {
+		t.Fatalf("items=%#v", items)
+	}
+	base, ok := items[0].Message()
+	if !ok || base.Role() != canonical.MessageRoleSystem {
+		t.Fatalf("base=%#v", items[0])
+	}
+}
 
 func TestHistoryFingerprintRoundTrip(t *testing.T) {
 	first := decodeResponsesFingerprintRequest(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
@@ -669,4 +696,21 @@ func decodeResponsesFingerprintRequest(t *testing.T, raw string) wire.ClientRequ
 		t.Fatal(err)
 	}
 	return result.Request
+}
+
+func decodeResponsesLiteFingerprintRequest(t *testing.T, raw string) wire.ClientRequestResult {
+	t.Helper()
+	result, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", http.Header{"X-Openai-Internal-Codex-Responses-Lite": {"true"}}, []byte(raw), carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Request
+}
+
+func TestResponsesLiteExplicitPreviousFingerprintIgnoresRequestPrefix(t *testing.T) {
+	standard := decodeResponsesFingerprintRequest(t, `{"model":"default","previous_response_id":"swobu_prior","input":[{"type":"message","role":"user","content":"continue"}]}`)
+	lite := decodeResponsesLiteFingerprintRequest(t, `{"model":"default","previous_response_id":"swobu_prior","input":[{"type":"additional_tools","role":"developer","tools":[]},{"type":"message","role":"developer","content":"base"},{"type":"message","role":"user","content":"continue"}]}`)
+	if standard.RequestFingerprint != lite.RequestFingerprint {
+		t.Fatalf("explicit continuation fingerprints differ: standard=%q lite=%q", standard.RequestFingerprint, lite.RequestFingerprint)
+	}
 }

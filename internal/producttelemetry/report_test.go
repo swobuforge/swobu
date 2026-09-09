@@ -2,6 +2,7 @@ package producttelemetry
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestProductReport_MarshalCarriesSchemaAndInstallID(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(raw)
-	for _, want := range []string{`"schema":2`, `"report_id":`, `"report_created_at":`, `"install_id":`, `"traffic":`} {
+	for _, want := range []string{fmt.Sprintf(`"schema":%d`, productReportSchemaVersion), `"report_id":`, `"report_created_at":`, `"install_id":`, `"traffic":`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("report JSON missing %q: %s", want, s)
 		}

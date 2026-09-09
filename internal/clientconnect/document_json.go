@@ -49,7 +49,9 @@ func (e jsonEditor) Value(raw []byte, path keyPath, out any) (bool, error) {
 	if err != nil || !exists {
 		return exists, err
 	}
-	packed := node.Clone().Pack()
+	clone := node.Clone()
+	clone.Standardize()
+	packed := clone.Pack()
 	if err := json.Unmarshal(packed, out); err != nil {
 		return false, fmt.Errorf("%s has incompatible structure", joinKeyPath(path))
 	}

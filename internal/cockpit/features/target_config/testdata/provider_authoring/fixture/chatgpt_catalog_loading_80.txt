@@ -1,0 +1,23 @@
+  new target · OpenAI · ChatGPT subscription                      cancel ↵
+     provider          OpenAI · ChatGPT subscription              change ↵
+     authentication    signed in                                  reconnect ↵
+   > model             loading catalog…                           wait
+     routing           fallback after step 1                      change ↵
+     create                                                       complete setup
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

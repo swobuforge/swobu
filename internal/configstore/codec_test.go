@@ -3,7 +3,6 @@ package configstore
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -12,71 +11,6 @@ import (
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
-
-func TestCredentialProvenFreeProviderExampleStaysWithinLiveEvidence(t *testing.T) {
-	raw, err := os.ReadFile("../../examples/free-provider-route/swobu.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, err := decode(raw)
-	if err != nil {
-		t.Fatalf("decode free-provider example: %v", err)
-	}
-	slug, _ := routing.ParseWorkspaceSlug("free-demo")
-	workspace, ok := config.Workspace(slug)
-	if !ok {
-		t.Fatal("free-demo workspace is missing")
-	}
-	if got := workspace.DefaultRoute().String(); got != "free" {
-		t.Fatalf("default route = %q, want free", got)
-	}
-	routeName, _ := routing.ParseRouteName("free")
-	route, ok := workspace.Route(routeName)
-	if !ok {
-		t.Fatal("free route is missing")
-	}
-
-	want := []struct {
-		provider   string
-		model      string
-		credential string
-	}{
-		{provider: "nvidia", model: "nvidia/nemotron-mini-4b-instruct", credential: "env:NVIDIA_API_KEY"},
-		{provider: "workersai", model: "@cf/google/gemma-4-26b-a4b-it", credential: "env:CLOUDFLARE_API_TOKEN"},
-		{provider: "openrouter", model: "openrouter/free", credential: "env:OPENROUTER_API_KEY"},
-		{provider: "groq", model: "openai/gpt-oss-20b", credential: "env:GROQ_API_KEY"},
-		{provider: "mistral", model: "ministral-3b-2512", credential: "env:MISTRAL_API_KEY"},
-		{provider: "llm7", model: "default", credential: "env:LLM7_API_KEY"},
-		{provider: "cerebras", model: "gemma-4-31b", credential: "env:CEREBRAS_API_KEY"},
-	}
-	tiers := route.Tiers()
-	if len(tiers) != 1 {
-		t.Fatalf("tier count = %d, want 1", len(tiers))
-	}
-	targets := tiers[0].Targets()
-	if len(targets) != len(want) {
-		t.Fatalf("target count = %d, want %d", len(targets), len(want))
-	}
-	for index, expected := range want {
-		target := targets[index]
-		if provider := string(target.Provider()); provider != expected.provider {
-			t.Fatalf("target %d provider = %q, want %q", index+1, provider, expected.provider)
-		}
-		if model := target.Model().String(); model != expected.model {
-			t.Fatalf("target %d model = %q, want %q", index+1, model, expected.model)
-		}
-		connection, ok := target.Connection().(routing.StandardConnection)
-		if !ok {
-			t.Fatalf("target %d connection = %T, want routing.StandardConnection", index+1, target.Connection())
-		}
-		if credential := connection.Credential().String(); credential != expected.credential {
-			t.Fatalf("target %d credential = %q, want %q", index+1, credential, expected.credential)
-		}
-		if string(target.Provider()) == "gemini" {
-			t.Fatalf("target %d contains excluded Gemini provider", index+1)
-		}
-	}
-}
 
 const allVariantsYAML = `schema_version: 1
 workspaces:

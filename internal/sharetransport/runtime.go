@@ -183,7 +183,7 @@ func (r *OwnerRuntime) startLocked() {
 				return fmt.Errorf("certificate provisioning is temporarily unavailable; retry after %s", certificate.RetryAt.UTC().Format(time.RFC3339))
 			}
 			if certificate.Due && certificate.CanAttempt(now) {
-				if err := ProvisionCertificate(ctx, control, r.Store, r.TLS); err != nil {
+				if err := ProvisionCertificate(ctx, control, r.Store); err != nil {
 					retryAfter := time.Duration(0)
 					var provisionErr *CertificateProvisionError
 					if errors.As(err, &provisionErr) {

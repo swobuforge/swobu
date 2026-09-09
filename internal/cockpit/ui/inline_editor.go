@@ -17,9 +17,9 @@ import (
 //
 // Rules:
 //   - Focus never leaves the parent shell. The text surface is non-focusable.
-//   - Escape and Enter are NOT bound here. The parent decides what they mean.
-//   - Typing keys (Rune, Backspace, Delete, arrows, Home, End) are bound via
-//     TypingKeyMap and forwarded into InlineInput.
+//   - Escape is not bound here. The parent owns cancellation.
+//   - TypingKeyMap forwards text editing and Enter to InlineInput; Enter
+//     invokes OnSubmit when set.
 //   - The parent must include the InlineEditor in BindApp and Watchers.
 type InlineEditor struct {
 	Value     *tui.State[string]
@@ -92,7 +92,7 @@ func (ed *InlineEditor) MoveHome() {
 	ed.input.MoveHome()
 }
 
-// Close resets the visible surface. If OnClose is set it is called first.
+// Close invokes OnClose when set. The caller owns the visible editing state.
 func (ed *InlineEditor) Close() {
 	if ed.OnClose != nil {
 		ed.OnClose()

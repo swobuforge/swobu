@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/pem"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ func TestCertificateValidityRenewalAndRetryAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InstallTLSCredential(tlsKey, [][]byte{der}); err != nil {
+	if err := installTestCredential(store, tlsKey, der); err != nil {
 		t.Fatal(err)
 	}
 	if !store.CertificateState(now).Valid {
@@ -44,6 +45,29 @@ func TestCertificateValidityRenewalAndRetryAreIndependent(t *testing.T) {
 	}
 	if !store.CertificateState(now).CanAttempt(now) {
 		t.Fatal("fresh certificate state blocks attempt")
+	}
+}
+
+func TestInstallTLSCredentialRejectsHostnameAndKeyMatchingUntrustedChain(t *testing.T) {
+	store, _ := Open(filepath.Join(t.TempDir(), "share.json"))
+	if err := store.EnsureEndpoint(); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := store.EndpointID()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootTemplate := &x509.Certificate{SerialNumber: big.NewInt(800), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	rootDER, _ := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	root, _ := x509.ParseCertificate(rootDER)
+	leafTemplate := &x509.Certificate{SerialNumber: big.NewInt(801), DNSNames: []string{Hostname(id)}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	leafDER, _ := x509.CreateCertificate(rand.Reader, leafTemplate, root, &key.PublicKey, rootKey)
+	if err := store.InstallTLSCredential(key, [][]byte{leafDER, rootDER}, x509.NewCertPool()); err == nil {
+		t.Fatal("untrusted returned certificate was installed")
+	}
+	trusted := x509.NewCertPool()
+	trusted.AddCert(root)
+	if err := store.InstallTLSCredential(key, [][]byte{leafDER, rootDER}, trusted); err != nil {
+		t.Fatalf("trusted returned certificate rejected: %v", err)
 	}
 }
 
@@ -59,9 +83,7 @@ func TestNotYetValidCertificateRemainsDue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InstallTLSCredential(key, [][]byte{der}); err != nil {
-		t.Fatal(err)
-	}
+	store.state.Endpoint.TLSCredential = &TLSCredential{PrivateKey: key, CertificateChain: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
 	state := store.CertificateState(now)
 	if state.Valid || !state.Due {
 		t.Fatalf("future credential state = %+v, want invalid and due", state)
@@ -107,7 +129,7 @@ func TestCertificateFailureBackoffPersistsAndInstallClears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reopened.InstallTLSCredential(tlsKey, [][]byte{der}); err != nil {
+	if err := installTestCredential(reopened, tlsKey, der); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := reopened.Snapshot().Endpoint
@@ -181,7 +203,7 @@ func TestTLSCredentialReplacementKeepsIdentityAndRotatesLeafKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := store.InstallTLSCredential(key, [][]byte{der}); err != nil {
+		if err := installTestCredential(store, key, der); err != nil {
 			t.Fatal(err)
 		}
 		if store.Snapshot().Endpoint.IdentityPrivateKey.PublicKey.X.Cmp(key.PublicKey.X) == 0 {
@@ -200,4 +222,14 @@ func TestTLSCredentialReplacementKeepsIdentityAndRotatesLeafKey(t *testing.T) {
 	if len(grants) != 1 || grants[0].Bearer != grant.Bearer {
 		t.Fatal("TLS replacement changed Grant")
 	}
+}
+
+func installTestCredential(store *Store, key *ecdsa.PrivateKey, der []byte) error {
+	certificate, err := x509.ParseCertificate(der)
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(certificate)
+	return store.InstallTLSCredential(key, [][]byte{der}, roots)
 }

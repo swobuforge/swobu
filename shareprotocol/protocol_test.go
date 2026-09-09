@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+func TestProtocolV2RejectsV1AndDeletedChallengeFields(t *testing.T) {
+	for _, raw := range []string{
+		`{"version":1,"type":"certificate_request"}` + "\n",
+		`{"version":2,"type":"challenge","challenge_private_key":"secret"}` + "\n",
+		`{"version":2,"type":"challenge"}` + "\n",
+	} {
+		if _, err := NewCodec(bytes.NewBufferString(raw)).Read(); err == nil {
+			t.Fatalf("legacy message accepted: %s", raw)
+		}
+	}
+}
+
 func TestRetryAfterSecondsRoundTripsAndOmitsZero(t *testing.T) {
 	var wire bytes.Buffer
 	codec := NewCodec(&wire)

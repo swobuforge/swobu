@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
@@ -140,6 +141,9 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 
 	payload, class := FetchStatus(ctx, client, addr)
 	if class != StatusClassDown {
+		if err := RequireControlPlaneProtocol(payload); err != nil {
+			return StatusPayload{}, err
+		}
 		report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: payload.State})
 		return payload, nil
 	}
@@ -191,8 +195,23 @@ func AttachOrStart(ctx context.Context, in AttachOrStartInput) (StatusPayload, e
 		}
 		return StatusPayload{}, fmt.Errorf("daemon readiness failed (check `swobu status` and foreground daemon diagnostics): %w", err)
 	}
+	if err := RequireControlPlaneProtocol(status); err != nil {
+		return StatusPayload{}, err
+	}
 	report.Report(StartupEvent{Kind: StartupEventDaemonReady, State: status.State})
 	return status, nil
+}
+
+// RequireControlPlaneProtocol rejects mutable or interactive control-plane use
+// when the reachable daemon cannot speak the caller's exact protocol.
+func RequireControlPlaneProtocol(payload StatusPayload) error {
+	if payload.ControlPlaneProtocol == nil {
+		return fmt.Errorf("daemon does not report a control-plane protocol; this CLI requires %d; run `swobu status`, then `swobu daemon down` and restart Swobu", controlplane.Protocol)
+	}
+	if *payload.ControlPlaneProtocol != controlplane.Protocol {
+		return fmt.Errorf("daemon control-plane protocol %d is incompatible; this CLI requires %d; run `swobu status`, then `swobu daemon down` and restart Swobu", *payload.ControlPlaneProtocol, controlplane.Protocol)
+	}
+	return nil
 }
 
 func Down(ctx context.Context, in DownInput) (DownResult, error) {

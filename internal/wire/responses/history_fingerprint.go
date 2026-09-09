@@ -43,7 +43,7 @@ type responsesHistoryResult struct {
 	current  json.RawMessage
 }
 
-func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, retainLitePrelude bool) (responsesHistoryResult, error) {
+func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, semantics clientRequestSemantics) (responsesHistoryResult, error) {
 	trimmed := bytes.TrimSpace(input)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		request, err := fingerprintResponsesRequestValue(nil)
@@ -74,38 +74,37 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, r
 	if err := json.Unmarshal(trimmed, &rawItems); err != nil || len(rawItems) != len(items) {
 		return responsesHistoryResult{}, errors.New("responses history input items are invalid")
 	}
+	prefixEnd := semantics.requestInputPrefixEnd
+	semanticItems := items[prefixEnd:]
+	semanticRawItems := rawItems[prefixEnd:]
 	if explicitPrevious {
-		request, err := fingerprintResponsesRequestValue(items)
+		request, err := fingerprintResponsesRequestValue(semanticItems)
 		return responsesHistoryResult{request: request, current: append(json.RawMessage(nil), trimmed...)}, err
 	}
 
 	var previous *historyfingerprint.History
 	requestStart := 0
-	preambleEnd := 0
-	if len(items) > 0 && strings.TrimSpace(items[0].Type) == "additional_tools" { // swobu:io-string source=boundary
-		preambleEnd = 1
-	}
-	for index := 0; index < len(items); {
-		if !isResponsesHistoryOutput(items[index]) {
+	for index := 0; index < len(semanticItems); {
+		if !isResponsesHistoryOutput(semanticItems[index]) {
 			index++
 			continue
 		}
 		responseEnd := index + 1
-		for responseEnd < len(items) && isResponsesHistoryOutput(items[responseEnd]) {
+		for responseEnd < len(semanticItems) && isResponsesHistoryOutput(semanticItems[responseEnd]) {
 			responseEnd++
 		}
 		// A terminal assistant/output value may be current prefill. Later request
 		// input usually closes the response contribution. A completed hosted
 		// web-search marker is already provider-owned lifecycle evidence, so the
 		// terminal assistant continuation belongs to that completed response.
-		if responseEnd == len(items) && !responsesHistoryRunHasCompletedWebSearch(items[index:responseEnd]) {
+		if responseEnd == len(semanticItems) && !responsesHistoryRunHasCompletedWebSearch(semanticItems[index:responseEnd]) {
 			break
 		}
-		request, err := fingerprintResponsesRequestValue(items[requestStart:index])
+		request, err := fingerprintResponsesRequestValue(semanticItems[requestStart:index])
 		if err != nil {
 			return responsesHistoryResult{}, err
 		}
-		response, err := fingerprintResponsesResponseValue(items[index:responseEnd])
+		response, err := fingerprintResponsesResponseValue(semanticItems[index:responseEnd])
 		if err != nil {
 			return responsesHistoryResult{}, err
 		}
@@ -117,12 +116,8 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, r
 		requestStart = responseEnd
 		index = responseEnd
 	}
-	currentItems := items[requestStart:]
-	currentRawItems := rawItems[requestStart:]
-	if retainLitePrelude && preambleEnd > 0 && requestStart >= preambleEnd {
-		currentItems = append(append([]responsesHistoryItemDTO(nil), items[:preambleEnd]...), currentItems...)
-		currentRawItems = append(append([]json.RawMessage(nil), rawItems[:preambleEnd]...), currentRawItems...)
-	}
+	currentItems := semanticItems[requestStart:]
+	currentRawItems := append(append([]json.RawMessage(nil), rawItems[:prefixEnd]...), semanticRawItems[requestStart:]...)
 	current, err := fingerprintResponsesRequestValue(currentItems)
 	if err != nil {
 		return responsesHistoryResult{}, err

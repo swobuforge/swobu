@@ -12,6 +12,16 @@ import (
 )
 
 // swobu:lint ignore string-switch because=protocol boundary decodes tool declaration variants.
+func schemaConformance(strict canonical.Specified[bool]) canonical.SchemaConformance {
+	if value, specified := strict.Get(); specified {
+		if value {
+			return canonical.SchemaConformanceEnforced
+		}
+		return canonical.SchemaConformanceRelaxed
+	}
+	return canonical.SchemaConformanceDefault
+}
+
 func decodeChatCompletionsTools(tools []ProviderRequestTool, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -40,7 +50,7 @@ func decodeChatCompletionsTools(tools []ProviderRequestTool, changeLog *[]compat
 			if tool.Function.Strict != nil {
 				strict = canonical.Specify(*tool.Function.Strict)
 			}
-			decl, err := canonical.NewFunctionTool(id, tool.Function.Description, schema, strict)
+			decl, err := canonical.NewFunctionTool(id, tool.Function.Description, schema, canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: schemaConformance(strict)})
 			if err != nil {
 				return nil, err
 			}
@@ -99,13 +109,27 @@ func DefaultToolLowering() ToolLowering {
 		if err != nil {
 			return ToolProjection{}, nil, err
 		}
-		return chatFunctionProjection(encoded, func(call canonical.ToolCallItem) (string, error) {
+		decl, _ := tool.Function()
+		exact := wire.SchemaContractExact(decl.SchemaContract(), canonical.SchemaProfileOpenAI)
+		if exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			strict := true
+			encoded.Function.Strict = &strict
+		} else if decl.Conformance() != canonical.SchemaConformanceDefault || !exact {
+			strict := false
+			encoded.Function.Strict = &strict
+		}
+		projection := chatFunctionProjection(encoded, func(call canonical.ToolCallItem) (string, error) {
 			object, ok := call.Input().Object()
 			if !ok {
 				return "", canonical.BadRequest("chat completions function projection requires object input")
 			}
 			return object.String(), nil
-		}), nil, nil
+		})
+		var changes []compat.Change
+		if !exact && decl.Conformance() == canonical.SchemaConformanceEnforced {
+			changes = []compat.Change{compat.NewApproximation(canonical.RequestToolsSchemaConformance, canonical.ToolOccurrence(tool.Key()))}
+		}
+		return projection, changes, nil
 	}
 	custom := func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
 		encoded, err := encodeChatCompletionsTool(tool, ctx.Names)
@@ -179,7 +203,8 @@ func DefaultLowering() Lowering {
 			}
 			return fields, nil
 		},
-		Message: func(*ProviderRequestMessage, []canonical.CanonicalItem) error { return nil },
+		Message:      func(*ProviderRequestMessage, []canonical.CanonicalItem) error { return nil },
+		OutputFormat: DefaultOutputFormatLowering,
 	}
 }
 
@@ -257,9 +282,6 @@ func encodeChatCompletionsFunctionTool(declaration canonical.ToolDeclaration, de
 			Name:        name,
 			Description: strings.TrimSpace(decl.Description()), // swobu:io-string source=boundary
 		},
-	}
-	if strict, specified := decl.Strict().Get(); specified {
-		wireTool.Function.Strict = &strict
 	}
 	if !decl.InputSchema().IsEmpty() {
 		parameters, err := chatCompletionsToolParametersFromSchema(decl.InputSchema())

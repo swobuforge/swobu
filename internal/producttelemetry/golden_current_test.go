@@ -31,7 +31,7 @@ func currentGoldenReport() productReport {
 		InstallationAgeBucket: "1_7d",
 		Traffic: []reportTrafficRow{
 			{
-				ClientFamily:        reportClientFamilyCodex,
+				ClientFamily:        reportClientFamilyVSCode,
 				RequestedModel:      reportModelDefault,
 				ResolvedModel:       reportModelConfigured,
 				ClientProtocol:      "responses",
@@ -77,23 +77,25 @@ func currentGoldenReport() productReport {
 	}
 }
 
-func contractsDir() string {
-	return filepath.Join("..", "..", "..", "..", "swobucom", "apps", "ingest-api", "contracts")
+func contractsDir(t *testing.T) string {
+	t.Helper()
+	return filepath.Join("..", "..", "contracts", "product-telemetry")
 }
 
 // productReportExamplePath is the committed golden fixture path for one schema
 // version. The Go client proves only the CURRENT emitter version's example exists
 // and matches the encoder; the Worker owns the registry-completeness invariant
 // (every published version registered == schema files == example files).
-func productReportExamplePath(version int) string {
-	return filepath.Join(contractsDir(), "product-report-v"+strconv.Itoa(version)+".example.json")
+func productReportExamplePath(t *testing.T, version int) string {
+	t.Helper()
+	return filepath.Join(contractsDir(t), "product-report-v"+strconv.Itoa(version)+".example.json")
 }
 
 // TestCurrentGoldenExample_MatchesEncoder proves the committed example for the
 // current schema version is semantically equal to the real Go encoder's output
 // for currentGoldenReport (so the fixture cannot drift from the struct).
 func TestCurrentGoldenExample_MatchesEncoder(t *testing.T) {
-	body, err := os.ReadFile(productReportExamplePath(productReportSchemaVersion))
+	body, err := os.ReadFile(productReportExamplePath(t, productReportSchemaVersion))
 	if err != nil {
 		t.Fatalf("read committed example: %v (regenerate with SWOBU_REGENERATE_GOLDEN=1)", err)
 	}
@@ -118,8 +120,9 @@ func TestCurrentGoldenExample_Regenerate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal golden: %v", err)
 	}
-	if err := os.WriteFile(productReportExamplePath(productReportSchemaVersion), append(body, '\n'), 0o644); err != nil {
+	path := productReportExamplePath(t, productReportSchemaVersion)
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
 		t.Fatalf("write example: %v", err)
 	}
-	t.Logf("regenerated %s", productReportExamplePath(productReportSchemaVersion))
+	t.Logf("regenerated %s", path)
 }

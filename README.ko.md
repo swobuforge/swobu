@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · **한국어** · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code, Codex 및 다른 AI 에이전트를 하나의 엔드포인트에서 DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock 등으로 연결하고 자동 라우팅, 로드 밸런싱, 페일오버를 적용합니다.**
 
 AI 용량을 라우팅 가능한 자원으로 만듭니다. 에이전트는 모델 이름 하나만 요청합니다. Swobu는 그 이름을 프로바이더, 계정, 리전, 로컬 서버를 아우르는 route로 바꾸고, 그 아래에서 로드 밸런싱, 페일오버, reasoning 변환, 의미 보존형 프로토콜 호환성을 처리합니다.
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="Swobu route를 통해 로드 밸런싱과 페일오버를 사용하는 AI 에이전트" width="1280">
-</p>
 
 [문서](https://swobu.com/docs/) · [빠른 시작](https://swobu.com/docs/start/first-route/) · [릴리스](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@ AI 용량을 라우팅 가능한 자원으로 만듭니다. 에이전트는 모�
 에이전트에게 Swobu의 **route는 하나의 모델처럼 보입니다**.
 
 그 이름 뒤에는 하나의 endpoint, 여러 곳에서 제공되는 동일 모델, 또는 여러 프로바이더를 섞은 pool이 있을 수 있습니다.
+
+아래 다이어그램은 구성 예시입니다. 각 프로바이더에서 사용할 수 있는 모델을 선택하세요.
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ free
 
 ## 명령어 하나로 시작
 
+macOS, Linux 또는 WSL:
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 설치 프로그램이 Swobu를 실행하고 터미널 UI인 **Cockpit**을 엽니다.
@@ -167,56 +173,6 @@ route 이름은 바뀌지 않습니다.
 
 ---
 
-### reasoning 의도도 요청과 함께 이동
-
-프로바이더마다 reasoning을 표현하는 방식이 다릅니다.
-
-어떤 API는 effort level을 받고, 다른 API는 token budget을 노출하며, 또 다른 API는 전혀 다른 request shape로 reasoning을 표현합니다.
-
-Swobu는 reasoning을 의미적 capability로 다루며, 의미를 보존하는 대응 표현이 있을 때 변환합니다.
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-프로바이더를 바꿀 때마다 모든 에이전트에게 새로운 API 방언을 가르칠 필요가 없어야 합니다.
-
----
-
-### 호환성이 있어야 라우팅이 가능하다
-
-같은 JSON을 다른 URL로 보내는 건 쉽습니다.
-
-에이전트 요청을 API 사이에서 안전하게 옮기는 건 쉽지 않습니다.
-
-프로바이더는 다음 항목에서 서로 다릅니다.
-
-- tools 및 function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- 프로바이더 native capability
-- 프로토콜 세부 사항과 edge case
-
-Swobu는 의미를 보존할 수 있을 때 요청을 변환합니다.
-
-필요한 의미를 표현할 수 없는 target은 조용히 요청을 열화시키는 대신 후보에서 제외할 수 있습니다.
-
-호환성은 사용자가 매번 고민해야 하는 제품 기능이 아닙니다. 신뢰할 수 있는 라우팅을 가능하게 하는 기반입니다.
-
----
-
 ## 하나의 경계, 여러 프로토콜
 
 ```text
@@ -254,50 +210,7 @@ Swobu는 현재 다음을 포함한 여러 프로토콜의 프로바이더 통�
 
 Swobu는 로컬 추론, frontier API, hyperscaler, 특화 추론 플랫폼, aggregator를 지원합니다.
 
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**Aggregation:** OpenRouter · Custom Endpoint
-
-카탈로그, 프로바이더 수, 프로토콜 매트릭스, README asset은 Swobu의 provider registry에서 생성됩니다.
-
----
-
-## Native capability는 native 그대로
-
-Swobu는 모든 프로바이더를 최저 공통 기능으로 낮추지 않습니다.
-
-선택된 target이 Swobu가 이해하는 유용한 native capability를 제공한다면, 해당 capability를 호환성 경계를 넘어 그대로 사용할 수 있습니다.
-
-지원되는 경우 provider-native web search도 포함됩니다.
-
-원칙은 단순합니다.
-
-> **유용한 의미를 보존할 수 있으면 보존하고, 표현할 수 없으면 명확하게 실패한다.**
-
----
-
-## 실제 비호환성을 기준으로 구축
-
-Swobu가 존재하는 이유는 “OpenAI-compatible”이 에이전트가 흥미로운 일을 시작하는 지점에서 자주 호환되지 않기 때문입니다.
-
-다음과 같은 실제 실패 사례를 기준으로 테스트합니다.
-
-- reasoning controls
-- tool definitions
-- malformed 또는 unsupported fields
-- message replay
-- model discovery
-- streaming behavior
-- cross-protocol translation
-- provider-specific request restrictions
-
-[호환성 노트 →](https://swobu.com/docs/)
+[지원 프로바이더와 설정 방법은 문서를 참조하세요.](https://swobu.com/docs/)
 
 ---
 
@@ -341,28 +254,14 @@ Swobu는 Linux, macOS, Windows용 버전 관리 binary와 SHA-256 checksum을 �
 
 [최신 릴리스 →](https://github.com/swobuforge/swobu/releases/latest)
 
-소스에서 설치:
+소스에서 빌드:
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## 상태
-
-추상화가 안정되는 동안 라우팅, 호환 동작, 프로바이더 통합은 계속 발전하고 있습니다.
-
-버그 및 호환성 리포트를 환영합니다.
-
-[Issue 열기 →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Swobu의 현재 아키텍처는 OpenAI Build Week 2026 동안 GPT 5.6 Sol을 사용해 재구축되었습니다.
-</details>
 
 ---
 

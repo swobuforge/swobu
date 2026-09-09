@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · **简体中文** · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **一个端点，让 Claude Code、Codex 和其他 AI Agent 在 DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock 等模型与提供商之间自动路由、负载均衡和故障切换。**
 
 让 AI 算力变得可路由。你的 Agent 只需要请求一个模型名；Swobu 会把这个名字变成一条跨提供商、账号、区域和本地服务器的路由，并在底层处理负载均衡、故障切换、推理语义转换和协议兼容。
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="AI Agent 通过 Swobu 路由进行负载均衡和故障切换" width="1280">
-</p>
 
 [文档](https://swobu.com/docs/) · [快速开始](https://swobu.com/docs/start/first-route/) · [版本发布](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@
 对 Agent 来说，Swobu 的**路由看起来就是一个模型**。
 
 这个名字背后可以是单个端点、分布在多个位置的同一个模型，也可以是跨提供商的容量池。
+
+以下示意图展示配置示例。请选择各提供商实际可用的模型。
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ Agent 本来就理解的 `model` 字段，因此变成了一个可编程的路�
 
 ## 一条命令开始
 
+macOS、Linux 或 WSL：
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 安装程序会启动 Swobu，并打开终端 UI **Cockpit**。
@@ -167,56 +173,6 @@ Swobu
 
 ---
 
-### 推理意图跟着请求走
-
-不同提供商表达 reasoning 的方式并不一样。
-
-有的 API 接收 effort level，有的暴露 token budget，还有的用完全不同的请求结构表示推理。
-
-Swobu 把 reasoning 当作语义能力来处理；只要目标 API 存在有意义的等价表达，就进行转换。
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-你不应该为了换一个提供商，就教每个 Agent 一套新的 API 方言。
-
----
-
-### 兼容性让路由真正可用
-
-把同一份 JSON 发到另一个 URL 很容易。
-
-把 Agent 请求安全地迁移到另一个 API 并不容易。
-
-提供商在这些地方经常不一致：
-
-- tools 和 function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- 提供商原生能力
-- 协议细节和边界情况
-
-当请求语义可以保留时，Swobu 会进行转换。
-
-无法表达所需语义的 target 可以被直接排除，而不是悄悄降级请求。
-
-兼容性不是你应该反复操心的产品功能。它是让路由值得信任的基础设施。
-
----
-
 ## 一个边界，多种协议
 
 ```text
@@ -254,50 +210,7 @@ Swobu 当前支持跨以下协议的提供商集成：
 
 Swobu 支持本地推理、前沿模型 API、超大规模云平台、专业推理平台和聚合器。
 
-**本地：** Ollama · LM Studio · vLLM
-
-**前沿：** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**云：** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**推理平台：** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**聚合：** OpenRouter · Custom Endpoint
-
-目录、提供商数量、协议矩阵和 README 资源均由 Swobu 的 provider registry 生成。
-
----
-
-## 原生能力继续保持原生
-
-Swobu 不会为了统一接口，把所有提供商压到最低公分母。
-
-如果某个 target 暴露了 Swobu 能理解的有用原生能力，那么该能力可以继续穿过兼容边界使用。
-
-例如，在受支持的提供商上保留 provider-native web search。
-
-原则很简单：
-
-> **能保留有用语义，就保留；无法表达时，就明确失败。**
-
----
-
-## 针对真实兼容性问题构建
-
-Swobu 存在的原因，是“OpenAI-compatible”往往恰恰在 Agent 开始变得复杂时不再兼容。
-
-Swobu 针对真实故障进行测试，包括：
-
-- reasoning controls
-- tool definitions
-- malformed 或 unsupported fields
-- message replay
-- model discovery
-- streaming behavior
-- cross-protocol translation
-- provider-specific request restrictions
-
-[兼容性说明 →](https://swobu.com/docs/)
+[请参阅文档中的提供商列表和配置说明。](https://swobu.com/docs/)
 
 ---
 
@@ -341,28 +254,14 @@ Swobu 为 Linux、macOS 和 Windows 发布带版本号的二进制文件，并�
 
 [最新版本 →](https://github.com/swobuforge/swobu/releases/latest)
 
-从源码安装：
+从源码构建：
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## 当前状态
-
-随着抽象逐步稳定，路由、兼容性行为和提供商集成仍在持续演进。
-
-欢迎提交 bug 和兼容性问题。
-
-[提交 issue →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Swobu 当前架构在 OpenAI Build Week 2026 期间使用 GPT 5.6 Sol 重建。
-</details>
 
 ---
 

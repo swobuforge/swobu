@@ -6,13 +6,6 @@ import (
 	"testing"
 )
 
-// TestResponseProjectorMatchesRetainAndReproject is the correctness lock for
-// epic-50 task 010: the incremental ResponseProjector (used by the checkpoint
-// capture stream) must produce the exact same projected response as the legacy
-// retain-and-reproject path (ReadClosedEnvelope + ProjectResponse) over the
-// same events. Both run the same itemStreamAssembler under the hood, so this
-// guards against any divergence introduced by folding one event at a time
-// instead of re-reading the whole slice.
 func TestResponseProjectorMatchesRetainAndReproject(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

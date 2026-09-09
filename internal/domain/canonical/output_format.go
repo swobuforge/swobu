@@ -19,37 +19,38 @@ const (
 // JSON-object schema opaquely; provider adapters, not canonical admission, own
 // support for particular JSON Schema dialects and keywords.
 type OutputFormat struct {
-	Kind        OutputFormatKind
-	Name        string
-	Description string
-	Schema      RawJSON
-	Strict      bool
+	Kind           OutputFormatKind
+	Name           string
+	Description    string
+	Schema         RawJSON
+	SchemaContract SchemaContract
 }
 
 type OutputFormatParams struct {
-	Kind        OutputFormatKind
-	Name        string
-	Description string
-	Schema      RawJSON
-	Strict      bool
+	Kind           OutputFormatKind
+	Name           string
+	Description    string
+	Schema         RawJSON
+	SchemaContract SchemaContract
 }
 
 // NewOutputFormat normalizes one canonical output-format request.
 func NewOutputFormat(params OutputFormatParams) (OutputFormat, error) {
 	kind := OutputFormatKind(strings.TrimSpace(string(params.Kind))) // swobu:io-string source=domain
+	contractIsZero := params.SchemaContract == (SchemaContract{})
 	switch kind {
 	case OutputFormatUnspecified:
-		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || !contractIsZero { // swobu:io-string source=domain
 			return OutputFormat{}, BadRequest("output format is invalid")
 		}
 		return OutputFormat{}, nil
 	case OutputFormatText:
-		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || !contractIsZero { // swobu:io-string source=domain
 			return OutputFormat{}, BadRequest("output format text does not accept schema, description, or strict mode")
 		}
 		return OutputFormat{Kind: OutputFormatText}, nil
 	case OutputFormatJSONObject:
-		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || params.Strict { // swobu:io-string source=domain
+		if !params.Schema.IsEmpty() || strings.TrimSpace(params.Name) != "" || strings.TrimSpace(params.Description) != "" || !contractIsZero { // swobu:io-string source=domain
 			return OutputFormat{}, BadRequest("output format json_object does not accept schema, description, or strict mode")
 		}
 		return OutputFormat{Kind: OutputFormatJSONObject}, nil
@@ -63,25 +64,35 @@ func NewOutputFormat(params OutputFormatParams) (OutputFormat, error) {
 		if err := validateOutputFormatSchema(schemaRaw); err != nil {
 			return OutputFormat{}, err
 		}
+		if params.SchemaContract.Profile == SchemaProfileUnspecified || params.SchemaContract.Profile > SchemaProfileUnprofiled || params.SchemaContract.Conformance > SchemaConformanceEnforced {
+			return OutputFormat{}, BadRequest("output format schema contract is invalid")
+		}
 		return OutputFormat{
-			Kind:        OutputFormatJSONSchema,
-			Name:        name,
-			Description: description,
-			Schema:      NewRawJSONObject(schemaRaw),
-			Strict:      params.Strict,
+			Kind:           OutputFormatJSONSchema,
+			Name:           name,
+			Description:    description,
+			Schema:         NewRawJSONObject(schemaRaw),
+			SchemaContract: params.SchemaContract,
 		}, nil
 	default:
 		return OutputFormat{}, BadRequest("output format kind is invalid")
 	}
 }
 
+func (f OutputFormat) Conformance() SchemaConformance {
+	if f.SchemaContract.Conformance != SchemaConformanceDefault {
+		return f.SchemaContract.Conformance
+	}
+	return SchemaConformanceDefault
+}
+
 func (f OutputFormat) Clone() OutputFormat {
 	return OutputFormat{
-		Kind:        f.Kind,
-		Name:        f.Name,
-		Description: f.Description,
-		Schema:      f.Schema.Clone(),
-		Strict:      f.Strict,
+		Kind:           f.Kind,
+		Name:           f.Name,
+		Description:    f.Description,
+		Schema:         f.Schema.Clone(),
+		SchemaContract: f.SchemaContract,
 	}
 }
 
@@ -90,24 +101,21 @@ func (f OutputFormat) IsZero() bool {
 		strings.TrimSpace(f.Name) == "" && // swobu:io-string source=domain
 		strings.TrimSpace(f.Description) == "" && // swobu:io-string source=domain
 		f.Schema.IsEmpty() &&
-		!f.Strict
+		f.SchemaContract == (SchemaContract{})
 }
 
 func (f OutputFormat) Validate() error {
 	_, err := NewOutputFormat(OutputFormatParams{
-		Kind:        f.Kind,
-		Name:        f.Name,
-		Description: f.Description,
-		Schema:      f.Schema,
-		Strict:      f.Strict,
+		Kind:           f.Kind,
+		Name:           f.Name,
+		Description:    f.Description,
+		Schema:         f.Schema,
+		SchemaContract: f.SchemaContract,
 	})
 	return err
 }
 
 func validateOutputFormatName(name string) error {
-	if name == "" {
-		return BadRequest("output format name is required")
-	}
 	if len(name) > 64 {
 		return BadRequest("output format name is too long")
 	}

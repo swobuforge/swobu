@@ -316,7 +316,7 @@ func bindingsForCatalog(catalog canonical.MCPToolSource) (
 			}
 		}
 		attemptDeclaration, err := canonical.NewFunctionTool(
-			function.Key(), description, function.InputSchema(), function.Strict(),
+			function.Key(), description, function.InputSchema(), function.SchemaContract(),
 		)
 		if err != nil {
 			return nil, nil, nil, err

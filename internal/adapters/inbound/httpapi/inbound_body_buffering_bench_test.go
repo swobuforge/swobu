@@ -19,14 +19,9 @@ import (
 //	     → exchange byte-owned transport boundary
 //	     → carrier.NewDocument boundary clone
 //
-// The live alloc profile (2026-08-01, /tmp/allocs_post.pb.gz) showed this path
-// owning ~190 MB before task 030: io.ReadAll #2 at 150 MB (split 75/75
-// inbound-vs-exchange — the exchange half being a redundant re-materialization
-// of bytes the inbound edge had already buffered), plus the newTransportRequest
-// (15 MB) clone of a body dead one statement later. 030 makes the inbound edge
-// transfer ownership of the materialized bytes so exchange adopts them in place
-// instead of io.ReadAll-ing a second copy. This benchmark is the before/after
-// evidence.
+// This benchmark guards the allocation shape after the inbound edge began
+// transferring ownership of materialized bytes to exchange. Exchange adopts
+// those bytes in place instead of reading or cloning the request body again.
 func BenchmarkInboundBodyBuffering(b *testing.B) {
 	for _, bodySize := range []int{2 << 10, 32 << 10, 256 << 10} {
 		wireBody := bytes.Repeat([]byte("a"), bodySize)

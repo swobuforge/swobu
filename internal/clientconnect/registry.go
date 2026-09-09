@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"os"
 )
 
@@ -8,13 +9,14 @@ type adapter struct {
 	id          ClientID
 	name        string
 	present     func(*Service) (bool, error)
-	planCurrent func(*Service, Target) (plannedMutation, error)
+	planCurrent func(context.Context, *Service, Target) (plannedMutation, error)
 }
 
 var adapters = []adapter{
 	codexAdapter,
 	claudeAdapter,
 	kiloAdapter,
+	openCodeAdapter,
 	piAdapter,
 	museAdapter,
 	openClawAdapter,
@@ -37,7 +39,10 @@ func binaryOrRegularFilePresent(s *Service, binary string, paths ...string) (boo
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err == nil {
-			return info.Mode().IsRegular(), nil
+			if info.Mode().IsRegular() {
+				return true, nil
+			}
+			continue
 		}
 		if !os.IsNotExist(err) {
 			return false, err

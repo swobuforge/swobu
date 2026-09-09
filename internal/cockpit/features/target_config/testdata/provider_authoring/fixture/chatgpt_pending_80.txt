@@ -1,5 +1,5 @@
-  new target · ChatGPT                                            cancel ↵
-     provider          ChatGPT                                    change ↵
+  new target · OpenAI · ChatGPT subscription                      cancel ↵
+     provider          OpenAI · ChatGPT subscription              change ↵
      authentication    browser login                              change ↵
      login URL                                                    open ↵
         https://auth.openai.com/oauth/authorize?client_id=app_test&redirect_uri=
@@ -7,7 +7,6 @@
         %20profile%20email&state=fixture-state
    > status            waiting for login                          refresh ↵
      cancel                                                       cancel ↵
-
 
 
 

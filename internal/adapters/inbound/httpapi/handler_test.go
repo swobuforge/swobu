@@ -186,8 +186,8 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 	if strings.Contains(out, "provider failed") || strings.Contains(out, "backend_error_detail") {
 		t.Fatalf("backend response content reached ordinary logs:\n%s", out)
 	}
-	if body := recFail.Body.String(); body != `{"error":"provider failed"}` {
-		t.Fatalf("backend response body = %q", body)
+	if body := recFail.Body.String(); !json.Valid(recFail.Body.Bytes()) || !strings.Contains(body, "provider failed") {
+		t.Fatalf("opaque backend response body = %q", body)
 	}
 }
 
@@ -223,12 +223,18 @@ func TestHandler_ProjectsProviderTimeoutAcrossClientFamilies(t *testing.T) {
 			if response.Code != http.StatusGatewayTimeout {
 				t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusGatewayTimeout, response.Body.String())
 			}
-			var envelope swobuErrorEnvelope
-			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
-				t.Fatal(err)
-			}
-			if envelope.Error.Code != string(canonical.ErrorCodeProviderTimeout) {
-				t.Fatalf("error code = %q, want %q", envelope.Error.Code, canonical.ErrorCodeProviderTimeout)
+			if test.name == "Messages" {
+				var envelope struct {
+					Error struct{ Type, Message string } `json:"error"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Error.Type != "timeout_error" || envelope.Error.Message == "" {
+					t.Fatalf("Messages error = %#v, decode=%v", envelope, err)
+				}
+			} else {
+				var envelope swobuErrorEnvelope
+				if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Error.Code != string(canonical.ErrorCodeProviderTimeout) {
+					t.Fatalf("Responses error = %#v, decode=%v", envelope, err)
+				}
 			}
 		})
 	}
@@ -238,16 +244,104 @@ func TestWriteExchangeErrorDefaultsStatuslessBackendFailureToBadGateway(t *testi
 	recorder := httptest.NewRecorder()
 	err := canonical.NewBackendError("responses", 0, "provider contract failed", "")
 
-	writeExchangeError(recorder, err)
+	writeExchangeError(recorder, canonical.ClientFamilyResponses, err)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadGateway)
 	}
-	if body := recorder.Body.String(); body != "provider contract failed" {
-		t.Fatalf("body = %q", body)
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(recorder.Body.Bytes(), &envelope); decodeErr != nil || envelope.Error.Message != "provider contract failed" {
+		t.Fatalf("body = %q, decode error = %v", recorder.Body.String(), decodeErr)
 	}
 	if got := statusCodeForExchangeError(err); got != http.StatusBadGateway {
 		t.Fatalf("traffic status = %d, want %d", got, http.StatusBadGateway)
+	}
+}
+
+func TestWriteExchangeErrorProjectsStructuredBackendErrorForMessagesClient(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	err := canonical.NewStructuredBackendError("target-a", protocolkind.Responses, http.StatusTooManyRequests, canonical.BackendErrorDetail{Type: "usage_limit_reached", Message: "limit reached", RequestID: "req_provider"}, "")
+
+	writeExchangeError(recorder, canonical.ClientFamilyMessages, err)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var envelope struct {
+		Type      string                         `json:"type"`
+		Error     struct{ Type, Message string } `json:"error"`
+		RequestID string                         `json:"request_id"`
+	}
+	if decodeErr := json.Unmarshal(recorder.Body.Bytes(), &envelope); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if envelope.Type != "error" || envelope.Error.Type != "rate_limit_error" || envelope.Error.Message != "limit reached" || envelope.RequestID != "req_provider" {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestWriteExchangeErrorProjectsStructuredMessagesErrorForResponsesClient(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	err := canonical.NewStructuredBackendError("target-a", protocolkind.Messages, http.StatusServiceUnavailable, canonical.BackendErrorDetail{Type: "overloaded_error", Message: "try later", RequestID: "req_provider"}, "")
+
+	writeExchangeError(recorder, canonical.ClientFamilyResponses, err)
+
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(recorder.Body.Bytes(), &envelope); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if recorder.Code != http.StatusServiceUnavailable || envelope.Error.Message != "try later" || envelope.Error.Type != "overloaded_error" {
+		t.Fatalf("status=%d envelope=%#v", recorder.Code, envelope)
+	}
+}
+
+func TestWriteExchangeErrorUsesProvenanceForPassthrough(t *testing.T) {
+	messagesBody := `{"type":"error","error":{"type":"overloaded_error","message":"try later"}}`
+	opaque := canonical.NewBackendError("target-a", 529, messagesBody, "")
+
+	responses := httptest.NewRecorder()
+	writeExchangeError(responses, canonical.ClientFamilyResponses, opaque)
+	if responses.Body.String() == messagesBody {
+		t.Fatal("Anthropic-shaped opaque body raw-passed to Responses")
+	}
+
+	structured := canonical.NewStructuredBackendError("target-a", protocolkind.Messages, 529, canonical.BackendErrorDetail{Type: "overloaded_error", Message: "try later"}, "")
+	structured.Message = messagesBody
+	messages := httptest.NewRecorder()
+	writeExchangeError(messages, canonical.ClientFamilyMessages, structured)
+	if messages.Body.String() != messagesBody {
+		t.Fatalf("same-protocol body = %q", messages.Body.String())
+	}
+}
+
+func TestWriteExchangeErrorProjectsSwobuErrorsIntoIngressFamily(t *testing.T) {
+	messages := httptest.NewRecorder()
+	writeExchangeError(messages, canonical.ClientFamilyMessages, canonical.BadRequest("fix the request"))
+	if !strings.Contains(messages.Body.String(), `"type":"invalid_request_error"`) || !strings.Contains(messages.Body.String(), "fix the request") {
+		t.Fatalf("Messages Swobu error = %s", messages.Body.String())
+	}
+	responses := httptest.NewRecorder()
+	writeExchangeError(responses, canonical.ClientFamilyResponses, canonical.NoAvailableTarget("no capacity"))
+	if !strings.Contains(responses.Body.String(), `"code":"NO_AVAILABLE_TARGET"`) || !strings.Contains(responses.Body.String(), "no capacity") {
+		t.Fatalf("Responses Swobu error = %s", responses.Body.String())
+	}
+}
+
+func TestMessagesErrorTypeForStatusMapsOnly529ToOverloaded(t *testing.T) {
+	if got := messagesErrorTypeForStatus(529); got != "overloaded_error" {
+		t.Fatalf("529 type = %q", got)
+	}
+	if got := messagesErrorTypeForStatus(503); got != "api_error" {
+		t.Fatalf("503 type = %q", got)
 	}
 }
 

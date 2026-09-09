@@ -3,8 +3,8 @@ package canonical
 import "testing"
 
 func TestToolSetPreservesDeclarationOrderAndRejectsDuplicates(t *testing.T) {
-	alpha := testFunctionTool(testRequestToolKey(ToolKindFunction, "alpha"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	zeta := testFunctionTool(testRequestToolKey(ToolKindFunction, "zeta"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	alpha := testFunctionTool(testRequestToolKey(ToolKindFunction, "alpha"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	zeta := testFunctionTool(testRequestToolKey(ToolKindFunction, "zeta"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	set, err := NewToolSet([]ToolDeclaration{zeta, alpha})
 	if err != nil {
 		t.Fatalf("NewToolSet: %v", err)
@@ -22,7 +22,7 @@ func TestToolSetPreservesDeclarationOrderAndRejectsDuplicates(t *testing.T) {
 }
 
 func TestToolSetLookupReturnsClone(t *testing.T) {
-	declaration := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	declaration := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	set, err := NewToolSet([]ToolDeclaration{declaration})
 	if err != nil {
 		t.Fatal(err)

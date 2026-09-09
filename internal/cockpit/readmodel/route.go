@@ -128,7 +128,6 @@ func (r RouteReadModel) HasBalancedTier() bool {
 }
 
 // RowValue derives the bounded route row value used by Cockpit sections.
-// Grammar is mechanical per the structural model route RFC:
 //
 //	targets == 0                     → "no targets"
 //	steps == 1 && targets == 1       → "1 target"

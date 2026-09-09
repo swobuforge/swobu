@@ -6,8 +6,8 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestModelSelectionDefaultsProtocolAndAdvancesSelectionToCreate(t *testing.T) {
@@ -70,6 +70,31 @@ func TestOpenSetModelRowUsesEnterThenUseGrammar(t *testing.T) {
 
 	if got := config.SelectedModel.Get().ModelName; got != "@cf/meta/llama" {
 		t.Fatalf("selected model = %q, want @cf/meta/llama", got)
+	}
+}
+
+func TestAdvisoryCatalogFailureAllowsExactManualModel(t *testing.T) {
+	config := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
+	config.Catalog.Set(catalogOperationState{Err: "catalog transport unavailable"})
+	config.Open()
+
+	h, err := testkit.NewHarness(config)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "retry ↵") || !strings.Contains(frame, "catalog transport unavailable") || !strings.Contains(frame, "enter ↵") {
+		t.Fatalf("advisory recovery must show retry evidence and exact model input:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	for _, key := range []rune("gpt-6-astra") {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: key})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if got := config.SelectedModel.Get().ModelName; got != "gpt-6-astra" {
+		t.Fatalf("selected model = %q, want gpt-6-astra", got)
 	}
 }
 

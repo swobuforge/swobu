@@ -7,10 +7,9 @@ import (
 )
 
 // TestResolveBedrockEndpoint is the construction-boundary acceptance table for
-// slices 070 (centralized endpoint resolution). Every row is a required
-// regression from the review inventory: T-02 (one operation), T-03 (proxy
-// prefix preserved in requests), T-04 (Anthropic SDK base), plus required input
-// and cross-family contradiction cases.
+// centralized endpoint resolution. It covers single operation suffixes,
+// reverse-proxy prefix preservation, Anthropic SDK bases, required input, and
+// cross-family contradictions.
 func TestResolveBedrockEndpoint(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -26,7 +25,7 @@ func TestResolveBedrockEndpoint(t *testing.T) {
 		{"empty endpoint is rejected", "", "us-east-1", protocolkind.Responses,
 			"", "", false, true},
 
-		// T-02: a full request URL dispatches with exactly one operation.
+		// A full request URL dispatches with exactly one operation.
 		{"openai base responses", "https://bedrock-mantle.us-east-1.api.aws/openai/v1", "us-east-1", protocolkind.Responses,
 			"https://bedrock-mantle.us-east-1.api.aws/openai/v1",
 			"https://bedrock-mantle.us-east-1.api.aws/openai/v1/responses",
@@ -44,7 +43,7 @@ func TestResolveBedrockEndpoint(t *testing.T) {
 			"",
 			true, false},
 
-		// T-03: a reverse-proxy prefix is preserved in the request.
+		// A reverse-proxy prefix is preserved in the request.
 		{"proxy prefix preserved in request", "https://proxy.example/bedrock/openai/v1", "us-east-1", protocolkind.Responses,
 			"https://proxy.example/bedrock/openai/v1",
 			"https://proxy.example/bedrock/openai/v1/responses",
@@ -54,7 +53,7 @@ func TestResolveBedrockEndpoint(t *testing.T) {
 			"https://proxy.example/bedrock/openai/v1/responses",
 			true, false},
 
-		// T-04: an Anthropic SDK base (/anthropic) promotes to /anthropic/v1.
+		// An Anthropic SDK base (/anthropic) promotes to /anthropic/v1.
 		{"anthropic sdk base promotes to api base", "https://bedrock-mantle.us-east-1.api.aws/anthropic", "us-east-1", protocolkind.Messages,
 			"https://bedrock-mantle.us-east-1.api.aws/anthropic/v1",
 			"https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages",

@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · **Español** · [Українська](README.uk.md)
 
 **Un solo endpoint para que Claude Code, Codex y otros agentes de IA usen DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock y más, con routing, balanceo y failover automáticos.**
 
 Convierte la capacidad de IA en un recurso enrutable. Tu agente pide un modelo; Swobu convierte ese nombre en una route entre proveedores, cuentas, regiones y servidores locales, y se encarga por debajo del balanceo, el failover, la traducción de reasoning y la compatibilidad semántica entre protocolos.
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="Un agente de IA usando una route de Swobu con balanceo y failover" width="1280">
-</p>
 
 [Documentación](https://swobu.com/docs/) · [Inicio rápido](https://swobu.com/docs/start/first-route/) · [Releases](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@ Convierte la capacidad de IA en un recurso enrutable. Tu agente pide un modelo; 
 Para el agente, una **route de Swobu parece un modelo**.
 
 Detrás de ese nombre puede haber un único endpoint, el mismo modelo disponible en varios lugares o un pool que cruza distintos proveedores.
+
+Los diagramas son ejemplos de configuración. Elige los modelos disponibles en tus proveedores.
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ El campo `model` que tu agente ya entiende se convierte en una frontera de routi
 
 ## Empieza con un solo comando
 
+macOS, Linux o WSL:
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 El instalador inicia Swobu y abre **Cockpit**, la interfaz de terminal.
@@ -167,56 +173,6 @@ El nombre de la route no cambia.
 
 ---
 
-### La intención de reasoning viaja con la petición
-
-Cada proveedor expone reasoning de forma distinta.
-
-Una API puede aceptar un effort level. Otra puede exponer un token budget. Otra puede codificar reasoning mediante una estructura de petición completamente distinta.
-
-Swobu trata reasoning como una capacidad semántica y lo traduce cuando existe una representación equivalente que conserve el significado.
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-No deberías tener que enseñar a cada agente el dialecto de API de cada proveedor.
-
----
-
-### La compatibilidad hace posible el routing
-
-Enviar el mismo JSON a otra URL es fácil.
-
-Mover de forma segura una petición de agente entre APIs no lo es.
-
-Los proveedores difieren en:
-
-- tools y function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- capacidades nativas del proveedor
-- detalles de protocolo y edge cases
-
-Swobu traduce las peticiones cuando puede preservar su significado.
-
-Los targets que no pueden representar la semántica requerida pueden excluirse en lugar de degradar silenciosamente la petición.
-
-La compatibilidad no debería ser algo en lo que tengas que pensar continuamente. Es la infraestructura que hace fiable el routing.
-
----
-
 ## Una frontera, varios protocolos
 
 ```text
@@ -254,50 +210,7 @@ El soporte exacto de protocolos y capacidades varía según el proveedor.
 
 Swobu soporta inferencia local, APIs frontier, hyperscalers, plataformas especializadas de inferencia y agregadores.
 
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**Aggregation:** OpenRouter · Custom Endpoint
-
-El catálogo, el número de proveedores, la matriz de protocolos y los assets del README se generan a partir del provider registry de Swobu.
-
----
-
-## Las capacidades nativas siguen siendo nativas
-
-Swobu no reduce todos los proveedores al mínimo común denominador.
-
-Cuando un target seleccionado expone una capacidad nativa útil que Swobu entiende, esa capacidad puede seguir disponible a través de la frontera de compatibilidad.
-
-Esto incluye capacidades como el web search nativo del proveedor cuando está soportado.
-
-El principio es simple:
-
-> **preserva la semántica útil cuando sea posible; falla de forma explícita cuando no pueda representarse.**
-
----
-
-## Construido contra incompatibilidades reales
-
-Swobu existe porque “OpenAI-compatible” suele dejar de ser compatible justo cuando los agentes empiezan a hacer cosas interesantes.
-
-Se prueba contra fallos reales relacionados con:
-
-- reasoning controls
-- tool definitions
-- campos malformed o unsupported
-- message replay
-- model discovery
-- comportamiento de streaming
-- traducción entre protocolos
-- restricciones específicas del proveedor
-
-[Notas de compatibilidad →](https://swobu.com/docs/)
+[Consulta los proveedores y su configuración en la documentación.](https://swobu.com/docs/)
 
 ---
 
@@ -341,28 +254,14 @@ Swobu publica binarios versionados para Linux, macOS y Windows con checksums SHA
 
 [Última release →](https://github.com/swobuforge/swobu/releases/latest)
 
-Instala desde el código fuente:
+Compila desde el código fuente:
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## Estado
-
-El routing, el comportamiento de compatibilidad y las integraciones con proveedores siguen evolucionando mientras se estabilizan las abstracciones.
-
-Se agradecen los informes de bugs y de incompatibilidades.
-
-[Abrir una issue →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-La arquitectura actual de Swobu se reconstruyó durante OpenAI Build Week 2026 usando GPT 5.6 Sol.
-</details>
 
 ---
 

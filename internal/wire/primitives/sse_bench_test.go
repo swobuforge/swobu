@@ -21,11 +21,6 @@ func sseBody(frameCount int) string {
 	return b.String()
 }
 
-// BenchmarkSSEReaderNext measures the per-frame cost of the SSE reader's Next
-// loop across streamed scales. Before epic-50 task 020, each Next spawned a
-// goroutine plus a channel to watch ctx cancellation, so per-response cost
-// scaled linearly with frame count: a 4096-frame response paid for 4096
-// short-lived goroutines and channels on the daemon's streaming response path.
 func BenchmarkSSEReaderNext(b *testing.B) {
 	for _, frameCount := range []int{16, 512, 4096} {
 		body := sseBody(frameCount)

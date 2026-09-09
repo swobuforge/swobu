@@ -150,7 +150,7 @@ func ToolEnvironmentAt(items []CanonicalItem, before int) (ToolEnvironment, erro
 			// declaration is already detached by set.Declarations() above and is
 			// the same value observe stored in byKey. Share it read-only rather
 			// than re-cloning: the types are immutable (no setters), so a single
-			// detach at the boundary accessor is sufficient. epic-50 task 070.
+			// detach at the boundary accessor is sufficient.
 			ordered = append(ordered, declaration)
 		}
 		return nil

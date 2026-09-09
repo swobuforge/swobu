@@ -144,8 +144,14 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		Short: "Print version",
 		RunE:  delegate("version"),
 	}
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update a standalone Swobu installation",
+		Args:  cobra.NoArgs,
+		RunE:  delegate("update"),
+	}
 
-	root.AddCommand(connectCmd, daemonCmd, shareCmd, statusCmd, telemetryCmd, versionCmd)
+	root.AddCommand(connectCmd, daemonCmd, shareCmd, statusCmd, telemetryCmd, updateCmd, versionCmd)
 	return root
 }
 

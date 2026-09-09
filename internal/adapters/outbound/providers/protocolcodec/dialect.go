@@ -36,6 +36,9 @@ type ResponsesHistoryMessageRoleTransformer = responses.HistoryMessageRoleTransf
 type MessagesToolLowering = messages.ToolLowering
 type MessagesLowering = messages.Lowering
 type MessagesReasoningTransformer = messages.ReasoningTransformer
+type MessagesOutputFormatTransformer = messages.OutputFormatTransformer
+
+var MessagesOmitOutputFormat MessagesOutputFormatTransformer = messages.OmitOutputFormat
 
 // MessagesOmitAdaptiveReasoning is the sparse semantic override for targets
 // whose Messages grammar cannot accept adaptive or budget reasoning controls.
@@ -53,6 +56,7 @@ type ChatDialect struct {
 // ResponsesDialect contains executable target rules for semantic occurrences
 // that differ from official Responses. Zero values use standard lowering.
 type ResponsesDialect struct {
+	OutputFormat                 responses.OutputFormatTransformer
 	Tools                        responses.ToolLowering
 	HistoryMessageRole           responses.HistoryMessageRoleTransformer
 	PrependInstructionsToInput   bool

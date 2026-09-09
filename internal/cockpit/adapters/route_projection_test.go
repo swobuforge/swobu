@@ -9,13 +9,13 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestDeepSeekOperatorConnectionSurvivesMountedTargetEdit(t *testing.T) {
-	const credential = "file:/home/metrofun/.config/deepseek.key"
+	const credential = "file:/home/example/.config/deepseek.key"
 	operatorTarget := workspaceapi.Target{
 		ID: "tgt_c5ca3ff9-222e-42c1-9c4f-74eb2d240f35", Model: "deepseek-v4-pro", Provider: "deepseek",
 		Connection: workspaceapi.StandardConnection("deepseek", "", credential),
@@ -31,7 +31,7 @@ func TestDeepSeekOperatorConnectionSurvivesMountedTargetEdit(t *testing.T) {
 	config := target_config.NewEditTargetConfig("demo", route, projected, nil, nil)
 	config.Open()
 	frame := testkit.RenderMountedTrimmed(t, config, 100, 18)
-	if !strings.Contains(frame, "credential        file · /home/metrofun/.config/deepseek.key") {
+	if !strings.Contains(frame, "credential        file · /home/example/.config/deepseek.key") {
 		t.Fatalf("mounted DeepSeek edit lost configured credential:\n%s", frame)
 	}
 	if strings.Contains(frame, "credential        required") || strings.Contains(frame, "model             waiting for setup") {
@@ -47,7 +47,7 @@ func TestOperatorConnectionFactsSurviveCockpitProjection(t *testing.T) {
 	}{
 		{"openai", workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
 		{"anthropic", workspaceapi.StandardConnection("anthropic", "", "env:ANTHROPIC_API_KEY"), readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
-		{"deepseek", workspaceapi.StandardConnection("deepseek", "", "file:/home/metrofun/.config/deepseek.key"), readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/metrofun/.config/deepseek.key"}},
+		{"deepseek", workspaceapi.StandardConnection("deepseek", "", "file:/home/example/.config/deepseek.key"), readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/example/.config/deepseek.key"}},
 		{"runpod", workspaceapi.StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), readmodel.TargetReadModel{Provider: "runpod", BaseURL: "https://api.runpod.ai/v2/abc123/openai/v1", CredentialRef: "env:RUNPOD_API_KEY"}},
 		{"openrouter", workspaceapi.StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
 		{"chatgpt", workspaceapi.StandardConnection("chatgpt", "", "secret:chatgpt/session"), readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},

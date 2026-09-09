@@ -93,7 +93,7 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 		}
 		statusCalls++
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 	}))
 	defer srv.Close()
 
@@ -106,6 +106,20 @@ func TestDefaultAttachOrStart_AcceptsReachableDaemonWithoutPreviewProbe(t *testi
 	}
 	if statusCalls == 0 {
 		t.Fatal("status endpoint was not probed")
+	}
+}
+
+func TestDefaultAttachOrStartRefusesIncompatibleControlPlane(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"state":"healthy","control_plane_protocol":8}`)
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	err := defaultAttachOrStart(context.Background(), io.Discard, io.Discard, &http.Client{}, addr, filepath.Join(t.TempDir(), "swobu.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "control-plane protocol 8") || !strings.Contains(err.Error(), "requires 9") {
+		t.Fatalf("error = %v, want protocol mismatch diagnostic", err)
 	}
 }
 

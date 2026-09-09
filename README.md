@@ -1,4 +1,4 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
@@ -6,11 +6,7 @@
 
 Make AI capacity routable. Your agent asks for a model. Swobu turns that model name into a route across providers, accounts, regions, and local servers — with balancing, failover, reasoning translation, and semantic protocol compatibility underneath.
 
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="An AI agent using a Swobu route with balancing and failover" width="1280">
-</p>
-
-[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [Releases](https://github.com/swobuforge/swobu/releases)
+[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
 
 <p align="center">
   <img src="./assets/readme/clients.png" alt="Agents and clients supported by Swobu" width="900">
@@ -24,6 +20,8 @@ Make AI capacity routable. Your agent asks for a model. Swobu turns that model n
 A Swobu **route looks like a model** to your agent.
 
 Behind that name can be one endpoint, the same model available from several places, or a cross-provider pool.
+
+The diagrams illustrate configurations. Choose models available from your providers.
 
 ```text
 claude-opus-5
@@ -63,15 +61,35 @@ The model field your agent already understands becomes a programmable routing bo
 
 ---
 
-## Start in one command
+## Start routing in one command
+
+macOS, Linux, or WSL:
 
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
 ```
 
-The installer starts Swobu and opens **Cockpit**, the terminal UI.
+Windows PowerShell:
 
-Add a provider, create a route, and connect your agent.
+```powershell
+irm https://swobu.com/install.ps1 | iex
+```
+
+The installer opens **Cockpit**, where you can add a provider, create a route,
+and connect your first agent. It verifies the download, preserves an existing
+standalone installation if setup fails, and leaves your shell profile and Swobu
+data alone.
+
+Already using a standalone installation? Update it with:
+
+```text
+swobu update
+```
+
+Source, package-manager, and custom-directory installations remain owned by
+the method that installed them.
+
+[Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
 
 ### Connect an agent
 
@@ -86,12 +104,11 @@ swobu connect muse
 swobu connect openclaw
 swobu connect pi
 swobu connect kilo
+swobu connect opencode
 swobu connect hermes
 ```
 
 After that, your agent talks to Swobu. Provider configuration and routing stay behind the gateway.
-
-[5-minute quickstart →](https://swobu.com/docs/start/first-route/)
 
 ---
 
@@ -168,66 +185,16 @@ The route name does not change.
 
 ---
 
-### Thinking travels with the request
-
-Providers expose reasoning differently.
-
-One API may accept an effort level. Another may expose a token budget. Another may encode reasoning through a different request shape entirely.
-
-Swobu treats reasoning as a semantic capability and translates it where a meaningful representation exists.
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-You shouldn't have to teach every agent every provider dialect.
-
----
-
-### Compatibility makes routing possible
-
-Sending the same JSON to a different URL is easy.
-
-Safely moving an agent request between APIs is not.
-
-Providers disagree about:
-
-- tools and function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- provider-native capabilities
-- protocol details and edge cases
-
-Swobu preserves what a target can carry, records bounded approximations and
-omissions, and still executes useful requests. A target is excluded only when
-dispatch would violate an explicit caller promise such as a required or
-specifically selected tool.
-
-Compatibility is not the product you should have to think about. It is what makes the routing trustworthy.
-
----
-
 ## One boundary, multiple protocols
 
 ```text
 Claude Code ─┐
 Codex ───────┤
-Muse Code ────┤
+Muse Code ───┤
 OpenClaw ────┤
 Pi ──────────┤
-Kilo ────────┼──── Swobu ────┬─ OpenAI
+Kilo ────────┤
+OpenCode ────┼──── Swobu ────┬─ OpenAI
 Hermes ──────┤                ├─ Anthropic
 Other agents ┘                ├─ Gemini
                               ├─ AWS Bedrock
@@ -257,55 +224,7 @@ Exact protocol and capability support varies by provider.
 
 Swobu supports local inference, frontier APIs, hyperscalers, specialized inference platforms, and aggregators.
 
-<!-- generated:providers:start -->
-
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · Meta Model API · ChatGPT · Anthropic · Gemini API · Mistral AI · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud AI Endpoints
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM Hosted · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius Token Factory · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope API-Inference · CompactifAI · LLM7 · Nous Portal · Command Code · Venice AI
-
-**Aggregation:** OpenRouter · OpenCode Zen · Custom Endpoint
-
-
-<!-- generated:providers:end -->
-
-The catalog, provider count, protocol matrix, and README assets are generated from Swobu's provider registry.
-
----
-
-## Native capabilities stay native
-
-Swobu does not reduce every provider to the lowest common denominator.
-
-When a selected target exposes a useful native capability that Swobu understands, it can remain available through the compatibility boundary.
-
-That includes capabilities such as provider-native web search where supported.
-
-The principle is simple:
-
-> **preserve useful semantics when possible; fail clearly when they cannot be represented.**
-
----
-
-## Built against real incompatibilities
-
-Swobu exists because “OpenAI-compatible” often stops being compatible exactly where agents become interesting.
-
-It is tested against real failures involving:
-
-- reasoning controls
-- tool definitions
-- malformed or unsupported fields
-- message replay
-- model discovery
-- streaming behavior
-- cross-protocol translation
-- provider-specific request restrictions
-
-[Compatibility notes →](https://swobu.com/docs/)
+[Find providers and setup instructions in the documentation.](https://swobu.com/docs/)
 
 ---
 
@@ -352,18 +271,11 @@ Swobu publishes versioned binaries for Linux, macOS, and Windows, with SHA-256 c
 Build from source:
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## Status
-
-Routing, compatibility behavior, and provider integrations are evolving while the abstractions settle.
-
-Bug reports and compatibility reports are welcome.
-
-[Open an issue →](https://github.com/swobuforge/swobu/issues)
 
 ---
 

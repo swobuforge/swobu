@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (s *Store) InstallTLSCredential(privateKey *ecdsa.PrivateKey, chain [][]byte) error {
+func (s *Store) InstallTLSCredential(privateKey *ecdsa.PrivateKey, chain [][]byte, roots *x509.CertPool) error {
 	if privateKey == nil || privateKey.Curve != elliptic.P256() {
 		return errors.New("Endpoint TLS key must be ECDSA P-256")
 	}
@@ -38,12 +38,22 @@ func (s *Store) InstallTLSCredential(privateKey *ecdsa.PrivateKey, chain [][]byt
 	if err := leaf.VerifyHostname(Hostname(id)); err != nil {
 		return fmt.Errorf("certificate hostname: %w", err)
 	}
+	certificates := make([]*x509.Certificate, 0, len(chain))
 	var chainPEM []byte
 	for _, der := range chain {
-		if _, err := x509.ParseCertificate(der); err != nil {
+		certificate, err := x509.ParseCertificate(der)
+		if err != nil {
 			return fmt.Errorf("parse endpoint certificate chain: %w", err)
 		}
+		certificates = append(certificates, certificate)
 		chainPEM = append(chainPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	intermediates := x509.NewCertPool()
+	for _, certificate := range certificates[1:] {
+		intermediates.AddCert(certificate)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: Hostname(id), Roots: roots, Intermediates: intermediates, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
+		return fmt.Errorf("verify endpoint certificate trust: %w", err)
 	}
 	previous := s.state.Endpoint
 	s.state.Endpoint.TLSCredential = &TLSCredential{PrivateKey: privateKey, CertificateChain: chainPEM}

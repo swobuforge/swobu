@@ -12,9 +12,9 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/profile"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 const providerAuthoringFixtureDir = "testdata/provider_authoring/fixture"
@@ -30,7 +30,8 @@ var requiredProviderAuthoringVisualNames = []string{
 	"bedrock_aws_identity", "bedrock_environment_api_key", "bedrock_target_api_key", "bedrock_auth_failure", "bedrock_credential_menu",
 	"azure_project_required", "azure_credential_required", "azure_protocol_required", "azure_ready",
 	"ollama_default_url", "ollama_editing_url",
-	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_signed_in", "chatgpt_failed",
+	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_signed_in", "chatgpt_catalog_failed", "chatgpt_failed",
+	"provider_picker_codex", "chatgpt_catalog_loading",
 	"model_picker", "deployment_picker", "protocol_picker", "routing_picker", "ready_to_create",
 }
 
@@ -107,7 +108,7 @@ func providerAuthoringVisualWidths(name string) []int {
 	switch name {
 	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker", "routing_picker",
 		"chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending",
-		"chatgpt_open_failed":
+		"chatgpt_open_failed", "provider_picker_codex", "chatgpt_signed_out", "chatgpt_catalog_loading", "chatgpt_signed_in", "chatgpt_catalog_failed":
 		return []int{80, 100, 120}
 	default:
 		return []int{100}
@@ -222,6 +223,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "chatgpt_signed_out", build: func(t *testing.T) tui.Component {
 			return authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
 		}},
+		{name: "provider_picker_codex", render: renderProviderPickerCodex},
 		{name: "chatgpt_auth_mode_picker", render: renderChatGPTAuthModePicker},
 		{name: "chatgpt_pending", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
@@ -238,6 +240,18 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
 			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
 			selectReadyModel(w, "GPT-5.2", "responses")
+			return w
+		}},
+		{name: "chatgpt_catalog_loading", build: func(t *testing.T) tui.Component {
+			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
+			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
+			w.Catalog.Set(catalogOperationState{Loading: true})
+			return w
+		}},
+		{name: "chatgpt_catalog_failed", build: func(t *testing.T) tui.Component {
+			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
+			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
+			w.Catalog.Set(catalogOperationState{Err: "catalog transport unavailable"})
 			return w
 		}},
 		{name: "chatgpt_failed", build: func(t *testing.T) tui.Component {
@@ -280,6 +294,27 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			return w
 		}},
 	}
+}
+
+func renderProviderPickerCodex(t *testing.T, width int) string {
+	t.Helper()
+	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+	w.UpdateProviderOptions([]readmodel.ProviderOptionReadModel{
+		{ProviderSpec: "openai", DisplayName: "OpenAI API", SetupHint: "API key"},
+		{ProviderSpec: "chatgpt", DisplayName: "OpenAI · ChatGPT subscription", SetupHint: "browser login"},
+		{ProviderSpec: "anthropic", DisplayName: "Anthropic", SetupHint: "API key"},
+	})
+	w.Open()
+	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	for _, char := range "codex" {
+		harness.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: char})
+	}
+	return harness.FrameTrimmed()
 }
 
 func ambientOrReferenceVisual(ref string) *ambientOrReferenceAuthentication {

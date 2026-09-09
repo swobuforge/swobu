@@ -107,11 +107,11 @@ func TestDecodeRequest_PreservesStopSequences(t *testing.T) {
 
 func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "reply_shape",
-		Description: "structured reply",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
-		Strict:      true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply_shape",
+		Description:    "structured reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
@@ -179,7 +179,7 @@ func TestResponsesJSONObjectRoundTrips(t *testing.T) {
 	if decoded.Kind != canonical.OutputFormatJSONObject {
 		t.Fatalf("decoded format = %#v", decoded)
 	}
-	encoded, err := encodeResponsesOutputFormat(decoded)
+	encoded, err := DefaultOutputFormatLowering(decoded, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestDecodeRequest_DecodesStructuredOutputFormat(t *testing.T) {
 		t.Fatalf("DecodeClientRequest returned error: %v", err)
 	}
 	format := got.OutputFormat()
-	if format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" || format.Description != "structured reply" || format.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || !format.Strict {
+	if format.Kind != canonical.OutputFormatJSONSchema || format.Name != "reply_shape" || format.Description != "structured reply" || format.Schema.RawObject() != `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}` || format.Conformance() != canonical.SchemaConformanceEnforced {
 		t.Fatalf("output format = %#v, want json schema", format)
 	}
 }

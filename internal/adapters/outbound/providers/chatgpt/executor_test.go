@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -132,11 +133,11 @@ func mustJSONBodyMap(t *testing.T, raw []byte) map[string]any {
 	return body
 }
 
-func TestListModels_LoadsBundledTierModels(t *testing.T) {
+func TestListModels_UsesAuthenticatedRemoteCatalog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
-	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}`
+	claims := `{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-123","chatgpt_account_is_fedramp":true,"chatgpt_plan_type":"enterprise"}}`
 	idToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".c"
 	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
 		AccessToken: "token-x",
@@ -146,40 +147,69 @@ func TestListModels_LoadsBundledTierModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode bundle: %v", err)
 	}
-	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/acct_plus", raw); err != nil {
+	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/acct_remote", raw); err != nil {
 		t.Fatalf("store secretfile bundle: %v", err)
 	}
-	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/backend-api/codex/models" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("client_version"); got != chatGPTCodexCatalogCompatibilityVersion {
+			t.Fatalf("client_version = %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-x" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.Header.Get(chatGPTAccountIDHeaderKey); got != "acct-123" {
+			t.Fatalf("account id = %q", got)
+		}
+		if got := r.Header.Get(chatGPTFedRAMPHeaderKey); got != "true" {
+			t.Fatalf("fedramp = %q", got)
+		}
+		if got := r.Header.Get(chatGPTOriginatorHeaderKey); got != "codex_cli_rs" {
+			t.Fatalf("originator = %q want codex_cli_rs", got)
+		}
+		_, _ = w.Write([]byte(`{"models":[{"slug":"zeta","visibility":"list","priority":2,"supported_in_api":false},{"slug":"hidden","visibility":"hide","priority":0},{"slug":"alpha","visibility":"list","priority":2},{"slug":"alpha","visibility":"list","priority":3},{"slug":"first","visibility":"list","priority":1},{"slug":" ","visibility":"list","priority":0}]}`))
+	}))
+	defer srv.Close()
+	exec := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
 	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
-		"https://chatgpt.com/backend-api/codex",
-		"secretfile:chatgpt/acct_plus",
+		srv.URL+"/backend-api/codex",
+		"secretfile:chatgpt/acct_remote",
 		protocolkind.ChatCompletions,
 		"", delivery.BufferedDelivery()))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(models) == 0 {
-		t.Fatal("expected non-empty bundled models for plus tier")
+	got := make([]string, 0, len(models))
+	for _, model := range models {
+		got = append(got, model.Name)
+	}
+	if want := []string{"first", "alpha", "zeta"}; !slices.Equal(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
 	}
 }
 
-func TestListModels_DoesNotInferTierFromCredentialRefPathSegment(t *testing.T) {
+func TestListModels_CatalogFailureDoesNotUseBundledFallback(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
-
-	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	exec := NewExecutor(srv.Client(), stubCredentialResolver{})
 	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
 		"draft",
 		"chatgpt",
-		"https://chatgpt.com/backend-api/codex",
+		srv.URL+"/backend-api/codex",
 		"secretfile:chatgpt/plus/sess_abc",
 		protocolkind.ChatCompletions,
 		"", delivery.BufferedDelivery()))
-	if err == nil {
-		t.Fatalf("expected error, got models=%v", models)
+	if err == nil || len(models) != 0 {
+		t.Fatalf("models=%v error=%v", models, err)
 	}
 }
 
@@ -202,15 +232,13 @@ func TestResolveBackendResponsesNeedsNoResumptionCallback(t *testing.T) {
 	}
 }
 
-func TestListModels_UnknownTierReturnsError(t *testing.T) {
+func TestListModels_UnknownPlanDoesNotBlockRemoteDiscovery(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", "")
 
-	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		_, _ = w.Write([]byte(`{"model_ids":["gpt-5.5"]}`))
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-6-astra","visibility":"list","priority":1}]}`))
 	}))
 	defer srv.Close()
 	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"enterprise"}}`
@@ -235,45 +263,93 @@ func TestListModels_UnknownTierReturnsError(t *testing.T) {
 		"secretfile:chatgpt/default",
 		protocolkind.ChatCompletions,
 		"", delivery.BufferedDelivery()))
-	if err == nil {
-		t.Fatalf("expected error, got models=%v", models)
-	}
-	if called {
-		t.Fatal("network must not be used when tier is unknown")
+	if err != nil || len(models) != 1 || models[0].Name != "gpt-6-astra" {
+		t.Fatalf("models=%v error=%v", models, err)
 	}
 }
 
-func TestListModels_ResolvesTierFromStoredSecretBundleWhenRefHasNoTierSegment(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", "")
-	claims := `{"https://api.openai.com/auth":{"chatgpt_plan_type":"team"}}`
+func TestListModels_UnauthorizedRefreshesOnceAndPreservesRoutingClaims(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
+	origRefreshURL := chatGPTRefreshTokenURL
+	t.Cleanup(func() { chatGPTRefreshTokenURL = origRefreshURL })
+	replacementIDToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_plan_type":"enterprise"}}`)) + ".c"
+	refreshSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"token_fresh","id_token":"` + replacementIDToken + `","expires_in":3600}`))
+	}))
+	defer refreshSrv.Close()
+	chatGPTRefreshTokenURL = refreshSrv.URL
+
+	claims := `{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-refresh","chatgpt_account_is_fedramp":true}}`
 	idToken := "a." + base64.RawURLEncoding.EncodeToString([]byte(claims)) + ".c"
-	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
-		AccessToken: "token-x",
-		IDToken:     idToken,
-		IssuedAt:    time.Now().UTC(),
+	bundle, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken: "token_old", RefreshToken: "refresh_1", IDToken: idToken,
+		ExpiresAt: time.Now().UTC().Add(time.Hour), IssuedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("encode bundle: %v", err)
 	}
-	if err := outboundcredentials.StoreSecretByRef("chatgpt", "secretfile:chatgpt/sess_abc", raw); err != nil {
-		t.Fatalf("store secretfile bundle: %v", err)
+	ref, err := outboundcredentials.StoreMaterializedCredential("chatgpt", "chatgpt/catalog-refresh", bundle, outboundcredentials.CredentialWritePolicyFile)
+	if err != nil {
+		t.Fatalf("store credential: %v", err)
 	}
 
-	exec := NewExecutor(http.DefaultClient, stubCredentialResolver{})
-	models, err := exec.ListDeployments(context.Background(), provider.NewTargetSnapshot(
-		"draft",
-		"chatgpt",
-		"https://chatgpt.com/backend-api/codex",
-		"secretfile:chatgpt/sess_abc",
-		protocolkind.ChatCompletions,
-		"", delivery.BufferedDelivery()))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token_fresh" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.Header.Get(chatGPTAccountIDHeaderKey); got != "acct-refresh" {
+			t.Fatalf("account id = %q", got)
+		}
+		if got := r.Header.Get(chatGPTFedRAMPHeaderKey); got != "true" {
+			t.Fatalf("fedramp = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-6-astra","visibility":"list","priority":1}]}`))
+	}))
+	defer srv.Close()
+
+	models, err := NewExecutor(srv.Client(), outboundcredentials.NewResolver()).ListDeployments(context.Background(), provider.NewTargetSnapshot(
+		"draft", "chatgpt", srv.URL+"/backend-api/codex", ref, protocolkind.Responses,
+		"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)))
+	if err != nil || len(models) != 1 || attempts != 2 {
+		t.Fatalf("models=%v attempts=%d error=%v", models, attempts, err)
 	}
-	if len(models) == 0 {
-		t.Fatal("expected non-empty bundled models for team tier")
+	raw, err := outboundcredentials.ResolveStoredSecretByRef("chatgpt", ref)
+	if err != nil {
+		t.Fatalf("resolve stored secret: %v", err)
+	}
+	persisted, isBundle, err := outboundcredentials.DecodeTokenBundle(raw)
+	if err != nil || !isBundle || persisted.IDToken != idToken || persisted.RefreshToken != "refresh_1" {
+		t.Fatalf("persisted bundle=%#v isBundle=%v error=%v", persisted, isBundle, err)
+	}
+}
+
+func TestListModels_RejectsMalformedCatalog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `{`) }))
+	defer srv.Close()
+	models, err := NewExecutor(srv.Client(), stubCredentialResolver{}).ListDeployments(context.Background(), provider.NewTargetSnapshot(
+		"draft", "chatgpt", srv.URL+"/backend-api/codex", "env:CHATGPT_TOKEN", protocolkind.Responses,
+		"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)))
+	if err == nil || len(models) != 0 {
+		t.Fatalf("models=%v error=%v", models, err)
+	}
+}
+
+func TestListModels_EmptyVisibleCatalogRemainsSuccessfulAndOpenSet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"hidden","visibility":"hide","priority":1}]}`)
+	}))
+	defer srv.Close()
+	models, err := NewExecutor(srv.Client(), stubCredentialResolver{}).ListDeployments(context.Background(), provider.NewTargetSnapshot(
+		"draft", "chatgpt", srv.URL+"/backend-api/codex", "env:CHATGPT_TOKEN", protocolkind.Responses,
+		"responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)))
+	if err != nil || len(models) != 0 {
+		t.Fatalf("models=%v error=%v", models, err)
 	}
 }
 
@@ -325,8 +401,11 @@ func TestExecute_UsesChatGPTCodexEndpointForOpenAIBaseURL(t *testing.T) {
 	if rt.lastRequest.Header.Get("Authorization") != "Bearer token_test" {
 		t.Fatalf("authorization=%q", rt.lastRequest.Header.Get("Authorization"))
 	}
-	if rt.lastRequest.Header.Get(chatGPTSubagentHeaderKey) != chatGPTSubagentHeaderVal {
-		t.Fatalf("subagent=%q", rt.lastRequest.Header.Get(chatGPTSubagentHeaderKey))
+	if rt.lastRequest.Header.Get("x-openai-subagent") != "" {
+		t.Fatalf("subagent=%q", rt.lastRequest.Header.Get("x-openai-subagent"))
+	}
+	if got := rt.lastRequest.Header.Get(chatGPTOriginatorHeaderKey); got != "codex_cli_rs" {
+		t.Fatalf("originator=%q want codex_cli_rs", got)
 	}
 }
 
@@ -612,8 +691,9 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	bundle, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
 		AccessToken:  "token_old",
 		RefreshToken: "refresh_1",
-		ExpiresAt:    time.Now().UTC().Add(-1 * time.Minute),
-		IssuedAt:     time.Now().UTC().Add(-2 * time.Minute),
+		IDToken:      "a." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-inference","chatgpt_account_is_fedramp":true}}`)) + ".c",
+		ExpiresAt:    time.Now().UTC().Add(time.Hour),
+		IssuedAt:     time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("encode bundle: %v", err)
@@ -637,6 +717,12 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 		}
 		if auth != "Bearer token_fresh" {
 			t.Fatalf("second auth=%q", auth)
+		}
+		if got := r.Header.Get(chatGPTAccountIDHeaderKey); got != "acct-inference" {
+			t.Fatalf("second account id=%q", got)
+		}
+		if got := r.Header.Get(chatGPTFedRAMPHeaderKey); got != "true" {
+			t.Fatalf("second fedramp=%q", got)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
@@ -680,6 +766,9 @@ func TestExecute_UnauthorizedRefreshesBundleAndRetriesOnce(t *testing.T) {
 	}
 	if strings.TrimSpace(persisted["access_token"].(string)) != "token_fresh" { // swobu:io-string source=domain
 		t.Fatalf("persisted access token=%v", persisted["access_token"])
+	}
+	if strings.TrimSpace(persisted["id_token"].(string)) == "" { // swobu:io-string source=domain
+		t.Fatal("persisted id token was erased")
 	}
 }
 

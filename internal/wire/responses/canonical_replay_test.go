@@ -3,6 +3,7 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
 
@@ -76,7 +78,7 @@ func TestResponsesRequestOmitsForeignOpaqueReasoningWithoutDroppingToolHistory(t
 		t.Fatal(err)
 	}
 	schema, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	function, err := canonical.NewFunctionTool(key, "search", canonical.NewToolSchemaObject(schema), canonical.Unspecified[bool]())
+	function, err := canonical.NewFunctionTool(key, "search", canonical.NewToolSchemaObject(schema), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,5 +526,49 @@ func TestEncodeConversationPairsReusedFunctionAndCustomIDByOccurrence(t *testing
 	if !firstOK || first.Type != "function_call_output" ||
 		!secondOK || second.Type != "custom_tool_call_output" {
 		t.Fatalf("result output kinds = %#v, %#v", encoded[1], encoded[3])
+	}
+}
+
+func TestCanonicalResponsesReplayResolvesNestedCustomToolCallByPriorDeclaration(t *testing.T) {
+	raw := []byte(`{"model":"default","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]},{"type":"message","role":"developer","content":"base"},{"type":"message","role":"user","content":"inspect"},{"type":"custom_tool_call","call_id":"call_1","name":"exec","input":"read skills"},{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"complete skill contents"}]}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", http.Header{"X-OpenAI-Internal-Codex-Responses-Lite": {"true"}}, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.Request.Items()
+	call, ok := items[len(items)-2].ToolCall()
+	if !ok || call.Tool().Kind() != canonical.ToolKindCustom || call.Tool().Namespace() != "functions" || call.Tool().Name() != "exec" {
+		t.Fatalf("custom call identity = %#v, want functions/exec", items[len(items)-2])
+	}
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request, ToolNames: testAttemptToolNames(decoded.Request.Request)}, delivery.StreamingDelivery(delivery.FramingSSE), nil, "nested-custom", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(document.RawBytes())
+	for _, want := range []string{`"type":"custom_tool_call"`, `"call_id":"call_1"`, `"type":"custom_tool_call_output"`, "complete skill contents"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("replay lost %q: %s", want, body)
+		}
+	}
+}
+
+func TestCanonicalResponsesReplayRejectsAmbiguousPriorCustomToolAlias(t *testing.T) {
+	raw := []byte(`{"model":"default","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"left","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]},{"type":"namespace","name":"right","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]},{"type":"message","role":"developer","content":"base"},{"type":"custom_tool_call","call_id":"call_1","name":"exec","input":"read"}]}`)
+	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", http.Header{"X-OpenAI-Internal-Codex-Responses-Lite": {"true"}}, raw, carrier.Meta{}))
+	if err == nil || !strings.Contains(err.Error(), "invalid tool identity") {
+		t.Fatalf("error=%v, want ambiguous prior custom alias rejection", err)
+	}
+}
+
+func TestCanonicalResponsesReplayDoesNotRebindHistoryFromLaterDeclaration(t *testing.T) {
+	raw := []byte(`{"model":"default","input":[{"type":"custom_tool_call","call_id":"call_1","name":"exec","input":"read"},{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]}`)
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := decoded.Request.Request.Items()
+	call, ok := items[0].ToolCall()
+	if !ok || call.Tool().Namespace() != canonical.ToolNamespaceRequest || call.Tool().Name() != "exec" {
+		t.Fatalf("historical identity was rebound by a later declaration: %#v", items[0])
 	}
 }

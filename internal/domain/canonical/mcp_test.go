@@ -17,7 +17,7 @@ func TestMCPToolSourceOwnsAuthorityCatalogAndDerivedLookup(t *testing.T) {
 	}
 	toolKey, _ := NewToolKey("mcp/docs", ToolKindFunction, "search")
 	schemaObject, _ := ParseJSONObject([]byte(`{"type":"object"}`))
-	tool, err := NewFunctionTool(toolKey, "Search", NewToolSchemaObject(schemaObject), Unspecified[bool]())
+	tool, err := NewFunctionTool(toolKey, "Search", NewToolSchemaObject(schemaObject), SchemaContract{Profile: SchemaProfileAnthropic})
 	if err != nil {
 		t.Fatal(err)
 	}

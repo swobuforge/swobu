@@ -41,9 +41,9 @@ func TestCompareReusablePrefixPreservesSemanticOrderAndCanonicalObjects(t *testi
 	secondSchema := NewToolSchemaObject(secondObject)
 	keyA, _ := NewRequestToolKey(ToolKindFunction, "a")
 	keyB, _ := NewRequestToolKey(ToolKindFunction, "b")
-	toolA1, _ := NewFunctionTool(keyA, "a", firstSchema, Unspecified[bool]())
-	toolA2, _ := NewFunctionTool(keyA, "a", secondSchema, Unspecified[bool]())
-	toolB, _ := NewFunctionTool(keyB, "b", firstSchema, Unspecified[bool]())
+	toolA1, _ := NewFunctionTool(keyA, "a", firstSchema, SchemaContract{Profile: SchemaProfileAnthropic})
+	toolA2, _ := NewFunctionTool(keyA, "a", secondSchema, SchemaContract{Profile: SchemaProfileAnthropic})
+	toolB, _ := NewFunctionTool(keyB, "b", firstSchema, SchemaContract{Profile: SchemaProfileAnthropic})
 	request := func(tools ...ToolDeclaration) CanonicalRequest {
 		set, _ := NewToolSet(tools)
 		declarations, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
@@ -77,7 +77,7 @@ func TestCompareReusablePrefixTreatsEarlierBandInsertionAsChange(t *testing.T) {
 	}
 	tool := func(name string) CanonicalItem {
 		key, _ := NewRequestToolKey(ToolKindFunction, name)
-		declaration, _ := NewFunctionTool(key, name, NewToolSchemaObject(EmptyJSONObject()), Unspecified[bool]())
+		declaration, _ := NewFunctionTool(key, name, NewToolSchemaObject(EmptyJSONObject()), SchemaContract{Profile: SchemaProfileAnthropic})
 		set, _ := NewToolSet([]ToolDeclaration{declaration})
 		item, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
 		return item
@@ -123,7 +123,7 @@ func TestCompareReusablePrefixTreatsEarlierBandInsertionAsChange(t *testing.T) {
 func TestCompareReusablePrefixIncludesToolOccurrenceVisibility(t *testing.T) {
 	schema := NewToolSchemaObject(EmptyJSONObject())
 	key, _ := NewRequestToolKey(ToolKindFunction, "lookup")
-	tool, _ := NewFunctionTool(key, "lookup", schema, Unspecified[bool]())
+	tool, _ := NewFunctionTool(key, "lookup", schema, SchemaContract{Profile: SchemaProfileAnthropic})
 	set, _ := NewToolSet([]ToolDeclaration{tool})
 	visible, _ := NewToolDeclarationsItem(set, ContextScopeRequest)
 	deferred, _ := NewToolVisibilityRefinements(set, []ToolKey{key})

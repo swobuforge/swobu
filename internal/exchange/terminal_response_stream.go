@@ -40,6 +40,21 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 			code, message := "provider_stream_decode_failed", "provider stream failed after response start"
 			if errors.Is(err, io.EOF) {
 				code, message = "provider_stream_incomplete", "provider stream ended before completed"
+			} else {
+				var backendErr canonical.BackendError
+				if errors.As(err, &backendErr) && backendErr.ProviderError != nil {
+					detail := backendErr.ProviderError
+					code = detail.Code
+					if code == "" {
+						code = detail.Type
+					}
+					if code == "" {
+						code = "provider_stream_failed"
+					}
+					if detail.Message != "" {
+						message = detail.Message
+					}
+				}
 			}
 			slog.Warn("provider response stream failed after start",
 				"component", "exchange",
@@ -48,7 +63,6 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 				"code", code,
 				"last_event_kind", s.last.Kind,
 				"last_event_seq", s.last.Seq,
-				"error", err,
 			)
 			s.pending = terminalFailureEvents(s.last, code, message)
 			s.terminated = true

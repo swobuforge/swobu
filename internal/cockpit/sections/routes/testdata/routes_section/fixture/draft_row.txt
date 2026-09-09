@@ -1,6 +1,0 @@
-  model routes ▾
-     gpt               default · 2 fallback steps                                     expand ↵
-     local             1 target                                                       expand ↵
-
-     draft             incomplete                                                     collapse ↵
-        name                                                                          create ↵

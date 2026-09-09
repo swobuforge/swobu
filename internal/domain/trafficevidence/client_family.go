@@ -45,6 +45,7 @@ const (
 	ClientFamilyCline      ClientFamily = "cline"
 	ClientFamilyOpenCode   ClientFamily = "opencode"
 	ClientFamilyAider      ClientFamily = "aider"
+	ClientFamilyVSCode     ClientFamily = "vscode"
 	ClientFamilyOther      ClientFamily = "other"
 	ClientFamilyUnknown    ClientFamily = "unknown"
 )
@@ -68,6 +69,8 @@ func ClassifyClientFamily(raw string) ClientFamily {
 		return ClientFamilyOpenCode
 	case "aider":
 		return ClientFamilyAider
+	case "swobu-vscode":
+		return ClientFamilyVSCode
 	case "", string(ClientHandlerUnknown):
 		return ClientFamilyUnknown
 	default:

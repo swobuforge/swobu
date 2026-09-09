@@ -137,6 +137,9 @@ func projectRequestHeaders(document carrier.Document, attempt provider.AttemptCo
 // CompileResponsesRequest owns the single standard typed lowering sequence used
 // by both the protocol codec and exact-provider decorators.
 func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (responses.ProviderRequestDocument, []compat.Change, error) {
+	if dialect.OutputFormat == nil {
+		dialect.OutputFormat = responses.DefaultOutputFormatLowering
+	}
 	if err := ValidateEncodeRequest(req); err != nil {
 		return responses.ProviderRequestDocument{}, nil, err
 	}
@@ -149,6 +152,7 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 		responses.EncodeOptions{},
 		responses.CompileOptions{
 			ToolLowering:               responses.ProtocolToolLowering().Overlay(dialect.Tools),
+			OutputFormatLowering:       dialect.OutputFormat,
 			HistoryMessageRole:         dialect.HistoryMessageRole,
 			PrependInstructionsToInput: dialect.PrependInstructionsToInput,
 			OmitInclude:                dialect.OmitInclude,
@@ -157,12 +161,12 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 			ForceArrayInput:            dialect.ForceArrayInput,
 			DefaultStore:               dialect.DefaultStore,
 			OmitParallelToolCallsFalse: func() bool {
-				return !req.TargetFacts.AcceptsParallelToolCallsFalse()
+				return !req.TargetFacts.UseParallelToolCallsFalse()
 			},
-			AcceptsReasoningEffortMax:  req.TargetFacts.AcceptsReasoningEffortMax,
-			AcceptsReasoningDisabled:   req.TargetFacts.AcceptsReasoningDisabled,
+			AcceptsReasoningEffortMax:  req.TargetFacts.UseReasoningEffortMax,
+			AcceptsReasoningDisabled:   req.TargetFacts.UseReasoningDisabled,
 			DefaultReasoningDisabled:   dialect.DefaultReasoningDisabled,
-			AcceptsFunctionOutputArray: req.TargetFacts.AcceptsFunctionCallOutputArray,
+			AcceptsFunctionOutputArray: req.TargetFacts.UseFunctionCallOutputArray,
 		},
 	)
 	return document, changes, err
@@ -185,16 +189,16 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 			Lowering:               chatcompletions.ProtocolLowering().Overlay(dialect.Lowering),
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
 			AcceptsMaxCompletionTokens: func() bool {
-				return req.TargetFacts.AcceptsMaxCompletionTokens()
+				return req.TargetFacts.UseMaxCompletionTokens()
 			},
 			OmitParallelToolCallsFalse: func() bool {
-				return !req.TargetFacts.AcceptsParallelToolCallsFalse()
+				return !req.TargetFacts.UseParallelToolCallsFalse()
 			},
 			ReasoningTarget: chatcompletions.ReasoningTargetDialect{
-				AcceptsEffortMax: req.TargetFacts.AcceptsReasoningEffortMax,
-				AcceptsDisabled:  req.TargetFacts.AcceptsReasoningDisabled,
+				AcceptsEffortMax: req.TargetFacts.UseReasoningEffortMax,
+				AcceptsDisabled:  req.TargetFacts.UseReasoningDisabled,
 			},
-			AcceptsStreamIncludeUsage: req.TargetFacts.AcceptsChatStreamIncludeUsage,
+			AcceptsStreamIncludeUsage: req.TargetFacts.UseChatStreamIncludeUsage,
 		},
 	)
 	return document, changes, err

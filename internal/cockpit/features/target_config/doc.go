@@ -1,58 +1,7 @@
-// Package target_config owns the mounted component for creating and editing
-// route targets.
+// Package target_config implements Cockpit target configuration.
 //
-// TargetConfig is mounted by the routes section when the operator activates
-// "add target" on an expanded route. It is not a global modal; it renders
-// inline under the route row. Provider setup, model catalog probing, and
-// routing choices backed by placement ranks are all internal to this package.
-// Once a provider is selected, provider-specific GSX components render the
-// visible row sequence below provider selection. The route section only knows
-// whether a target config is open for a given route. Empty
-// routes skip the routing chooser and create their first target at step 1.
-// Provider forms author one locator value whose meaning comes from profile
-// facts. One pure connection projection builds the routing.Connection used by
-// catalog probing. The Cockpit adapter decodes opaque probe diagnostics before
-// this feature receives typed Bedrock authentication evidence. Catalog success
-// controls creation validity while optional STS identity enriches the Bedrock
-// form. Every catalog-backed edit enters catalog-loading state before the
-// component is mounted; BindApp resumes that pending operation while persisted
-// model/protocol values remain non-authoritative selection seeds until
-// reconciliation. Z.AI retains its open-set authored model and never initiates
-// catalog discovery. Bedrock keeps region and required operator-authored API URL
-// as separate draft facts. Regional catalog discovery may complete before the
-// inference URL is known; target creation requires the URL after model and
-// protocol selection. Endpoint input is editor-local until successful
-// submission and no model identity selects its namespace.
-// Protocol options retain provider-manifest preference order. Selecting a model
-// initializes the first resolved option and leaves the protocol row editable.
-// Bedrock has one authentication field: an absent credential reference
-// selects AWS identity, while a present reference selects a bearer API key and
-// embeds the shared credential chooser. ChatGPT retains its genuine
-// login-session workflow. Ordinary HTTP providers whose profile declares
-// AmbientOrReference use one provider-neutral authentication component: profile
-// labels describe ambient and reference choices, the existing credential
-// chooser authors references, and selecting ambient clears only the reference.
-// The component receives no provider identity or TargetConfig authority.
-// Browser login is the default and device code is an
-// explicit form-owned choice. Pending authentication remains selectable;
-// changing mode cancels the active session before starting its replacement. A
-// pending session always renders its complete login URL as wrapped terminal
-// text nested beneath one best-effort open action; auth choices use the normal
-// child-row indentation without a placeholder label column. Opener failure
-// does not mutate the form, so the visible URL remains the manual-selection
-// hedge. A
-// mounted pending ChatGPT session is observed through the local daemon until it
-// succeeds or fails; manual refresh remains a recovery action, and the observer
-// ends with the form, mount, app, or session.
-// Custom Endpoint uses best-effort discovery plus an open-set model picker.
-// Z.AI has no discovery surface, so its open-set model ID is authored through
-// a plain text row rather than an empty searchable catalog.
-// An incomplete create row is status, not an interaction target; only a ready
-// create action participates in selection and Enter dispatch.
-//
-// GSX files own visible template hierarchy. Target-config transitions live in
-// effects.go, and pure projections accept concrete values rather than reading
-// reactive component state. Azure alone retains a narrow *_component.go adapter
-// because its mounted receiver owns endpoint-draft continuity that go-tui cannot
-// yet express directly; the adapter is deleted when the generator supports it.
+// The routes section mounts this inline editor. Provider profile facts govern
+// connection authoring; model identity does not choose endpoint semantics.
+// Authentication sessions belong to the form lifecycle and are cancelled when
+// replaced. Credential inputs author references, not stored credential values.
 package target_config

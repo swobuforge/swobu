@@ -567,6 +567,27 @@ func TestSendProviderRequest_ClassifiesConfirmedUnsupportedResponseAsRejected(t 
 	}
 }
 
+func TestSendProviderRequest_PromotesOrdinaryOpenAIHTTPError(t *testing.T) {
+	body := io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"quota","message":"slow down","param":"model"}}`))
+	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"X-Request-Id": []string{"req_provider"}, "Retry-After": []string{"30"}}, Body: body, Request: req}, nil
+	})}
+	exec := NewExecutor(client, nil, StandardNoAuthPolicy(profile.ProviderSpecOllama))
+	target := provider.NewTargetSnapshot("backend-a", string(profile.ProviderSpecOllama), "http://127.0.0.1:11434/v1", "", protocolkind.Responses, "", delivery.BufferedDelivery())
+	target.Model = "gpt-4o-mini"
+	doc := carrier.NewDocument(protocolkind.Responses, "application/json", nil, []byte(`{"model":"gpt-4o-mini"}`), carrier.Meta{})
+
+	_, err := exec.Send(context.Background(), target, doc)
+	var backendErr canonical.BackendError
+	if !errors.As(err, &backendErr) || backendErr.ProviderError == nil {
+		t.Fatalf("error = %#v, want structured backend error", err)
+	}
+	detail := backendErr.ProviderError
+	if backendErr.TargetID != "backend-a" || backendErr.SourceProtocol != protocolkind.Responses || backendErr.StatusCode != http.StatusTooManyRequests || backendErr.RetryAfterHeaderValue != "30" || detail.Type != "rate_limit_error" || detail.Code != "quota" || detail.Message != "slow down" || detail.Param != "model" || detail.RequestID != "req_provider" {
+		t.Fatalf("structured backend error = %#v", backendErr)
+	}
+}
+
 // An unclassified 4xx defaults to RejectedError with ExecutionMayHaveOccurred.
 // This owns the adapter's fallback for unclassified rejection, not permanent
 // ignorance of any provider's vocabulary: the prose is deliberately opaque so

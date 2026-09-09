@@ -17,8 +17,8 @@ import (
 )
 
 type connectOperations interface {
-	Plan(clientconnect.ClientID, clientconnect.Target) (clientconnect.Plan, error)
-	Apply(clientconnect.Plan) error
+	Plan(context.Context, clientconnect.ClientID, clientconnect.Target) (clientconnect.Plan, error)
+	Apply(context.Context, clientconnect.Plan) (clientconnect.Plan, error)
 }
 
 type connectWorkspaceLister interface {
@@ -103,9 +103,10 @@ func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.
 	if ops == nil {
 		ops = clientconnect.NewService()
 	}
-	plan, err := ops.Plan(clientID, target)
+	plan, err := ops.Plan(ctx, clientID, target)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
+		_, _ = fmt.Fprintln(stderr, "Nothing changed.")
 		return ExitDown
 	}
 	renderConnectPlan(stdout, plan, target)
@@ -117,8 +118,13 @@ func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.
 		_, _ = fmt.Fprintln(stderr, "Existing client configuration would be replaced.\nRun again with --replace.")
 		return ExitDown
 	}
-	if err := ops.Apply(plan); err != nil {
+	verified, err := ops.Apply(ctx, plan)
+	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	if !verified.AlreadyConfigured() {
+		_, _ = fmt.Fprintln(stderr, "Client did not converge to the reviewed configuration.")
 		return ExitDown
 	}
 	_, _ = fmt.Fprintln(stdout, "configured")
@@ -166,7 +172,14 @@ func renderConnectPlan(out io.Writer, plan clientconnect.Plan, target clientconn
 			_, _ = fmt.Fprintf(out, "  %-9s %s\n            → %s\n", change.Field, shortConnectValue(target, change.Before), shortConnectValue(target, change.After))
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  %-9s %s\n\n", "writes", plan.ConfigPath)
+	for i, path := range plan.ConfigPaths {
+		label := ""
+		if i == 0 {
+			label = "writes"
+		}
+		_, _ = fmt.Fprintf(out, "  %-9s %s\n", label, path)
+	}
+	_, _ = fmt.Fprintln(out)
 }
 
 func shortConnectValue(target clientconnect.Target, value string) string {

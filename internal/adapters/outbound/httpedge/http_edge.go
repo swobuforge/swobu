@@ -41,7 +41,10 @@ func DecodeHTTPResponseContentEncoding(resp *http.Response) (*http.Response, err
 }
 
 func ReadBackendHTTPError(resp *http.Response, backendRef string) canonical.BackendError {
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxUnexpectedStreamingEvidence+1))
+	if len(raw) > maxUnexpectedStreamingEvidence {
+		raw = raw[:maxUnexpectedStreamingEvidence]
+	}
 	return canonical.NewBackendError(
 		backendRef,
 		resp.StatusCode,

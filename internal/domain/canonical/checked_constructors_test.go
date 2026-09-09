@@ -15,13 +15,14 @@ func testRequestToolKey(kind ToolKind, name string) ToolKey {
 	}
 	return value
 }
-func testFunctionTool(key ToolKey, description string, schema ToolSchema, strict Specified[bool]) ToolDeclaration {
-	value, err := NewFunctionTool(key, description, schema, strict)
+func testFunctionTool(key ToolKey, description string, schema ToolSchema, spec SchemaContract) ToolDeclaration {
+	value, err := NewFunctionTool(key, description, schema, spec)
 	if err != nil {
 		panic(err)
 	}
 	return value
 }
+
 func testCustomTool(key ToolKey, description string, format ToolFormat) ToolDeclaration {
 	value, err := NewCustomTool(key, description, format)
 	if err != nil {

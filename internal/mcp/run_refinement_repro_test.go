@@ -15,9 +15,9 @@ func TestAttemptRequestPreservesDeferredFunctionAndInlineImageBesideLocalMCPExpa
 	remoteB, _ := canonical.NewToolKey("mcp/docs", canonical.ToolKindFunction, "fetch")
 	deferredKey, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
 
-	remoteADecl, _ := canonical.NewFunctionTool(remoteA, "", schema, canonical.Unspecified[bool]())
-	remoteBDecl, _ := canonical.NewFunctionTool(remoteB, "", schema, canonical.Unspecified[bool]())
-	deferredDecl, _ := canonical.NewFunctionTool(deferredKey, "", schema, canonical.Unspecified[bool]())
+	remoteADecl, _ := canonical.NewFunctionTool(remoteA, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
+	remoteBDecl, _ := canonical.NewFunctionTool(remoteB, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
+	deferredDecl, _ := canonical.NewFunctionTool(deferredKey, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 
 	remote, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
 	// One local MCP source catalog that resolves to two function declarations.

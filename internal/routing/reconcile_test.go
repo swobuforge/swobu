@@ -119,7 +119,7 @@ func TestApplyRouteSpecAddsRemovesAndCombinesChangesAtomically(t *testing.T) {
 	newTarget := testTarget(t, "c")
 	desired.Tiers[0].Targets[0].Settings.Model = testTarget(t, "changed").Model()
 	desired.Tiers = append(desired.Tiers, TierSpec{Targets: []TargetSpec{{
-		ID: newTarget.ID(), Settings: TargetSettings{newTarget.Model(), newTarget.Protocol(), newTarget.Connection()},
+		ID: newTarget.ID(), Settings: TargetSettings{Model: newTarget.Model(), Protocol: newTarget.Protocol(), Connection: newTarget.Connection()},
 	}}})
 	next, err := ApplyRouteSpec(current, desired)
 	if err != nil {

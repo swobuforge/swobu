@@ -422,6 +422,7 @@ func TestCodecLowersNativeControlsOutputImagesReasoningAndFunctions(t *testing.T
 	}
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind: canonical.OutputFormatJSONSchema, Name: "reply", Schema: canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -474,7 +475,7 @@ func TestCodecLowersNativeControlsOutputImagesReasoningAndFunctions(t *testing.T
 	assertGeminiChanges(t, changes,
 		canonical.RequestControlsEffort,
 		canonical.RequestReasoningContextResponses,
-		canonical.RequestOutputFormatSchema,
+		canonical.RequestOutputSchemaConformance,
 		canonical.RequestItemsMessageImageDetail,
 	)
 }
@@ -944,9 +945,9 @@ func TestCodecRejectsResidualMCPBeforeProviderLowering(t *testing.T) {
 	}
 }
 
-func TestCodecProjectsStrictJSONSchemaWithoutStrengtheningApproximation(t *testing.T) {
+func TestCodecProjectsForeignStrictJSONSchemaWithApproximation(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind: canonical.OutputFormatJSONSchema, Name: "reply", Strict: true,
+		Kind: canonical.OutputFormatJSONSchema, Name: "reply", SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 		Schema: canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
 	})
 	if err != nil {
@@ -959,8 +960,8 @@ func TestCodecProjectsStrictJSONSchemaWithoutStrengtheningApproximation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 0 {
-		t.Fatalf("changes = %#v, want exact strict schema projection", changes)
+	if !containsGeminiChange(changes, canonical.RequestOutputSchemaConformance) {
+		t.Fatalf("changes = %#v, want schema conformance approximation", changes)
 	}
 	var payload interactionRequest
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
@@ -1209,7 +1210,7 @@ func TestGeminiFunctionStrictnessDegradesOnlyWhenTrue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.wantOmission != containsGeminiChange(changes, canonical.RequestToolsSchemaStrict) {
+			if tc.wantOmission != containsGeminiChange(changes, canonical.RequestToolsSchemaConformance) {
 				t.Fatalf("strict omission = %t, changes=%#v", tc.wantOmission, changes)
 			}
 		})

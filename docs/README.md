@@ -8,6 +8,7 @@ These docs contain practical setup recipes and troubleshooting references that a
 - [Codex CLI](./clients/codex-cli.md)
 - [Muse Code](./clients/muse-code.md)
 - [Kilo Code](./clients/kilo-code.md)
+- [OpenCode](./clients/opencode.md)
 - [pi](./clients/pi.md)
 - [OpenClaw](./clients/openclaw.md)
 - [Hermes Agent](./clients/hermes-agent.md)
@@ -32,4 +33,3 @@ These docs contain practical setup recipes and troubleshooting references that a
 
 - [Workspace configuration](./configuration.md)
 - [Troubleshooting](./troubleshooting.md)
-- [Telemetry](./telemetry.md)

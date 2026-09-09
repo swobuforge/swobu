@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -19,32 +20,32 @@ func openClawPresent(s *Service) (bool, error) {
 	return commandClientPresent("openclaw")(s)
 }
 
-func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
+func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (plannedMutation, error) {
 	if strings.TrimSpace(s.getenv("OPENCLAW_NIX_MODE")) == "1" {
-		return plannedMutation{}, openClawNoChange(fmt.Errorf("Nix mode makes configuration immutable"))
+		return plannedMutation{}, openClawProblem(fmt.Errorf("Nix mode makes configuration immutable"))
 	}
-	locusRaw, err := requireCommandOutput(s, "OpenClaw", "openclaw", "config", "file")
+	locusRaw, err := requireCommandOutput(ctx, s, "OpenClaw", "openclaw", "config", "file")
 	if err != nil {
-		return plannedMutation{}, openClawNoChange(err)
+		return plannedMutation{}, openClawProblem(err)
 	}
 	locus := strings.TrimSpace(string(locusRaw))
 	if locus == "" {
-		return plannedMutation{}, openClawNoChange(fmt.Errorf("config file returned no path"))
+		return plannedMutation{}, openClawProblem(fmt.Errorf("config file returned no path"))
 	}
 
-	modelRef, source, modelExists, err := readModelRef(s)
+	modelRef, source, modelExists, err := readModelRef(ctx, s)
 	if err != nil {
-		return plannedMutation{}, openClawNoChange(err)
+		return plannedMutation{}, openClawProblem(err)
 	}
 
-	observedProvider, _, err := readOptionalJSON(s, "models.providers.swobu")
+	observedProvider, _, err := readOptionalJSON(ctx, s, "models.providers.swobu")
 	if err != nil {
-		return plannedMutation{}, openClawNoChange(err)
+		return plannedMutation{}, openClawProblem(err)
 	}
 
-	allowlist, allowlistExists, err := readOptionalJSON(s, "agents.defaults.models")
+	allowlist, allowlistExists, err := readOptionalJSON(ctx, s, "agents.defaults.models")
 	if err != nil {
-		return plannedMutation{}, openClawNoChange(err)
+		return plannedMutation{}, openClawProblem(err)
 	}
 
 	api, apiExists := observedProvider["api"].(string)
@@ -76,11 +77,11 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 	}
 
 	plan := Plan{
-		ClientID:   ClientOpenClaw,
-		ClientName: "OpenClaw",
-		ConfigPath: locus,
-		Target:     target,
-		Changes:    changes,
+		ClientID:    ClientOpenClaw,
+		ClientName:  "OpenClaw",
+		ConfigPaths: []string{locus},
+		Target:      target,
+		Changes:     changes,
 	}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
@@ -88,10 +89,10 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 
 	return plannedMutation{
 		plan: plan,
-		apply: func() error {
-			freshProvider, freshProviderExists, freshErr := readOptionalJSON(s, "models.providers.swobu")
+		apply: func(ctx context.Context) error {
+			freshProvider, freshProviderExists, freshErr := readOptionalJSON(ctx, s, "models.providers.swobu")
 			if freshErr != nil {
-				return openClawNoChange(freshErr)
+				return openClawProblem(freshErr)
 			}
 			providerValue := map[string]any{
 				"baseUrl": target.WorkspaceURL(),
@@ -107,7 +108,7 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 				}
 				models, ok := providerValue["models"].([]any)
 				if providerValue["models"] != nil && !ok {
-					return openClawNoChange(fmt.Errorf("models.providers.swobu.models is not an array"))
+					return openClawProblem(fmt.Errorf("models.providers.swobu.models is not an array"))
 				}
 				found := false
 				for _, item := range models {
@@ -126,9 +127,9 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 				{"config", "set", "models.providers.swobu", string(providerJSON), "--json"},
 			}
 
-			freshAllowlist, freshAllowlistExists, allowlistErr := readOptionalJSON(s, "agents.defaults.models")
+			freshAllowlist, freshAllowlistExists, allowlistErr := readOptionalJSON(ctx, s, "agents.defaults.models")
 			if allowlistErr != nil {
-				return openClawNoChange(allowlistErr)
+				return openClawProblem(allowlistErr)
 			}
 			if freshAllowlistExists {
 				updatedAllowlist := cloneMap(freshAllowlist)
@@ -144,9 +145,9 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 
 			sets = append(sets, []string{"config", "set", source, "swobu/default"})
 			for _, args := range sets {
-				_, code, runErr := s.run("openclaw", args...)
+				_, code, runErr := s.run(ctx, "openclaw", args...)
 				if runErr != nil {
-					return fmt.Errorf("OpenClaw could not start its configuration command")
+					return fmt.Errorf("OpenClaw could not set %s: %w", args[2], runErr)
 				}
 				if code != 0 {
 					return fmt.Errorf("OpenClaw configuration command exited %d", code)
@@ -157,8 +158,8 @@ func planOpenClawCurrent(s *Service, target Target) (plannedMutation, error) {
 	}, nil
 }
 
-func readModelRef(s *Service) (model string, source string, exists bool, err error) {
-	primary, primaryExists, primaryErr := readOptionalString(s, "agents.defaults.model.primary")
+func readModelRef(ctx context.Context, s *Service) (model string, source string, exists bool, err error) {
+	primary, primaryExists, primaryErr := readOptionalString(ctx, s, "agents.defaults.model.primary")
 	if primaryErr != nil {
 		return "", "", false, primaryErr
 	}
@@ -166,7 +167,7 @@ func readModelRef(s *Service) (model string, source string, exists bool, err err
 		return primary, "agents.defaults.model.primary", true, nil
 	}
 
-	legacy, legacyExists, legacyErr := readOptionalString(s, "agents.defaults.model")
+	legacy, legacyExists, legacyErr := readOptionalString(ctx, s, "agents.defaults.model")
 	if legacyErr != nil {
 		return "", "", false, legacyErr
 	}
@@ -177,8 +178,8 @@ func readModelRef(s *Service) (model string, source string, exists bool, err err
 	return "", "agents.defaults.model.primary", false, nil
 }
 
-func readOptionalString(s *Service, path string) (value string, exists bool, err error) {
-	out, code, runErr := s.run("openclaw", "config", "get", path)
+func readOptionalString(ctx context.Context, s *Service, path string) (value string, exists bool, err error) {
+	out, code, runErr := s.run(ctx, "openclaw", "config", "get", path)
 	if runErr != nil {
 		return "", false, fmt.Errorf("openclaw config get %s failed: %w", path, runErr)
 	}
@@ -199,8 +200,8 @@ func readOptionalString(s *Service, path string) (value string, exists bool, err
 	return trimmed, true, nil
 }
 
-func readOptionalJSON(s *Service, path string) (value map[string]any, exists bool, err error) {
-	out, code, runErr := s.run("openclaw", "config", "get", path, "--json")
+func readOptionalJSON(ctx context.Context, s *Service, path string) (value map[string]any, exists bool, err error) {
+	out, code, runErr := s.run(ctx, "openclaw", "config", "get", path, "--json")
 	if runErr != nil {
 		return nil, false, fmt.Errorf("openclaw config get %s failed: %w", path, runErr)
 	}
@@ -248,6 +249,6 @@ func cloneMap(m map[string]any) map[string]any {
 	return out
 }
 
-func openClawNoChange(err error) error {
-	return fmt.Errorf("OpenClaw is not automatically wireable: %v. Nothing changed.", err)
+func openClawProblem(err error) error {
+	return fmt.Errorf("OpenClaw is not automatically wireable: %w", err)
 }

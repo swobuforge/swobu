@@ -98,6 +98,7 @@ func TestReportReducer_ProjectsBoundedClientProductSeparatelyFromProtocolAndProv
 		{trafficevidence.ClientFamilyCline, reportClientFamilyCline},
 		{trafficevidence.ClientFamilyOpenCode, reportClientFamilyOpenCode},
 		{trafficevidence.ClientFamilyAider, reportClientFamilyAider},
+		{trafficevidence.ClientFamilyVSCode, reportClientFamilyVSCode},
 		{trafficevidence.ClientFamilyOther, reportClientFamilyOther},
 		{trafficevidence.ClientFamilyUnknown, reportClientFamilyUnknown},
 	}

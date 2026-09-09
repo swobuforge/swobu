@@ -150,7 +150,7 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 		}
 		var frame streamFrame
 		if err := json.Unmarshal(rawFrame, &frame); err != nil {
-			return canonical.Event{}, canonical.InternalError("responses stream event is invalid JSON")
+			return canonical.Event{}, canonical.InternalErrorWithCause("responses stream event is invalid JSON", err)
 		}
 		var native struct {
 			Item     json.RawMessage `json:"item"`
@@ -159,7 +159,7 @@ func (s *responsesResponseStream) Next(ctx context.Context) (canonical.Event, er
 			} `json:"response"`
 		}
 		if err := json.Unmarshal(rawFrame, &native); err != nil {
-			return canonical.Event{}, canonical.InternalError("responses stream completed item is invalid JSON")
+			return canonical.Event{}, canonical.InternalErrorWithCause("responses stream completed item is invalid JSON", err)
 		}
 		frame.RawItem = native.Item
 		frame.RawOutput = native.Response.Output

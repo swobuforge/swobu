@@ -18,7 +18,7 @@ type itemStreamPartState struct {
 	// text accumulates streamed text deltas for one part. A strings.Builder
 	// keeps accumulation O(n) in total delta bytes rather than O(n^2): Go's
 	// `+=` on a string reallocates and copies the whole growing prefix on every
-	// delta, which dominates memory for long streamed responses (epic-50). The
+	// delta. The
 	// accumulated value is only read once, at EventItemCompleted validation.
 	text strings.Builder
 }

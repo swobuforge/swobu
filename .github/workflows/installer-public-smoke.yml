@@ -1,0 +1,41 @@
+name: Published Installer Smoke
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install published release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          install_dir="$(mktemp -d)"
+          curl -fsSL https://swobu.com/install.sh | INSTALL_DIR="$install_dir" VERSION="$RELEASE_TAG" START_SWOBU=false sh
+          test "$("$install_dir/swobu" --version)" = "${RELEASE_TAG#swobu-}"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Install published release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $InstallDir = Join-Path $env:RUNNER_TEMP 'swobu-published'
+          $env:INSTALL_DIR = $InstallDir
+          $env:VERSION = $env:RELEASE_TAG
+          $env:START_SWOBU = 'false'
+          irm https://swobu.com/install.ps1 | iex
+          $Actual = (& (Join-Path $InstallDir 'swobu.exe') --version) -join "`n"
+          $Expected = $env:RELEASE_TAG -replace '^swobu-', ''
+          if ($Actual.Trim() -ne $Expected) {
+            throw "installed version is $Actual, want $Expected"
+          }

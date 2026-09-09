@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type failAfterEventsStream struct {
@@ -28,7 +29,7 @@ func (s *failAfterEventsStream) Next(context.Context) (canonical.Event, error) {
 
 func (s *failAfterEventsStream) Close(context.Context) error { return nil }
 
-func TestTerminalResponseStreamLogsUnderlyingPostStartFailure(t *testing.T) {
+func TestTerminalResponseStreamHidesUnderlyingPostStartFailure(t *testing.T) {
 	underlying := errors.New("item.completed ordinal 2 is duplicated")
 	upstream := &failAfterEventsStream{
 		events: []canonical.Event{{
@@ -62,11 +63,30 @@ func TestTerminalResponseStreamLogsUnderlyingPostStartFailure(t *testing.T) {
 		"event=provider_stream_failed_after_start",
 		"exchange_id=exchange_1",
 		"code=provider_stream_decode_failed",
-		`error="item.completed ordinal 2 is duplicated"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("operator log missing %q: %s", want, got)
 		}
+	}
+	if strings.Contains(got, underlying.Error()) {
+		t.Fatalf("stable WARN log exposed arbitrary cause: %s", got)
+	}
+}
+
+func TestTerminalResponseStreamPreservesStructuredProviderFailure(t *testing.T) {
+	upstream := &failAfterEventsStream{
+		events: []canonical.Event{{ExchangeID: "exchange_1", Seq: 1, Kind: canonical.EventEnvelopeStart, EnvID: "response_1", Payload: canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse}}},
+		err:    canonical.NewStructuredBackendError("target-a", protocolkind.Responses, 429, canonical.BackendErrorDetail{Code: "quota", Type: "rate_limit_error", Message: "limit reached"}, ""),
+	}
+	stream := newTerminalResponseStream(upstream)
+	_, _ = stream.Next(context.Background())
+	event, err := stream.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := event.Payload.(canonical.ErrorPayload)
+	if !ok || payload.Code != "quota" || payload.Message != "limit reached" {
+		t.Fatalf("terminal payload = %#v", event.Payload)
 	}
 }
 

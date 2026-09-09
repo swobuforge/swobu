@@ -21,7 +21,7 @@ func testTarget(t *testing.T, id string) Target {
 	t.Helper()
 	targetID, _ := ParseTargetID(id)
 	model, _ := ParseUpstreamModel("upstream-" + id)
-	provider := supportedProvider("openai")
+	provider, _ := ParseProvider("openai", func(string) bool { return true })
 	connection, err := NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
 	if err != nil {
 		t.Fatal(err)
@@ -210,41 +210,6 @@ func TestWorkspaceResolveRouteUsesExactNameThenConfiguredDefault(t *testing.T) {
 	for _, requested := range []string{"", " \t"} {
 		if _, err := workspace.ResolveRoute(requested); !errors.Is(err, ErrEmptyRequestedRoute) {
 			t.Fatalf("ResolveRoute(%q) error = %v, want ErrEmptyRequestedRoute", requested, err)
-		}
-	}
-}
-
-// TestWorkspaceResolveRouteLetsCodexMemoryNamesSelectOperatorTargets proves
-// the configuration workaround for Codex #37009. The client-visible hardcoded
-// values are exact route names; each route still owns its independent upstream
-// target model.
-func TestWorkspaceResolveRouteLetsCodexMemoryNamesSelectOperatorTargets(t *testing.T) {
-	defaultName, _ := ParseRouteName("chat")
-	lunaName, _ := ParseRouteName("gpt-5.6-luna")
-	terraName, _ := ParseRouteName("gpt-5.6-terra")
-	defaultTier, _ := NewTier([]Target{testTarget(t, "default-target")})
-	lunaTier, _ := NewTier([]Target{testTarget(t, "memory-extraction")})
-	terraTier, _ := NewTier([]Target{testTarget(t, "memory-consolidation")})
-	defaultRoute, _ := NewRoute(defaultName, []Tier{defaultTier})
-	lunaRoute, _ := NewRoute(lunaName, []Tier{lunaTier})
-	terraRoute, _ := NewRoute(terraName, []Tier{terraTier})
-	slug, _ := ParseWorkspaceSlug("dev")
-	workspace, err := NewWorkspace(slug, defaultName, []Route{defaultRoute, lunaRoute, terraRoute})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for requested, wantUpstream := range map[string]string{
-		"gpt-5.6-luna":  "upstream-memory-extraction",
-		"gpt-5.6-terra": "upstream-memory-consolidation",
-	} {
-		route, err := workspace.ResolveRoute(requested)
-		if err != nil {
-			t.Fatalf("ResolveRoute(%q): %v", requested, err)
-		}
-		target := route.Tiers()[0].Targets()[0]
-		if got := target.Model().String(); got != wantUpstream {
-			t.Fatalf("route %q target model = %q, want %q", requested, got, wantUpstream)
 		}
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 type flowTextFixture struct {

@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/wire"
 	core "github.com/swobuforge/swobu/internal/wire/primitives"
 )
@@ -99,6 +100,15 @@ type messageStartFrame struct {
 	} `json:"message"`
 }
 
+type messagesErrorFrame struct {
+	Type  string `json:"type"`
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+	RequestID string `json:"request_id"`
+}
+
 type contentBlockStartFrame struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
@@ -171,7 +181,7 @@ func (s *messagesEventReader) Next(ctx context.Context) (canonical.Event, error)
 		}
 		var envelope streamEnvelope
 		if err := json.Unmarshal([]byte(frame.Data), &envelope); err != nil {
-			return canonical.Event{}, canonical.InternalError("messages stream frame is invalid JSON")
+			return canonical.Event{}, canonical.InternalErrorWithCause("messages stream frame is invalid JSON", err)
 		}
 		currentFrame := s.frameIndex
 		s.frameIndex++
@@ -224,13 +234,15 @@ func (s *messagesEventReader) handleFrame(ctx context.Context, envelope streamEn
 	if s.lifecycle == messagesResponseStopped {
 		return canonical.NewBackendError("messages", 0, "messages stream frame arrived after message_stop", "")
 	}
-	if s.lifecycle == messagesResponseUnseen && normalizedFrameType != "message_start" && normalizedFrameType != "ping" {
+	if s.lifecycle == messagesResponseUnseen && normalizedFrameType != "message_start" && normalizedFrameType != "ping" && normalizedFrameType != "error" {
 		return canonical.NewBackendError("messages", 0, "messages stream frame arrived before message_start", "")
 	}
 	if s.lifecycle == messagesResponseStarted && normalizedFrameType == "message_start" {
 		return canonical.NewBackendError("messages", 0, "messages stream received a second message_start", "")
 	}
 	switch normalizedFrameType {
+	case "error":
+		return decodeMessagesErrorFrame(raw)
 	case "message_start":
 		if err := s.handleMessageStart(raw); err != nil {
 			return err
@@ -263,6 +275,50 @@ func (s *messagesEventReader) handleFrame(ctx context.Context, envelope streamEn
 	}
 }
 
+func decodeMessagesErrorFrame(raw string) error {
+	var frame messagesErrorFrame
+	if err := json.Unmarshal([]byte(raw), &frame); err != nil {
+		return canonical.InternalErrorWithCause("messages stream error frame is invalid", err)
+	}
+	detail := canonical.BackendErrorDetail{
+		Type: strings.TrimSpace(frame.Error.Type), Message: strings.TrimSpace(frame.Error.Message),
+		RequestID: strings.TrimSpace(frame.RequestID),
+	}
+	if detail.Message == "" {
+		detail.Message = "messages stream returned an error event"
+	}
+	return canonical.NewStructuredBackendError("messages", protocolkind.Messages, messagesErrorStatus(detail.Type), detail, "")
+}
+
+func messagesErrorStatus(errorType string) int {
+	switch strings.ToLower(strings.TrimSpace(errorType)) { // swobu:io-string source=provider-wire
+	case "invalid_request_error":
+		return 400
+	case "authentication_error":
+		return 401
+	case "billing_error":
+		return 402
+	case "permission_error":
+		return 403
+	case "not_found_error":
+		return 404
+	case "conflict_error":
+		return 409
+	case "request_too_large":
+		return 413
+	case "rate_limit_error":
+		return 429
+	case "api_error":
+		return 500
+	case "timeout_error":
+		return 504
+	case "overloaded_error":
+		return 529
+	default:
+		return 0
+	}
+}
+
 func messagesUnknownEventDecisionKey(frameType string, blockIndex *int) string {
 	if blockIndex != nil {
 		return frameType + "\x00" + fmt.Sprintf("block:%d", *blockIndex)
@@ -273,7 +329,7 @@ func messagesUnknownEventDecisionKey(frameType string, blockIndex *int) string {
 func (s *messagesEventReader) handleMessageStart(raw string) error {
 	var payload messageStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return canonical.InternalError("messages stream message_start frame is invalid")
+		return canonical.InternalErrorWithCause("messages stream message_start frame is invalid", err)
 	}
 	s.resultID = payload.Message.ID
 	s.model = payload.Message.Model
@@ -285,7 +341,7 @@ func (s *messagesEventReader) handleMessageStart(raw string) error {
 func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 	var payload contentBlockStartFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return canonical.InternalError("messages stream content_block_start frame is invalid")
+		return canonical.InternalErrorWithCause("messages stream content_block_start frame is invalid", err)
 	}
 	if payload.Index != s.nextBlockIndex {
 		return canonical.NewBackendError("messages", 0, "messages content block starts are out of provider index order", "")
@@ -419,7 +475,7 @@ func (s *messagesEventReader) handleContentBlockStart(raw string) error {
 func (s *messagesEventReader) handleContentBlockDelta(raw string) error {
 	var payload contentBlockDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return canonical.InternalError("messages stream content_block_delta frame is invalid")
+		return canonical.InternalErrorWithCause("messages stream content_block_delta frame is invalid", err)
 	}
 	block, ok := s.blocks[payload.Index]
 	if !ok {
@@ -509,7 +565,7 @@ func isKnownMessagesDeltaType(deltaType string) bool {
 func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 	var payload contentBlockStopFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return canonical.InternalError("messages stream content_block_stop frame is invalid")
+		return canonical.InternalErrorWithCause("messages stream content_block_stop frame is invalid", err)
 	}
 	block, ok := s.blocks[payload.Index]
 	if !ok {
@@ -646,7 +702,7 @@ func (s *messagesEventReader) handleContentBlockStop(raw string) error {
 func (s *messagesEventReader) handleMessageDelta(raw string) error {
 	var payload messageDeltaFrame
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return canonical.InternalError("messages stream message_delta frame is invalid")
+		return canonical.InternalErrorWithCause("messages stream message_delta frame is invalid", err)
 	}
 	s.finishReason = strings.TrimSpace(payload.Delta.StopReason) // swobu:io-string source=boundary
 	return nil

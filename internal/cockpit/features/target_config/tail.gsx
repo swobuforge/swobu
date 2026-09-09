@@ -62,8 +62,8 @@ func classifyCatalogError(errText string) catalogErrorClassification {
 
 func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
 	cls := classifyCatalogError(w.Catalog.Get().Err)
-	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), TargetModelLabel(w), cls.summary, "retry ↵", w.RetryCatalog)
-	row.AutoFocus = true
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), "models", cls.summary, "retry ↵", w.RetryCatalog)
+	row.AutoFocus = !w.permitsManualModelRecovery()
 	return row
 }
 
@@ -91,7 +91,8 @@ func ManualModelInput(w *TargetConfig) *ui.EditableRow {
 	row.Placeholder = "required"
 	row.ViewAction = "enter ↵"
 	row.EditAction = "use ↵"
-	row.StartEditing = model == ""
+	row.StartEditing = model == "" && !w.permitsManualModelRecovery()
+	row.AutoFocus = w.permitsManualModelRecovery()
 	row.OnSubmit = func(value string) {
 		w.selectModelByID(strings.TrimSpace(value))
 	}
@@ -266,6 +267,9 @@ templ (t *targetTail) Render() {
 				<div class="pl-20 w-full">
 					@FlowText(strings.TrimSpace(t.root.Catalog.Get().Err))
 				</div>
+			}
+			if t.root.permitsManualModelRecovery() {
+				@ManualModelInput(t.root)
 			}
 		} else if setupAllowsModelChoice(t.root) {
 			@ModelSelectRow(t.root)

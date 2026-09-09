@@ -299,7 +299,7 @@ func decodeChatCompletionsItems(
 			if err != nil {
 				return nil, err
 			}
-			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, call.Function.Name, canonical.ToolKindFunction)
+			toolKey, err := canonical.ToolIdentityFromWire(call.Function.Name, canonical.ToolKindFunction)
 			if err != nil {
 				return nil, canonical.BadRequest("chat completions tool call has an invalid function identity")
 			}
@@ -316,7 +316,7 @@ func decodeChatCompletionsItems(
 			if strings.TrimSpace(call.Custom.Name) == "" { // swobu:io-string source=boundary
 				return nil, canonical.BadRequest("chat completions custom tool calls require a custom name")
 			}
-			toolKey, err := canonical.ResolveHistoricalToolKeyByName(tools, call.Custom.Name, canonical.ToolKindCustom)
+			toolKey, err := canonical.ToolIdentityFromWire(call.Custom.Name, canonical.ToolKindCustom)
 			if err != nil {
 				return nil, canonical.BadRequest("chat completions custom tool call has an invalid identity")
 			}

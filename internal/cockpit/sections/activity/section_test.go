@@ -9,7 +9,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestSection_RendersCatchAllResolutionPathAtSupportedWidths(t *testing.T) {
@@ -356,7 +356,7 @@ func TestActivityInProgressGlyphStandsAloneInStatusCell(t *testing.T) {
 
 func TestSection_RendersMultipleRecentRows(t *testing.T) {
 	first := *successfulModel().Activity.Latest
-	first.RouteLabel = "chatgpt-dmytrii"
+	first.RouteLabel = "sample-primary"
 	first.ProviderSpec = "chatgpt"
 	first.ProviderModel = "gpt-5.6-sol"
 	first.ClientLabel = "codex-tui/0.146.1"
@@ -366,7 +366,7 @@ func TestSection_RendersMultipleRecentRows(t *testing.T) {
 	first.AttemptCount = 1
 	second := first
 	second.ID = "req-2"
-	second.RouteLabel = "chatgpt-gmetrofun"
+	second.RouteLabel = "sample-secondary"
 	second.Status = readmodel.ActivitySucceeded
 	second.HTTPStatus = 200
 	second.Duration = 5713 * time.Millisecond
@@ -374,7 +374,7 @@ func TestSection_RendersMultipleRecentRows(t *testing.T) {
 	second.AttemptCount = 2
 	third := second
 	third.ID = "req-3"
-	third.RouteLabel = "chatgpt-jesus"
+	third.RouteLabel = "sample-third"
 	third.Status = readmodel.ActivityFailed
 	third.HTTPStatus = 500
 	third.Duration = 63 * time.Second

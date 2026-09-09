@@ -20,12 +20,7 @@ swobu connect muse
 muse
 ```
 
-Connect writes Muse's `provider = "meta"` profile discriminator, selects the
-client-facing model `default`, points `endpoint_transport.base_url` at the
-workspace `/v1` base, disables client-side auth, and replaces `model_catalog`
-with one Swobu facade row. It preserves unrelated MCP, skill, hook, TUI, and
-future settings. Existing owned values require explicit `--replace` approval.
-
-Muse never receives `MODEL_API_KEY`. Swobu resolves that credential only when
-calling Meta. This integration does not claim Muse compatibility with arbitrary
-models or providers and does not add `/muse-code/models`.
+Connect points Muse at the workspace endpoint and selects Swobu's `default`
+model. Its catalog advertises Swobu's conservative facade budget of 1,000,000
+context tokens and 64,000 output tokens. The Meta credential stays in Swobu and
+is not written to Muse.

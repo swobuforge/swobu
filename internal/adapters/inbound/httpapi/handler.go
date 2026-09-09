@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -67,7 +69,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	normalizedPath, err := canonical.NormalizePath(operationPath)
 	if err != nil {
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, "", err)
 		return
 	}
 	if websocketUpgrade(r) {
@@ -75,7 +77,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveResponsesWebsocket(writer, r, endpointName, normalizedPath)
 			return
 		}
-		writeExchangeError(writer, canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
+		writeExchangeError(writer, "", canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
 		return
 	}
 	if normalizedPath == canonical.NormalizedPathModels {
@@ -83,20 +85,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := canonical.ValidateClientTransport(r.Method, normalizedPath, false); err != nil {
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, "", err)
 		return
 	}
 
 	hasMessagesProtocolMarker := strings.TrimSpace(r.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
 	family, err := canonical.InferClientFamily(r.Method, normalizedPath, hasMessagesProtocolMarker)
 	if err != nil {
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, "", err)
 		return
 	}
 
 	requestBody, err := decodeRequestBody(w, r)
 	if err != nil {
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, family, err)
 		return
 	}
 	clientHandler := trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent"))
@@ -114,7 +116,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	transportRequest, threadID, err := ingressTransportRequest(r.Method, operationPath, workspace.String(), r.Header, requestBody)
 	if err != nil {
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, family, err)
 		return
 	}
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
@@ -134,7 +136,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
 		}
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, family, err)
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
@@ -149,24 +151,37 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if writer.committed {
-			slog.Warn("protocol response write failed after commit",
-				"component", "httpapi",
-				"event", "response_write_after_commit_failed",
-				"request_id", requestID,
-				"workspace", workspace.String(),
-				"ingress_family", string(family),
-				"normalized_op", string(normalizedPath),
-				"error", err,
-			)
+			logResponseWriteAfterCommitFailure(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, err)
 			h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 			return
 		}
-		writeExchangeError(writer, err)
+		writeExchangeError(writer, family, err)
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
 		return
 	}
 	logRequestOutcome(requestID, workspace.String(), family, normalizedPath, out.Target.TargetID, out.AttemptCount, delivery.Result{Kind: delivery.Succeeded})
 	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), family, normalizedPath, out, &timing, deliveryResult)
+}
+
+func logResponseWriteAfterCommitFailure(requestID, workspace string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, targetID string, attemptCount int, err error) {
+	attrs := []any{
+		"component", "httpapi", "event", "response_write_after_commit_failed",
+		"request_id", requestID, "workspace", workspace, "ingress_family", string(family),
+		"normalized_op", string(normalizedPath), "target_id", targetID, "attempt_count", attemptCount,
+		"error_type", fmt.Sprintf("%T", err),
+	}
+	var backendErr canonical.BackendError
+	if errors.As(err, &backendErr) {
+		attrs = append(attrs, "status_code", statusCodeForBackendError(backendErr))
+		if backendErr.SourceProtocol != "" {
+			attrs = append(attrs, "source_protocol", backendErr.SourceProtocol.String())
+		}
+		if backendErr.ProviderError != nil {
+			detail := backendErr.ProviderError
+			attrs = append(attrs, "backend_error_type", detail.Type, "backend_error_code", detail.Code, "backend_request_id", detail.RequestID)
+		}
+	}
+	slog.LogAttrs(context.Background(), slog.LevelWarn, "protocol response write failed after commit", anyAttrs(attrs)...)
 }
 
 func exchangeFailureDeliveryResult(err error) delivery.Result {
@@ -196,7 +211,7 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, wor
 	}
 	out, err := m.ListModels(r.Context(), exchange.ListModelsInput{Workspace: workspace})
 	if err != nil {
-		writeExchangeError(w, err)
+		writeExchangeError(w, "", err)
 		return
 	}
 	writeModelsSuccess(w, out)
@@ -350,6 +365,14 @@ func logRequestOutcome(
 	if errorCode != "" {
 		attrs = append(attrs, "error_code", errorCode)
 	}
+	var loggedBackend canonical.BackendError
+	if errors.As(err, &loggedBackend) && loggedBackend.SourceProtocol != "" {
+		attrs = append(attrs, "source_protocol", loggedBackend.SourceProtocol.String())
+		if loggedBackend.ProviderError != nil {
+			detail := loggedBackend.ProviderError
+			attrs = append(attrs, "backend_error_type", detail.Type, "backend_error_code", detail.Code, "backend_request_id", detail.RequestID)
+		}
+	}
 	attrs = append(attrs, "attempt_count", attemptCount)
 	level := slog.LevelDebug
 	if err != nil && deliveryResult.Kind != delivery.ClientCancelled && !errors.Is(err, context.Canceled) {
@@ -393,10 +416,14 @@ func statusCodeForBackendError(err canonical.BackendError) int {
 	return http.StatusBadGateway
 }
 
-func writeExchangeError(w http.ResponseWriter, err error) {
+func writeExchangeError(w http.ResponseWriter, family canonical.ClientFamily, err error) {
 	var swobuErr canonical.Error
 	if errors.As(err, &swobuErr) {
-		writeSwobuError(w, swobuErr)
+		if family == "" {
+			writeSwobuError(w, swobuErr)
+			return
+		}
+		writeProtocolError(w, family, statusCodeForSwobuError(swobuErr.Code), "swobu_error", string(swobuErr.Code), swobuErr.Message, "", "")
 		return
 	}
 
@@ -406,17 +433,117 @@ func writeExchangeError(w http.ResponseWriter, err error) {
 		if backendErr.RetryAfterHeaderValue != "" {
 			w.Header().Set("Retry-After", backendErr.RetryAfterHeaderValue)
 		}
-		if backendErr.Message != "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(statusCode)
-			_, _ = w.Write([]byte(backendErr.Message))
-			return
-		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
+		_, _ = w.Write(projectBackendError(family, statusCode, backendErr))
 		return
 	}
 
-	writeSwobuError(w, canonical.InternalError("internal server error"))
+	internal := canonical.InternalError("internal server error")
+	if family == "" {
+		writeSwobuError(w, internal)
+		return
+	}
+	writeProtocolError(w, family, http.StatusInternalServerError, "swobu_error", string(internal.Code), internal.Message, "", "")
+}
+
+func projectBackendError(family canonical.ClientFamily, statusCode int, backendErr canonical.BackendError) []byte {
+	if backendErr.ProviderError != nil && backendErr.SourceProtocol == family && json.Valid([]byte(backendErr.Message)) {
+		return []byte(backendErr.Message)
+	}
+	message := strings.TrimSpace(backendErr.Message) // swobu:io-string source=boundary
+	errorType, code, param, requestID := "provider_error", "", "", ""
+	if backendErr.ProviderError != nil {
+		detail := backendErr.ProviderError
+		message, errorType, code, param, requestID = detail.Message, detail.Type, detail.Code, detail.Param, detail.RequestID
+	}
+	if message == "" {
+		message = http.StatusText(statusCode)
+	}
+	if family == canonical.ClientFamilyMessages {
+		projectedType := messagesErrorTypeForStatus(statusCode)
+		if backendErr.SourceProtocol == canonical.ClientFamilyMessages && errorType != "" {
+			projectedType = errorType
+		}
+		body := struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+			RequestID string `json:"request_id,omitempty"`
+		}{Type: "error", RequestID: requestID}
+		body.Error.Type, body.Error.Message = projectedType, message
+		raw, _ := json.Marshal(body)
+		return raw
+	}
+	if errorType == "" {
+		errorType = "provider_error"
+	}
+	body := struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code,omitempty"`
+			Param   string `json:"param,omitempty"`
+		} `json:"error"`
+	}{}
+	body.Error.Message, body.Error.Type, body.Error.Code, body.Error.Param = message, errorType, code, param
+	raw, _ := json.Marshal(body)
+	return raw
+}
+
+func writeProtocolError(w http.ResponseWriter, family canonical.ClientFamily, status int, errorType, code, message, param, requestID string) {
+	if family == canonical.ClientFamilyMessages {
+		body := struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}{Type: "error"}
+		body.Error.Type, body.Error.Message = messagesErrorTypeForStatus(status), message
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
+	backend := canonical.NewStructuredBackendError("swobu", family, status, canonical.BackendErrorDetail{
+		Type: errorType, Code: code, Message: message, Param: param, RequestID: requestID,
+	}, "")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(projectBackendError(family, status, backend))
+}
+
+func messagesErrorTypeForStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "invalid_request_error"
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusPaymentRequired:
+		return "billing_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusConflict:
+		return "conflict_error"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case http.StatusGatewayTimeout:
+		return "timeout_error"
+	case 529:
+		return "overloaded_error"
+	default:
+		if status >= http.StatusInternalServerError {
+			return "api_error"
+		}
+		return "invalid_request_error"
+	}
 }
 
 type committingResponseWriter struct {

@@ -22,6 +22,29 @@ type chatCompletionsJSONSchemaFormatDTO struct {
 }
 
 // swobu:lint ignore string-switch because=protocol boundary decodes response_format variants.
+type OutputFormatTransformer func(canonical.OutputFormat, *[]compat.Change) (json.RawMessage, error)
+
+func DefaultOutputFormatLowering(format canonical.OutputFormat, changes *[]compat.Change) (json.RawMessage, error) {
+	var strict *bool
+	if format.Kind == canonical.OutputFormatJSONSchema {
+		if strings.TrimSpace(format.Name) == "" { // swobu:io-string source=domain
+			format.Name = "swobu_output"
+		}
+		exact := wire.SchemaContractExact(format.SchemaContract, canonical.SchemaProfileOpenAI)
+		if exact && format.Conformance() == canonical.SchemaConformanceEnforced {
+			value := true
+			strict = &value
+		} else if format.Conformance() != canonical.SchemaConformanceDefault || !exact {
+			value := false
+			strict = &value
+		}
+		if !exact && format.Conformance() == canonical.SchemaConformanceEnforced && changes != nil {
+			*changes = compat.AppendUnique(*changes, compat.NewApproximation(canonical.RequestOutputSchemaConformance, canonical.Occurrence{}))
+		}
+	}
+	return encodeChatCompletionsOutputFormat(format, strict)
+}
+
 func decodeChatCompletionsOutputFormat(raw json.RawMessage, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
 	if trimmed == "" || trimmed == "null" {
@@ -39,15 +62,21 @@ func decodeChatCompletionsOutputFormat(raw json.RawMessage, changeLog *[]compat.
 			return canonical.OutputFormat{}, canonical.BadRequest("chat completions request response_format json_schema is required")
 		}
 		strict := false
+		conformance := canonical.SchemaConformanceDefault
 		if dto.JSONSchema.Strict != nil {
 			strict = *dto.JSONSchema.Strict
+			if strict {
+				conformance = canonical.SchemaConformanceEnforced
+			} else {
+				conformance = canonical.SchemaConformanceRelaxed
+			}
 		}
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{
-			Kind:        canonical.OutputFormatJSONSchema,
-			Name:        dto.JSONSchema.Name,
-			Description: dto.JSONSchema.Description,
-			Schema:      canonical.NewRawJSONObject(string(dto.JSONSchema.Schema)),
-			Strict:      strict,
+			Kind:           canonical.OutputFormatJSONSchema,
+			Name:           dto.JSONSchema.Name,
+			Description:    dto.JSONSchema.Description,
+			Schema:         canonical.NewRawJSONObject(string(dto.JSONSchema.Schema)),
+			SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: conformance},
 		})
 	case "json_object":
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONObject})
@@ -56,7 +85,7 @@ func decodeChatCompletionsOutputFormat(raw json.RawMessage, changeLog *[]compat.
 	}
 }
 
-func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawMessage, error) {
+func encodeChatCompletionsOutputFormat(format canonical.OutputFormat, strict *bool) (json.RawMessage, error) {
 	if format.IsZero() {
 		return nil, nil
 	}
@@ -80,10 +109,7 @@ func encodeChatCompletionsOutputFormat(format canonical.OutputFormat) (json.RawM
 			Schema:      json.RawMessage(format.Schema.RawObject()),
 		},
 	}
-	if format.Strict {
-		strict := true
-		dto.JSONSchema.Strict = &strict
-	}
+	dto.JSONSchema.Strict = strict
 	raw, err := json.Marshal(dto)
 	if err != nil {
 		return nil, canonical.InternalError("chat completions request output format could not be encoded")

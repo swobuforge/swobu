@@ -201,22 +201,6 @@ func ResolveToolDeclarationByName(tools []ToolDeclaration, name string, specific
 	return resolvePlainToolDeclarationByName(tools, trimmed, normalizedSpecific)
 }
 
-// ResolveHistoricalToolKeyByName recovers the by-value identity of a client
-// transcript call. Current declarations refine the identity when present; an
-// absent declaration does not make historical environment data invalid.
-// Provider response decoders must continue using ResolveToolDeclarationByName
-// against the exact attempted ToolSet.
-func ResolveHistoricalToolKeyByName(tools []ToolDeclaration, name string, kind ToolKind) (ToolKey, error) {
-	if declaration, _, err := ResolveToolDeclarationByName(tools, name, string(kind)); err == nil {
-		return declaration.Key(), nil
-	}
-	key, err := ToolIdentityFromWire(name, kind)
-	if err != nil {
-		return ToolKey{}, BadRequest("canonical historical tool call identity is invalid")
-	}
-	return key, nil
-}
-
 // HistoricalScopedToolKey preserves one client-transcript identity by value.
 // It does not resolve or authorize a current declaration.
 func HistoricalScopedToolKey(namespace string, name string, kind ToolKind) (ToolKey, error) {

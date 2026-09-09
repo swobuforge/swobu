@@ -1,0 +1,85 @@
+{
+  "schema": 2,
+  "report_id": "fedcba9876543210fedcba9876543210",
+  "report_created_at": "2026-08-31T12:00:00Z",
+  "install_id": "0123456789abcdef0123456789abcdef",
+  "runtime": {
+    "version": "0.1.0",
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "installation_age_bucket": "1_7d",
+  "traffic": [
+    {
+      "client_family": "codex",
+      "requested_model": "default",
+      "resolved_model": "configured",
+      "client_protocol": "responses",
+      "target_protocol": "responses",
+      "operation": "response",
+      "provider": "openai",
+      "result": "success",
+      "status_code": 200,
+      "delivery_kind": "succeeded",
+      "canonical_error_code": "",
+      "attempt_count": 1,
+      "fallback_recovered": false,
+      "continuity_recovered": false,
+      "cross_protocol": false,
+      "wire_mutated": true,
+      "count": 27,
+      "duration_ms": [
+        0,
+        2,
+        14,
+        9,
+        2,
+        0
+      ],
+      "ttfb_ms": [
+        0,
+        5,
+        18,
+        3,
+        1,
+        0
+      ]
+    },
+    {
+      "client_family": "claude_code",
+      "requested_model": "configured",
+      "resolved_model": "configured",
+      "client_protocol": "messages",
+      "target_protocol": "messages",
+      "operation": "message",
+      "provider": "anthropic",
+      "result": "backend_error",
+      "status_code": 503,
+      "delivery_kind": "exchange_failed",
+      "canonical_error_code": "BAD_ENDPOINT",
+      "attempt_count": 2,
+      "fallback_recovered": true,
+      "continuity_recovered": true,
+      "cross_protocol": false,
+      "wire_mutated": false,
+      "count": 3,
+      "duration_ms": [
+        0,
+        0,
+        1,
+        1,
+        1,
+        0
+      ],
+      "ttfb_ms": [
+        0,
+        0,
+        1,
+        1,
+        0,
+        1
+      ]
+    }
+  ],
+  "overflow_count": 0
+}

@@ -1,14 +1,10 @@
-# Swobu
+# [Swobu](https://swobu.com/)
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · **Bahasa Indonesia** · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Satu endpoint untuk Claude Code, Codex, dan agen AI lain agar dapat memakai DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock, dan lainnya — dengan routing, load balancing, dan failover otomatis.**
 
 Jadikan kapasitas AI dapat dirutekan. Agen Anda meminta sebuah model; Swobu mengubah nama model itu menjadi route lintas provider, akun, region, dan server lokal, sambil menangani load balancing, failover, translasi reasoning, serta kompatibilitas protokol secara semantik di belakang layar.
-
-<p align="center">
-  <img src="./assets/readme/free-demo.gif" alt="Agen AI memakai route Swobu dengan load balancing dan failover" width="1280">
-</p>
 
 [Dokumentasi](https://swobu.com/docs/) · [Mulai cepat](https://swobu.com/docs/start/first-route/) · [Rilis](https://github.com/swobuforge/swobu/releases)
 
@@ -24,6 +20,8 @@ Jadikan kapasitas AI dapat dirutekan. Agen Anda meminta sebuah model; Swobu meng
 Bagi agen, sebuah **route Swobu terlihat seperti sebuah model**.
 
 Di balik nama itu bisa ada satu endpoint, model yang sama dari beberapa tempat, atau pool lintas provider.
+
+Diagram berikut adalah contoh konfigurasi. Pilih model yang tersedia di provider Anda.
 
 ```text
 claude-opus-5
@@ -65,8 +63,16 @@ Field `model` yang sudah dipahami agen Anda menjadi batas routing yang dapat dip
 
 ## Mulai dengan satu perintah
 
+macOS, Linux, atau WSL:
+
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://swobu.com/install.ps1 | iex
 ```
 
 Installer menjalankan Swobu dan membuka **Cockpit**, antarmuka terminalnya.
@@ -167,56 +173,6 @@ Nama route tidak berubah.
 
 ---
 
-### Intent reasoning ikut bersama request
-
-Setiap provider mengekspos reasoning dengan cara berbeda.
-
-Satu API mungkin menerima effort level. API lain mengekspos token budget. Yang lain lagi mengodekan reasoning dengan bentuk request yang sepenuhnya berbeda.
-
-Swobu memperlakukan reasoning sebagai kemampuan semantik dan menerjemahkannya ketika ada representasi ekuivalen yang tetap bermakna.
-
-```text
-agent intent
-    │
-    │ reasoning: high
-    ▼
-   Swobu
-    │
-    ├─ provider A → reasoning effort
-    ├─ provider B → reasoning budget
-    └─ provider C → native equivalent
-```
-
-Anda seharusnya tidak perlu mengajari setiap agen dialek API setiap provider.
-
----
-
-### Kompatibilitas membuat routing benar-benar mungkin
-
-Mengirim JSON yang sama ke URL lain itu mudah.
-
-Memindahkan request agen dengan aman antar-API tidak mudah.
-
-Provider berbeda dalam hal:
-
-- tools dan function calls
-- reasoning
-- web search
-- streaming
-- message history
-- structured content
-- model discovery
-- kemampuan native provider
-- detail protokol dan edge case
-
-Swobu menerjemahkan request ketika maknanya dapat dipertahankan.
-
-Target yang tidak dapat merepresentasikan semantik yang dibutuhkan bisa dikeluarkan, alih-alih diam-diam menurunkan kualitas request.
-
-Kompatibilitas bukan sesuatu yang seharusnya perlu Anda pikirkan terus. Itu adalah infrastruktur yang membuat routing dapat dipercaya.
-
----
-
 ## Satu boundary, banyak protokol
 
 ```text
@@ -254,50 +210,7 @@ Dukungan protokol dan kemampuan yang tepat berbeda menurut provider.
 
 Swobu mendukung inferensi lokal, frontier API, hyperscaler, platform inferensi khusus, dan aggregator.
 
-**Local:** Ollama · LM Studio · vLLM
-
-**Frontier:** OpenAI · ChatGPT · Anthropic · Gemini · Mistral · DeepSeek · Kimi · StepFun · Z.AI
-
-**Cloud:** AWS Bedrock · Azure AI · Cloudflare Workers AI · Scaleway · OVHcloud
-
-**Inference:** Cerebras · Groq · SambaNova · NVIDIA NIM · Together AI · Fireworks AI · FriendliAI · DeepInfra · Runpod · Nebius · GMI Cloud · Novita AI · SiliconFlow · Baseten · Hyperbolic · ModelScope · LLM7
-
-**Aggregation:** OpenRouter · Custom Endpoint
-
-Katalog, jumlah provider, matriks protokol, dan aset README dihasilkan dari provider registry Swobu.
-
----
-
-## Kemampuan native tetap native
-
-Swobu tidak memaksa semua provider turun ke sekumpulan kemampuan minimum yang sama.
-
-Ketika target yang dipilih menyediakan kemampuan native berguna yang dipahami Swobu, kemampuan itu tetap dapat tersedia melewati boundary kompatibilitas.
-
-Termasuk kemampuan seperti web search native provider pada provider yang mendukungnya.
-
-Prinsipnya sederhana:
-
-> **pertahankan semantik yang berguna bila memungkinkan; gagal secara jelas bila tidak dapat direpresentasikan.**
-
----
-
-## Dibangun terhadap inkompatibilitas nyata
-
-Swobu ada karena “OpenAI-compatible” sering berhenti kompatibel tepat ketika agen mulai melakukan hal-hal yang menarik.
-
-Swobu diuji terhadap kegagalan nyata yang melibatkan:
-
-- reasoning controls
-- tool definitions
-- field malformed atau unsupported
-- message replay
-- model discovery
-- perilaku streaming
-- translasi lintas protokol
-- pembatasan request khusus provider
-
-[Catatan kompatibilitas →](https://swobu.com/docs/)
+[Lihat provider dan panduan konfigurasinya di dokumentasi.](https://swobu.com/docs/)
 
 ---
 
@@ -341,28 +254,14 @@ Swobu menerbitkan binary berversi untuk Linux, macOS, dan Windows, lengkap denga
 
 [Rilis terbaru →](https://github.com/swobuforge/swobu/releases/latest)
 
-Instal dari source:
+Build dari source:
 
 ```bash
-go install github.com/swobuforge/swobu/cmd/swobu@latest
+git clone https://github.com/swobuforge/swobu.git
+cd swobu
+make build
+./.out/swobu --version
 ```
-
----
-
-## Status
-
-Routing, perilaku kompatibilitas, dan integrasi provider terus berkembang sementara abstraksinya distabilkan.
-
-Laporan bug dan masalah kompatibilitas sangat diterima.
-
-[Buka issue →](https://github.com/swobuforge/swobu/issues)
-
----
-
-<details>
-<summary><strong>OpenAI Build Week 2026</strong></summary>
-Arsitektur Swobu saat ini dibangun ulang selama OpenAI Build Week 2026 menggunakan GPT 5.6 Sol.
-</details>
 
 ---
 

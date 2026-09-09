@@ -9,6 +9,29 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
+type OutputFormatTransformer func(canonical.OutputFormat, *[]compat.Change) (*responsesTextDTO, error)
+
+func DefaultOutputFormatLowering(format canonical.OutputFormat, changes *[]compat.Change) (*responsesTextDTO, error) {
+	var strict *bool
+	if format.Kind == canonical.OutputFormatJSONSchema {
+		if strings.TrimSpace(format.Name) == "" { // swobu:io-string source=domain
+			format.Name = "swobu_output"
+		}
+		exact := wire.SchemaContractExact(format.SchemaContract, canonical.SchemaProfileOpenAI)
+		if exact && format.Conformance() == canonical.SchemaConformanceEnforced {
+			value := true
+			strict = &value
+		} else if format.Conformance() != canonical.SchemaConformanceDefault || !exact {
+			value := false
+			strict = &value
+		}
+		if !exact && format.Conformance() == canonical.SchemaConformanceEnforced && changes != nil {
+			*changes = compat.AppendUnique(*changes, compat.NewApproximation(canonical.RequestOutputSchemaConformance, canonical.Occurrence{}))
+		}
+	}
+	return encodeResponsesOutputFormat(format, strict)
+}
+
 func decodeResponsesOutputFormat(text *responsesTextDTO, changeLog *[]compat.Change, exchangeID string) (canonical.OutputFormat, error) {
 	if text == nil {
 		return canonical.OutputFormat{}, nil
@@ -27,22 +50,28 @@ func decodeResponsesOutputFormat(text *responsesTextDTO, changeLog *[]compat.Cha
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONObject})
 	case canonical.OutputFormatJSONSchema:
 		strict := false
+		conformance := canonical.SchemaConformanceDefault
 		if text.Format.Strict != nil {
 			strict = *text.Format.Strict
+			if strict {
+				conformance = canonical.SchemaConformanceEnforced
+			} else {
+				conformance = canonical.SchemaConformanceRelaxed
+			}
 		}
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{
-			Kind:        canonical.OutputFormatJSONSchema,
-			Name:        text.Format.Name,
-			Description: text.Format.Description,
-			Schema:      canonical.NewRawJSONObject(string(text.Format.Schema)),
-			Strict:      strict,
+			Kind:           canonical.OutputFormatJSONSchema,
+			Name:           text.Format.Name,
+			Description:    text.Format.Description,
+			Schema:         canonical.NewRawJSONObject(string(text.Format.Schema)),
+			SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: conformance},
 		})
 	default:
 		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Responses", "text.format type "+formatType)
 	}
 }
 
-func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextDTO, error) {
+func encodeResponsesOutputFormat(format canonical.OutputFormat, strict *bool) (*responsesTextDTO, error) {
 	if format.IsZero() {
 		return nil, nil
 	}
@@ -67,10 +96,7 @@ func encodeResponsesOutputFormat(format canonical.OutputFormat) (*responsesTextD
 		if !format.Schema.IsEmpty() {
 			dto.Schema = json.RawMessage(format.Schema.RawObject())
 		}
-		if format.Strict {
-			strict := true
-			dto.Strict = &strict
-		}
+		dto.Strict = strict
 		return &responsesTextDTO{Format: dto}, nil
 	default:
 		return nil, canonical.InternalError("canonical output format kind is invalid")

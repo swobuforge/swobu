@@ -149,7 +149,7 @@ func FunctionTool(t testing.TB, name string, schema canonical.ToolSchema) canoni
 	if err != nil {
 		t.Fatal(err)
 	}
-	declaration, err := canonical.NewFunctionTool(key, "", schema, canonical.Unspecified[bool]())
+	declaration, err := canonical.NewFunctionTool(key, "", schema, canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,8 @@ func LargeIntegerRequest(t testing.TB, model string) canonical.CanonicalRequest 
 	call := ToolCall(t, "call_probe", key, canonical.NewJSONObjectToolInput(Object(t, `{"value":`+large+`}`)))
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
 		Kind: canonical.OutputFormatJSONSchema, Name: "probe_result",
-		Schema: canonical.NewRawJSONObject(`{"type":"object","properties":{"value":{"enum":[` + large + `]}}}`),
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"value":{"enum":[` + large + `]}}}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI},
 	})
 	if err != nil {
 		t.Fatal(err)

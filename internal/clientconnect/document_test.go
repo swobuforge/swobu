@@ -53,6 +53,36 @@ func TestJSONEditorAddsObjectsAndRejectsAmbiguityOrWrongShape(t *testing.T) {
 	}
 }
 
+func TestJSONEditorValueStandardizesSelectedJSONCSubtree(t *testing.T) {
+	raw := []byte(`{
+  "models": [
+    // Swobu facade
+    {"id": "default",},
+  ],
+  "compat": {
+    // Pi compatibility
+    "supportsDeveloperRole": false,
+  },
+  "modelOverrides": {
+    "default": {
+      // output limit
+      "maxTokens": 1000,
+    },
+  },
+}`)
+	editor := jsonEditor{allowComments: true}
+	var models []map[string]any
+	if exists, err := editor.Value(raw, keyPath{"models"}, &models); err != nil || !exists || len(models) != 1 || models[0]["id"] != "default" {
+		t.Fatalf("models = %#v, exists=%v, error=%v", models, exists, err)
+	}
+	for _, path := range []keyPath{{"compat"}, {"modelOverrides"}} {
+		var value map[string]any
+		if exists, err := editor.Value(raw, path, &value); err != nil || !exists || len(value) == 0 {
+			t.Fatalf("%s = %#v, exists=%v, error=%v", joinKeyPath(path), value, exists, err)
+		}
+	}
+}
+
 func TestTOMLEditorConformance(t *testing.T) {
 	editor := tomlEditor{}
 	path := keyPath{"openai_base_url"}

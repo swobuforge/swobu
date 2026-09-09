@@ -13,8 +13,28 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
+// responsesLitePrefixEnd is the single positional classifier shared by input
+// decoding and history rebasing. Lite only owns the known Codex prefix; later
+// developer messages remain ordinary conversation items.
+func responsesLitePrefixEnd(lite bool, length int, itemAt func(int) (string, string)) int {
+	if !lite || length == 0 {
+		return 0
+	}
+	typeName, role := itemAt(0)
+	if strings.TrimSpace(typeName) != "additional_tools" || strings.TrimSpace(role) != "developer" {
+		return 0
+	}
+	if length > 1 {
+		typeName, role = itemAt(1)
+		if strings.TrimSpace(typeName) == "message" && strings.TrimSpace(role) == "developer" {
+			return 2
+		}
+	}
+	return 1
+}
+
 // swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
-func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, lite bool, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy, access *mcp.Access) ([]canonical.CanonicalItem, error) {
+func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, semantics clientRequestSemantics, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy, access *mcp.Access) ([]canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
@@ -33,6 +53,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 	}
 	decoded := make([]canonical.CanonicalItem, 0, len(items))
 	pendingHostedDiscovery := make([]canonical.ToolCallID, 0)
+	prefixEnd := semantics.requestInputPrefixEnd
 	for idx, item := range items {
 		itemType := strings.TrimSpace(item.Type) // swobu:io-string source=boundary
 		if itemType == "" {
@@ -53,7 +74,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 				return nil, canonical.BadRequest("responses request additional_tools tools are invalid")
 			}
 			scope := canonical.ContextScopeHistory
-			if lite && idx == 0 {
+			if idx < prefixEnd && idx == 0 {
 				scope = canonical.ContextScopeRequest
 			}
 			occurrences, embeddedTools, updatedAccess, err := decodeResponsesToolOccurrences(wireTools, scope, fmt.Sprintf("wire:/input/%d/tools", idx), changeLog, exchangeID, *access)
@@ -84,13 +105,13 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, err
 			}
-			if lite && idx == 1 && role == "developer" {
+			if idx < prefixEnd && idx == 1 && role == "developer" {
 				for _, part := range parts {
 					message, ok := part.Message()
 					if !ok {
 						return nil, canonical.BadRequest("Responses Lite base instructions must be a message")
 					}
-					scoped, err := canonical.NewScopedMessageItem(message.Role(), message.Content(), canonical.ContextScopeRequest)
+					scoped, err := canonical.NewScopedMessageItem(canonical.MessageRoleSystem, message.Content(), canonical.ContextScopeRequest)
 					if err != nil {
 						return nil, err
 					}
@@ -147,7 +168,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err := json.Unmarshal(rawInput, &input); err != nil {
 				return nil, canonical.BadRequest("responses request custom_tool_call input must be a string")
 			}
-			toolKey, err := canonical.ToolIdentityFromWire(item.Name, canonical.ToolKindCustom)
+			toolKey, err := resolveHistoricalResponsesCustomCall(tools, item.Name)
 			if err != nil {
 				return nil, canonical.BadRequest("responses request custom_tool_call has an invalid tool identity")
 			}
@@ -416,9 +437,7 @@ func equalResponsesToolDeclarations(left, right []canonical.ToolDeclaration) boo
 				leftFunction.InputSchema().RawObject() != rightFunction.InputSchema().RawObject() {
 				return false
 			}
-			leftStrict, leftSpecified := leftFunction.Strict().Get()
-			rightStrict, rightSpecified := rightFunction.Strict().Get()
-			if leftSpecified != rightSpecified || leftStrict != rightStrict {
+			if leftFunction.SchemaContract() != rightFunction.SchemaContract() {
 				return false
 			}
 		}

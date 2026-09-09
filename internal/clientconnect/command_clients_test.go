@@ -2,13 +2,16 @@ package clientconnect
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type commandCall struct {
@@ -32,12 +35,20 @@ func commandService(t *testing.T, binary string, replies map[string]commandReply
 			}
 			return "", os.ErrNotExist
 		},
-		run: func(name string, args ...string) ([]byte, int, error) {
+		run: func(_ context.Context, name string, args ...string) ([]byte, int, error) {
 			*calls = append(*calls, commandCall{name, append([]string(nil), args...)})
 			key := strings.Join(append([]string{name}, args...), " ")
 			reply, ok := replies[key]
 			if !ok {
 				t.Fatalf("unexpected command: %s", key)
+			}
+			if reply.err == nil && reply.code == 0 && name == "openclaw" && len(args) >= 4 && args[0] == "config" && args[1] == "set" {
+				value := args[3]
+				if args[2] == "models.providers.swobu" || args[2] == "agents.defaults.models" {
+					replies["openclaw config get "+args[2]+" --json"] = commandReply{stdout: value + "\n"}
+				} else {
+					replies["openclaw config get "+args[2]] = commandReply{stdout: value + "\n"}
+				}
 			}
 			return []byte(reply.stdout), reply.code, reply.err
 		},
@@ -95,7 +106,7 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 
 	service := NewService()
 	target := testTarget(t)
-	clients := service.Discover(target)
+	clients := service.Discover(context.Background(), target)
 	found := false
 	for _, client := range clients {
 		if client.ID == ClientOpenClaw {
@@ -107,14 +118,14 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 		t.Fatalf("OpenClaw not discovered through PATH: %#v", clients)
 	}
 
-	plan, err := service.Plan(ClientOpenClaw, target)
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.AlreadyConfigured() {
 		t.Fatalf("initial plan unexpectedly configured: %#v", plan)
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,7 +151,7 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 		t.Fatalf("Swobu model missing from allowlist: %#v", state.Allowlist)
 	}
 
-	configured, err := service.Plan(ClientOpenClaw, target)
+	configured, err := service.Plan(context.Background(), ClientOpenClaw, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,16 +290,42 @@ func TestOpenClawDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
 	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Apply(plan); err != nil {
+	if _, err = service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	want := []commandCall{{"openclaw", []string{"config", "set", "models.providers.swobu", providerJSON, "--json"}}, {"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/default"}}}
-	if !reflect.DeepEqual(calls[len(calls)-2:], want) {
+	if !reflect.DeepEqual(configurationSetCalls(calls), want) {
 		t.Fatalf("apply calls=%#v", calls)
+	}
+}
+
+func TestOpenClawApplyPreservesCommandCancellation(t *testing.T) {
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"openclaw config file":                              {stdout: "/path/to/config.json\n"},
+		"openclaw config get agents.defaults.model.primary": {stdout: "openrouter/e2e\n"},
+		"openclaw config get models.providers.swobu --json": {code: 1},
+		"openclaw config get agents.defaults.models --json": {code: 1},
+	}
+	service := commandService(t, "openclaw", replies, &calls)
+	baseRun := service.run
+	service.run = func(ctx context.Context, name string, args ...string) ([]byte, int, error) {
+		if len(args) >= 3 && args[0] == "config" && args[1] == "set" {
+			return nil, -1, context.Canceled
+		}
+		return baseRun(ctx, name, args...)
+	}
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Apply(context.Background(), plan)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context cancellation", err)
 	}
 }
 
@@ -301,7 +338,7 @@ func TestOpenClawConfiguredAndNixStates(t *testing.T) {
 		"openclaw config get agents.defaults.models --json": {code: 1},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil || !plan.AlreadyConfigured() {
 		t.Fatalf("plan=%#v err=%v", plan, err)
 	}
@@ -311,7 +348,7 @@ func TestOpenClawConfiguredAndNixStates(t *testing.T) {
 		}
 		return ""
 	}
-	clients := service.Discover(testTarget(t))
+	clients := service.Discover(context.Background(), testTarget(t))
 	found := false
 	for _, c := range clients {
 		if c.ID == ClientOpenClaw {
@@ -321,7 +358,7 @@ func TestOpenClawConfiguredAndNixStates(t *testing.T) {
 	if !found {
 		t.Fatal("Nix mode OpenClaw omitted from discovery")
 	}
-	if _, err := service.Plan(ClientOpenClaw, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nix mode") {
+	if _, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nix mode") {
 		t.Fatalf("Nix admitted: %v", err)
 	}
 }
@@ -332,7 +369,7 @@ func TestOpenClawDiscoverSurvivesInspectionCommandFailure(t *testing.T) {
 		"openclaw config file": {code: 1, err: os.ErrPermission},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
-	clients := service.Discover(testTarget(t))
+	clients := service.Discover(context.Background(), testTarget(t))
 	if len(calls) != 0 {
 		t.Fatalf("Discover spawned %d processes, want 0", len(calls))
 	}
@@ -356,7 +393,7 @@ func TestOpenClawDiscoverySpawnsZeroProcessesAndPlanSurfacesInspectionError(t *t
 	service := commandService(t, "openclaw", replies, &calls)
 
 	// 1. Discover finds OpenClaw and spawns ZERO processes
-	clients := service.Discover(testTarget(t))
+	clients := service.Discover(context.Background(), testTarget(t))
 	if len(calls) != 0 {
 		t.Fatalf("Discover spawned %d processes, want 0: %#v", len(calls), calls)
 	}
@@ -372,15 +409,15 @@ func TestOpenClawDiscoverySpawnsZeroProcessesAndPlanSurfacesInspectionError(t *t
 
 	// 2. Plan encounters failing config get (corrupt config / runtime failure)
 	// It must surface that exact failure rather than planning missing fields
-	_, err := service.Plan(ClientOpenClaw, testTarget(t))
+	_, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err == nil {
 		t.Fatal("Plan succeeded on corrupt config / failing config get")
 	}
 	if !strings.Contains(err.Error(), "SyntaxError") && !strings.Contains(err.Error(), "position 42") {
 		t.Fatalf("Plan did not surface exact CLI failure: %v", err)
 	}
-	if !strings.Contains(err.Error(), "OpenClaw is not automatically wireable") || !strings.Contains(err.Error(), "Nothing changed.") {
-		t.Fatalf("Plan error missing wireable / nothing changed envelope: %v", err)
+	if !strings.Contains(err.Error(), "OpenClaw is not automatically wireable") || strings.Contains(err.Error(), "Nothing changed") {
+		t.Fatalf("Plan error has wrong adapter envelope: %v", err)
 	}
 }
 
@@ -393,12 +430,40 @@ func TestOpenClawPlanSurfacesMalformedJSONError(t *testing.T) {
 		"openclaw config get models.providers.swobu --json": {stdout: "{\ninvalid json\n"},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
-	_, err := service.Plan(ClientOpenClaw, testTarget(t))
+	_, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err == nil {
 		t.Fatal("Plan succeeded on malformed JSON")
 	}
 	if !strings.Contains(err.Error(), "invalid JSON") {
 		t.Fatalf("Plan error did not describe invalid JSON: %v", err)
+	}
+}
+
+func TestCommandBackedPlanReceivesOperationCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	service := &Service{
+		getenv: func(string) string { return "" },
+		run: func(commandCtx context.Context, _ string, _ ...string) ([]byte, int, error) {
+			close(started)
+			<-commandCtx.Done()
+			return nil, -1, commandCtx.Err()
+		},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.Plan(ctx, ClientOpenClaw, testTarget(t))
+		done <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("command-backed Plan ignored cancellation")
 	}
 }
 
@@ -416,7 +481,7 @@ func TestOpenClawMissingPathDiagnosticsPlanFreshConfiguration(t *testing.T) {
 	}
 	service := commandService(t, "openclaw", replies, &calls)
 
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
 		t.Fatalf("Plan with OpenClaw missing-path diagnostics failed: %v", err)
 	}
@@ -439,7 +504,7 @@ func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) 
 	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
 
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
 		t.Fatalf("Plan with unset default model failed: %v", err)
 	}
@@ -460,16 +525,26 @@ func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) 
 		t.Fatalf("backend change after = %q, want swobu/default", backendChange.After)
 	}
 
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 	want := []commandCall{
 		{"openclaw", []string{"config", "set", "models.providers.swobu", providerJSON, "--json"}},
 		{"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/default"}},
 	}
-	if !reflect.DeepEqual(calls[len(calls)-2:], want) {
+	if !reflect.DeepEqual(configurationSetCalls(calls), want) {
 		t.Fatalf("apply calls = %#v, want %#v", calls, want)
 	}
+}
+
+func configurationSetCalls(calls []commandCall) []commandCall {
+	var sets []commandCall
+	for _, call := range calls {
+		if len(call.args) >= 2 && call.args[0] == "config" && call.args[1] == "set" {
+			sets = append(sets, call)
+		}
+	}
+	return sets
 }
 
 func TestOpenClawReusesExistingCredentialPresentationAndMetadata(t *testing.T) {
@@ -484,7 +559,7 @@ func TestOpenClawReusesExistingCredentialPresentationAndMetadata(t *testing.T) {
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
 	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +568,7 @@ func TestOpenClawReusesExistingCredentialPresentationAndMetadata(t *testing.T) {
 			t.Fatalf("existing credential/model was over-owned: %#v", plan.Changes)
 		}
 	}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	joined := ""
@@ -516,7 +591,7 @@ func TestOpenClawApplyMergesUnrelatedProviderAndAllowlistEdits(t *testing.T) {
 		"openclaw config get agents.defaults.models --json": {stdout: `{"other/model":{}}` + "\n"},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
-	plan, err := service.Plan(ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +609,7 @@ func TestOpenClawApplyMergesUnrelatedProviderAndAllowlistEdits(t *testing.T) {
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
 	replies["openclaw config set agents.defaults.models "+allowlistJSON+" --json"] = commandReply{}
 	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
-	if err := service.Apply(plan); err != nil {
+	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
 	joined := ""
@@ -559,18 +634,17 @@ func TestHermesDeclaresCustomBackendWithOneAtomicFileReplacement(t *testing.T) {
 	}
 	var calls []commandCall
 	replies := map[string]commandReply{
-		"hermes config get model --json": {stdout: `{"provider":"openrouter","default":"vendor/model","base_url":"https://openrouter.ai/api/v1"}`},
-		"hermes config path":             {stdout: path + "\n"},
+		"hermes config path": {stdout: path + "\n"},
 	}
 	service := commandService(t, "hermes", replies, &calls)
-	plan, err := service.Plan(ClientHermes, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientHermes, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Apply(plan); err != nil {
+	if _, err = service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 4 { // Plan and Apply each inspect model and path; no write command.
+	if len(calls) != 3 { // Plan, pre-write inspection, and verification each resolve only the persisted config path.
 		t.Fatalf("calls=%#v", calls)
 	}
 	got, err := os.ReadFile(path)
@@ -584,12 +658,86 @@ func TestHermesDeclaresCustomBackendWithOneAtomicFileReplacement(t *testing.T) {
 	}
 }
 
+func TestHermesPlansOnlyFromPersistedUserConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "model:\n  provider: openrouter\n  default: vendor/model\n  base_url: https://openrouter.ai/api/v1\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []commandCall
+	service := commandService(t, "hermes", map[string]commandReply{
+		"hermes config path": {stdout: path + "\n"},
+	}, &calls)
+	plan, err := service.Plan(context.Background(), ClientHermes, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], commandCall{"hermes", []string{"config", "path"}}) {
+		t.Fatalf("calls = %#v, want only persisted config path lookup", calls)
+	}
+	if len(plan.Changes) != 2 || plan.Changes[0].Before != "openrouter/vendor/model" || !plan.Changes[0].BeforeExists || plan.Changes[1].Before != "https://openrouter.ai/api/v1" || !plan.Changes[1].BeforeExists {
+		t.Fatalf("changes = %#v", plan.Changes)
+	}
+}
+
+func TestHermesCreatesMissingConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "config.yaml")
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"hermes config path": {stdout: path + "\n"},
+	}
+	service := commandService(t, "hermes", replies, &calls)
+	plan, err := service.Plan(context.Background(), ClientHermes, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RequiresReplace() {
+		t.Fatalf("missing persistent values are additive: %#v", plan.Changes)
+	}
+	verified, err := service.Apply(context.Background(), plan)
+	if err != nil || !verified.AlreadyConfigured() {
+		t.Fatalf("verified = %#v, error = %v", verified, err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := hermesModelBlock(testTarget(t).WorkspaceURL())
+	if string(raw) != want {
+		t.Fatalf("config = %q, want %q", raw, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, error = %v", info.Mode().Perm(), err)
+	}
+}
+
+func TestReplaceHermesModelAppendsMissingBlockWithoutReserializing(t *testing.T) {
+	for _, original := range []string{"# human\nkeep:  [one,  two] # exact\n", "# comment only", "  \n"} {
+		next, err := replaceHermesModel([]byte(original), testTarget(t).WorkspaceURL())
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix := original
+		if original != "" && !strings.HasSuffix(original, "\n") {
+			prefix += "\n"
+		}
+		if string(next) != prefix+hermesModelBlock(testTarget(t).WorkspaceURL()) {
+			t.Fatalf("next:\n%s", next)
+		}
+	}
+}
+
 func TestHermesRefusesUnsupportedYAMLSyntaxWithoutChange(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		raw  string
 	}{
 		{name: "flow-style model", raw: "model: {provider: openrouter, default: gpt-4o, base_url: https://example.com}\nkeep: true\n"},
+		{name: "flow-style root without model", raw: "{keep: true}\n"},
+		{name: "document terminator without model", raw: "keep: true\n...\n"},
 		{name: "literal owned scalar", raw: "model:\n  provider: openrouter\n  default: gpt-4o\n  base_url: |\n    https://example.com\nkeep: true\n"},
 		{name: "folded owned scalar", raw: "model:\n  provider: openrouter\n  default: >\n    gpt-4o\n  base_url: https://example.com\n"},
 		{name: "duplicate top-level model", raw: "model:\n  provider: openrouter\n  default: gpt-4o\n  base_url: https://example.com\nmodel:\n  provider: custom\n  default: other\n  base_url: https://other.example\n"},
@@ -603,11 +751,10 @@ func TestHermesRefusesUnsupportedYAMLSyntaxWithoutChange(t *testing.T) {
 			}
 			var calls []commandCall
 			replies := map[string]commandReply{
-				"hermes config get model --json": {stdout: `{"provider":"openrouter","default":"gpt-4o","base_url":"https://example.com"}`},
-				"hermes config path":             {stdout: path + "\n"},
+				"hermes config path": {stdout: path + "\n"},
 			}
 			service := commandService(t, "hermes", replies, &calls)
-			if _, err := service.Plan(ClientHermes, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+			if _, err := service.Plan(context.Background(), ClientHermes, testTarget(t)); err == nil {
 				t.Fatalf("error = %v", err)
 			}
 			got, err := os.ReadFile(path)
@@ -652,7 +799,7 @@ func TestOpenClawPlanningFailurePreservesDetailedErrorMessage(t *testing.T) {
 		"openclaw config file": {code: 1, stdout: "SyntaxError: Unexpected token in JSON at position 42"},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
-	_, err := service.Plan(ClientOpenClaw, testTarget(t))
+	_, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err == nil {
 		t.Fatal("expected planning error")
 	}

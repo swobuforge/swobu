@@ -130,6 +130,27 @@ func TestDecodeClientRequestAcceptsHistoricalNamespacedFunctionCallWithoutCurren
 	if !ok || call.Tool().Namespace() != "mcp__openaiDeveloperDocs" || call.Tool().Name() != "search_openai_docs" {
 		t.Fatalf("historical namespaced call identity = %#v", call.Tool())
 	}
+	names, _, err := provider.BuildAttemptToolNames(decoded.Request.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := EncodeCarrierWithChanges(EncodeInput{Request: decoded.Request.Request, ToolNames: names}, delivery.BufferedDelivery(), nil, "", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected struct {
+		Input []struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+		} `json:"input"`
+		Tools json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(document.RawBytes(), &projected); err != nil {
+		t.Fatal(err)
+	}
+	if len(projected.Input) != 1 || projected.Input[0].Type != "function_call" || projected.Input[0].CallID != call.CallID().String() || len(projected.Tools) != 0 {
+		t.Fatalf("historical call lost or promoted to declaration: %s", document.RawBytes())
+	}
 }
 
 func TestDecodeClientRequestRejectsMalformedHistoricalNamespacedFunctionCallIdentity(t *testing.T) {

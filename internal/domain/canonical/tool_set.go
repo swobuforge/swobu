@@ -21,13 +21,12 @@ func NewToolSet(declarations []ToolDeclaration) (ToolSet, error) {
 // canonical state without re-cloning. The single intended caller is
 // ToolEnvironmentAt, which builds its ordered slice from boundary accessors
 // (ToolSet.Declarations, ToolNamespace.Tools, MCPToolSource.Tools) that already
-// return independent clones; re-cloning there is pure waste (epic-50 task 070:
-// this path was the #1 allocator on the live daemon profile).
+// return independent clones.
 //
 // Invariant the caller must hold: ordered contains declarations already
 // detached from canonical item state, never aliasing it. buildToolSet performs
-// the same validation as NewToolSet (invalid kind, duplicate key) so a stale
-// or aliased slice cannot slip through undetected.
+// the same kind and duplicate-key validation as NewToolSet; it does not check
+// whether the caller retained aliases.
 func newToolSetOwned(ordered []ToolDeclaration) (ToolSet, error) {
 	return buildToolSet(ordered)
 }

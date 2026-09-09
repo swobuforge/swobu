@@ -9,10 +9,10 @@ func TestTargetFactsUnknownUsesPreferredAndRecordsEveryRead(t *testing.T) {
 		}
 		return false, false
 	})
-	if !facts.AcceptsParallelToolCallsFalse() {
+	if !facts.UseParallelToolCallsFalse() {
 		t.Fatal("unknown fact did not use preferred true")
 	}
-	if facts.AcceptsReasoningDisabled() {
+	if facts.UseReasoningDisabled() {
 		t.Fatal("known false fact did not use fallback branch")
 	}
 	reads := facts.Reads()
@@ -20,7 +20,7 @@ func TestTargetFactsUnknownUsesPreferredAndRecordsEveryRead(t *testing.T) {
 		t.Fatalf("reads = %#v", reads)
 	}
 	reads[AcceptsReasoningDisabled] = true
-	if facts.AcceptsReasoningDisabled() {
+	if facts.UseReasoningDisabled() {
 		t.Fatal("detached read snapshot mutated attempt facts")
 	}
 }

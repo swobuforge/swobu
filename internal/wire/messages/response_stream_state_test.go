@@ -2,7 +2,9 @@ package messages
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -11,6 +13,50 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
+
+func TestMessagesStreamPreservesErrorBeforeMessageStart(t *testing.T) {
+	raw := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"},\"request_id\":\"req_provider\"}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	_, err := stream.Next(context.Background())
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) || backend.StatusCode != http.StatusTooManyRequests || backend.ProviderError == nil {
+		t.Fatalf("error = %#v, want structured 429 backend error", err)
+	}
+	if backend.ProviderError.Type != "rate_limit_error" || backend.ProviderError.Message != "slow down" || backend.ProviderError.RequestID != "req_provider" {
+		t.Fatalf("provider detail = %#v", backend.ProviderError)
+	}
+}
+
+func TestMessagesStreamPreservesErrorAfterMessageStart(t *testing.T) {
+	raw := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\"}}\n\n" +
+		"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"future_error\",\"message\":\"future detail\"}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	for {
+		_, err := stream.Next(context.Background())
+		if err == nil {
+			continue
+		}
+		var backend canonical.BackendError
+		if !errors.As(err, &backend) || backend.StatusCode != 0 || backend.ProviderError == nil || backend.ProviderError.Type != "future_error" {
+			t.Fatalf("error = %#v, want statusless structured backend error", err)
+		}
+		return
+	}
+}
+
+func TestMessagesErrorStatusUsesStableProtocolTypes(t *testing.T) {
+	tests := map[string]int{
+		"invalid_request_error": 400, "authentication_error": 401, "billing_error": 402,
+		"permission_error": 403, "not_found_error": 404, "conflict_error": 409,
+		"request_too_large": 413, "rate_limit_error": 429, "api_error": 500,
+		"timeout_error": 504, "overloaded_error": 529, "future_error": 0,
+	}
+	for errorType, want := range tests {
+		if got := messagesErrorStatus(errorType); got != want {
+			t.Errorf("status(%q) = %d, want %d", errorType, got, want)
+		}
+	}
+}
 
 func TestMessagesAllErasedToolResultDoesNotClosePendingCall(t *testing.T) {
 	raw := []byte(`{"model":"m","messages":[
@@ -210,7 +256,7 @@ func messagesStreamFunctionRequest(t *testing.T) canonical.CanonicalRequest {
 	t.Helper()
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	tools, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	return canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})
@@ -409,7 +455,7 @@ func TestMessagesStreamUnknownBlockAdvancesProviderIndexWithoutCanonicalOrdinal(
 func TestMessagesStreamToolUseFinishRequiresCompletedToolCall(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "search")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	tools, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})

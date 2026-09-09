@@ -6,19 +6,19 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"golang.org/x/mod/semver"
 )
 
-const installCommand = "curl -fsSL https://swobu.com/install.sh | sh"
 const latestVersionURL = "https://api.github.com/repos/swobuforge/swobu/releases/latest"
 
 var fetchLatestVersion = defaultFetchLatestVersion
 var latestVersionHTTPClient = &http.Client{Timeout: 500 * time.Millisecond}
+var currentSwobuVersion = controlplane.SwobuVersion
 
 type versionNoticeDecision struct {
 	show bool
@@ -39,23 +39,22 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 		return versionNoticeDecision{}
 	}
 
-	currentRaw := strings.TrimSpace(controlplane.SwobuVersion()) // swobu:io-string source=boundary
+	currentRaw := strings.TrimSpace(currentSwobuVersion()) // swobu:io-string source=boundary
 	latestRaw, err := fetchLatestVersion()
 	if err != nil {
 		return versionNoticeDecision{}
 	}
 	latest := sanitizeLatestVersion(latestRaw)
 	current := strings.TrimSpace(currentRaw) // swobu:io-string source=boundary
-	if latest == "" || current == "" || latest == current {
-		return versionNoticeDecision{}
-	}
-	if patchOnlyVersionChange(current, latest) {
+	current = normalizeSemver(current)
+	latest = normalizeSemver(latest)
+	if !semver.IsValid(current) || !semver.IsValid(latest) || semver.Compare(latest, current) <= 0 {
 		return versionNoticeDecision{}
 	}
 
 	rows := []string{
-		"versions: " + nonEmptyOr(currentRaw, "dev") + " → " + latest,
-		"update: " + installCommand,
+		"versions: " + current + " → " + latest,
+		"update: swobu update",
 		"hide: export " + platformconfig.EnvSkipVersionNotice + "=1",
 	}
 
@@ -63,14 +62,6 @@ func evaluateVersionNoticePolicy() versionNoticeDecision {
 		show: true,
 		rows: rows,
 	}
-}
-
-func nonEmptyOr(value string, fallback string) string {
-	trimmed := strings.TrimSpace(value) // swobu:io-string source=boundary
-	if trimmed == "" {
-		return fallback
-	}
-	return trimmed
 }
 
 func defaultFetchLatestVersion() (string, error) {
@@ -99,48 +90,4 @@ func sanitizeLatestVersion(raw string) string {
 		}
 	}
 	return ""
-}
-
-func patchOnlyVersionChange(current string, latest string) bool {
-	curSemver, okCur := parseSemverLike(current)
-	latSemver, okLat := parseSemverLike(latest)
-	if !okCur || !okLat {
-		return false
-	}
-	return curSemver.major == latSemver.major && curSemver.minor == latSemver.minor && curSemver.patch != latSemver.patch
-}
-
-type semverLikeVersion struct {
-	major int
-	minor int
-	patch int
-}
-
-func parseSemverLike(raw string) (semverLikeVersion, bool) {
-	value := strings.TrimSpace(raw) // swobu:io-string source=boundary
-	value = strings.TrimPrefix(value, "v")
-	if value == "" {
-		return semverLikeVersion{}, false
-	}
-	main := value
-	if cut := strings.IndexAny(main, "-+"); cut >= 0 {
-		main = main[:cut]
-	}
-	parts := strings.Split(main, ".")
-	if len(parts) != 3 {
-		return semverLikeVersion{}, false
-	}
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return semverLikeVersion{}, false
-	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return semverLikeVersion{}, false
-	}
-	patch, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return semverLikeVersion{}, false
-	}
-	return semverLikeVersion{major: major, minor: minor, patch: patch}, true
 }

@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -12,8 +13,8 @@ func commandClientPresent(binary string) func(*Service) (bool, error) {
 	}
 }
 
-func requireCommandOutput(s *Service, client, binary string, args ...string) ([]byte, error) {
-	output, code, err := s.run(binary, args...)
+func requireCommandOutput(ctx context.Context, s *Service, client, binary string, args ...string) ([]byte, error) {
+	output, code, err := s.run(ctx, binary, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s could not start its configuration command: %w", client, err)
 	}

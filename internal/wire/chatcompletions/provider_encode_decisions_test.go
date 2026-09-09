@@ -1,6 +1,7 @@
 package chatcompletions
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/compat"
@@ -18,6 +19,24 @@ func TestExactProviderEncodeReturnsNoCompatibilityChanges(t *testing.T) {
 	}
 	if len(result.Changes) != 0 {
 		t.Fatalf("changes = %#v, want exact-as-empty", result.Changes)
+	}
+}
+
+func TestCustomOutputLoweringOwnsCompatibilityEvidence(t *testing.T) {
+	request := chatRequestWithStrictToolAndJSONSchema(t)
+	var changes []compat.Change
+	custom := func(format canonical.OutputFormat, _ *[]compat.Change) (json.RawMessage, error) {
+		strict := true
+		return encodeChatCompletionsOutputFormat(format, &strict)
+	}
+	lowering := DefaultLowering()
+	lowering.OutputFormat = custom
+	_, err := CompileProviderRequestDocument(request, testAttemptToolNames(request), delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{Lowering: lowering})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("outer compiler added output compatibility evidence: %#v", changes)
 	}
 }
 
@@ -54,12 +73,16 @@ func chatRequestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalReq
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup"), "", canonical.NewToolSchemaObject(schema), canonical.Specify(true))
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	tool, err := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schema), canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tools, err := canonical.NewToolSet([]canonical.ToolDeclaration{tool})
 	if err != nil {
 		t.Fatal(err)
 	}
-	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`), SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI}})
 	if err != nil {
 		t.Fatal(err)
 	}

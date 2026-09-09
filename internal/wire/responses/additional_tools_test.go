@@ -1,16 +1,21 @@
 package responses
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestAdditionalToolsLiftIntoCanonicalAndResolveHistoricalCalls(t *testing.T) {
@@ -210,4 +215,44 @@ func assertAdditionalToolsErrorCode(t *testing.T, raw []byte, want canonical.Err
 	if strings.Contains(err.Error(), "presentation-only") {
 		t.Fatalf("error exposed item metadata: %v", err)
 	}
+}
+
+func TestCodexResponsesLiteRequestPrefixNormalizesToStandardResponsesSemantics(t *testing.T) {
+	standard := decodeResponsesConvergenceRequest(t, `{"model":"default","instructions":"base","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}],"input":[{"type":"message","role":"user","content":"find it"}],"stream":true}`, nil)
+	lite := decodeResponsesConvergenceRequest(t, `{"model":"default","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"search","parameters":{"type":"object"}}]},{"type":"message","role":"developer","content":"base"},{"type":"message","role":"user","content":"find it"}],"stream":true}`, http.Header{"X-Openai-Internal-Codex-Responses-Lite": {"true"}})
+	if standard.RequestFingerprint != lite.RequestFingerprint {
+		t.Fatalf("request fingerprints differ: standard=%q lite=%q", standard.RequestFingerprint, lite.RequestFingerprint)
+	}
+	standardDocument, err := EncodeCarrierWithChanges(EncodeInput{Request: standard.Request, ToolNames: testAttemptToolNames(standard.Request)}, delivery.StreamingDelivery(delivery.FramingSSE), nil, "standard", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liteDocument, err := EncodeCarrierWithChanges(EncodeInput{Request: lite.Request, ToolNames: testAttemptToolNames(lite.Request)}, delivery.StreamingDelivery(delivery.FramingSSE), nil, "lite", EncodeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var standardJSON, liteJSON any
+	if err := json.Unmarshal(standardDocument.RawBytes(), &standardJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(liteDocument.RawBytes(), &liteJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(standardJSON, liteJSON) {
+		t.Fatalf("provider documents differ:\nstandard=%s\nlite=%s", standardDocument.RawBytes(), liteDocument.RawBytes())
+	}
+	items := lite.Request.Items()
+	message, ok := items[0].Message()
+	if !ok || message.Scope() != canonical.ContextScopeRequest || message.Role() != canonical.MessageRoleSystem {
+		t.Fatalf("Lite base instructions = %#v, want request-scoped system directive", items[0])
+	}
+}
+
+func decodeResponsesConvergenceRequest(t *testing.T, raw string, header http.Header) wire.ClientRequestResult {
+	t.Helper()
+	decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument(protocolkind.Responses, "application/json", header, []byte(raw), carrier.Meta{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decoded.Request
 }

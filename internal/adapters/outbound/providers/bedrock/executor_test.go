@@ -43,12 +43,12 @@ func newBedrockTarget(baseURL, credentialRef string, kind protocolkind.ProtocolK
 		region, delivery.BufferedDelivery())
 }
 
-func TestBedrockMantleMessagesApproximatesStrictStructuredOutput(t *testing.T) {
+func TestBedrockMantleMessagesOmitsUnsupportedStructuredOutput(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:   canonical.OutputFormatJSONSchema,
-		Name:   "reply",
-		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
-		Strict: true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object"}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestBedrockMantleMessagesApproximatesStrictStructuredOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{})
+	want := compat.NewOmission(canonical.RequestOutputFormat, canonical.Occurrence{})
 	if len(changes) != 1 || changes[0] != want {
 		t.Fatalf("changes = %#v, want %#v", changes, want)
 	}
@@ -83,17 +83,17 @@ func TestBedrockMantleMessagesApproximatesStrictStructuredOutput(t *testing.T) {
 	if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := payload["output_config"]; !ok {
-		t.Fatalf("Mantle Messages payload omitted approximated structured output: %s", document.RawBytes())
+	if _, ok := payload["output_config"]; ok {
+		t.Fatalf("Mantle Messages payload contains unsupported output_config: %s", document.RawBytes())
 	}
 }
 
 func TestBedrockMantleNonMessagesProtocolsKeepTheirStructuredOutputSemantics(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:   canonical.OutputFormatJSONSchema,
-		Name:   "reply",
-		Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
-		Strict: true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object"}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatal(err)

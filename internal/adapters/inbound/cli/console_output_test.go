@@ -107,7 +107,7 @@ func TestWriteNoticeBlock_TelemetryDisclosureGolden(t *testing.T) {
 
 func TestWriteNoticeBlock_DaemonRuntimeGolden(t *testing.T) {
 	rows := []string{
-		"config path: /home/metrofun/.config/swobu/swobu.yaml",
+		"config path: /home/example/.config/swobu/swobu.yaml",
 		"address: 127.0.0.1:7926",
 	}
 	var out strings.Builder

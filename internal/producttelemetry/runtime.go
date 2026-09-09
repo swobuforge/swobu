@@ -55,6 +55,9 @@ type runtimeConfig struct {
 
 // StartRuntime launches the product-telemetry runtime for the daemon lifetime
 // against the default telemetry state directory, report endpoint, and wall clock.
+// Builds carrying the canonical "dev" version use the same report construction
+// and local-output path as SWOBU_TELEMETRY_DEBUG without opening the production
+// transport. Other valid version tokens retain the normal upload behavior.
 // It returns nil when a prerequisite is unavailable: DO_NOT_TRACK is set, the
 // canonical build version is not a bounded printable-ASCII token, or the
 // identity/preference state cannot be loaded. Telemetry is best-effort — a nil
@@ -67,7 +70,7 @@ func StartRuntime(version string, logger *slog.Logger) *Runtime {
 		Logger:   logger,
 		Endpoint: resolveReportEndpoint(),
 		Now:      time.Now,
-		Debug:    os.Getenv("SWOBU_TELEMETRY_DEBUG") == "1",
+		Debug:    version == "dev" || os.Getenv("SWOBU_TELEMETRY_DEBUG") == "1",
 	})
 }
 

@@ -10,32 +10,10 @@ import (
 )
 
 func TestHelpPageDoesNotImportPlatformEffects(t *testing.T) {
-	root := t.TempDir()
-	// Copy all .go files from this package into a temp tree so we can parse
-	// the full package without importing the test file itself.
-	srcDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		if err := os.WriteFile(filepath.Join(root, e.Name()), data, 0o644); err != nil {
-			t.Fatalf("write %s: %v", e.Name(), err)
-		}
-	}
-
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, root, nil, parser.ImportsOnly)
+	pkgs, err := parser.ParseDir(fset, ".", func(info os.FileInfo) bool {
+		return !strings.HasSuffix(info.Name(), "_test.go")
+	}, parser.ImportsOnly)
 	if err != nil {
 		t.Fatalf("parse dir: %v", err)
 	}

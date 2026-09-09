@@ -9,6 +9,16 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
+func schemaConformance(strict canonical.Specified[bool]) canonical.SchemaConformance {
+	if value, specified := strict.Get(); specified {
+		if value {
+			return canonical.SchemaConformanceEnforced
+		}
+		return canonical.SchemaConformanceRelaxed
+	}
+	return canonical.SchemaConformanceDefault
+}
+
 func decodeResponsesTools(tools []responsesToolDefinitionDTO, subjectPrefix string, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) ([]canonical.ToolDeclaration, []canonical.ToolKey, error) {
 	if len(tools) == 0 {
 		return nil, nil, nil
@@ -248,7 +258,7 @@ func decodeResponsesFlatFunctionTool(tool responsesToolDefinitionDTO, ctx respon
 	if tool.Strict != nil {
 		strict = canonical.Specify(*tool.Strict)
 	}
-	return canonical.NewFunctionTool(id, tool.Description, schema, strict)
+	return canonical.NewFunctionTool(id, tool.Description, schema, canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: schemaConformance(strict)})
 }
 
 func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext) (canonical.ToolDeclaration, error) {
@@ -269,7 +279,7 @@ func decodeResponsesNestedFunctionTool(tool responsesToolDefinitionDTO, ctx resp
 	if err != nil {
 		return canonical.ToolDeclaration{}, err
 	}
-	return canonical.NewFunctionTool(key, tool.Description, schema, strict)
+	return canonical.NewFunctionTool(key, tool.Description, schema, canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: schemaConformance(strict)})
 }
 
 func decodeResponsesFlatCustomTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, error) {

@@ -6,7 +6,7 @@ import (
 )
 
 // ToolDeclaration is the closed request-level sum of directly model-available
-// tools. New branches are added here only with an owning RFC and real codecs.
+// tools.
 type ToolDeclaration struct {
 	function  *FunctionTool
 	custom    *CustomTool
@@ -65,7 +65,7 @@ type FunctionTool struct {
 	key         ToolKey
 	description string
 	inputSchema ToolSchema
-	strict      Specified[bool]
+	contract    SchemaContract
 }
 
 // CustomTool is a text-input callable declaration with a typed format object.
@@ -75,14 +75,17 @@ type CustomTool struct {
 	format      ToolFormat
 }
 
-func NewFunctionTool(key ToolKey, description string, inputSchema ToolSchema, strict Specified[bool]) (ToolDeclaration, error) {
+func NewFunctionTool(key ToolKey, description string, inputSchema ToolSchema, contract SchemaContract) (ToolDeclaration, error) {
 	if key.IsZero() || key.Kind() != ToolKindFunction {
 		return ToolDeclaration{}, fmt.Errorf("canonical function tool requires a function key")
 	}
-	if inputSchema.IsEmpty() {
-		return ToolDeclaration{}, fmt.Errorf("canonical function tool requires an input schema")
+	if inputSchema.IsEmpty() || contract.Profile == SchemaProfileUnspecified {
+		return ToolDeclaration{}, fmt.Errorf("canonical function tool requires an input schema contract")
 	}
-	tool := FunctionTool{key: key.Clone(), description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), strict: cloneSpecified(strict, func(v bool) bool { return v })} // swobu:io-string source=domain
+	if contract.Profile > SchemaProfileUnprofiled || contract.Conformance > SchemaConformanceEnforced {
+		return ToolDeclaration{}, fmt.Errorf("canonical function tool schema conformance is invalid")
+	}
+	tool := FunctionTool{key: key.Clone(), description: strings.TrimSpace(description), inputSchema: inputSchema.Clone(), contract: contract} // swobu:io-string source=domain
 	return ToolDeclaration{function: &tool}, nil
 }
 
@@ -262,9 +265,7 @@ func (d ToolDeclaration) Equivalent(other ToolDeclaration) bool {
 			left.InputSchema().RawObject() != right.InputSchema().RawObject() {
 			return false
 		}
-		leftStrict, leftSet := left.Strict().Get()
-		rightStrict, rightSet := right.Strict().Get()
-		if leftSet != rightSet || leftSet && leftStrict != rightStrict {
+		if left.SchemaContract() != right.SchemaContract() {
 			return false
 		}
 		return true
@@ -333,11 +334,12 @@ func (d ToolDiscoveryTool) Clone() ToolDiscoveryTool {
 func (f FunctionTool) Key() ToolKey            { return f.key.Clone() }
 func (f FunctionTool) Description() string     { return f.description }
 func (f FunctionTool) InputSchema() ToolSchema { return f.inputSchema.Clone() }
-func (f FunctionTool) Strict() Specified[bool] {
-	return cloneSpecified(f.strict, func(v bool) bool { return v })
+func (f FunctionTool) Conformance() SchemaConformance {
+	return f.contract.Conformance
 }
+func (f FunctionTool) SchemaContract() SchemaContract { return f.contract }
 func (f FunctionTool) Clone() FunctionTool {
-	return FunctionTool{key: f.key.Clone(), description: f.description, inputSchema: f.inputSchema.Clone(), strict: f.Strict()}
+	return FunctionTool{key: f.key.Clone(), description: f.description, inputSchema: f.inputSchema.Clone(), contract: f.contract}
 }
 
 func (c CustomTool) Key() ToolKey        { return c.key.Clone() }

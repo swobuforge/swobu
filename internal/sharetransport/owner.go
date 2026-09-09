@@ -87,7 +87,7 @@ func ServeApplicationTLS(conn net.Conn, config *tls.Config, handler http.Handler
 		return errors.New("application TLS dependencies are required")
 	}
 	config = config.Clone()
-	config.NextProtos = []string{"http/1.1", "acme-tls/1"}
+	config.NextProtos = []string{"http/1.1"}
 	tlsConn := tls.Server(conn, config)
 	if err := tlsConn.Handshake(); err != nil {
 		_ = tlsConn.Close()

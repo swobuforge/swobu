@@ -4,7 +4,7 @@ import "testing"
 
 func TestCanonicalRequestOwnsOrderedContextAndDeepClones(t *testing.T) {
 	message, _ := NewMessageItem(MessageRoleUser, []MessagePart{NewTextMessagePart("hello")})
-	decl := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	decl := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	tools, err := NewToolSet([]ToolDeclaration{decl})
 	if err != nil {
 		t.Fatal(err)

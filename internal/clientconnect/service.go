@@ -2,12 +2,14 @@ package clientconnect
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 )
 
-type commandRunner func(name string, args ...string) (stdout []byte, exitCode int, err error)
+type commandRunner func(context.Context, string, ...string) (stdout []byte, exitCode int, err error)
 
 // Service discovers, plans, and applies the closed automatic-client adapter set.
 type Service struct {
@@ -22,7 +24,7 @@ func NewService() *Service {
 	return &Service{homeDir: os.UserHomeDir, getenv: os.Getenv, lookPath: exec.LookPath, run: runLocalCommand}
 }
 
-func runLocalCommand(name string, args ...string) ([]byte, int, error) {
+func runLocalCommand(ctx context.Context, name string, args ...string) ([]byte, int, error) {
 	stdoutFile, err := os.CreateTemp("", "swobu-clientconnect-stdout-*")
 	if err != nil {
 		return nil, -1, err
@@ -39,10 +41,13 @@ func runLocalCommand(name string, args ...string) ([]byte, int, error) {
 	defer os.Remove(stderrPath)
 	defer stderrFile.Close()
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		return nil, -1, ctx.Err()
+	}
 	if err := stdoutFile.Close(); err != nil {
 		return nil, -1, err
 	}
@@ -71,12 +76,15 @@ func runLocalCommand(name string, args ...string) ([]byte, int, error) {
 }
 
 // Discover returns all clients with a positive presence signal.
-func (s *Service) Discover(target Target) []Client {
+func (s *Service) Discover(ctx context.Context, target Target) []Client {
 	if !target.IsLocal() {
 		return nil
 	}
 	var clients []Client
 	for _, adapter := range adapters {
+		if ctx.Err() != nil {
+			break
+		}
 		present, err := adapter.present(s)
 		if err != nil || !present {
 			continue
@@ -90,7 +98,10 @@ func (s *Service) Discover(target Target) []Client {
 }
 
 // Plan inspects current foreign state and returns its exact semantic delta.
-func (s *Service) Plan(client ClientID, target Target) (Plan, error) {
+func (s *Service) Plan(ctx context.Context, client ClientID, target Target) (Plan, error) {
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
+	}
 	if err := target.validateLocal(); err != nil {
 		return Plan{}, err
 	}
@@ -98,36 +109,65 @@ func (s *Service) Plan(client ClientID, target Target) (Plan, error) {
 	if !ok {
 		return Plan{}, fmt.Errorf("unsupported client")
 	}
-	current, err := adapter.planCurrent(s, target)
+	current, err := adapter.planCurrent(ctx, s, target)
 	if err != nil {
+		return Plan{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
 	return current.plan.withClient(adapter), nil
 }
 
-// Apply re-plans current client state and applies only the semantic mutation
-// the operator reviewed. Unrelated human edits are therefore preserved.
-func (s *Service) Apply(plan Plan) error {
-	if err := plan.Target.validateLocal(); err != nil {
-		return err
+// Apply re-plans current client state, applies only the reviewed semantic
+// mutation, and returns the authoritative post-operation observation.
+func (s *Service) Apply(ctx context.Context, reviewed Plan) (Plan, error) {
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
 	}
-	adapter, ok := adapterFor(plan.ClientID)
+	if err := reviewed.Target.validateLocal(); err != nil {
+		return Plan{}, err
+	}
+	adapter, ok := adapterFor(reviewed.ClientID)
 	if !ok {
-		return fmt.Errorf("unsupported client")
+		return Plan{}, fmt.Errorf("unsupported client")
 	}
-	current, err := adapter.planCurrent(s, plan.Target)
+	current, err := adapter.planCurrent(ctx, s, reviewed.Target)
 	if err != nil {
-		return err
+		return Plan{}, err
 	}
 	current.plan = current.plan.withClient(adapter)
 	if current.plan.AlreadyConfigured() {
-		return nil
+		return current.plan, nil
 	}
-	if !current.plan.equal(plan) {
-		return fmt.Errorf("Client configuration changed. Open Connect again to review the current value.")
+	if !current.plan.equal(reviewed) {
+		return current.plan, fmt.Errorf("Client configuration changed. Open Connect again to review the current value.")
 	}
 	if current.apply == nil {
-		return fmt.Errorf("client configuration plan has no mutation operation")
+		return current.plan, fmt.Errorf("client configuration plan has no mutation operation")
 	}
-	return current.apply()
+	if err := ctx.Err(); err != nil {
+		return current.plan, err
+	}
+	applyErr := current.apply(ctx)
+	verified, verifyErr := adapter.planCurrent(ctx, s, reviewed.Target)
+	if verifyErr == nil {
+		verified.plan = verified.plan.withClient(adapter)
+	}
+	if applyErr != nil {
+		if verifyErr == nil {
+			return verified.plan, applyErr
+		}
+		return Plan{}, errors.Join(
+			applyErr,
+			fmt.Errorf("current client configuration could not be verified: %w", verifyErr),
+		)
+	}
+	if verifyErr != nil {
+		return Plan{}, fmt.Errorf("%s configuration was written but could not be verified: %w", adapter.name, verifyErr)
+	}
+	if !verified.plan.AlreadyConfigured() {
+		return verified.plan, fmt.Errorf("%s did not converge to the reviewed configuration", adapter.name)
+	}
+	return verified.plan, nil
 }

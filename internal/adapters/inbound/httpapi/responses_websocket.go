@@ -256,7 +256,6 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		ExchangeID:      requestID,
 	})
 	if err != nil {
-		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err})
 		return err
 	}
@@ -387,9 +386,22 @@ func websocketErrorEvent(err error) []byte {
 
 	var backendErr canonical.BackendError
 	if errors.As(err, &backendErr) {
-		dto.StatusCode = backendErr.StatusCode
-		dto.Error.Code = "BACKEND_ERROR"
-		dto.Error.Message = backendErr.Message
+		dto.StatusCode = statusCodeForBackendError(backendErr)
+		dto.Error.Code = "provider_error"
+		dto.Error.Message = http.StatusText(dto.StatusCode)
+		if backendErr.ProviderError != nil {
+			detail := backendErr.ProviderError
+			dto.Error.Code = detail.Code
+			if dto.Error.Code == "" {
+				dto.Error.Code = detail.Type
+			}
+			if dto.Error.Code == "" {
+				dto.Error.Code = "provider_error"
+			}
+			if detail.Message != "" {
+				dto.Error.Message = detail.Message
+			}
+		}
 		raw, _ := json.Marshal(dto)
 		return raw
 	}

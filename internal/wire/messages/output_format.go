@@ -39,16 +39,18 @@ func decodeMessagesOutputFormat(raw json.RawMessage, changeLog *[]compat.Change,
 		if dto.JSONSchema == nil {
 			return canonical.OutputFormat{}, canonical.BadRequest("messages request response_format json_schema is required")
 		}
-		strict := false
+		conformance := canonical.SchemaConformanceDefault
 		if dto.JSONSchema.Strict != nil {
-			strict = *dto.JSONSchema.Strict
+			if *dto.JSONSchema.Strict {
+				conformance = canonical.SchemaConformanceEnforced
+			} else {
+				conformance = canonical.SchemaConformanceRelaxed
+			}
 		}
+		schema := canonical.NewRawJSONObject(string(dto.JSONSchema.Schema))
 		return canonical.NewOutputFormat(canonical.OutputFormatParams{
-			Kind:        canonical.OutputFormatJSONSchema,
-			Name:        dto.JSONSchema.Name,
-			Description: dto.JSONSchema.Description,
-			Schema:      canonical.NewRawJSONObject(string(dto.JSONSchema.Schema)),
-			Strict:      strict,
+			Kind: canonical.OutputFormatJSONSchema, Name: dto.JSONSchema.Name, Description: dto.JSONSchema.Description, Schema: schema,
+			SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled, Conformance: conformance},
 		})
 	default:
 		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Messages", "response_format type "+strings.TrimSpace(dto.Type))
@@ -69,8 +71,8 @@ func encodeMessagesOutputFormat(format canonical.OutputFormat, changeLog *[]comp
 		}
 		return nil, nil
 	case canonical.OutputFormatJSONSchema:
-		if !format.Strict && changeLog != nil {
-			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{}))
+		if (!wire.SchemaContractExact(format.SchemaContract, canonical.SchemaProfileAnthropic) || format.Conformance() != canonical.SchemaConformanceEnforced) && changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestOutputSchemaConformance, canonical.Occurrence{}))
 		}
 		dto := messagesNativeOutputFormatDTO{
 			Type:   "json_schema",
@@ -97,16 +99,20 @@ func decodeMessagesNativeOutputFormat(format *messagesNativeOutputFormatDTO, cha
 	if formatType != "json_schema" {
 		return canonical.OutputFormat{}, wire.RejectUnknownOutputFormat("Messages", "output_config format type "+formatType)
 	}
-	if changeLog != nil {
-		*changeLog = append(*changeLog, compat.Change{
-			Capability: canonical.RequestOutputFormat,
-			Kind:       compat.Approximation,
-		})
-	}
 	return canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:   canonical.OutputFormatJSONSchema,
-		Name:   "messages_output",
-		Schema: canonical.NewRawJSONObject(string(format.Schema)),
-		Strict: true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Schema:         canonical.NewRawJSONObject(string(format.Schema)),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic, Conformance: canonical.SchemaConformanceEnforced},
 	})
+}
+
+// OmitOutputFormat drops structured output for a Messages target that cannot accept it.
+func OmitOutputFormat(format canonical.OutputFormat, changes *[]compat.Change) (json.RawMessage, error) {
+	if format.IsZero() || format.Kind == canonical.OutputFormatText {
+		return nil, nil
+	}
+	if changes != nil {
+		*changes = compat.AppendUnique(*changes, compat.NewOmission(canonical.RequestOutputFormat, canonical.Occurrence{}))
+	}
+	return nil, nil
 }

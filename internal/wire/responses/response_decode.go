@@ -77,7 +77,7 @@ var tokenUsagePathSpec = core.TokenUsagePathSpec{
 func decodeResponseBuffered(ctx context.Context, request canonical.CanonicalRequest, names wire.ToolNames, raw []byte, exchangeID string, changeLog *[]compat.Change, continuationEligible bool) (canonical.ResponseStream, error) {
 	var dto responseEnvelope
 	if err := json.Unmarshal(raw, &dto); err != nil {
-		return nil, canonical.InternalError("responses output is invalid JSON")
+		return nil, canonical.InternalErrorWithCause("responses output is invalid JSON", err)
 	}
 	if strings.TrimSpace(dto.ID) == "" { // swobu:io-string source=provider-wire
 		return nil, canonical.InternalError("responses output is missing id")
@@ -172,7 +172,7 @@ func decodeCompletedResponsesItemSetAtIndexes(
 		}
 		var item responsesWireOutputItemDTO
 		if err := json.Unmarshal(rawItem, &item); err != nil {
-			return nil, canonical.InternalError("responses output item is invalid JSON")
+			return nil, canonical.InternalErrorWithCause("responses output item is invalid JSON", err)
 		}
 		admission, err := admitCompletedResponsesOutputItem(item, responseStatus)
 		if err != nil {
@@ -591,7 +591,7 @@ func decodeResponsesReasoningContent(raw json.RawMessage) ([]responsesReasoningT
 	}
 	var content []responsesReasoningTextDTO
 	if err := json.Unmarshal(trimmed, &content); err != nil {
-		return nil, canonical.InternalError("responses reasoning content is invalid")
+		return nil, canonical.InternalErrorWithCause("responses reasoning content is invalid", err)
 	}
 	return content, nil
 }

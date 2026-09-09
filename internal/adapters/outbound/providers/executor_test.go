@@ -126,12 +126,19 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 	t.Parallel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"},{"id":"model-b"}]}`))
+		case "/backend-api/codex/models":
+			if r.URL.Query().Get("client_version") == "" || r.Header.Get("Authorization") != "Bearer token_test" {
+				t.Fatalf("chatgpt catalog request missing compatibility/auth context: %s", r.URL.String())
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-chatgpt","visibility":"list","priority":1}]}`))
+		default:
 			w.WriteHeader(http.StatusNotFound)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"model-a"},{"id":"model-b"}]}`))
 	}))
 	defer upstream.Close()
 
@@ -146,10 +153,10 @@ func TestServices_ModelCatalogDispatchesByProviderID(t *testing.T) {
 		t.Fatalf("openai model catalog len=%d want 2", len(openAIProbe.Options))
 	}
 
-	_, err = composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
-		"backend-b", "chatgpt", upstream.URL+"/v1", "secret:chatgpt/default", protocolkind.ChatCompletions, "", delivery.BufferedDelivery()))
-	if err == nil || !strings.Contains(err.Error(), "subscription tier") {
-		t.Fatalf("chatgpt catalog dispatch must use chatgpt adapter tier validation, got err=%v", err)
+	chatGPTProbe, err := composition.ProbeTarget(context.Background(), provider.NewTargetSnapshot(
+		"backend-b", "chatgpt", upstream.URL+"/backend-api/codex", "env:CHATGPT_TOKEN", protocolkind.Responses, "responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)))
+	if err != nil || len(chatGPTProbe.Options) != 1 || chatGPTProbe.Options[0].Name != "gpt-chatgpt" {
+		t.Fatalf("chatgpt catalog dispatch = %#v, err=%v", chatGPTProbe.Options, err)
 	}
 }
 
@@ -303,16 +310,20 @@ func TestServices_OpenAIProviderReportsActualCompatibilityDecisions(t *testing.T
 	defer upstream.Close()
 
 	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "reply_shape",
-		Description: "structured reply",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
-		Strict:      true,
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply_shape",
+		Description:    "structured reply",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced},
 	})
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
 	}
-	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0"), "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.Specify(true))
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "tool_0")
+	tool, err := canonical.NewFunctionTool(key, "search the workspace", canonicaltest.Schema(t, `{"type":"object","properties":{"q":{"type":"string"}}}`), canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: canonical.SchemaConformanceEnforced})
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("m"),
 		Items: []canonical.CanonicalItem{
@@ -375,7 +386,9 @@ func TestServices_BedrockCodecReportsActualProviderCompatibilityDecisions(t *tes
 		t.Fatalf("bedrock execution failed: %v", err)
 	}
 
-	assertProviderDecision(t, *sink, canonical.RequestToolsSchemaStrict, compat.Omission)
+	if len(*sink) != 0 {
+		t.Fatalf("native strict tool changes = %#v", *sink)
+	}
 }
 
 func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *testing.T) {
@@ -413,7 +426,9 @@ func TestServices_AnthropicCodecReportsActualProviderCompatibilityDecisions(t *t
 		t.Fatalf("anthropic execution failed: %v", err)
 	}
 
-	assertProviderDecision(t, *sink, canonical.RequestToolsSchemaStrict, compat.Omission)
+	if len(*sink) != 0 {
+		t.Fatalf("native strict tool changes = %#v", *sink)
+	}
 }
 
 func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t *testing.T) {
@@ -450,11 +465,11 @@ func TestServices_OpenAIFamilyClassifiesBackendErrorWithoutTelemetryAuthority(t 
 
 func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 	outputFormat, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:        canonical.OutputFormatJSONSchema,
-		Name:        "reply_shape",
-		Schema:      canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
-		Strict:      true,
-		Description: "structured reply",
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply_shape",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic, Conformance: canonical.SchemaConformanceEnforced},
+		Description:    "structured reply",
 	})
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
@@ -502,7 +517,9 @@ func TestServices_MessagesCodecProjectsNativeStructuredOutput(t *testing.T) {
 			if !ok || format["type"] != "json_schema" {
 				t.Fatalf("output_config.format = %#v", outputConfig["format"])
 			}
-			assertProviderDecision(t, *sink, canonical.RequestOutputFormat, compat.Approximation)
+			if len(*sink) != 0 {
+				t.Fatalf("native structured output changes = %#v", *sink)
+			}
 		})
 	}
 }

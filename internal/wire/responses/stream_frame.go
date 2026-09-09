@@ -7,42 +7,55 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type streamFrame struct {
-	RawItem      json.RawMessage   `json:"-"`
-	RawOutput    []json.RawMessage `json:"-"`
-	EventIndex   int               `json:"-"`
-	Type         string            `json:"type"`
-	ID           string            `json:"id"`
-	Model        string            `json:"model"`
-	Delta        string            `json:"delta"`
-	Input        string            `json:"input"`
-	Status       string            `json:"status"`
-	Code         string            `json:"code"`
-	Message      string            `json:"message"`
-	CallID       string            `json:"call_id"`
-	Name         string            `json:"name"`
-	ItemID       string            `json:"item_id"`
-	OutputIndex  *int              `json:"output_index"`
-	SummaryIndex *int              `json:"summary_index"`
-	ContentIndex *int              `json:"content_index"`
-	Arguments    string            `json:"arguments"`
+	RawItem    json.RawMessage   `json:"-"`
+	RawOutput  []json.RawMessage `json:"-"`
+	EventIndex int               `json:"-"`
+	Type       string            `json:"type"`
+	ID         string            `json:"id"`
+	Model      string            `json:"model"`
+	Delta      string            `json:"delta"`
+	Input      string            `json:"input"`
+	Status     responsesStatus   `json:"status"`
+	StatusCode int               `json:"status_code"`
+	Code       string            `json:"code"`
+	Message    string            `json:"message"`
+	RequestID  string            `json:"request_id"`
+	Error      struct {
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Param   string `json:"param"`
+	} `json:"error"`
+	CallID       string `json:"call_id"`
+	Name         string `json:"name"`
+	ItemID       string `json:"item_id"`
+	OutputIndex  *int   `json:"output_index"`
+	SummaryIndex *int   `json:"summary_index"`
+	ContentIndex *int   `json:"content_index"`
+	Arguments    string `json:"arguments"`
 	Response     struct {
 		ID                string                         `json:"id"`
 		Model             string                         `json:"model"`
 		Status            string                         `json:"status"`
+		StatusCode        int                            `json:"status_code"`
 		Store             *bool                          `json:"store"`
 		IncompleteDetails *responsesIncompleteDetailsDTO `json:"incomplete_details,omitempty"`
 		ContentFilters    []responsesContentFilterDTO    `json:"content_filters,omitempty"`
 		Output            []json.RawMessage              `json:"output,omitempty"`
 		OutputText        string                         `json:"output_text,omitempty"`
 		Error             struct {
+			Type    string `json:"type"`
 			Code    string `json:"code"`
 			Message string `json:"message"`
+			Param   string `json:"param"`
 		} `json:"error"`
 	} `json:"response"`
 	Item struct {
@@ -59,6 +72,24 @@ type streamFrame struct {
 		EncryptedContent string                         `json:"encrypted_content"`
 		Action           json.RawMessage                `json:"action"`
 	} `json:"item"`
+}
+
+// responsesStatus accepts lifecycle strings on normal events and numeric
+// HTTP-equivalent status values on provider error events.
+type responsesStatus string
+
+func (s *responsesStatus) UnmarshalJSON(raw []byte) error {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		*s = responsesStatus(text)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil {
+		return err
+	}
+	*s = responsesStatus(number.String())
+	return nil
 }
 
 // swobu:lint ignore function-complexity because=Responses streaming dispatch keeps frame ordering and lifecycle ownership in one boundary function.
@@ -189,25 +220,43 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 		}
 		return true, canonical.Event{}, nil
 	case "response.failed":
-		message := strings.TrimSpace(frame.Response.Error.Message) // swobu:io-string source=provider-wire
-		if message == "" {
-			message = "responses stream returned response.failed"
+		detail := canonical.BackendErrorDetail{
+			Code: strings.TrimSpace(frame.Response.Error.Code), Type: strings.TrimSpace(frame.Response.Error.Type),
+			Message: strings.TrimSpace(frame.Response.Error.Message), Param: strings.TrimSpace(frame.Response.Error.Param), RequestID: strings.TrimSpace(frame.RequestID),
 		}
-		code := strings.TrimSpace(frame.Response.Error.Code) // swobu:io-string source=provider-wire
-		if code != "" {
-			message = code + ": " + message
+		if detail.Message == "" {
+			detail.Message = "responses stream returned response.failed"
 		}
-		return false, canonical.Event{}, canonical.NewBackendError("responses", responsesErrorStatus(code), message, "")
+		status := frame.Response.StatusCode
+		if status == 0 {
+			status = responsesErrorStatus(detail.Code, detail.Type)
+		}
+		return false, canonical.Event{}, canonical.NewStructuredBackendError("responses", protocolkind.Responses, status, detail, "")
 	case "error":
-		message := strings.TrimSpace(frame.Message) // swobu:io-string source=provider-wire
-		if message == "" {
-			message = "responses stream returned an error event"
+		detail := canonical.BackendErrorDetail{
+			Code: strings.TrimSpace(frame.Code), Type: strings.TrimSpace(frame.Error.Type),
+			Message: strings.TrimSpace(frame.Message), Param: strings.TrimSpace(frame.Error.Param), RequestID: strings.TrimSpace(frame.RequestID),
 		}
-		code := strings.TrimSpace(frame.Code) // swobu:io-string source=provider-wire
-		if code != "" {
-			message = code + ": " + message
+		if detail.Code == "" {
+			detail.Code = strings.TrimSpace(frame.Error.Code)
 		}
-		return false, canonical.Event{}, canonical.NewBackendError("responses", responsesErrorStatus(code), message, "")
+		if detail.Message == "" {
+			detail.Message = strings.TrimSpace(frame.Error.Message)
+		}
+		if detail.Message == "" {
+			detail.Message = "responses stream returned an error event"
+		}
+		status := frame.StatusCode
+		if status == 0 {
+			status = frame.Response.StatusCode
+		}
+		if status == 0 {
+			status = responsesNumericStatus(string(frame.Status))
+		}
+		if status == 0 {
+			status = responsesErrorStatus(detail.Code, detail.Type)
+		}
+		return false, canonical.Event{}, canonical.NewStructuredBackendError("responses", protocolkind.Responses, status, detail, "")
 	default:
 		key := responsesUnknownEventDecisionKey(frameType, frame.OutputIndex)
 		if _, recorded := s.unknownEventDecisions[key]; recorded {
@@ -225,13 +274,33 @@ func (s *responsesResponseStream) handleFrame(ctx context.Context, frame streamF
 // a typed Responses stream error after the HTTP stream has already opened.
 // Unknown codes remain statusless backend failures; message prose never
 // selects recovery.
-func responsesErrorStatus(code string) int {
-	switch strings.ToLower(strings.TrimSpace(code)) { // swobu:io-string source=provider-wire
+func responsesErrorStatus(code, errorType string) int {
+	value := strings.ToLower(strings.TrimSpace(code)) // swobu:io-string source=provider-wire
+	if value == "" {
+		value = strings.ToLower(strings.TrimSpace(errorType)) // swobu:io-string source=provider-wire
+	}
+	switch value {
 	case "authentication_error":
 		return http.StatusUnauthorized
+	case "rate_limit_exceeded", "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "server_error":
+		return http.StatusInternalServerError
 	default:
 		return 0
 	}
+}
+
+func responsesNumericStatus(status string) int {
+	status = strings.TrimSpace(status) // swobu:io-string source=provider-wire
+	if status == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(status)
+	if err != nil {
+		return 0
+	}
+	return value
 }
 
 func responsesCarriesOutputLifecycle(frameType string) bool {
@@ -557,8 +626,8 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 			return err
 		}
 	}
-	terminalStatus := responsesTerminalStatus(frame.Type, frame.Status, frame.Response.Status)
-	if terminalReason, promptBlocked := responsesTerminalReason(frame.Type, frame.Status, frame.Response.Status, frame.Response.ContentFilters, responseIncompleteReason(frame.Response.IncompleteDetails)); promptBlocked {
+	terminalStatus := responsesTerminalStatus(frame.Type, string(frame.Status), frame.Response.Status)
+	if terminalReason, promptBlocked := responsesTerminalReason(frame.Type, string(frame.Status), frame.Response.Status, frame.Response.ContentFilters, responseIncompleteReason(frame.Response.IncompleteDetails)); promptBlocked {
 		s.completed = true
 		s.discardOpenText()
 		s.closeOpenTools(canonical.EnvelopeStatusError)
@@ -618,7 +687,7 @@ func (s *responsesResponseStream) handleResponseTerminal(ctx context.Context, fr
 func (s *responsesResponseStream) observeTerminalOutput(ctx context.Context, index int, raw json.RawMessage, responseStatus string) (bool, []canonical.CanonicalItem, error) {
 	var item responsesWireOutputItemDTO
 	if err := json.Unmarshal(raw, &item); err != nil {
-		return false, nil, canonical.InternalError("responses terminal output item is invalid JSON")
+		return false, nil, canonical.InternalErrorWithCause("responses terminal output item is invalid JSON", err)
 	}
 	if err := s.acceptTerminalOutput(index, item); err != nil {
 		return false, nil, err
@@ -641,7 +710,7 @@ func (s *responsesResponseStream) observeTerminalOutput(ctx context.Context, ind
 		return false, nil, err
 	}
 	if err := json.Unmarshal(resolvedRaw, &item); err != nil {
-		return false, nil, canonical.InternalError("responses terminal output item is invalid JSON")
+		return false, nil, canonical.InternalErrorWithCause("responses terminal output item is invalid JSON", err)
 	}
 	switch slot.phase {
 	case responsesOutputAccumulating:
@@ -681,7 +750,7 @@ func restoreResponsesTerminalIdentity(raw json.RawMessage, item responsesWireOut
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, canonical.InternalError("responses terminal output item is invalid JSON")
+		return nil, canonical.InternalErrorWithCause("responses terminal output item is invalid JSON", err)
 	}
 	for field, value := range missing {
 		encoded, err := json.Marshal(value)
@@ -701,7 +770,7 @@ func (s *responsesResponseStream) commitPendingTerminalOutput(ctx context.Contex
 	slot := s.outputAt(index)
 	var item responsesWireOutputItemDTO
 	if err := json.Unmarshal(slot.terminalPendingItem, &item); err != nil {
-		return canonical.InternalError("responses deferred item is invalid JSON")
+		return canonical.InternalErrorWithCause("responses deferred item is invalid JSON", err)
 	}
 	if _, err := admitCompletedResponsesOutputItem(item, responseStatus); err != nil {
 		return err
@@ -711,7 +780,7 @@ func (s *responsesResponseStream) commitPendingTerminalOutput(ctx context.Contex
 		return err
 	}
 	if err := json.Unmarshal(raw, &item); err != nil {
-		return canonical.InternalError("responses deferred item is invalid JSON")
+		return canonical.InternalErrorWithCause("responses deferred item is invalid JSON", err)
 	}
 	if _, _, err := s.completeObservedOutput(ctx, index, raw, item, responseStatus); err != nil {
 		return err

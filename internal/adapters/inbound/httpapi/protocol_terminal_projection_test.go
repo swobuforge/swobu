@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,46 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
+
+func TestMessagesClientReceivesImmediateStructuredResponsesError(t *testing.T) {
+	setDefaultLogger, logs := testDebugLogger()
+	defer setDefaultLogger()
+	body := "event: error\ndata: {\"type\":\"error\",\"status_code\":429,\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\"},\"request_id\":\"req_provider\"}\n\n"
+	handler := terminalProjectionHandler(t, terminalProjectionTransport{body: body})
+	request := httptest.NewRequest(http.MethodPost, "/c/personal/messages", strings.NewReader(`{"model":"default","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("anthropic-version", "2023-06-01")
+	request.Header.Set("X-Request-Id", "req_cross_family_error")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429; body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Type != "error" || envelope.Error.Type != "rate_limit_error" || envelope.Error.Message != "The usage limit has been reached" || envelope.RequestID != "req_provider" {
+		t.Fatalf("Messages error envelope = %#v", envelope)
+	}
+	for _, want := range []string{
+		"failure_class=unavailable", "status_code=429", "backend_error_type=usage_limit_reached",
+		"event=provider_error_detail", `backend_error_message="The usage limit has been reached"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("logs missing %q:\n%s", want, logs.String())
+		}
+	}
+}
 
 type terminalProjectionWorkspaceLookup struct{ workspace routing.Workspace }
 
@@ -93,8 +134,8 @@ func TestChatStreamingClientProjectsPostIdentityResponsesFailureInStream(t *test
 	if bytes.Contains(raw, []byte(`"finish_reason":"stop"`)) {
 		t.Fatalf("failed Responses stream became Chat success: %s", raw)
 	}
-	if !bytes.Contains(raw, []byte("provider_stream_decode_failed")) {
-		t.Fatalf("failed Responses stream lacks post-identity stream error: status=%d body=%s", response.Code, raw)
+	if !bytes.Contains(raw, []byte("backend_failed")) || !bytes.Contains(raw, []byte("provider failed")) {
+		t.Fatalf("failed Responses stream discarded structured provider error: status=%d body=%s", response.Code, raw)
 	}
 }
 

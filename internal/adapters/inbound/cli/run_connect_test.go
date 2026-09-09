@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -22,6 +23,7 @@ func (s connectWorkspacesStub) ListWorkspaces(context.Context) ([]workspaceapi.W
 
 type connectOperationsStub struct {
 	plan       clientconnect.Plan
+	verified   clientconnect.Plan
 	planErr    error
 	applyErr   error
 	plannedID  clientconnect.ClientID
@@ -29,11 +31,51 @@ type connectOperationsStub struct {
 	applied    bool
 }
 
-func (s *connectOperationsStub) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+func (s *connectOperationsStub) Plan(_ context.Context, id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
 	s.plannedID, s.plannedURL = id, target.WorkspaceURL()
 	return s.plan, s.planErr
 }
-func (s *connectOperationsStub) Apply(clientconnect.Plan) error { s.applied = true; return s.applyErr }
+func (s *connectOperationsStub) Apply(_ context.Context, plan clientconnect.Plan) (clientconnect.Plan, error) {
+	s.applied = true
+	if s.applyErr != nil {
+		if s.verified.ClientID != "" {
+			return s.verified, s.applyErr
+		}
+		return plan, s.applyErr
+	}
+	if s.verified.ClientID != "" {
+		return s.verified, nil
+	}
+	plan.Changes = nil
+	return plan, nil
+}
+
+func TestConnectDistinguishesPlanAndApplyFailureSideEffects(t *testing.T) {
+	target, err := clientconnect.NewTarget("personal", "http://127.0.0.1:7926/c/personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed := clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPaths: []string{"/tmp/config"}, Target: target, Changes: []clientconnect.Change{{Field: "endpoint", After: target.WorkspaceURL()}}}
+	for _, tc := range []struct {
+		name string
+		ops  *connectOperationsStub
+		want bool
+	}{
+		{name: "plan failure", ops: &connectOperationsStub{planErr: errors.New("inspection failed")}, want: true},
+		{name: "apply failure", ops: &connectOperationsStub{plan: reviewed, applyErr: errors.New("mutation failed")}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			runner := Runner{Stdout: &stdout, Stderr: &stderr, HTTPClient: http.DefaultClient, ConnectOperations: tc.ops, ConnectWorkspaces: connectWorkspacesStub{summaries: []workspaceapi.WorkspaceSummary{{Slug: "personal"}}}, ConnectAttach: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error { return nil }}
+			if got := runner.Run(context.Background(), []string{"connect", "codex"}); got != ExitDown {
+				t.Fatalf("code = %v", got)
+			}
+			if strings.Contains(stderr.String(), "Nothing changed.") != tc.want {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+		})
+	}
+}
 
 func TestConnectWorkspaceResolutionMatrix(t *testing.T) {
 	for _, tc := range []struct {
@@ -84,9 +126,9 @@ func TestConnectUsesCanonicalPlanAndSemanticReplaceGate(t *testing.T) {
 		wantApply bool
 		wantText  string
 	}{
-		{name: "new leaf applies", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPath: "/tmp/config", Target: target, Changes: []clientconnect.Change{{Field: "endpoint", After: target.WorkspaceURL()}}}, args: []string{"connect", "codex"}, wantCode: ExitHealthy, wantApply: true, wantText: "configured"},
-		{name: "replacement refused", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPath: "/tmp/config", Target: target, Changes: []clientconnect.Change{{Field: "endpoint", Before: "https://old", BeforeExists: true, After: target.WorkspaceURL()}}}, args: []string{"connect", "codex"}, wantCode: ExitDown, wantText: "Run again with --replace."},
-		{name: "replacement applied", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPath: "/tmp/config", Target: target, Changes: []clientconnect.Change{{Field: "endpoint", Before: "https://old", BeforeExists: true, After: target.WorkspaceURL()}}}, args: []string{"connect", "codex", "--replace"}, wantCode: ExitHealthy, wantApply: true, wantText: "configured"},
+		{name: "new leaf applies", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPaths: []string{"/tmp/config"}, Target: target, Changes: []clientconnect.Change{{Field: "endpoint", After: target.WorkspaceURL()}}}, args: []string{"connect", "codex"}, wantCode: ExitHealthy, wantApply: true, wantText: "configured"},
+		{name: "replacement refused", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPaths: []string{"/tmp/config"}, Target: target, Changes: []clientconnect.Change{{Field: "endpoint", Before: "https://old", BeforeExists: true, After: target.WorkspaceURL()}}}, args: []string{"connect", "codex"}, wantCode: ExitDown, wantText: "Run again with --replace."},
+		{name: "replacement applied", plan: clientconnect.Plan{ClientID: clientconnect.ClientCodex, ClientName: "Codex CLI", ConfigPaths: []string{"/tmp/config"}, Target: target, Changes: []clientconnect.Change{{Field: "endpoint", Before: "https://old", BeforeExists: true, After: target.WorkspaceURL()}}}, args: []string{"connect", "codex", "--replace"}, wantCode: ExitHealthy, wantApply: true, wantText: "configured"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ops := &connectOperationsStub{plan: tc.plan}
@@ -132,7 +174,7 @@ func TestConnectPlanRendersEveryReviewedSemanticChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := clientconnect.Plan{
-		ClientName: "Codex CLI", ConfigPath: "/tmp/config.toml", Target: target,
+		ClientName: "Codex CLI", ConfigPaths: []string{"/tmp/config.toml"}, Target: target,
 		Changes: []clientconnect.Change{
 			{Field: "backend", Before: "openai/model", BeforeExists: true, After: "swobu/default"},
 			{Field: "endpoint", Before: "http://127.0.0.1:7926/c/old", BeforeExists: true, After: target.WorkspaceURL()},

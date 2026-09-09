@@ -5,8 +5,8 @@ import "testing"
 func TestContextOperationsPreserveScopeAndFoldEnvironment(t *testing.T) {
 	requestDirective, _ := NewScopedMessageItem(MessageRoleDeveloper, []MessagePart{NewTextMessagePart("base")}, ContextScopeRequest)
 	historyDirective, _ := NewScopedMessageItem(MessageRoleSystem, []MessagePart{NewTextMessagePart("prior")}, ContextScopeHistory)
-	first := testFunctionTool(testRequestToolKey(ToolKindFunction, "first"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	second := testFunctionTool(testRequestToolKey(ToolKindFunction, "second"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	first := testFunctionTool(testRequestToolKey(ToolKindFunction, "first"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	second := testFunctionTool(testRequestToolKey(ToolKindFunction, "second"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	firstSet, _ := NewToolSet([]ToolDeclaration{first})
 	secondSet, _ := NewToolSet([]ToolDeclaration{second})
 	requestDeclarations, _ := NewToolDeclarationsItem(firstSet, ContextScopeRequest)
@@ -28,8 +28,8 @@ func TestContextOperationsPreserveScopeAndFoldEnvironment(t *testing.T) {
 
 func TestToolEnvironmentRejectsConflictingRedeclaration(t *testing.T) {
 	key := testRequestToolKey(ToolKindFunction, "lookup")
-	left := testFunctionTool(key, "left", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	right := testFunctionTool(key, "right", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	left := testFunctionTool(key, "left", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	right := testFunctionTool(key, "right", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	leftSet, _ := NewToolSet([]ToolDeclaration{left})
 	rightSet, _ := NewToolSet([]ToolDeclaration{right})
 	leftItem, _ := NewToolDeclarationsItem(leftSet, ContextScopeHistory)
@@ -46,7 +46,7 @@ func TestToolEnvironmentRejectsConflictingRedeclaration(t *testing.T) {
 func TestToolEnvironmentRejectsEquivalentDeclarationWithContradictoryOwner(t *testing.T) {
 	childKey, _ := NewToolKey("request/group", ToolKindFunction, "lookup")
 	child := testFunctionTool(
-		childKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool](),
+		childKey, "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic},
 	)
 	parentKey := testRequestToolKey(ToolKindNamespace, "group")
 	parent, err := NewToolNamespace(parentKey, "", []ToolDeclaration{child})
@@ -65,8 +65,8 @@ func TestToolEnvironmentRejectsEquivalentDeclarationWithContradictoryOwner(t *te
 }
 
 func TestTransformToolContributionsPreservesEveryCarrierMetadata(t *testing.T) {
-	first := testFunctionTool(testRequestToolKey(ToolKindFunction, "first"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	replacement := testFunctionTool(testRequestToolKey(ToolKindFunction, "replacement"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	first := testFunctionTool(testRequestToolKey(ToolKindFunction, "first"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	replacement := testFunctionTool(testRequestToolKey(ToolKindFunction, "replacement"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	firstSet, _ := NewToolSet([]ToolDeclaration{first})
 	replacementSet, _ := NewToolSet([]ToolDeclaration{replacement})
 	declarations, _ := NewToolDeclarationsItem(firstSet, ContextScopeRequest)
@@ -97,9 +97,9 @@ func TestTransformToolContributionsRetainsResponsesRefinementsByExactCallableKey
 	survivingKey := testRequestToolKey(ToolKindFunction, "surviving")
 	plainKey, _ := NewToolKey("request/workspace", ToolKindFunction, "plain")
 	addedKey := testRequestToolKey(ToolKindCustom, "added")
-	removed := testFunctionTool(removedKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	surviving := testFunctionTool(survivingKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
-	plain := testFunctionTool(plainKey, "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	removed := testFunctionTool(removedKey, "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	surviving := testFunctionTool(survivingKey, "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
+	plain := testFunctionTool(plainKey, "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	formatObject, err := ParseJSONObject([]byte(`{"type":"text"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestTransformToolContributionsPreservesDiscoveryFailure(t *testing.T) {
 	request := NewCanonicalRequest(RequestParams{Items: []CanonicalItem{failure}})
 	functionKey, _ := NewRequestToolKey(ToolKindFunction, "unexpected")
 	schemaObject, _ := ParseJSONObject([]byte(`{"type":"object"}`))
-	function, _ := NewFunctionTool(functionKey, "", NewToolSchemaObject(schemaObject), Unspecified[bool]())
+	function, _ := NewFunctionTool(functionKey, "", NewToolSchemaObject(schemaObject), SchemaContract{Profile: SchemaProfileAnthropic})
 	functionSet, _ := NewToolSet([]ToolDeclaration{function})
 
 	transformed, err := TransformToolContributions(request, func(ToolSet) (ToolSet, error) {

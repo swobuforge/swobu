@@ -1,6 +1,9 @@
 # Workspace Configuration
 
-Swobu stores local routing configuration in one private YAML file. The daemon is the only writer while it runs; use Cockpit or the local workspace command surface for changes. Manual edits require stopping the daemon first.
+Swobu stores local routing configuration in one YAML file on your machine. The daemon is the only writer while it runs; use Cockpit or the local workspace command surface for changes. Manual edits require stopping the daemon first.
+
+On Unix, keep the file owner-readable/writable only (`0600`) and its directory
+owner-accessible only (`0700`). Swobu checks these permissions when opening it.
 
 ```yaml
 schema_version: 1
@@ -35,10 +38,12 @@ opens Cockpit against the same address. Address and config path are
 restart-bound startup configuration, not routing state, and workspace edits
 never rewrite them.
 
-Each target uses exactly one connection arm: `openai`, `anthropic`, `openrouter`, `chatgpt`, `ollama`, `lmstudio`, `vllm`, `azure`, `bedrock`, or `custom`. Credentials are locators such as `env:OPENAI_API_KEY`, not secret values. Protocol values are concrete provider contracts; an omitted protocol is materialized only when the provider declares one concrete contract.
+Each target selects one provider under `connection`; see the
+[backend recipes](./README.md#backend-recipes) for setup examples. Credentials
+are references such as `env:OPENAI_API_KEY`, not secret values. Set the protocol
+as shown in the provider recipe, or let Cockpit configure it.
 
-Swobu rejects unknown fields and obsolete schemas at startup. The file is
-replaced atomically after every successful command. Failures before rename keep
-the old snapshot; directory-sync uncertainty after rename publishes the renamed
-snapshot and fail-stops later writes until restart. A second daemon using the
-same path is rejected while the first holds the lock.
+Swobu validates the configuration at startup and saves changes atomically.
+Only one daemon can use a configuration file at a time. A directory-sync
+warning means the change was saved, but its persistence through a system crash
+is uncertain. Check the underlying filesystem; the daemon remains writable.

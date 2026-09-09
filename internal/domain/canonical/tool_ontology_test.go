@@ -46,7 +46,7 @@ func TestHistoricalScopedToolKeyRejectsNormalizedIdentity(t *testing.T) {
 
 func TestToolDeclarationObjectValuesAreCanonicalAndCloned(t *testing.T) {
 	schema := testToolSchema(`{"z":1,"a":{"b":2,"a":1}}`)
-	decl := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", schema, Unspecified[bool]())
+	decl := testFunctionTool(testRequestToolKey(ToolKindFunction, "lookup"), "", schema, SchemaContract{Profile: SchemaProfileAnthropic})
 	function, ok := decl.Function()
 	if !ok {
 		t.Fatal("function branch missing")
@@ -62,7 +62,7 @@ func TestToolDeclarationObjectValuesAreCanonicalAndCloned(t *testing.T) {
 
 func TestToolDeclarationKindsRemainClosed(t *testing.T) {
 	object, _ := ParseJSONObject([]byte(`{"type":"grammar"}`))
-	function := testFunctionTool(testRequestToolKey(ToolKindFunction, "f"), "", testToolSchema(`{"type":"object"}`), Unspecified[bool]())
+	function := testFunctionTool(testRequestToolKey(ToolKindFunction, "f"), "", testToolSchema(`{"type":"object"}`), SchemaContract{Profile: SchemaProfileAnthropic})
 	custom := testCustomTool(testRequestToolKey(ToolKindCustom, "c"), "", NewToolFormatObject(object))
 	if string(function.Kind()) != ToolTypeFunction || string(custom.Kind()) != ToolTypeCustom {
 		t.Fatal("tool declaration kind projection changed")

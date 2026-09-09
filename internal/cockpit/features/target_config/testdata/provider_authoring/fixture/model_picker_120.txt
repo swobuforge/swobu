@@ -1,5 +1,5 @@
-  new target · OpenAI                                                                                     cancel ↵
-     provider          OpenAI                                                                             change ↵
+  new target · OpenAI API                                                                                 cancel ↵
+     provider          OpenAI API                                                                         change ↵
      credential        environment · OPENAI_API_KEY                                                       change ↵
      model             GPT-4.1                                                                            close ↵
         model
@@ -14,7 +14,6 @@
      protocol          OpenAI · Responses · buffered                                                      change ↵
      routing           fallback after step 1                                                              change ↵
      create                                                                                               create ↵
-
 
 
 

@@ -14,6 +14,7 @@ require (
 	github.com/zalando/go-keyring v0.2.4
 	golang.design/x/clipboard v0.6.3
 	golang.org/x/image v0.0.0-20211028202545-6944b10bf410
+	golang.org/x/mod v0.33.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 )
@@ -51,7 +52,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/exp v0.0.0-20190731235908-ec7cb31e5a56 // indirect
 	golang.org/x/mobile v0.0.0-20210716004757-34ab1303b554 // indirect
-	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect

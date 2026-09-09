@@ -28,7 +28,7 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 	}))
 	defer srv.Close()
 
@@ -83,7 +83,7 @@ func TestAttachOrStart_AcceptsReachableDegradedState(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"degraded","workspace_count":1}`)
+		_, _ = io.WriteString(w, `{"state":"degraded","workspace_count":1,"control_plane_protocol":9}`)
 	}))
 	defer srv.Close()
 
@@ -134,7 +134,7 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 		case "/_swobu/status":
 			if downRequested.Load() && started.Load() {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+				_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 				return
 			}
 			if downRequested.Load() {
@@ -143,7 +143,7 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 		case "/_swobu/down":
 			downRequested.Store(true)
 			w.WriteHeader(http.StatusOK)
@@ -186,7 +186,7 @@ func TestRestart_PropagatesDownFailure(t *testing.T) {
 		switch r.URL.Path {
 		case "/_swobu/status":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 		case "/_swobu/down":
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
@@ -217,7 +217,7 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1}`)
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":9}`)
 		case "/_swobu/down":
 			downRequested.Store(true)
 			w.WriteHeader(http.StatusOK)

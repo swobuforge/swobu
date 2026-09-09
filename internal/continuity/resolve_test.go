@@ -622,7 +622,7 @@ func TestResumeMaterializesOrderedHistory(t *testing.T) {
 
 func TestResumeUsesFieldLocalPresenceForExplicitClears(t *testing.T) {
 	tool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "search"), "", canonical.NewToolSchemaObject(canonicaltest.Object(t, `{"type":"object"}`)), canonical.Unspecified[bool]())
-	structured, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
+	structured, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`), SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI}})
 	if err != nil {
 		t.Fatal(err)
 	}

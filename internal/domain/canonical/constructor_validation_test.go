@@ -7,7 +7,7 @@ func TestPublicConstructorsRejectInvalidStateImmediately(t *testing.T) {
 		t.Fatal("request tool key normalized surrounding whitespace")
 	}
 	customKey, _ := NewToolKey(ToolNamespaceRequest, ToolKindCustom, "custom")
-	if _, err := NewFunctionTool(customKey, "", EmptyToolSchema(), Unspecified[bool]()); err == nil {
+	if _, err := NewFunctionTool(customKey, "", EmptyToolSchema(), SchemaContract{Profile: SchemaProfileAnthropic}); err == nil {
 		t.Fatal("function constructor returned a zero declaration")
 	}
 	functionKey, _ := NewToolKey(ToolNamespaceRequest, ToolKindFunction, "function")

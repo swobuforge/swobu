@@ -145,7 +145,7 @@ func TestDecodeResponseStreamAddedMessageRecoversFromTerminalOutput(t *testing.T
 func TestDecodeResponseStreamAddedFunctionCallRecoversFromTerminalOutput(t *testing.T) {
 	key, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
-	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.Unspecified[bool]())
+	declaration, _ := canonical.NewFunctionTool(key, "", canonical.NewToolSchemaObject(schemaObject), canonical.SchemaContract{Profile: canonical.SchemaProfileAnthropic})
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{declaration})
 	tools, _ := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{Items: []canonical.CanonicalItem{tools}})

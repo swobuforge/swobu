@@ -12,6 +12,7 @@ func TestClassifyClientFamilyUsesOnlyThePrimaryProductToken(t *testing.T) {
 		{"Cline/3", ClientFamilyCline},
 		{"opencode/1.15", ClientFamilyOpenCode},
 		{"Aider/0.82", ClientFamilyAider},
+		{"swobu-vscode/0.1.0", ClientFamilyVSCode},
 		{"NewClient/1", ClientFamilyOther},
 		{"", ClientFamilyUnknown},
 	}

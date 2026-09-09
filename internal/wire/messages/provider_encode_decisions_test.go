@@ -19,8 +19,7 @@ func TestProviderEncodeDecisionsDescribeActualMessagesProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDecision(t, result.Changes, canonical.RequestToolsSchemaStrict, compat.Omission)
-	assertDecision(t, result.Changes, canonical.RequestOutputFormat, compat.Approximation)
+	assertDecision(t, result.Changes, canonical.RequestOutputSchemaConformance, compat.Approximation)
 }
 
 func TestNativeDeferredVisibilityEmitsNoApproximation(t *testing.T) {
@@ -120,7 +119,7 @@ func requestWithStrictToolAndJSONSchema(t *testing.T) canonical.CanonicalRequest
 	if err != nil {
 		t.Fatal(err)
 	}
-	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`)})
+	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{Kind: canonical.OutputFormatJSONSchema, Name: "answer", Schema: canonical.NewRawJSONObject(`{"type":"object"}`), SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI}})
 	if err != nil {
 		t.Fatal(err)
 	}

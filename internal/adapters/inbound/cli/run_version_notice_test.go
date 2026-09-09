@@ -15,10 +15,15 @@ import (
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
-func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *testing.T) {
+func TestRunner_InteractiveVersionNotice_ShowsUpdateCommandBeforeAttach(t *testing.T) {
 	originalFetch := fetchLatestVersion
+	originalCurrent := currentSwobuVersion
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
-	t.Cleanup(func() { fetchLatestVersion = originalFetch })
+	currentSwobuVersion = func() string { return "v1.2.3" }
+	t.Cleanup(func() {
+		fetchLatestVersion = originalFetch
+		currentSwobuVersion = originalCurrent
+	})
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 	t.Setenv(platformconfig.EnvDoNotTrack, "1")
@@ -46,8 +51,8 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 	}
 	text := stdout.String()
 	requireClosedNotice(t, text, "Update Available", []string{
-		"versions: dev → v999.0.0",
-		"update: " + installCommand,
+		"versions: v1.2.3 → v999.0.0",
+		"update: swobu update",
 		"hide: export " + platformconfig.EnvSkipVersionNotice + "=1",
 	})
 	if !strings.Contains(text, "press Enter to continue") {
@@ -57,8 +62,13 @@ func TestRunner_InteractiveVersionNotice_ShowsInstallCommandBeforeAttach(t *test
 
 func TestEvaluateVersionNoticePolicy_ShowsOnMismatch(t *testing.T) {
 	originalFetch := fetchLatestVersion
+	originalCurrent := currentSwobuVersion
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
-	t.Cleanup(func() { fetchLatestVersion = originalFetch })
+	currentSwobuVersion = func() string { return "v1.2.3" }
+	t.Cleanup(func() {
+		fetchLatestVersion = originalFetch
+		currentSwobuVersion = originalCurrent
+	})
 
 	decision := evaluateVersionNoticePolicy()
 	if !decision.show {
@@ -141,8 +151,13 @@ func (fn roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, err
 
 func TestEvaluateVersionNoticePolicy_TrimsLatestVersionPayload(t *testing.T) {
 	originalFetch := fetchLatestVersion
+	originalCurrent := currentSwobuVersion
 	fetchLatestVersion = func() (string, error) { return "\n  v999.0.0  \nextra-line\n", nil }
-	t.Cleanup(func() { fetchLatestVersion = originalFetch })
+	currentSwobuVersion = func() string { return "1.2.3" }
+	t.Cleanup(func() {
+		fetchLatestVersion = originalFetch
+		currentSwobuVersion = originalCurrent
+	})
 
 	decision := evaluateVersionNoticePolicy()
 	if !decision.show {
@@ -154,9 +169,7 @@ func TestEvaluateVersionNoticePolicy_TrimsLatestVersionPayload(t *testing.T) {
 	}
 }
 
-func TestPatchOnlyVersionChange(t *testing.T) {
-	t.Parallel()
-
+func TestEvaluateVersionNoticePolicy_UsesSemanticOrdering(t *testing.T) {
 	cases := []struct {
 		name    string
 		current string
@@ -164,20 +177,29 @@ func TestPatchOnlyVersionChange(t *testing.T) {
 		want    bool
 	}{
 		{name: "patch only", current: "v1.2.3", latest: "v1.2.9", want: true},
-		{name: "major change", current: "v1.2.3", latest: "v2.0.0", want: false},
-		{name: "minor change", current: "v1.2.3", latest: "v1.3.0", want: false},
+		{name: "major change", current: "v1.2.3", latest: "v2.0.0", want: true},
+		{name: "minor change", current: "v1.2.3", latest: "v1.3.0", want: true},
 		{name: "same version", current: "v1.2.3", latest: "v1.2.3", want: false},
+		{name: "older latest", current: "v2.0.0", latest: "v1.9.9", want: false},
 		{name: "prerelease patch change", current: "v1.2.3-rc.1", latest: "v1.2.4", want: true},
 		{name: "non semver current", current: "dev", latest: "v1.2.4", want: false},
+		{name: "invalid latest", current: "v1.2.3", latest: "latest", want: false},
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := patchOnlyVersionChange(tc.current, tc.latest)
+			originalFetch := fetchLatestVersion
+			originalCurrent := currentSwobuVersion
+			fetchLatestVersion = func() (string, error) { return tc.latest, nil }
+			currentSwobuVersion = func() string { return tc.current }
+			t.Cleanup(func() {
+				fetchLatestVersion = originalFetch
+				currentSwobuVersion = originalCurrent
+			})
+
+			got := evaluateVersionNoticePolicy().show
 			if got != tc.want {
-				t.Fatalf("patchOnlyVersionChange(%q,%q)=%v, want %v", tc.current, tc.latest, got, tc.want)
+				t.Fatalf("show for current=%q latest=%q is %v, want %v", tc.current, tc.latest, got, tc.want)
 			}
 		})
 	}
@@ -217,8 +239,13 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 
 func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttach(t *testing.T) {
 	originalFetch := fetchLatestVersion
+	originalCurrent := currentSwobuVersion
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
-	t.Cleanup(func() { fetchLatestVersion = originalFetch })
+	currentSwobuVersion = func() string { return "v1.2.3" }
+	t.Cleanup(func() {
+		fetchLatestVersion = originalFetch
+		currentSwobuVersion = originalCurrent
+	})
 
 	t.Setenv(platformconfig.EnvSwobuHome, filepath.Join(t.TempDir(), "swobu-home"))
 	t.Setenv(platformconfig.EnvDoNotTrack, "1")

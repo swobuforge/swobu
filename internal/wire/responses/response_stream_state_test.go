@@ -70,6 +70,70 @@ func TestDecodeResponseStreamClassifiesAuthenticationFailureAsBackendRejection(t
 	}
 }
 
+func TestDecodeResponseStreamPreservesWrappedErrorEvent(t *testing.T) {
+	raw := "event: error\ndata: {\"type\":\"error\",\"status_code\":429,\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\"},\"request_id\":\"req_provider\"}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	_, err := stream.Next(context.Background())
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) {
+		t.Fatalf("error = %T %v, want backend error", err, err)
+	}
+	if backend.StatusCode != http.StatusTooManyRequests || backend.ProviderError == nil {
+		t.Fatalf("backend error = %#v", backend)
+	}
+	want := canonical.BackendErrorDetail{Type: "usage_limit_reached", Message: "The usage limit has been reached", RequestID: "req_provider"}
+	if *backend.ProviderError != want {
+		t.Fatalf("provider detail = %#v, want %#v", *backend.ProviderError, want)
+	}
+}
+
+func TestDecodeResponseStreamPreservesErrorParam(t *testing.T) {
+	raw := "event: error\ndata: {\"type\":\"error\",\"status_code\":400,\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_value\",\"message\":\"invalid model\",\"param\":\"model\"}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	_, err := stream.Next(context.Background())
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) || backend.ProviderError == nil || backend.ProviderError.Param != "model" {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestDecodeResponseStreamPreservesNumericStatusField(t *testing.T) {
+	raw := "event: error\ndata: {\"type\":\"error\",\"status\":500,\"error\":{\"type\":\"future_server_error\",\"message\":\"failed\"}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	_, err := stream.Next(context.Background())
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) || backend.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("error = %#v, want structured 500 backend error", err)
+	}
+}
+
+func TestResponsesErrorStatusUsesOnlyStableStructuredClasses(t *testing.T) {
+	for _, test := range []struct {
+		code, errorType string
+		want            int
+	}{
+		{code: "authentication_error", want: 401},
+		{code: "rate_limit_exceeded", want: 429},
+		{errorType: "rate_limit_error", want: 429},
+		{errorType: "server_error", want: 500},
+		{errorType: "future_error", want: 0},
+	} {
+		if got := responsesErrorStatus(test.code, test.errorType); got != test.want {
+			t.Errorf("status(%q,%q) = %d, want %d", test.code, test.errorType, got, test.want)
+		}
+	}
+}
+
+func TestDecodeResponseStreamRecoversFailedStatusFromStableCode(t *testing.T) {
+	raw := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"slow down\"}}}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil, true)
+	_, err := stream.Next(context.Background())
+	var backend canonical.BackendError
+	if !errors.As(err, &backend) || backend.StatusCode != http.StatusTooManyRequests || backend.ProviderError == nil {
+		t.Fatalf("error = %#v, want structured 429 backend error", err)
+	}
+}
+
 func TestDecodeResponseStreamReconcilesPartialFunctionInputWithDoneAndTerminalSnapshots(t *testing.T) {
 	request := responsesFunctionRequest(t)
 	for _, terminalOnly := range []bool{false, true} {

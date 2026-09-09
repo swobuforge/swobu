@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
 type ErrorOrigin string
@@ -42,11 +44,14 @@ func ValidErrorCode(c ErrorCode) bool {
 }
 
 type Error struct {
-	Code    ErrorCode
-	Message string
-	Origin  ErrorOrigin
-	Details map[string]string
+	Code            ErrorCode
+	Message         string
+	Origin          ErrorOrigin
+	Details         map[string]string
+	DiagnosticCause error
 }
+
+func (e Error) Unwrap() error { return e.DiagnosticCause }
 
 func (e Error) Error() string {
 	if e.Message == "" {
@@ -70,6 +75,14 @@ func UnsupportedEndpoint(message string) Error {
 
 func InternalError(message string) Error {
 	return newSwobuError(ErrorCodeInternal, message)
+}
+
+// InternalErrorWithCause keeps a safe public error while retaining a private
+// diagnostic cause for correlated DEBUG logging.
+func InternalErrorWithCause(message string, cause error) Error {
+	err := InternalError(message)
+	err.DiagnosticCause = cause
+	return err
 }
 
 // TerminalErrorCode classifies a terminal request failure into the canonical
@@ -161,14 +174,31 @@ func ClientUnsupportedDelivery(message, retryChange string) Error {
 	return newSwobuError(ErrorCodeUnsupportedDelivery, message+". "+retryChange)
 }
 
+// BackendErrorDetail is provider error truth decoded from a recognized
+// protocol envelope. It is deliberately separate from BackendError.Message,
+// which may still contain an opaque response body.
+type BackendErrorDetail struct {
+	Code      string
+	Type      string
+	Message   string
+	Param     string
+	RequestID string
+}
+
 type BackendError struct {
 	Origin     ErrorOrigin
 	TargetID   string
 	StatusCode int
 	Message    string
+	// SourceProtocol names the provider wire protocol that owned ProviderError.
+	// It remains empty for opaque transport captures.
+	SourceProtocol protocolkind.ProtocolKind
 	// RetryAfterHeaderValue is the only allowed backend-header passthrough in v0.
 	// Keep this narrow field explicit instead of introducing a generic header map.
 	RetryAfterHeaderValue string
+	// ProviderError is non-nil only when the protocol owner recognized and
+	// decoded a structured provider error envelope.
+	ProviderError *BackendErrorDetail
 }
 
 type BackendErrorClass string
@@ -215,7 +245,27 @@ func NewBackendError(targetID string, statusCode int, message string, retryAfter
 	}
 }
 
+// NewStructuredBackendError records provider-owned error fields without
+// granting arbitrary backend response text the same diagnostic trust.
+func NewStructuredBackendError(targetID string, sourceProtocol protocolkind.ProtocolKind, statusCode int, detail BackendErrorDetail, retryAfterHeaderValue string) BackendError {
+	if _, err := protocolkind.ParseProtocolKind(sourceProtocol.String()); err != nil {
+		panic("structured backend error requires a valid source protocol")
+	}
+	return BackendError{
+		Origin:                ErrorOriginBackend,
+		TargetID:              targetID,
+		StatusCode:            statusCode,
+		Message:               detail.Message,
+		SourceProtocol:        sourceProtocol,
+		RetryAfterHeaderValue: retryAfterHeaderValue,
+		ProviderError:         &detail,
+	}
+}
+
 func (e BackendError) Error() string {
+	if e.ProviderError != nil && e.ProviderError.Code != "" && e.ProviderError.Message != "" {
+		return fmt.Sprintf("backend error from %s (%d): %s: %s", e.TargetID, e.StatusCode, e.ProviderError.Code, e.ProviderError.Message)
+	}
 	if e.Message == "" {
 		return fmt.Sprintf("backend error from %s (%d)", e.TargetID, e.StatusCode)
 	}

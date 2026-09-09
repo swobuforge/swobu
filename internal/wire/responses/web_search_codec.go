@@ -69,7 +69,7 @@ func (s *responsesResponseStream) reconcileMessageParts(frame streamFrame, state
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(frame.Item.Content, &wireParts); err != nil {
-		return canonical.InternalError("responses terminal message content is invalid")
+		return canonical.InternalErrorWithCause("responses terminal message content is invalid", err)
 	}
 	message, _ := item.Message()
 	content := message.Content()

@@ -77,6 +77,7 @@ func newReportReducer() *reportReducer {
 // Observe folds one terminal traffic event into the accumulator. Non-terminal
 // events are ignored. Activation is installation-lifetime State overlaid by the
 // runtime, never derived here.
+
 func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 	if event.EventKind() != trafficevidence.EventKindProviderTerminal {
 		return

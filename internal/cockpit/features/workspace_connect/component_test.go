@@ -1,6 +1,7 @@
 package workspace_connect
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,8 +12,8 @@ import (
 
 	ui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/clientconnect"
-	"github.com/swobuforge/swobu/internal/cockpit/testkit"
 	cockpitui "github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func waitFor(t *testing.T, fn func() bool) {
@@ -44,10 +45,12 @@ type fakeOperations struct {
 	discoverCalls int
 	plans         map[clientconnect.ClientID]clientconnect.Plan
 	applyErr      error
+	verified      clientconnect.Plan
+	emptyOnError  bool
 	applied       clientconnect.Plan
 }
 
-func (f *fakeOperations) Discover(clientconnect.Target) []clientconnect.Client {
+func (f *fakeOperations) Discover(context.Context, clientconnect.Target) []clientconnect.Client {
 	f.discoverCalls++
 	if f.discover != nil {
 		return f.discover()
@@ -55,17 +58,30 @@ func (f *fakeOperations) Discover(clientconnect.Target) []clientconnect.Client {
 	return append([]clientconnect.Client(nil), f.clients...)
 }
 
-func (f *fakeOperations) Plan(id clientconnect.ClientID, _ clientconnect.Target) (clientconnect.Plan, error) {
+func (f *fakeOperations) Plan(_ context.Context, id clientconnect.ClientID, _ clientconnect.Target) (clientconnect.Plan, error) {
 	plan, ok := f.plans[id]
 	if !ok {
-		return clientconnect.Plan{}, errors.New("plan failed. Nothing changed.")
+		return clientconnect.Plan{}, errors.New("plan failed.")
 	}
 	return plan, nil
 }
 
-func (f *fakeOperations) Apply(plan clientconnect.Plan) error {
+func (f *fakeOperations) Apply(_ context.Context, plan clientconnect.Plan) (clientconnect.Plan, error) {
 	f.applied = plan
-	return f.applyErr
+	if f.applyErr != nil {
+		if f.emptyOnError {
+			return clientconnect.Plan{}, f.applyErr
+		}
+		if f.verified.ClientID != "" {
+			return f.verified, f.applyErr
+		}
+		return plan, f.applyErr
+	}
+	if f.verified.ClientID != "" {
+		return f.verified, nil
+	}
+	plan.Changes = nil
+	return plan, nil
 }
 
 func connectTarget(t *testing.T) clientconnect.Target {
@@ -95,10 +111,10 @@ func connectFixture(t *testing.T) (*Disclosure, *fakeOperations) {
 		clients: allSixClients(),
 		plans: map[clientconnect.ClientID]clientconnect.Plan{
 			clientconnect.ClientCodex: {
-				ClientID:   clientconnect.ClientCodex,
-				ClientName: "Codex CLI",
-				ConfigPath: "/tmp/.codex/config.toml",
-				Target:     target,
+				ClientID:    clientconnect.ClientCodex,
+				ClientName:  "Codex CLI",
+				ConfigPaths: []string{"/tmp/.codex/config.toml"},
+				Target:      target,
 				Changes: []clientconnect.Change{
 					{Field: "backend", BeforeExists: true, Before: "openai", After: "swobu"},
 					{Field: "base URL", BeforeExists: true, Before: "https://api.openai.com/v1", After: target.WorkspaceURL()},
@@ -106,42 +122,42 @@ func connectFixture(t *testing.T) (*Disclosure, *fakeOperations) {
 				},
 			},
 			clientconnect.ClientClaude: {
-				ClientID:   clientconnect.ClientClaude,
-				ClientName: "Claude Code",
-				ConfigPath: "/tmp/.claude/settings.json",
-				Target:     target,
-				Changes:    nil, // AlreadyConfigured
+				ClientID:    clientconnect.ClientClaude,
+				ClientName:  "Claude Code",
+				ConfigPaths: []string{"/tmp/.claude/settings.json"},
+				Target:      target,
+				Changes:     nil, // AlreadyConfigured
 			},
 			clientconnect.ClientKilo: {
-				ClientID:   clientconnect.ClientKilo,
-				ClientName: "Kilo Code",
-				ConfigPath: "/tmp/.kilo/config.json",
-				Target:     target,
+				ClientID:    clientconnect.ClientKilo,
+				ClientName:  "Kilo Code",
+				ConfigPaths: []string{"/tmp/.kilo/config.json"},
+				Target:      target,
 				Changes: []clientconnect.Change{
 					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
 				},
 			},
 			clientconnect.ClientPi: {
-				ClientID:   clientconnect.ClientPi,
-				ClientName: "pi",
-				ConfigPath: "/tmp/.pi/config.toml",
-				Target:     target,
-				Changes:    nil, // AlreadyConfigured
+				ClientID:    clientconnect.ClientPi,
+				ClientName:  "pi",
+				ConfigPaths: []string{"/tmp/.pi/config.toml"},
+				Target:      target,
+				Changes:     nil, // AlreadyConfigured
 			},
 			clientconnect.ClientOpenClaw: {
-				ClientID:   clientconnect.ClientOpenClaw,
-				ClientName: "OpenClaw",
-				ConfigPath: "/tmp/.openclaw/config.json",
-				Target:     target,
+				ClientID:    clientconnect.ClientOpenClaw,
+				ClientName:  "OpenClaw",
+				ConfigPaths: []string{"/tmp/.openclaw/config.json"},
+				Target:      target,
 				Changes: []clientconnect.Change{
 					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
 				},
 			},
 			clientconnect.ClientHermes: {
-				ClientID:   clientconnect.ClientHermes,
-				ClientName: "Hermes Agent",
-				ConfigPath: "/tmp/.hermes/config.yaml",
-				Target:     target,
+				ClientID:    clientconnect.ClientHermes,
+				ClientName:  "Hermes Agent",
+				ConfigPaths: []string{"/tmp/.hermes/config.yaml"},
+				Target:      target,
 				Changes: []clientconnect.Change{
 					{Field: "endpoint", BeforeExists: false, After: target.WorkspaceURL()},
 				},
@@ -157,9 +173,9 @@ func TestDiscoveryRunsOnlyOnDeliberateOpenAndReopen(t *testing.T) {
 		clients: []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}},
 		plans: map[clientconnect.ClientID]clientconnect.Plan{
 			clientconnect.ClientCodex: {
-				ClientID:   clientconnect.ClientCodex,
-				ClientName: "Codex CLI",
-				ConfigPath: "/tmp/.codex/config.toml",
+				ClientID:    clientconnect.ClientCodex,
+				ClientName:  "Codex CLI",
+				ConfigPaths: []string{"/tmp/.codex/config.toml"},
 				Changes: []clientconnect.Change{
 					{Field: "backend", BeforeExists: false, After: "swobu"},
 				},
@@ -209,6 +225,53 @@ func TestDisclosureRestingAndExpandedFrames(t *testing.T) {
 	}
 }
 
+func TestClientPickerBoundsAutomaticClientsAndRetainsQueryAcrossObservationUpdates(t *testing.T) {
+	d := New(connectTarget(t), &fakeOperations{})
+	clients := []clientconnect.Client{
+		{ID: clientconnect.ClientCodex, Name: "Codex CLI"},
+		{ID: clientconnect.ClientClaude, Name: "Claude Code"},
+		{ID: clientconnect.ClientOpenCode, Name: "OpenCode"},
+		{ID: clientconnect.ClientKilo, Name: "Kilo Code"},
+		{ID: clientconnect.ClientPi, Name: "pi"},
+		{ID: clientconnect.ClientMuse, Name: "Muse Code"},
+		{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"},
+		{ID: clientconnect.ClientHermes, Name: "Hermes Agent"},
+	}
+	observations := make([]clientObservation, len(clients))
+	for i, client := range clients {
+		observations[i] = clientObservation{Client: client, Kind: observationNeedsChange}
+	}
+	d.Observations.Set(observations)
+	picker := ClientPicker(d)
+	frame := testkit.RenderMountedTrimmed(t, picker, 100, 20)
+	if strings.Contains(frame, "Hermes Agent") || strings.Count(frame, "configure ↵") != 7 {
+		t.Fatalf("client picker did not retain its seven-row bound:\n%s", frame)
+	}
+
+	picker.Query.Set("opencode")
+	filtered := testkit.RenderMountedTrimmed(t, picker, 100, 20)
+	if !strings.Contains(filtered, "OpenCode") || strings.Contains(filtered, "Codex CLI") {
+		t.Fatalf("client picker did not search by client ID:\n%s", filtered)
+	}
+	picker.Query.Set("Claude Code")
+	filtered = testkit.RenderMountedTrimmed(t, picker, 100, 20)
+	if !strings.Contains(filtered, "Claude Code") || strings.Contains(filtered, "OpenCode") {
+		t.Fatalf("client picker did not search by display name:\n%s", filtered)
+	}
+
+	updated := append([]clientObservation(nil), observations...)
+	updated[1].Kind = observationMatch
+	d.Observations.Set(updated)
+	picker.UpdateProps(ClientPicker(d))
+	if got := picker.Query.Get(); got != "Claude Code" {
+		t.Fatalf("query after async observation props = %q, want Claude Code", got)
+	}
+	updatedFrame := testkit.RenderMountedTrimmed(t, picker, 100, 20)
+	if !strings.Contains(updatedFrame, "configured ↵") {
+		t.Fatalf("fresh observation action missing after retained query:\n%s", updatedFrame)
+	}
+}
+
 func TestDisclosurePlanChildScopeAndApplyConfiguresClientWithoutToast(t *testing.T) {
 	d, ops := connectFixture(t)
 	d.toggleEndpoint()
@@ -219,9 +282,9 @@ func TestDisclosurePlanChildScopeAndApplyConfiguresClientWithoutToast(t *testing
 			t.Fatalf("plan frame missing %q:\n%s", want, frame)
 		}
 	}
-	// Sibling client rows remain visible inline in the browse list
-	if !strings.Contains(frame, "Kilo Code") || !strings.Contains(frame, "Other clients") {
-		t.Fatalf("plan frame should keep sibling browse rows visible:\n%s", frame)
+	// Detail scope suppresses sibling and manual navigation.
+	if strings.Contains(frame, "Kilo Code") || strings.Contains(frame, "Other clients") {
+		t.Fatalf("plan frame should suppress browse navigation:\n%s", frame)
 	}
 	// Label must be 'config', not 'writes'
 	if strings.Contains(frame, "writes") {
@@ -256,7 +319,7 @@ func TestPlanActionGrammarDistinguishesInsertFromOverwrite(t *testing.T) {
 			if tc.overwrites {
 				change.BeforeExists, change.Before = true, "https://old"
 			}
-			plan := clientconnect.Plan{ClientID: clientconnect.ClientCodex, ConfigPath: "/tmp/config", Target: connectTarget(t), Changes: []clientconnect.Change{change}}
+			plan := clientconnect.Plan{ClientID: clientconnect.ClientCodex, ConfigPaths: []string{"/tmp/config"}, Target: connectTarget(t), Changes: []clientconnect.Change{change}}
 			obs := clientObservation{Client: clientconnect.Client{ID: clientconnect.ClientCodex, Name: "Codex CLI"}, Kind: observationNeedsChange, Plan: plan}
 			frame := testkit.RenderMountedTrimmed(t, PlanActionRow(d, obs), 100, 2)
 			if !strings.Contains(frame, tc.want) || strings.Contains(frame, tc.forbidden) {
@@ -266,18 +329,65 @@ func TestPlanActionGrammarDistinguishesInsertFromOverwrite(t *testing.T) {
 	}
 }
 
-func TestDisclosureApplyErrorStatesNothingChangedAndKeepsPlan(t *testing.T) {
+func TestDisclosureApplyErrorStoresObservedStateAndKeepsPlanOpen(t *testing.T) {
 	d, ops := connectFixture(t)
-	ops.applyErr = errors.New("client configuration changed; nothing was overwritten")
+	verified := ops.plans[clientconnect.ClientCodex]
+	verified.Changes = []clientconnect.Change{{Field: "endpoint", Before: "partially-written", BeforeExists: true, After: verified.Target.WorkspaceURL()}}
+	ops.verified = verified
+	ops.applyErr = errors.New("second write failed")
 	d.toggleEndpoint()
 	d.chooseClient(clientconnect.ClientCodex)
 	d.applyPlan(clientconnect.ClientCodex)
 	frame := testkit.RenderMountedTrimmed(t, d, 100, 22)
-	if !strings.Contains(frame, "nothing was") || !strings.Contains(frame, "overwritten") || !strings.Contains(frame, "replace ↵") {
+	if !strings.Contains(frame, "second write failed") || !strings.Contains(frame, "partially-written") || !strings.Contains(frame, "replace ↵") || strings.Contains(frame, "Nothing changed") {
 		t.Fatalf("error frame:\n%s", frame)
 	}
 	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
 		t.Fatalf("error dismissed plan state: %#v", d.Child.Get())
+	}
+	observation := observationFor(t, d.Observations.Get(), clientconnect.ClientCodex)
+	if observation.Plan.Changes[0].Before != "partially-written" || observation.Kind != observationNeedsChange {
+		t.Fatalf("observation = %#v", observation)
+	}
+}
+
+func TestDisclosureApplyErrorRendersWhenVerifiedStateIsCurrent(t *testing.T) {
+	d, ops := connectFixture(t)
+	verified := ops.plans[clientconnect.ClientCodex]
+	verified.Changes = nil
+	ops.verified = verified
+	ops.applyErr = errors.New("write reported a late failure")
+	d.toggleEndpoint()
+	d.chooseClient(clientconnect.ClientCodex)
+	d.applyPlan(clientconnect.ClientCodex)
+	frame := testkit.RenderMountedTrimmed(t, d, 100, 22)
+	for _, want := range []string{"status", "current", "write reported a late failure"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("converged error frame missing %q:\n%s", want, frame)
+		}
+	}
+	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
+		t.Fatalf("apply error closed detail: %#v", d.Child.Get())
+	}
+	observation := observationFor(t, d.Observations.Get(), clientconnect.ClientCodex)
+	if observation.Kind != observationMatch || observation.Err == "" || !observation.Plan.AlreadyConfigured() {
+		t.Fatalf("observation = %#v", observation)
+	}
+}
+
+func TestDisclosureApplyVerificationFailureClearsReviewedPlan(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.applyErr = errors.New("configuration was written but could not be verified")
+	ops.emptyOnError = true
+	d.toggleEndpoint()
+	d.chooseClient(clientconnect.ClientCodex)
+	d.applyPlan(clientconnect.ClientCodex)
+	observation := observationFor(t, d.Observations.Get(), clientconnect.ClientCodex)
+	if observation.Kind != observationFailed || observation.Plan.ClientID != "" || observation.Err == "" {
+		t.Fatalf("observation = %#v", observation)
+	}
+	if !d.Child.Get().isClient(clientconnect.ClientCodex) {
+		t.Fatalf("verification failure closed detail: %#v", d.Child.Get())
 	}
 }
 
@@ -313,9 +423,9 @@ func TestDisclosureOtherClientsManualSetupChildScope(t *testing.T) {
 			t.Fatalf("manual setup frame missing %q:\n%s", want, manualFrame)
 		}
 	}
-	// Sibling client rows remain visible inline above Other clients
-	if !strings.Contains(manualFrame, "Codex CLI") || !strings.Contains(manualFrame, "Kilo Code") {
-		t.Fatalf("manual setup frame should keep sibling browse rows visible:\n%s", manualFrame)
+	// Manual setup suppresses automatic-client navigation.
+	if strings.Contains(manualFrame, "Codex CLI") || strings.Contains(manualFrame, "Kilo Code") {
+		t.Fatalf("manual setup should suppress automatic-client navigation:\n%s", manualFrame)
 	}
 
 	// 1. Copy Base URL
@@ -837,10 +947,10 @@ func TestCockpitSurfaceWorstCasePlanAtAllWidths(t *testing.T) {
 				}
 			}
 
-			// 4. All sibling client rows remain visible in the browse list
-			for _, want := range []string{"Claude Code", "configured ↵", "Kilo Code", "configure ↵", "pi", "OpenClaw", "Hermes Agent", "Other clients", "setup ↵"} {
-				if !strings.Contains(frame, want) {
-					t.Fatalf("surface missing sibling client element %q:\n%s", want, frame)
+			// 4. Detail scope suppresses all browse navigation.
+			for _, hidden := range []string{"Claude Code", "Kilo Code", "OpenClaw", "Hermes Agent", "Other clients"} {
+				if strings.Contains(frame, hidden) {
+					t.Fatalf("surface retained hidden browse element %q:\n%s", hidden, frame)
 				}
 			}
 
@@ -901,10 +1011,10 @@ func TestCockpitSurfaceOtherClientsManualSetupAtAllWidths(t *testing.T) {
 				}
 			}
 
-			// 3. Sibling client rows remain visible
-			for _, want := range []string{"Codex CLI", "configure ↵", "Claude Code", "configured ↵", "Kilo Code", "pi", "OpenClaw", "Hermes Agent"} {
-				if !strings.Contains(frame, want) {
-					t.Fatalf("surface missing sibling client element %q:\n%s", want, frame)
+			// 3. Manual scope suppresses automatic clients.
+			for _, hidden := range []string{"Codex CLI", "Claude Code", "Kilo Code", "OpenClaw", "Hermes Agent"} {
+				if strings.Contains(frame, hidden) {
+					t.Fatalf("surface retained hidden automatic client %q:\n%s", hidden, frame)
 				}
 			}
 
@@ -956,7 +1066,7 @@ func TestCockpitSurfaceStructuralStress60Columns(t *testing.T) {
 			t.Fatalf("60-col plan stress line %d exceeded 60 columns (%d chars):\n%s", i, len([]rune(line)), line)
 		}
 	}
-	for _, want := range []string{"Codex CLI", "close ↵", "config", "replace ↵", "Claude Code", "Other clients"} {
+	for _, want := range []string{"Codex CLI", "close ↵", "config", "replace ↵"} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("60-col plan stress dropped essential action/label %q:\n%s", want, frame)
 		}
@@ -972,7 +1082,7 @@ func TestCockpitSurfaceStructuralStress60Columns(t *testing.T) {
 			t.Fatalf("60-col manual setup stress line %d exceeded 60 columns (%d chars):\n%s", i, len([]rune(line)), line)
 		}
 	}
-	for _, want := range []string{"Other clients", "close ↵", "Base URL", "copy ↵", "API key", "Codex CLI"} {
+	for _, want := range []string{"Other clients", "close ↵", "Base URL", "copy ↵", "API key"} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("60-col manual setup stress dropped essential action/label %q:\n%s", want, frame)
 		}
@@ -1229,9 +1339,87 @@ type delayedPlanOperations struct {
 	planUnblock chan struct{}
 }
 
-func (d *delayedPlanOperations) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+type cancellingPlanOperations struct {
+	*fakeOperations
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (c *cancellingPlanOperations) Plan(ctx context.Context, _ clientconnect.ClientID, _ clientconnect.Target) (clientconnect.Plan, error) {
+	close(c.started)
+	<-ctx.Done()
+	close(c.cancelled)
+	return clientconnect.Plan{}, ctx.Err()
+}
+
+func TestClosingConnectCancelsInspectionAndRejectsLateResult(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"}}
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	d.Ops = &cancellingPlanOperations{fakeOperations: ops, started: started, cancelled: cancelled}
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	defer h.Close()
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	})
+	d.Back()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("closing Connect did not cancel inspection")
+	}
+	if d.EndpointOpen.Get() || len(d.Observations.Get()) != 1 || observationFor(t, d.Observations.Get(), clientconnect.ClientOpenClaw).Kind != observationChecking {
+		t.Fatalf("obsolete result updated closed Connect: open=%v observations=%#v", d.EndpointOpen.Get(), d.Observations.Get())
+	}
+}
+
+func TestUnbindCancelsOpenConnectLifecycle(t *testing.T) {
+	d, ops := connectFixture(t)
+	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientOpenClaw, Name: "OpenClaw"}}
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	d.Ops = &cancellingPlanOperations{fakeOperations: ops, started: started, cancelled: cancelled}
+
+	h, err := testkit.NewHarness(&connectRoot{Disclosure: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Open()
+	d.toggleEndpoint()
+	waitFor(t, func() bool {
+		h.Frame()
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	})
+	d.UnbindApp()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("UnbindApp did not cancel inspection")
+	}
+	h.Close()
+}
+
+func (d *delayedPlanOperations) Plan(ctx context.Context, id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
 	<-d.planUnblock
-	return d.fakeOperations.Plan(id, target)
+	return d.fakeOperations.Plan(ctx, id, target)
 }
 
 func TestBlockedApplyKeepsEventLoopResponsiveWhileGatingDuplicateMutation(t *testing.T) {
@@ -1239,10 +1427,10 @@ func TestBlockedApplyKeepsEventLoopResponsiveWhileGatingDuplicateMutation(t *tes
 	ops.clients = []clientconnect.Client{{ID: clientconnect.ClientCodex, Name: "Codex CLI"}}
 	ops.plans = map[clientconnect.ClientID]clientconnect.Plan{
 		clientconnect.ClientCodex: {
-			ClientID:   clientconnect.ClientCodex,
-			ClientName: "Codex CLI",
-			ConfigPath: "/tmp/codex.toml",
-			Target:     connectTarget(t),
+			ClientID:    clientconnect.ClientCodex,
+			ClientName:  "Codex CLI",
+			ConfigPaths: []string{"/tmp/codex.toml"},
+			Target:      connectTarget(t),
 			Changes: []clientconnect.Change{
 				{Field: "backend", BeforeExists: false, After: "swobu"},
 			},
@@ -1337,12 +1525,12 @@ type delayedApplyOperations struct {
 	onApply      func()
 }
 
-func (d *delayedApplyOperations) Apply(plan clientconnect.Plan) error {
+func (d *delayedApplyOperations) Apply(ctx context.Context, plan clientconnect.Plan) (clientconnect.Plan, error) {
 	if d.onApply != nil {
 		d.onApply()
 	}
 	<-d.applyUnblock
-	return d.fakeOperations.Apply(plan)
+	return d.fakeOperations.Apply(ctx, plan)
 }
 
 func TestDisclosurePlanErrorOpensClientChildScopeAndEscCloses(t *testing.T) {
@@ -1367,14 +1555,13 @@ func TestDisclosurePlanErrorOpensClientChildScopeAndEscCloses(t *testing.T) {
 	if !strings.Contains(frame, "OpenClaw") || !strings.Contains(frame, "close ↵") {
 		t.Fatalf("expected OpenClaw close ↵ header:\n%s", frame)
 	}
-	if !strings.Contains(frame, "plan failed. Nothing changed.") {
+	if !strings.Contains(frame, "plan failed.") || !strings.Contains(frame, "Nothing changed.") {
 		t.Fatalf("expected error detail in frame:\n%s", frame)
 	}
 	openClawIdx := strings.Index(frame, "OpenClaw")
 	errIdx := strings.Index(frame, "plan failed")
-	otherIdx := strings.Index(frame, "Other clients")
-	if !(openClawIdx < errIdx && errIdx < otherIdx) {
-		t.Fatalf("layout ordering violated: openclaw=%d, err=%d, other=%d\nFrame:\n%s", openClawIdx, errIdx, otherIdx, frame)
+	if !(openClawIdx < errIdx) || strings.Contains(frame, "Other clients") {
+		t.Fatalf("error detail should precede no sibling navigation: openclaw=%d, err=%d\nFrame:\n%s", openClawIdx, errIdx, frame)
 	}
 
 	// Back / Esc closes the error scope
@@ -1508,12 +1695,12 @@ type countingDelayedPlanOps struct {
 	onPlan      func()
 }
 
-func (c *countingDelayedPlanOps) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+func (c *countingDelayedPlanOps) Plan(ctx context.Context, id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
 	if c.onPlan != nil {
 		c.onPlan()
 	}
 	<-c.planUnblock
-	return c.fakeOperations.Plan(id, target)
+	return c.fakeOperations.Plan(ctx, id, target)
 }
 
 func TestApplyingParentRowStateAndSelectiveChildScopeClose(t *testing.T) {
@@ -1651,11 +1838,11 @@ type selectiveDelayedPlanOps struct {
 	unblock  chan struct{}
 }
 
-func (s *selectiveDelayedPlanOps) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+func (s *selectiveDelayedPlanOps) Plan(ctx context.Context, id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
 	if id == s.delayFor {
 		<-s.unblock
 	}
-	return s.fakeOperations.Plan(id, target)
+	return s.fakeOperations.Plan(ctx, id, target)
 }
 
 func TestConfiguredClientRemainsActionable(t *testing.T) {
@@ -1735,11 +1922,11 @@ type callCountingPlanOps struct {
 	onPlan func(id clientconnect.ClientID)
 }
 
-func (c *callCountingPlanOps) Plan(id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
+func (c *callCountingPlanOps) Plan(ctx context.Context, id clientconnect.ClientID, target clientconnect.Target) (clientconnect.Plan, error) {
 	if c.onPlan != nil {
 		c.onPlan(id)
 	}
-	return c.fakeOperations.Plan(id, target)
+	return c.fakeOperations.Plan(ctx, id, target)
 }
 
 func TestConfiguredObservationRefreshesToNeedsChangeWithoutRestart(t *testing.T) {
@@ -1766,10 +1953,10 @@ func TestConfiguredObservationRefreshesToNeedsChangeWithoutRestart(t *testing.T)
 
 	// 2. External change: Pi configuration is modified/deleted outside Swobu
 	ops.plans[clientconnect.ClientPi] = clientconnect.Plan{
-		ClientID:   clientconnect.ClientPi,
-		ClientName: "pi",
-		ConfigPath: "/tmp/.pi/config.toml",
-		Target:     connectTarget(t),
+		ClientID:    clientconnect.ClientPi,
+		ClientName:  "pi",
+		ConfigPaths: []string{"/tmp/.pi/config.toml"},
+		Target:      connectTarget(t),
 		Changes: []clientconnect.Change{
 			{Field: "backend", BeforeExists: false, After: "swobu"},
 		},
@@ -1816,7 +2003,7 @@ func TestRealPiConfigurationExternalDeletionAndRecovery(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(piDir, "settings.json"), []byte(settingsJSON), 0644); err != nil {
 		t.Fatal(err)
 	}
-	modelsJSON := `{"providers": {"swobu": {"baseUrl": "` + target.WorkspaceURL() + `", "api": "openai-completions", "apiKey": "swobu", "models": [{"id": "default", "name": "Swobu default"}]}}}`
+	modelsJSON := `{"providers": {"swobu": {"baseUrl": "` + target.WorkspaceURL() + `", "api": "openai-responses", "apiKey": "swobu", "models": [{"id": "default", "name": "Swobu default"}]}}}`
 	if err := os.WriteFile(filepath.Join(piDir, "models.json"), []byte(modelsJSON), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1918,7 +2105,7 @@ func TestRealPiConfigurationCreatesMissingGlobalFiles(t *testing.T) {
 		return d.Child.Get().isClient(clientconnect.ClientPi)
 	})
 	observation = observationFor(t, d.Observations.Get(), clientconnect.ClientPi)
-	if frame := h.Frame(); !strings.Contains(frame, "apply ↵") || !strings.Contains(observation.Plan.ConfigPath, "settings.json") || !strings.Contains(observation.Plan.ConfigPath, "models.json") {
+	if frame := h.Frame(); !strings.Contains(frame, "apply ↵") || len(observation.Plan.ConfigPaths) != 2 || !strings.Contains(observation.Plan.ConfigPaths[0], "models.json") || !strings.Contains(observation.Plan.ConfigPaths[1], "settings.json") {
 		t.Fatalf("fresh Pi plan missing:\n%s", frame)
 	}
 	d.applyPlan(clientconnect.ClientPi)

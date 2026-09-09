@@ -109,9 +109,6 @@ func (s *LoginService) exchangeAndPersist(ctx context.Context, sessionID string,
 	}
 
 	keyName := defaultCredentialKeychainTag + "/" + sessionID
-	if tier, ok := parseChatGPTSubscriptionTier(token.IDToken); ok {
-		keyName = defaultCredentialKeychainTag + "/" + tier + "/" + sessionID
-	}
 	credentialRef := "secret:" + keyName
 	if s.config.CredentialOut != nil {
 		persistedRef, err := s.config.CredentialOut.Store("chatgpt", keyName, string(encodedSecret))
@@ -136,35 +133,5 @@ func classifyCredentialStoreFailure(err error) string {
 		return "credential store failed: local credential state is not writable"
 	default:
 		return "credential store failed"
-	}
-}
-
-func parseChatGPTSubscriptionTier(idToken string) (string, bool) {
-	idToken = strings.TrimSpace(idToken) // swobu:io-string source=boundary
-	if idToken == "" {
-		return "", false
-	}
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return "", false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", false
-	}
-	var claims struct {
-		Auth struct {
-			ChatGPTPlanType string `json:"chatgpt_plan_type"`
-		} `json:"https://api.openai.com/auth"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", false
-	}
-	planType := strings.ToLower(strings.TrimSpace(claims.Auth.ChatGPTPlanType)) // swobu:io-string source=provider-wire
-	switch planType {
-	case "free", "plus", "pro", "team":
-		return planType, true
-	default:
-		return "", false
 	}
 }

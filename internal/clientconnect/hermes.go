@@ -1,8 +1,9 @@
 package clientconnect
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -13,41 +14,73 @@ const ClientHermes ClientID = "hermes"
 
 var hermesAdapter = adapter{id: ClientHermes, name: "Hermes Agent", present: commandClientPresent("hermes"), planCurrent: planHermesCurrent}
 
-func planHermesCurrent(s *Service, target Target) (plannedMutation, error) {
-	raw, err := requireCommandOutput(s, "Hermes Agent", "hermes", "config", "get", "model", "--json")
+func planHermesCurrent(ctx context.Context, s *Service, target Target) (plannedMutation, error) {
+	locusRaw, err := requireCommandOutput(ctx, s, "Hermes Agent", "hermes", "config", "path")
 	if err != nil {
-		return plannedMutation{}, hermesNoChange(err)
-	}
-	var model map[string]any
-	if json.Unmarshal(raw, &model) != nil {
-		return plannedMutation{}, hermesNoChange(fmt.Errorf("model config is not an object"))
-	}
-	provider, _ := model["provider"].(string)
-	selected, _ := model["default"].(string)
-	base, _ := model["base_url"].(string)
-	locusRaw, err := requireCommandOutput(s, "Hermes Agent", "hermes", "config", "path")
-	if err != nil {
-		return plannedMutation{}, hermesNoChange(err)
+		return plannedMutation{}, hermesProblem(err)
 	}
 	locus := strings.TrimSpace(string(locusRaw))
 	if locus == "" {
-		return plannedMutation{}, hermesNoChange(fmt.Errorf("config path is empty"))
+		return plannedMutation{}, hermesProblem(fmt.Errorf("config path is empty"))
 	}
-	changes := semanticChange("backend", provider+"/"+selected, provider != "" || selected != "", "custom/default")
-	changes = append(changes, semanticChange("endpoint", base, base != "", target.WorkspaceURL())...)
-	plan := Plan{ConfigPath: locus, Target: target, Changes: changes}
+	file, err := inspectForeignFile(locus, nil)
+	if err != nil {
+		return plannedMutation{}, hermesProblem(err)
+	}
+	model := hermesPersistedModel(file.raw)
+	changes := semanticChange("backend", model.provider.value+"/"+model.selected.value, model.provider.exists || model.selected.exists, "custom/default")
+	changes = append(changes, semanticChange("endpoint", model.base.value, model.base.exists, target.WorkspaceURL())...)
+	plan := Plan{ConfigPaths: []string{locus}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
-	file, err := inspectForeignFile(locus, nil)
-	if err != nil || !file.existed {
-		return plannedMutation{}, hermesNoChange(fmt.Errorf("config.yaml is required"))
-	}
 	next, err := replaceHermesModel(file.raw, target.WorkspaceURL())
 	if err != nil {
-		return plannedMutation{}, hermesNoChange(err)
+		return plannedMutation{}, hermesProblem(err)
 	}
-	return plannedMutation{plan: plan, apply: func() error { return file.replace(next) }}, nil
+	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
+}
+
+type hermesPersistedScalar struct {
+	value  string
+	exists bool
+}
+
+type hermesPersistedModelState struct {
+	provider hermesPersistedScalar
+	selected hermesPersistedScalar
+	base     hermesPersistedScalar
+}
+
+func hermesPersistedModel(raw []byte) hermesPersistedModelState {
+	if len(raw) == 0 {
+		return hermesPersistedModelState{}
+	}
+	var document yaml.Node
+	if yaml.Unmarshal(raw, &document) != nil || len(document.Content) == 0 {
+		return hermesPersistedModelState{}
+	}
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return hermesPersistedModelState{}
+	}
+	_, model, count := yamlMappingPair(root, "model")
+	if count != 1 || model.Kind != yaml.MappingNode {
+		return hermesPersistedModelState{}
+	}
+	return hermesPersistedModelState{
+		provider: hermesPersistedScalarAt(model, "provider"),
+		selected: hermesPersistedScalarAt(model, "default"),
+		base:     hermesPersistedScalarAt(model, "base_url"),
+	}
+}
+
+func hermesPersistedScalarAt(model *yaml.Node, key string) hermesPersistedScalar {
+	_, value, count := yamlMappingPair(model, key)
+	if count != 1 || value.Kind != yaml.ScalarNode {
+		return hermesPersistedScalar{}
+	}
+	return hermesPersistedScalar{value: value.Value, exists: true}
 }
 
 // replaceHermesModel performs one source-preserving model-block edit because
@@ -55,12 +88,15 @@ func planHermesCurrent(s *Service, target Target) (plannedMutation, error) {
 // parsed only to establish structural and line authority; unrelated source is
 // never serialized by Swobu.
 func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
+	if len(raw) == 0 {
+		return []byte(hermesModelBlock(endpoint)), nil
+	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(raw, &document); err != nil {
 		return nil, fmt.Errorf("config.yaml is invalid: %w", err)
 	}
 	if len(document.Content) == 0 {
-		return nil, fmt.Errorf("config.yaml root is empty")
+		return appendHermesModelBlock(raw, endpoint)
 	}
 	root := document.Content[0]
 	if root.Kind != yaml.MappingNode {
@@ -68,7 +104,10 @@ func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
 	}
 	modelKey, model, modelCount := yamlMappingPair(root, "model")
 	if modelCount == 0 {
-		return nil, fmt.Errorf("model config is missing")
+		if root.Style&yaml.FlowStyle != 0 {
+			return nil, fmt.Errorf("config.yaml root is not a block-style object")
+		}
+		return appendHermesModelBlock(raw, endpoint)
 	}
 	if modelCount != 1 {
 		return nil, fmt.Errorf("model config is duplicated")
@@ -136,6 +175,45 @@ func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
 	return []byte(strings.Join(lines, "")), nil
 }
 
+func appendHermesModelBlock(raw []byte, endpoint string) ([]byte, error) {
+	ending := preferredLineEnding(raw)
+	next := append([]byte(nil), raw...)
+	if len(next) > 0 && !strings.HasSuffix(string(next), "\n") {
+		next = append(next, ending...)
+	}
+	next = append(next, hermesModelBlockWithEnding(endpoint, ending)...)
+	var documents []yaml.Node
+	decoder := yaml.NewDecoder(strings.NewReader(string(next)))
+	for {
+		var document yaml.Node
+		err := decoder.Decode(&document)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("config.yaml cannot safely append model: %w", err)
+		}
+		if len(document.Content) > 0 {
+			documents = append(documents, document)
+		}
+	}
+	if len(documents) != 1 {
+		return nil, fmt.Errorf("config.yaml cannot safely append model after a document boundary")
+	}
+	return next, nil
+}
+
+func hermesModelBlock(endpoint string) string {
+	return hermesModelBlockWithEnding(endpoint, "\n")
+}
+
+func hermesModelBlockWithEnding(endpoint, ending string) string {
+	return "model:" + ending +
+		"  provider: custom" + ending +
+		"  default: default" + ending +
+		"  base_url: " + endpoint + ending
+}
+
 func yamlMappingPair(mapping *yaml.Node, key string) (keyNode, valueNode *yaml.Node, count int) {
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		if mapping.Content[i].Value == key {
@@ -178,6 +256,6 @@ func preferredLineEnding(raw []byte) string {
 	return "\n"
 }
 
-func hermesNoChange(err error) error {
-	return fmt.Errorf("Hermes Agent is not automatically wireable: %v. Nothing changed.", err)
+func hermesProblem(err error) error {
+	return fmt.Errorf("Hermes Agent is not automatically wireable: %w", err)
 }

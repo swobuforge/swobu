@@ -707,9 +707,8 @@ func geminiResponseFormat(format canonical.OutputFormat, changes []compat.Change
 		return responseFormat, changes, nil
 	case canonical.OutputFormatJSONSchema:
 		responseFormat.Schema = json.RawMessage(format.Schema.RawObject())
-		if !format.Strict {
-			changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestOutputFormatSchema, canonical.Occurrence{}))
-		}
+		// Gemini schema lowering has no established exact contract-family mapping.
+		changes = compat.AppendUnique(changes, compat.NewApproximation(canonical.RequestOutputSchemaConformance, canonical.Occurrence{}))
 		return responseFormat, changes, nil
 	default:
 		return nil, changes, canonical.InternalError("canonical output format kind is invalid")
@@ -773,8 +772,8 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 			lowered.Records = append(lowered.Records, wire.LoweredToolRecord{Key: declaration.Key(), Kind: declaration.Kind()})
 			continue
 		}
-		if strict, specified := function.Strict().Get(); specified && strict {
-			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsSchemaStrict, canonical.ToolOccurrence(declaration.Key())))
+		if function.Conformance() == canonical.SchemaConformanceEnforced {
+			changes = compat.AppendUnique(changes, compat.NewOmission(canonical.RequestToolsSchemaConformance, canonical.ToolOccurrence(declaration.Key())))
 		}
 		name, err := wire.EncodeToolName(names, function.Key())
 		if err != nil {

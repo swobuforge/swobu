@@ -33,7 +33,7 @@ func SupportedAuthHeadersForSpec(spec string) []string {
 // selected implicitly. Unknown or unparsable URLs fall back to the profile
 // default (Authorization).
 //
-// Rules (RFC: Custom Endpoint Credential Header):
+// Defaults:
 //   - path contains /anthropic/            -> x-api-key
 //   - Azure Foundry Anthropic-looking host -> x-api-key
 //   - Azure OpenAI-looking host            -> api-key

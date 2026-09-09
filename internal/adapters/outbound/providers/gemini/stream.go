@@ -147,7 +147,7 @@ func (s *interactionsStream) Next(ctx context.Context) (canonical.Event, error) 
 		}
 		var payload interactionSSEFrame
 		if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
-			return canonical.Event{}, canonical.NewBackendError("gemini", 0, "Gemini Interactions stream frame is invalid JSON", "")
+			return canonical.Event{}, canonical.InternalErrorWithCause("Gemini Interactions stream frame is invalid JSON", err)
 		}
 		if err := s.handle(payload); err != nil {
 			return canonical.Event{}, err

@@ -1,6 +1,9 @@
 package clientconnect
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -35,10 +38,10 @@ func piPresent(s *Service) (bool, error) {
 	return binaryOrRegularFilePresent(s, "pi", settings, models)
 }
 
-func planPiCurrent(s *Service, target Target) (plannedMutation, error) {
+func planPiCurrent(_ context.Context, s *Service, target Target) (plannedMutation, error) {
 	settings, models, err := s.piPaths()
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
 	return planPi(settings, models, target)
 }
@@ -46,96 +49,95 @@ func planPiCurrent(s *Service, target Target) (plannedMutation, error) {
 func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, error) {
 	settings, err := inspectForeignFile(settingsPath, []byte("{}\n"))
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	editor := jsonEditor{}
-	provider, providerExists, err := editor.String(settings.raw, keyPath{"defaultProvider"})
+	settingsEditor := jsonEditor{}
+	provider, providerExists, err := settingsEditor.String(settings.raw, keyPath{"defaultProvider"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	model, modelExists, err := editor.String(settings.raw, keyPath{"defaultModel"})
+	model, modelExists, err := settingsEditor.String(settings.raw, keyPath{"defaultModel"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
 	models, err := inspectForeignFile(modelsPath, []byte("{}\n"))
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	endpoint, endpointExists, err := editor.String(models.raw, keyPath{"providers", "swobu", "baseUrl"})
+	modelsEditor := jsonEditor{allowComments: true}
+	endpoint, endpointExists, err := modelsEditor.String(models.raw, keyPath{"providers", "swobu", "baseUrl"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	api, apiExists, err := editor.String(models.raw, keyPath{"providers", "swobu", "api"})
+	api, apiExists, err := modelsEditor.String(models.raw, keyPath{"providers", "swobu", "api"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	apiKey, apiKeyExists, err := editor.String(models.raw, keyPath{"providers", "swobu", "apiKey"})
+	apiKey, apiKeyExists, err := modelsEditor.String(models.raw, keyPath{"providers", "swobu", "apiKey"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	var existingModels []map[string]any
-	modelsExist, err := editor.Value(models.raw, keyPath{"providers", "swobu", "models"}, &existingModels)
+	var existingModels json.RawMessage
+	modelsExist, err := modelsEditor.Value(models.raw, keyPath{"providers", "swobu", "models"}, &existingModels)
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	defaultExists := false
-	for _, item := range existingModels {
-		if item["id"] == "default" {
-			defaultExists = true
-		}
-	}
+	canonicalModels, _ := json.Marshal([]map[string]string{{"id": "default", "name": "Swobu default"}})
 	changes := semanticChange("backend", provider+"/"+model, providerExists || modelExists, "swobu/default")
 	changes = append(changes, semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())...)
-	changes = append(changes, semanticChange("protocol", api, apiExists, "openai-completions")...)
+	changes = append(changes, semanticChange("protocol", api, apiExists, "openai-responses")...)
 	if !apiKeyExists || apiKey == "" {
-		changes = append(changes, semanticChange("API key placeholder", "", false, "swobu")...)
+		changes = append(changes, semanticChange("API key placeholder", apiKey, apiKeyExists, "swobu")...)
 	}
-	changes = append(changes, semanticChange("default model", fmt.Sprint(defaultExists), modelsExist && defaultExists, "true")...)
-	plan := Plan{ConfigPath: models.logical + ", " + settings.logical, Target: target, Changes: changes}
+	changes = append(changes, semanticChange("model catalog", semanticJSON(existingModels), modelsExist, string(canonicalModels))...)
+	plan := Plan{ConfigPaths: []string{models.logical, settings.logical}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
-	var swobu map[string]any
-	exists, err := editor.Value(models.raw, keyPath{"providers", "swobu"}, &swobu)
+	nextModels, err := setJSONValue(modelsEditor, models.raw, keyPath{"providers", "swobu", "baseUrl"}, target.WorkspaceURL())
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	if !exists {
-		swobu = map[string]any{}
+	nextModels, err = setJSONValue(modelsEditor, nextModels, keyPath{"providers", "swobu", "api"}, "openai-responses")
+	if err != nil {
+		return plannedMutation{}, piProblem(err)
 	}
-	swobu["baseUrl"], swobu["api"] = target.WorkspaceURL(), "openai-completions"
 	if !apiKeyExists || apiKey == "" {
-		swobu["apiKey"] = "swobu"
-	}
-	modelList, ok := swobu["models"].([]any)
-	if swobu["models"] != nil && !ok {
-		return plannedMutation{}, piNoChange(fmt.Errorf("providers.swobu.models is not an array"))
-	}
-	foundDefault := false
-	for _, item := range modelList {
-		if object, ok := item.(map[string]any); ok && object["id"] == "default" {
-			foundDefault = true
+		nextModels, err = setJSONValue(modelsEditor, nextModels, keyPath{"providers", "swobu", "apiKey"}, "swobu")
+		if err != nil {
+			return plannedMutation{}, piProblem(err)
 		}
 	}
-	if !foundDefault {
-		modelList = append(modelList, map[string]any{"id": "default", "name": "Swobu default"})
-	}
-	swobu["models"] = modelList
-	nextModels, err := setJSONValue(editor, models.raw, keyPath{"providers", "swobu"}, swobu)
+	nextModels, err = modelsEditor.SetValue(nextModels, keyPath{"providers", "swobu", "models"}, canonicalModels)
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	nextSettings, err := setJSONStrings(editor, settings.raw,
+	nextSettings, err := setJSONStrings(settingsEditor, settings.raw,
 		jsonStringChange{keyPath{"defaultProvider"}, "swobu"}, jsonStringChange{keyPath{"defaultModel"}, "default"})
 	if err != nil {
-		return plannedMutation{}, piNoChange(err)
+		return plannedMutation{}, piProblem(err)
 	}
-	return plannedMutation{plan: plan, apply: func() error {
+	apply := func(context.Context) error {
 		if err := models.replace(nextModels); err != nil {
 			return err
 		}
 		return settings.replace(nextSettings)
-	}}, nil
+	}
+	return plannedMutation{plan: plan, apply: apply}, nil
 }
 
-func piNoChange(err error) error { return fmt.Errorf("pi %v. Nothing changed.", err) }
+func semanticJSON(raw json.RawMessage) string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return string(raw)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return string(raw)
+	}
+	return string(canonical)
+}
+
+func piProblem(err error) error { return fmt.Errorf("pi: %w", err) }

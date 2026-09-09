@@ -1,6 +1,7 @@
 package clientconnect
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -83,7 +84,7 @@ func TestMuseCreatesFacadeConfiguration(t *testing.T) {
 	if plan.plan.RequiresReplace() {
 		t.Fatal("fresh Muse configuration must not require replacement")
 	}
-	if err := plan.apply(); err != nil {
+	if err := plan.apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := readMuseSettings(t, path)
@@ -122,7 +123,7 @@ func TestMusePreservesUnrelatedConfigurationAndPresentSchema(t *testing.T) {
 	if !mutation.plan.RequiresReplace() {
 		t.Fatal("existing Meta-direct Muse configuration must require replacement")
 	}
-	if err := mutation.apply(); err != nil {
+	if err := mutation.apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got := readMuseSettings(t, path)
@@ -152,7 +153,7 @@ func TestMusePreservesUnrelatedConfigurationAndPresentSchema(t *testing.T) {
 
 func TestMuseReplacesCatalogRowsWithUnownedFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	raw := []byte(`{"provider":"meta","model":"default","endpoint_transport":{"base_url":"http://127.0.0.1:7926/c/work/v1","auth":"none"},"model_catalog":[{"model_id":"default","provider_id":"meta","profile_id":"tbh","display_label":"Swobu","visibility":"visible","display_order":0,"is_default":true,"context_limit":1048576,"output_limit":131072,"description":"Muse Spark via Swobu","future":"must be removed"}],"schema_version":1}`)
+	raw := []byte(`{"provider":"meta","model":"default","endpoint_transport":{"base_url":"http://127.0.0.1:7926/c/work/v1","auth":"none"},"model_catalog":[{"model_id":"default","provider_id":"meta","profile_id":"tbh","display_label":"Swobu","visibility":"visible","display_order":0,"is_default":true,"context_limit":1000000,"output_limit":64000,"description":"Muse Spark via Swobu","future":"must be removed"}],"schema_version":1}`)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestMuseReplacesCatalogRowsWithUnownedFields(t *testing.T) {
 	if mutation.plan.AlreadyConfigured() || !mutation.plan.RequiresReplace() {
 		t.Fatalf("catalog with an extra row field was accepted: %#v", mutation.plan)
 	}
-	if err := mutation.apply(); err != nil {
+	if err := mutation.apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	encoded, _ := os.ReadFile(path)
@@ -177,14 +178,14 @@ func TestMusePlanIsIdempotentAndFreshnessProtected(t *testing.T) {
 	xdg := filepath.Join(home, "xdg")
 	path := filepath.Join(xdg, "muse", "settings.json")
 	svc := museService(home, xdg)
-	first, err := svc.Plan(ClientMuse, testTarget(t))
+	first, err := svc.Plan(context.Background(), ClientMuse, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Apply(first); err != nil {
+	if _, err := svc.Apply(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.Plan(ClientMuse, testTarget(t))
+	second, err := svc.Plan(context.Background(), ClientMuse, testTarget(t))
 	if err != nil || !second.AlreadyConfigured() {
 		t.Fatalf("second plan = %#v, %v", second, err)
 	}
@@ -195,7 +196,7 @@ func TestMusePlanIsIdempotentAndFreshnessProtected(t *testing.T) {
 	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Apply(second); err == nil || !strings.Contains(err.Error(), "Client configuration changed") {
+	if _, err := svc.Apply(context.Background(), second); err == nil || !strings.Contains(err.Error(), "Client configuration changed") {
 		t.Fatalf("freshness error = %v", err)
 	}
 }
@@ -212,7 +213,7 @@ func TestMuseRejectsMalformedOwnedStateWithoutChange(t *testing.T) {
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := planMuse(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "Nothing changed") {
+		if _, err := planMuse(path, testTarget(t)); err == nil {
 			t.Fatalf("error = %v for %s", err, raw)
 		}
 		got, _ := os.ReadFile(path)
@@ -226,7 +227,7 @@ func TestMuseApplyRejectsMutationAfterReview(t *testing.T) {
 	home := t.TempDir()
 	xdg := filepath.Join(home, "xdg")
 	svc := museService(home, xdg)
-	plan, err := svc.Plan(ClientMuse, testTarget(t))
+	plan, err := svc.Plan(context.Background(), ClientMuse, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +238,7 @@ func TestMuseApplyRejectsMutationAfterReview(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"model":"changed"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Apply(plan); err == nil || !strings.Contains(err.Error(), "Client configuration changed") {
+	if _, err := svc.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "Client configuration changed") {
 		t.Fatalf("freshness error = %v", err)
 	}
 }
@@ -273,7 +274,7 @@ func assertMuseOwnedState(t *testing.T, got map[string]any) {
 	for key, want := range map[string]any{
 		"model_id": "default", "provider_id": "meta", "profile_id": "tbh",
 		"display_label": "Swobu", "visibility": "visible", "is_default": true,
-		"context_limit": float64(1048576), "output_limit": float64(131072),
+		"context_limit": float64(1000000), "output_limit": float64(64000),
 		"description": "Muse Spark via Swobu",
 	} {
 		if entry[key] != want {

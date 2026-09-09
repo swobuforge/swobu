@@ -1,10 +1,24 @@
 package canonical
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
+
+func TestInternalErrorWithCauseKeepsPublicMessageAndPrivateCause(t *testing.T) {
+	cause := errors.New("invalid character at byte 7")
+	err := InternalErrorWithCause("provider frame is invalid", cause)
+	if err.Error() != "INTERNAL_ERROR: provider frame is invalid" {
+		t.Fatalf("public error = %q", err.Error())
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("private diagnostic cause was discarded")
+	}
+}
 
 func TestNewSwobuError_UsesCanonicalOriginAndCode(t *testing.T) {
 	err := UnsupportedEndpoint("unsupported normalized path")
@@ -28,6 +42,21 @@ func TestNewBackendError_PreservesBackendOriginAndRetryAfter(t *testing.T) {
 	}
 	if err.RetryAfterHeaderValue != "120" {
 		t.Fatalf("retry_after = %q, want %q", err.RetryAfterHeaderValue, "120")
+	}
+}
+
+func TestNewStructuredBackendError_PreservesOwnedProviderDetail(t *testing.T) {
+	detail := BackendErrorDetail{Code: "quota", Type: "rate_limit_error", Message: "limit reached", RequestID: "req_provider"}
+	err := NewStructuredBackendError("target-a", protocolkind.Responses, http.StatusTooManyRequests, detail, "30")
+
+	if err.ProviderError == nil || *err.ProviderError != detail {
+		t.Fatalf("provider detail = %#v, want %#v", err.ProviderError, detail)
+	}
+	if err.Message != detail.Message {
+		t.Fatalf("compatibility message = %q, want %q", err.Message, detail.Message)
+	}
+	if err.TargetID != "target-a" || err.SourceProtocol != protocolkind.Responses {
+		t.Fatalf("provenance = target %q protocol %q", err.TargetID, err.SourceProtocol)
 	}
 }
 

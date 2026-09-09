@@ -195,7 +195,7 @@ func TestProviderPreparationProjectsCurrentFullAfterMCPRound(t *testing.T) {
 	schemaObject, _ := canonical.ParseJSONObject([]byte(`{"type":"object"}`))
 	declaration, err := canonical.NewFunctionTool(
 		key, "", canonical.NewToolSchemaObject(schemaObject),
-		canonical.Unspecified[bool](),
+		canonical.SchemaContract{Profile: canonical.SchemaProfileUnprofiled},
 	)
 	if err != nil {
 		t.Fatal(err)

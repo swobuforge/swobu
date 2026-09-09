@@ -113,9 +113,10 @@ func TestDecodeRequest_DecodesGenerationControls(t *testing.T) {
 
 func TestEncode_PreservesStructuredOutputFormat(t *testing.T) {
 	format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-		Kind:   canonical.OutputFormatJSONSchema,
-		Name:   "reply_shape",
-		Schema: canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+		Kind:           canonical.OutputFormatJSONSchema,
+		Name:           "reply_shape",
+		Schema:         canonical.NewRawJSONObject(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+		SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI},
 	})
 	if err != nil {
 		t.Fatalf("NewOutputFormat returned error: %v", err)
@@ -177,11 +178,11 @@ func TestMessagesStructuredOutputStrictnessControlsHardness(t *testing.T) {
 		wantChange bool
 	}{
 		{name: "non-strict", wantChange: true},
-		{name: "strict", strict: true},
+		{name: "strict", strict: true, wantChange: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			format, err := canonical.NewOutputFormat(canonical.OutputFormatParams{
-				Kind: canonical.OutputFormatJSONSchema, Name: "reply", Strict: tc.strict,
+				Kind: canonical.OutputFormatJSONSchema, Name: "reply", SchemaContract: canonical.SchemaContract{Profile: canonical.SchemaProfileOpenAI, Conformance: map[bool]canonical.SchemaConformance{true: canonical.SchemaConformanceEnforced}[tc.strict]},
 				Schema: canonical.NewRawJSONObject(`{"type":"object"}`),
 			})
 			if err != nil {
@@ -198,7 +199,7 @@ func TestMessagesStructuredOutputStrictnessControlsHardness(t *testing.T) {
 				}
 				return
 			}
-			want := compat.NewApproximation(canonical.RequestOutputFormat, canonical.Occurrence{})
+			want := compat.NewApproximation(canonical.RequestOutputSchemaConformance, canonical.Occurrence{})
 			if len(changes) != 1 || changes[0] != want {
 				t.Fatalf("changes = %#v, want %#v", changes, want)
 			}
@@ -214,7 +215,7 @@ func TestDecodeRequestPreservesNativeMessagesOutputConfigFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	format := got.OutputFormat()
-	if format.Kind != canonical.OutputFormatJSONSchema || format.Schema.RawObject() != `{"type":"object"}` || !format.Strict {
+	if format.Kind != canonical.OutputFormatJSONSchema || format.Schema.RawObject() != `{"type":"object"}` || format.Conformance() != canonical.SchemaConformanceEnforced {
 		t.Fatalf("native Messages output format = %#v", format)
 	}
 }
