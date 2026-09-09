@@ -38,7 +38,7 @@ func provisioningResponseError(message shareprotocol.Message) error {
 	return fmt.Errorf("Relay certificate provisioning failed: %s", message.Error)
 }
 
-func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sharestate.Store) error {
+func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sharestate.Store, roots *x509.CertPool) error {
 	if store == nil {
 		return errors.New("Owner certificate store is required")
 	}
@@ -80,9 +80,11 @@ func ProvisionCertificate(ctx context.Context, control io.ReadWriter, store *sha
 		}
 		chain = append(chain, der)
 	}
-	roots, err := systemCertPool()
-	if err != nil {
-		return fmt.Errorf("load system certificate roots: %w", err)
+	if roots == nil {
+		roots, err = systemCertPool()
+		if err != nil {
+			return fmt.Errorf("load system certificate roots: %w", err)
+		}
 	}
 	if err := store.InstallTLSCredential(candidate, chain, roots); err != nil {
 		return err

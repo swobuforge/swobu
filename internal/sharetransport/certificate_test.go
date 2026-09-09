@@ -81,7 +81,7 @@ func TestProvisionCertificateProtocolV2ReceivesCertificateDirectlyAndKeepsOwnerK
 		}
 		done <- nil
 	}()
-	if err := ProvisionCertificate(context.Background(), owner, store); err != nil {
+	if err := ProvisionCertificate(context.Background(), owner, store, trustedRoots); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
