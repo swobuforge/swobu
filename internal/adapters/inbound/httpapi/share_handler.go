@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
+// ShareHandler serves the Owner-terminated public Share HTTP boundary.
 type ShareHandler struct {
 	shareStore  *sharestate.Store
 	configStore *configstore.Store
@@ -20,11 +21,22 @@ type ShareHandler struct {
 	traffic     observation.TrafficEventSink
 }
 
+// NewShareHandler constructs the public Share adapter around existing Share
+// state and ingress.
 func NewShareHandler(shareStore *sharestate.Store, configStore *configstore.Store, ingress exchange.RequestIngress, traffic observation.TrafficEventSink) ShareHandler {
 	return ShareHandler{shareStore: shareStore, configStore: configStore, ingress: ingress, traffic: traffic}
 }
 
+// ServeHTTP applies public Share HTTP policy before delegating authenticated
+// requests.
 func (h ShareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	setShareCORSHeaders(w)
+	// Preflight carries no Share authority and must terminate before any
+	// dependency access.
+	if isCORSPreflight(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/" {
 		serveShareInvite(w)
 		return
@@ -76,6 +88,19 @@ func (b workspaceBoundIngress) ListModels(ctx context.Context, in exchange.ListM
 		return exchange.ListModelsWithWorkspace(b.workspace), nil
 	}
 	return exchange.ListModelsOutput{DefaultModelID: routing.PublicDefaultRouteID}, nil
+}
+
+func setShareCORSHeaders(w http.ResponseWriter) {
+	header := w.Header()
+	header.Set("Access-Control-Allow-Origin", "*")
+	header.Set("Access-Control-Allow-Methods", "GET, POST")
+	header.Set("Access-Control-Allow-Headers", "Authorization, x-api-key, Content-Type, Anthropic-Version")
+}
+
+func isCORSPreflight(r *http.Request) bool {
+	return r.Method == http.MethodOptions &&
+		r.Header.Get("Origin") != "" &&
+		r.Header.Get("Access-Control-Request-Method") != ""
 }
 
 func shareBearer(r *http.Request) string {

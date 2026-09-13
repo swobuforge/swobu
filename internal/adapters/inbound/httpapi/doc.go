@@ -6,6 +6,11 @@
 // non-object bodies, and trailing values. Durable configuration remains a
 // separate closed schema.
 //
+// The Owner-terminated public Share boundary emits one static wildcard-origin
+// browser CORS policy without credentialed CORS. Recognized preflight terminates
+// before Share authentication or state access; local daemon and control-plane
+// HTTP do not inherit that policy.
+//
 // Responses WebSocket upgrades require a loopback TCP peer, literal loopback
 // authority, and exact browser origin; native clients may omit Origin.
 // Forwarded headers are not trust inputs. Disconnect cancels the connection
