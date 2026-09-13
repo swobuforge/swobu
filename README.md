@@ -13,7 +13,7 @@ curl -fsSL https://swobu.com/install.sh | sh
 Windows PowerShell: `irm https://swobu.com/install.ps1 | iex`
 
 <p align="center">
-  <img src="./assets/readme/cockpit-workspace.png" alt="Swobu Cockpit workspace with balanced Azure targets and an AWS Bedrock fallback" width="1100">
+  <img src="./assets/readme/swobu-demo.gif" alt="Claude Code using one Swobu route across Azure, Bedrock, Gemini and OpenAI" width="960">
 </p>
 
 ## One route. Your capacity underneath.
