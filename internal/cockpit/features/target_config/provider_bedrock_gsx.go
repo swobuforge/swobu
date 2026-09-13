@@ -288,12 +288,19 @@ func (f *bedrockProviderForm) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (f *bedrockProviderForm) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (f *bedrockProviderForm) updatePropsFields(fresh tui.Component) {
 	ff, ok := fresh.(*bedrockProviderForm)
 	if !ok {
 		return
 	}
 	f.target = ff.target
+}
+
+func (f *bedrockProviderForm) UpdateProps(fresh tui.Component) {
+	f.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*bedrockProviderForm)(nil)
@@ -349,12 +356,19 @@ func (m *bedrockAuthenticationMenu) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (m *bedrockAuthenticationMenu) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (m *bedrockAuthenticationMenu) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*bedrockAuthenticationMenu)
 	if !ok {
 		return
 	}
 	m.target = f.target
+}
+
+func (m *bedrockAuthenticationMenu) UpdateProps(fresh tui.Component) {
+	m.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*bedrockAuthenticationMenu)(nil)

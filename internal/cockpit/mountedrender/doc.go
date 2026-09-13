@@ -6,7 +6,7 @@
 // render path where generated app.Mount calls cannot run, which in turn pushes
 // the codebase toward app/non-app split brain.
 //
-// The seam is intentionally small and framework-specific. go-tui v0.17.0 does
-// not expose a public TTY-free App constructor, so this package seeds the
-// private App fields required for mounted render and dispatch proof.
+// The seam is intentionally small and framework-specific. go-tui does not
+// expose a public TTY-free App constructor, so this package seeds the private
+// App fields required for mounted render and dispatch proof.
 package mountedrender

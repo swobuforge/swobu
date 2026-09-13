@@ -49,12 +49,21 @@ func (d *SectionDisclosure) Render(app *tui.App) *tui.Element {
 	for _, opt := range opts {
 		opt(root)
 	}
-	root.AddChild(tui.New(tui.WithText(d.disclosure.Marker()), tui.WithWidth(2)))
+	marker := d.disclosure.Marker()
+	markerOpts := []tui.Option{tui.WithText(marker), tui.WithWidth(2)}
+	if marker == ">" {
+		markerOpts = append(markerOpts, tui.WithTextStyle(selectedMarkerStyle()))
+	}
+	root.AddChild(tui.New(markerOpts...))
 	indicator := " ▾"
 	if !d.Expanded.Get() {
 		indicator = " ▸"
 	}
-	root.AddChild(tui.New(tui.WithText(d.Label + indicator)))
+	labelStyle := headingStyle()
+	if marker == ">" {
+		labelStyle = activeFieldStyle()
+	}
+	root.AddChild(tui.New(tui.WithText(d.Label+indicator), tui.WithTextStyle(labelStyle)))
 	d.disclosure.BindElement(root)
 	return root
 }

@@ -2,9 +2,9 @@
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
-**One endpoint for your AI agents. Any LLM capacity underneath.**
+**Your agent asks for a model. You control where it runs.**
 
-Make AI capacity routable. Your agent asks for a model. Swobu turns that model name into a route across providers, accounts, regions, and local servers — with balancing, failover, reasoning translation, and semantic protocol compatibility underneath.
+Make AI capacity routable. A Swobu route looks like a model to the agent; behind it can be your provider accounts, cloud regions, hosted endpoints, and local servers. Swobu handles routing, fallback, and protocol translation where the required semantics are representable.
 
 [Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
 
@@ -216,6 +216,8 @@ Swobu currently supports provider integrations across protocols including:
 
 Exact protocol and capability support varies by provider.
 
+Routes control provider differences. They do not erase them.
+
 [Capability matrix →](https://swobu.com/docs/)
 
 ---
@@ -229,6 +231,31 @@ Swobu supports local inference, frontier APIs, hyperscalers, specialized inferen
 ---
 
 ## Examples
+
+### Share a live AI gateway
+
+Give a remote agent one HTTPS endpoint and bearer without copying Swobu or
+provider credentials to the recipient:
+
+```text
+workspace dev
+  coding → Bedrock → Anthropic fallback
+  cheap  → OpenRouter
+  local  → Ollama
+
+swobu share dev
+```
+
+The recipient can use `coding`, `cheap`, and `local`. If you change the targets
+behind `coding`, their endpoint, bearer, and model name stay the same. Share one
+route instead with `swobu share dev/coding`.
+
+Shares default to one day. `7d`, `30d`, and `never` are free during preview.
+The Owner Swobu process must be running: application TLS terminates there,
+certificates renew automatically without changing the Share URL, and
+`swobu share revoke dev` closes that workspace access.
+
+[Workspace and Route Share details →](https://swobu.com/docs/concepts/sharing/)
 
 ### Same model, multiple providers
 

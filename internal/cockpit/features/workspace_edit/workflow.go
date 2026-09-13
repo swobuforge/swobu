@@ -126,10 +126,6 @@ func (w *Workflow) Back() bool {
 	return true
 }
 
-func (w *Workflow) KeyMap() tui.KeyMap {
-	return w.row.KeyMap()
-}
-
 // RowComponent syncs the child row props before render and returns the shared
 // input row component for templ mounting.
 func RowComponent(w *Workflow) tui.Component {
@@ -369,7 +365,6 @@ func NormalizeSlug(raw string) (string, error) {
 
 var (
 	_ tui.Component       = (*Workflow)(nil)
-	_ tui.KeyListener     = (*Workflow)(nil)
 	_ tui.PropsUpdater    = (*Workflow)(nil)
 	_ tui.AppBinder       = (*Workflow)(nil)
 	_ tui.WatcherProvider = (*Workflow)(nil)

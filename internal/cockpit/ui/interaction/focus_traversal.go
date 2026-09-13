@@ -4,9 +4,9 @@ import tui "github.com/grindlemire/go-tui"
 
 // FocusRefByTraversal focuses ref using go-tui's public focus traversal.
 //
-// go-tui v0.17 does not expose direct focus-by-ref. The interaction package is
-// the only Cockpit layer allowed to carry this workaround, and only for
-// mount/update focus repair.
+// The supported go-tui API does not expose direct focus-by-ref. The interaction
+// package is the only Cockpit layer allowed to carry this workaround, and only
+// for mount/update focus repair.
 func FocusRefByTraversal(app *tui.App, ref *tui.Ref) {
 	if app == nil || ref == nil {
 		return

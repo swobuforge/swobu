@@ -2,12 +2,15 @@
 //
 // Route parent rows own their local expand/collapse activation. Target child
 // rows are rendered into the go-tui focus graph only while their parent route
-// is expanded. This package does not sort, mutate, register rows upward, or
+// is expanded. Derived primary/fallback metadata shares each target row's
+// reserved label column and never becomes a selection stop. This package does
+// not sort, mutate, register rows upward, or
 // redefine domain routing semantics. A zero-target route omits the inapplicable
 // default row so add target is its next visible and selectable action.
 // Onboarding route creation, rename, and delete remain local; the first target
 // save crosses the existing atomic workspace-seed command and promotes the
 // workspace from Cockpit projection to persisted state. Share is a route-local
 // projection: issue selects one existing Grant expiry, copy reveals just in
-// time, and revoke reuses the existing confirmation grammar.
+// time, and revoke reuses the existing confirmation grammar. Each Share target
+// stays one mounted Select across those projected phases.
 package routes

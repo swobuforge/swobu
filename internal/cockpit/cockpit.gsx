@@ -303,13 +303,13 @@ templ ShellNotice(notice readmodel.Notice) {
 
 templ ShellHeader(model readmodel.CockpitReadModel) {
 	<div class="flex-row w-full">
-		<span class="w-9 font-bold nowrap">⛉ SWOBU</span>
+		<span class="w-9 nowrap">⛉ SWOBU</span>
 		<div class="flex-row gap-1 grow justify-end">
 			for _, tab := range model.Tabs {
 				if tab.Selected {
-					<span class="truncate nowrap" minWidth={0}>{activeTabLabel(tab)}</span>
+					<span class="truncate nowrap" minWidth={0} textStyle={ui.ActiveTabStyle()}>{activeTabLabel(tab)}</span>
 				} else {
-					<span class="truncate nowrap" minWidth={0}>{inactiveTabLabel(tab)}</span>
+					<span class="truncate nowrap" minWidth={0} textStyle={ui.ToneStyle(ui.ToneMuted)}>{inactiveTabLabel(tab)}</span>
 				}
 			}
 		</div>
@@ -321,12 +321,16 @@ templ ShellHeader(model readmodel.CockpitReadModel) {
 
 templ ShellFooter(model readmodel.CockpitReadModel) {
 	<div class="flex-row gap-3">
-		<span>↑↓ move</span>
-		<span>↵ action</span>
-		<span>? help</span>
-		<span>esc back</span>
-		<span>tab switch</span>
+		@FooterHint("↑↓", "move")
+		@FooterHint("↵", "action")
+		@FooterHint("F1", "help")
+		@FooterHint("esc", "back")
+		@FooterHint("tab", "switch")
 	</div>
+}
+
+templ FooterHint(key string, description string) {
+		<span class="flex-row"><span textStyle={ui.ToneStyle(ui.ToneAccent)}>{key}</span><span class="ml-1" textStyle={ui.ToneStyle(ui.ToneMuted)}>{description}</span></span>
 }
 
 func activeTabLabel(tab readmodel.WorkspaceTabReadModel) string {

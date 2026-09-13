@@ -1,0 +1,7 @@
+  new target · OpenAI API                                                             [90mcancel ↵[0m
+     provider          OpenAI API                                                     [90mchange ↵[0m
+     credential        environment · OPENAI_API_KEY                                   [90mchange ↵[0m
+     model             gpt-4.1                                                        [90mchange ↵[0m
+     protocol          OpenAI · Responses · buffered                                  [90mchange ↵[0m
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mcreate[0m                                                                           [1;38;2;70;167;88mcreate ↵[0m

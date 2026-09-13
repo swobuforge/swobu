@@ -113,7 +113,7 @@ func IssueRowComponent(v *PageView) *ui.SelectableRow {
 
 // DiagnosticsRow copies or saves diagnostics.
 func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.CopyPasteRowComponent(
+	row := ui.CopyPasteRowComponent(
 		"help:diagnostics",
 		"diagnostics",
 		v.diagnosticsValue(),
@@ -121,12 +121,13 @@ func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
 		func() ui.CopyResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
 		v.onDiagnosticsCopied,
 	)
+	return row
 }
 
 templ (v *PageView) Render() {
 	<div class="flex-col w-full pl-2">
 		<div class="flex-row w-full">
-			<span>  help</span>
+			<span textStyle={ui.HeadingStyle()}>  help</span>
 		</div>
 		<br />
 		<div class="flex-col w-full">

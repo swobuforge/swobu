@@ -226,11 +226,11 @@ func TestWorkflow_EditSubmitFailureShowsSaveErrorInRender(t *testing.T) {
 		t.Fatalf("slug = %q, want preserved dev-2", got)
 	}
 
-	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen := testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("edit_submit_failed").
-		Fixture("testdata/workspace_edit_workflow/fixture/edit_submit_failed.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/edit_submit_failed.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 }
 
 func TestWorkflow_BackClosesOpenWorkflow(t *testing.T) {
@@ -252,12 +252,18 @@ func TestWorkflow_BackClosesOpenWorkflow(t *testing.T) {
 	}
 }
 
-func TestWorkflow_KeyMapEscClosesFocusedWorkflow(t *testing.T) {
+func TestWorkflow_MountedEscapeClosesFocusedWorkflow(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
 	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
 	workflow.Slug.Set("prod")
+	h, err := testkit.NewHarness(workflow)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
 
-	pressBinding(t, workflow.KeyMap(), tui.KeyEscape)
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 
 	if workflow.IsEditing() {
 		t.Fatal("Escape should leave editing state")
@@ -424,54 +430,54 @@ func TestWorkflow_ActivateSlugRowEditsNoopsOrSubmits(t *testing.T) {
 
 func TestWorkflow_RenderSlugLifecycleStatesInComponentLane(t *testing.T) {
 	workflow := NewWorkflow(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"}, nil, nil)
-	rendered := testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen := testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("viewing").
-		Fixture("testdata/workspace_edit_workflow/fixture/viewing.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/viewing.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.OpenEditor(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev"})
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("editing").
-		Fixture("testdata/workspace_edit_workflow/fixture/editing.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/editing.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.Slug.Set("dev!")
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("invalid").
-		Fixture("testdata/workspace_edit_workflow/fixture/invalid.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/invalid.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.OpenDraft()
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("required").
-		Fixture("testdata/workspace_edit_workflow/fixture/required.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/required.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.Slug.Set("dev")
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("draft_valid").
-		Fixture("testdata/workspace_edit_workflow/fixture/draft_valid.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/draft_valid.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.Slug.Set("dev!")
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("invalid").
-		Fixture("testdata/workspace_edit_workflow/fixture/draft_invalid.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/draft_invalid.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 
 	workflow.Slug.Set("dev")
 	workflow.Error.Set("name conflict")
-	rendered = testkit.RenderMountedTrimmed(t, workflow, 90, 9)
+	screen = testkit.RenderMountedScreen(t, workflow, 90, 9)
 	testkit.AssertVisual("duplicate").
-		Fixture("testdata/workspace_edit_workflow/fixture/duplicate.txt").
+		Fixture("testdata/workspace_edit_workflow/fixture/duplicate.ansi").
 		Viewport(90, 9).
-		Now(t, rendered)
+		Now(t, screen)
 }
 
 func TestWorkflow_WorkspaceURLPreviewDerivesFromSlug(t *testing.T) {
@@ -489,15 +495,4 @@ func TestWorkflow_WorkspaceURLPreviewDerivesFromSlug(t *testing.T) {
 	if got, want := workflow.WorkspaceURLPreview(), "after first target"; got != want {
 		t.Fatalf("invalid preview = %q, want %q", got, want)
 	}
-}
-
-func pressBinding(t *testing.T, keymap tui.KeyMap, key tui.Key) {
-	t.Helper()
-	for _, binding := range keymap {
-		if binding.Pattern.Key == key {
-			binding.Handler(tui.KeyEvent{Key: key})
-			return
-		}
-	}
-	t.Fatalf("keymap missing binding for %v", key)
 }

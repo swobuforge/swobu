@@ -20,6 +20,6 @@ templ ChoicePickerFooterRow(countLabel string) {
 	<div class="flex-row w-full mt-1">
 		<span class="w-2"></span>
 		<span class="grow truncate nowrap">{countLabel}</span>
-		<span class="w-14">↑↓ choose</span>
+		<span class="w-14" textStyle={ToneStyle(ToneMuted)}>↑↓ choose</span>
 	</div>
 }

@@ -2,6 +2,7 @@ package readmodel
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -9,6 +10,22 @@ type ShareReadModel struct {
 	Hostname  string
 	ExpiresAt time.Time
 	Never     bool
+}
+
+func (s ShareReadModel) EndpointValue() string {
+	const suffix = ".share.swobu.com"
+	prefix := strings.TrimSuffix(s.Hostname, suffix)
+	if prefix == s.Hostname || len(prefix) <= 8 {
+		return s.Hostname + "/#••••"
+	}
+	return prefix[:8] + "…" + suffix + "/#••••"
+}
+
+func (s ShareReadModel) ExpiryValue() string {
+	if s.Never {
+		return "until revoked"
+	}
+	return s.ExpiresAt.Local().Format("2 Jan 2006")
 }
 
 // RouteID is the stable Cockpit identifier for a client-visible model name.
@@ -117,7 +134,7 @@ func (r RouteReadModel) IsClientVisible() bool {
 
 func (r RouteReadModel) TierCount() int { return len(r.Tiers) }
 
-// HasBalancedStep reports whether any step has more than one target.
+// HasBalancedTier reports whether any tier has more than one target.
 func (r RouteReadModel) HasBalancedTier() bool {
 	for _, tier := range r.Tiers {
 		if len(tier.Targets) > 1 {
@@ -130,10 +147,10 @@ func (r RouteReadModel) HasBalancedTier() bool {
 // RowValue derives the bounded route row value used by Cockpit sections.
 //
 //	targets == 0                     → "no targets"
-//	steps == 1 && targets == 1       → "1 target"
-//	steps == 1 && targets > 1        → "N balanced targets"
-//	steps > 1 && one target/step     → "N fallback steps"
-//	steps > 1                         → "N steps · M targets"
+//	tiers == 1 && targets == 1       → "1 target"
+//	tiers == 1 && targets > 1        → "N balanced targets"
+//	tiers > 1 && one target/tier     → "N fallback steps"
+//	tiers > 1                         → "N tiers · M targets"
 func (r RouteReadModel) RowValue() string {
 	targets := r.TargetCount()
 	tiers := r.TierCount()
@@ -147,7 +164,7 @@ func (r RouteReadModel) RowValue() string {
 	case tiers == 1 && targets > 1:
 		base = fmt.Sprintf("%d balanced targets", targets)
 	case tiers > 1 && !r.HasBalancedTier():
-		base = fmt.Sprintf("%d fallback tiers", tiers-1)
+		base = fmt.Sprintf("%d fallback steps", tiers-1)
 	default:
 		base = fmt.Sprintf("%d tiers · %d targets", tiers, targets)
 	}

@@ -1,0 +1,9 @@
+  [1mmodel routes ▾[0m
+     dev               no targets                                 [90mcollapse ↵[0m
+        name              dev                                     [90medit ↵[0m
+        share             not shared                              [90mshare ↵[0m
+
+        add target                                                [90madd ↵[0m
+        delete            model route                             [90mdelete ↵[0m
+
+     add model route                                              [90madd ↵[0m

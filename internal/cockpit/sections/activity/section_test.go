@@ -25,17 +25,18 @@ func TestSection_RendersCatchAllResolutionPathAtSupportedWidths(t *testing.T) {
 		width   int
 		fixture string
 	}{
-		{name: "narrow_60", width: 60, fixture: "successful_narrow_60.txt"},
-		{name: "standard_80", width: 80, fixture: "successful_standard_80.txt"},
-		{name: "wide_100", width: 100, fixture: "successful_wide_100.txt"},
-		{name: "wide_120", width: 120, fixture: "successful_wide_120.txt"},
+		{name: "narrow_60", width: 60, fixture: "successful_narrow_60.ansi"},
+		{name: "standard_80", width: 80, fixture: "successful_standard_80.ansi"},
+		{name: "wide_100", width: 100, fixture: "successful_wide_100.ansi"},
+		{name: "wide_120", width: 120, fixture: "successful_wide_120.ansi"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rendered := testkit.RenderMountedTrimmed(t, section, tc.width, 2)
+			screen := testkit.RenderMountedScreen(t, section, tc.width, 2)
+			rendered := screen.String()
 			testkit.AssertVisual(tc.name).
 				Fixture("testdata/activity_section/fixture/"+tc.fixture).
 				Viewport(tc.width, 2).
-				Now(t, rendered)
+				Now(t, screen)
 			if strings.Contains(rendered, "TIME") || strings.Contains(rendered, "TARGET / CLIENT") {
 				t.Fatalf("rendered Activity column labels; want headerless semantic grid\n%s", rendered)
 			}
@@ -134,11 +135,11 @@ func TestSection_RendersFailedLatest(t *testing.T) {
 	m.Activity.Latest.HTTPStatus = 500
 	m.Activity.Latest.Duration = 312 * time.Millisecond
 	section := Section(m, context.Background(), nil)
-	rendered := testkit.RenderMountedTrimmed(t, section, 56, 2)
+	screen := testkit.RenderMountedScreen(t, section, 56, 2)
 	testkit.AssertVisual("failed_narrow").
-		Fixture("testdata/activity_section/fixture/failed_narrow.txt").
+		Fixture("testdata/activity_section/fixture/failed_narrow.ansi").
 		Viewport(56, 2).
-		Now(t, rendered)
+		Now(t, screen)
 }
 
 func TestActivityDurationLabelUsesHumanReadableUnits(t *testing.T) {
@@ -202,30 +203,30 @@ func TestSection_RendersFailoverAttemptEvidence(t *testing.T) {
 	m.Activity.Latest.ProviderModel = "gemini-2.5-pro"
 	m.Activity.Latest.AttemptCount = 2
 	section := Section(m, context.Background(), nil)
-	rendered := testkit.RenderMountedTrimmed(t, section, 100, 2)
+	screen := testkit.RenderMountedScreen(t, section, 100, 2)
 	testkit.AssertVisual("failover_narrow").
-		Fixture("testdata/activity_section/fixture/failover_narrow.txt").
+		Fixture("testdata/activity_section/fixture/failover_narrow.ansi").
 		Viewport(100, 2).
-		Now(t, rendered)
+		Now(t, screen)
 
 	m.Activity.Latest.Status = readmodel.ActivityCanceled
 	m.Activity.Latest.HTTPStatus = 0
 	m.Activity.Latest.Duration = 23 * time.Millisecond
-	rendered = testkit.RenderMountedTrimmed(t, Section(m, context.Background(), nil), 100, 2)
+	screen = testkit.RenderMountedScreen(t, Section(m, context.Background(), nil), 100, 2)
 	testkit.AssertVisual("canceled_failover_narrow").
-		Fixture("testdata/activity_section/fixture/canceled_failover_narrow.txt").
+		Fixture("testdata/activity_section/fixture/canceled_failover_narrow.ansi").
 		Viewport(100, 2).
-		Now(t, rendered)
+		Now(t, screen)
 }
 
 func TestSection_RendersEmptyState(t *testing.T) {
 	m := activityModel(readmodel.ActivityReadModel{})
 	section := Section(m, context.Background(), nil)
-	rendered := testkit.RenderMountedTrimmed(t, section, 80, 2)
+	screen := testkit.RenderMountedScreen(t, section, 80, 2)
 	testkit.AssertVisual("empty").
-		Fixture("testdata/activity_section/fixture/empty.txt").
+		Fixture("testdata/activity_section/fixture/empty.ansi").
 		Viewport(80, 2).
-		Now(t, rendered)
+		Now(t, screen)
 }
 
 func TestSection_BootstrapShowsNoRequestsWithoutQueryingDaemon(t *testing.T) {
@@ -380,11 +381,12 @@ func TestSection_RendersMultipleRecentRows(t *testing.T) {
 	third.Duration = 63 * time.Second
 	third.AttemptCount = 1
 	m := activityModel(readmodel.ActivityReadModel{Rows: []readmodel.ActivityRowReadModel{first, second, third}})
-	rendered := testkit.RenderMountedTrimmed(t, Section(m, context.Background(), nil), 100, 4)
+	screen := testkit.RenderMountedScreen(t, Section(m, context.Background(), nil), 100, 4)
+	rendered := screen.String()
 	testkit.AssertVisual("multiple_rows").
-		Fixture("testdata/activity_section/fixture/multiple_rows.txt").
+		Fixture("testdata/activity_section/fixture/multiple_rows.ansi").
 		Viewport(100, 4).
-		Now(t, rendered)
+		Now(t, screen)
 	if got := physicalRowCount(rendered); got != 4 {
 		t.Fatalf("rendered physical rows = %d, want section title + three events\n%s", got, rendered)
 	}

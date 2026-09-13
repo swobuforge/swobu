@@ -1,0 +1,36 @@
+⛉ SWOBU                                                                        [1;7;38;2;70;167;88;48;2;18;25;18m[› dev][0m [90m[lab][0m [90m[+][0m [90m[?][0m
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  [1mworkspace ▾[0m                                                                                       
+     name              dev                                                            [90medit ↵[0m        
+     endpoint          http://127.0.0.1:7926/c/dev                                    [90mclients ↵[0m     
+                       OpenAI · Anthropic                                                           
+     share             not shared                                                     [90mshare ↵[0m       
+     delete            workspace                                                      [90mdelete ↵[0m      
+                                                                                                    
+  [1mmodel routes ▾[0m                                                                                    
+   [1;38;2;70;167;88m>[0m [1mgpt[0m               default · 2 tiers · 3 targets                                  [1;38;2;70;167;88mcollapse ↵[0m    
+        name              gpt                                                         [90medit ↵[0m        
+        default           yes                                                         [90mcurrent[0m       
+        share             not shared                                                  [90mshare ↵[0m       
+        [1;38;2;70;167;88mprimary[0m           openai/gpt-4.1 · 50%                                        [90medit ↵[0m        
+                          anthropic/claude · 50%                                      [90medit ↵[0m        
+        [1;38;2;247;107;21mfallback 1[0m        openai/gpt-4o                                               [90medit ↵[0m        
+                                                                                                    
+        add target                                                                    [90madd ↵[0m         
+        delete            model route                                                 [90mdelete ↵[0m      
+     local             1 target                                                       [90mexpand ↵[0m      
+                                                                                                    
+     add model route                                                                  [90madd ↵[0m         
+                                                                                                    
+  [1mactivity[0m                                                                                          
+                                   no requests yet                                                  
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+────────────────────────────────────────────────────────────────────────────────────────────────────
+[1;38;2;70;167;88m↑↓[0m [90mmove[0m   [1;38;2;70;167;88m↵[0m [90maction[0m   [1;38;2;70;167;88mF1[0m [90mhelp[0m   [1;38;2;70;167;88mesc[0m [90mback[0m   [1;38;2;70;167;88mtab[0m [90mswitch[0m                                                

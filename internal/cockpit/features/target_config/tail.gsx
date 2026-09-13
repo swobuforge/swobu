@@ -63,6 +63,7 @@ func classifyCatalogError(errText string) catalogErrorClassification {
 func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
 	cls := classifyCatalogError(w.Catalog.Get().Err)
 	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), "models", cls.summary, "retry ↵", w.RetryCatalog)
+	row.ValueTone = ui.ToneFailure
 	row.AutoFocus = !w.permitsManualModelRecovery()
 	return row
 }
@@ -79,7 +80,9 @@ func ModelSelectRow(w *TargetConfig) *ui.Select {
 	if value == "" {
 		value, action = "required", "choose ↵"
 	}
-	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "model-display"), Label: TargetModelLabel(w), Value: value, Action: action, AutoFocus: model == "" && setupAllowsModelChoice(w), CanEnter: func() bool { return setupAllowsModelChoice(w) }, Body: func(backout func()) tui.Component { return ModelPicker(w, backout) }})
+	tone := ui.ToneNeutral
+	if model == "" { tone = ui.ToneWarning }
+	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "model-display"), Label: TargetModelLabel(w), Value: value, ValueTone: tone, Action: action, AutoFocus: model == "" && setupAllowsModelChoice(w), CanEnter: func() bool { return setupAllowsModelChoice(w) }, Body: func(backout func()) tui.Component { return ModelPicker(w, backout) }})
 }
 
 // ManualModelInput authors an open-set model identity for providers with no
@@ -164,8 +167,11 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 }
 
 func PlacementSelect(w *TargetConfig) *ui.Select {
-	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), Action: "change ↵", CanEnter: w.readyToCreate, Body: func(backout func()) tui.Component { return PlacementPicker(w, backout) }})
+	tone := ui.ToneAccent
+	if w.Placement.Get().Kind == readmodel.PlacementFallback && w.Placement.Get().PeerTargetID != "" { tone = ui.ToneFallback }
+	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), ValueTone: tone, Action: "change ↵", CanEnter: w.readyToCreate, Body: func(backout func()) tui.Component { return PlacementPicker(w, backout) }})
 }
+
 func PlacementPicker(w *TargetConfig, backout func()) *ui.ChoicePicker {
 	opts := placementOptions(w.Route, w.mode, w.Target.ID)
 	items := make([]ui.ChoiceOption, 0, len(opts))
@@ -201,7 +207,9 @@ func TargetConfigHeader(w *TargetConfig) *ui.SelectableRow {
 }
 
 func CreateRetryControl(w *TargetConfig) *ui.SelectableRow {
-	return ui.NewSelectableRow(TargetAddMountKey(w, "create-retry"), w.saveVerb(), "failed", "retry ↵", w.RetryCreate)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "create-retry"), w.saveVerb(), "failed", "retry ↵", w.RetryCreate)
+	row.ValueTone = ui.ToneFailure
+	return row
 }
 
 func DeleteControl(w *TargetConfig) *ui.SelectableRow {
@@ -222,7 +230,9 @@ func DeleteControl(w *TargetConfig) *ui.SelectableRow {
 			w.DeleteArmed.Set(false)
 		}
 	}
-	return ui.NewSelectableRow(TargetAddMountKey(w, "delete"), "delete", value, action, activate)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "delete"), "delete", value, action, activate)
+	if w.DeleteArmed.Get() { row.ValueTone = ui.ToneFailure }
+	return row
 }
 
 func CreateControl(w *TargetConfig) *ui.SelectableRow {
@@ -245,11 +255,21 @@ type targetTail struct{ root *TargetConfig }
 func TargetConfigTail(w *TargetConfig) tui.Component { return &targetTail{root: w} }
 
 templ InertTargetField(label string, value string, action string) {
+	@InertTargetFieldWithTone(label, value, action, ui.ToneNeutral)
+}
+
+templ InertTargetFieldWithTone(label string, value string, action string, tone ui.Tone) {
 	<div class="flex-row w-full">
 		<span class="w-2"></span>
 		<span class="w-18">{label}</span>
-		<span class="grow truncate nowrap" minWidth={0}>{value}</span>
-		if action != "" { <span class="w-14">{action}</span> }
+		<span class="grow truncate nowrap" minWidth={0} textStyle={ui.ToneStyle(tone)}>{value}</span>
+		if action != "" {
+			if tone == ui.ToneWarning || tone == ui.ToneFailure {
+				<span class="w-14" textStyle={ui.ToneStyle(tone)}>{action}</span>
+			} else {
+				<span class="w-14" textStyle={ui.ToneStyle(ui.ToneMuted)}>{action}</span>
+			}
+		}
 	</div>
 }
 
@@ -264,7 +284,7 @@ templ (t *targetTail) Render() {
 		} else if targetCatalogFailed(t.root) && targetCatalogRetryable(t.root) {
 			@ModelCatalogRetry(t.root)
 			if cls := classifyCatalogError(t.root.Catalog.Get().Err); cls.showDetail {
-				<div class="pl-20 w-full">
+				<div class="pl-20 w-full" textStyle={ui.ToneStyle(ui.ToneFailure)}>
 					@FlowText(strings.TrimSpace(t.root.Catalog.Get().Err))
 				</div>
 			}
@@ -303,7 +323,7 @@ templ (t *targetTail) Render() {
 		} else if targetReadyToCreate(t.root) {
 			@CreateControl(t.root)
 		} else {
-			@InertTargetField(targetSaveVerb(t.root), "", "complete setup")
+			@InertTargetFieldWithTone(targetSaveVerb(t.root), "", "complete setup", ui.ToneWarning)
 		}
 	</div>
 }

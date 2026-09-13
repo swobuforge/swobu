@@ -149,12 +149,12 @@ func (r *ConfirmActionRow) Render(_ *tui.App) *tui.Element {
 	switch r.phase.Get() {
 	case ConfirmConfirming:
 		opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.Confirm))
-		row = ActionRow(r.target.Marker(), r.copy.Label, r.copy.ConfirmValue, r.copy.ConfirmAction, opts...)
+		row = ActionRowWithTone(r.target.Marker(), r.copy.Label, r.copy.ConfirmValue, r.copy.ConfirmAction, ToneFailure, opts...)
 	case ConfirmSubmitting:
 		row = ActionRow(r.target.Marker(), r.copy.Label, r.copy.SubmittingValue, r.copy.SubmittingHint, r.target.ShellOptions()...)
 	case ConfirmFailed:
 		opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.Confirm))
-		row = ActionRow(r.target.Marker(), r.copy.Label, r.copy.FailedValue, r.copy.FailedAction, opts...)
+		row = ActionRowWithTone(r.target.Marker(), r.copy.Label, r.copy.FailedValue, r.copy.FailedAction, ToneFailure, opts...)
 	default:
 		opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.OpenConfirm))
 		row = ActionRow(r.target.Marker(), r.copy.Label, r.copy.IdleValue, r.copy.IdleAction, opts...)

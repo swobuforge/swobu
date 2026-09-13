@@ -7,12 +7,14 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	workspace_connect "github.com/swobuforge/swobu/internal/cockpit/features/workspace_connect"
 	workspace_delete "github.com/swobuforge/swobu/internal/cockpit/features/workspace_delete"
 	workspace_edit "github.com/swobuforge/swobu/internal/cockpit/features/workspace_edit"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/sharestate"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
@@ -28,6 +30,132 @@ func TestSection_WorkspaceSavedResetsTransientState(t *testing.T) {
 	if got := section.PendingDeleteWorkspaceID.Get(); got != "" {
 		t.Fatalf("pending delete workspace id after workspace save = %q, want empty", got)
 	}
+}
+
+type workspaceShareCommandsStub struct {
+	ref         string
+	expiry      sharestate.Expiry
+	result      shares.Result
+	issueCalls  int
+	revealCalls int
+	issueFunc   func() (shares.Result, error)
+}
+
+func (s *workspaceShareCommandsStub) IssueShare(_ context.Context, ref string, expiry sharestate.Expiry) (shares.Result, error) {
+	s.issueCalls++
+	s.ref, s.expiry = ref, expiry
+	if s.issueFunc != nil {
+		return s.issueFunc()
+	}
+	return s.result, nil
+}
+func (s *workspaceShareCommandsStub) RevealShare(context.Context, string) (shares.Result, error) {
+	s.revealCalls++
+	return s.result, nil
+}
+
+func TestSection_WorkspaceShareEscapeReturnsSelectionWithoutIssuing(t *testing.T) {
+	commands := &workspaceShareCommandsStub{}
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = commands
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+	for range 3 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+	if commands.issueCalls != 0 {
+		t.Fatalf("Escape issued Share: %d", commands.issueCalls)
+	}
+	frame := h.FrameTrimmed()
+	if strings.Contains(frame, "1 day") || !strings.Contains(frame, "not shared") {
+		t.Fatalf("Escape did not restore inactive Share:\n%s", frame)
+	}
+	testkit.AssertFocusedFrame(t, frame, "> share")
+}
+
+func TestSection_ActiveWorkspaceShareCopiesAndUsesBoundedExpiryPresentation(t *testing.T) {
+	commands := &workspaceShareCommandsStub{result: shares.Result{ShareURL: "https://d-q7mk3abcdefghijkl.share.swobu.com/#swsh_SECRET"}}
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = commands
+	section.Model.Share = &readmodel.ShareReadModel{Hostname: "d-q7mk3abcdefghijkl.share.swobu.com", Never: true}
+	var copied string
+	cleanup := ui.RegisterEffectHooks(nil, func(value string) (bool, error) { copied = value; return true, nil }, nil)
+	defer cleanup()
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+	for range 3 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "d-q7mk3a….share.swobu.com/#••••") || !strings.Contains(frame, "expires           until revoked") || strings.Contains(frame, "share access") {
+		t.Fatalf("active Workspace Share presentation drifted:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if commands.revealCalls != 1 || copied != commands.result.ShareURL {
+		t.Fatalf("active Share copy calls=%d value=%q", commands.revealCalls, copied)
+	}
+}
+
+func TestSection_PendingWorkspaceShareCannotDuplicateIssue(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	commands := &workspaceShareCommandsStub{issueFunc: func() (shares.Result, error) {
+		close(started)
+		<-release
+		return shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET", ExpiresAt: "2026-09-11T00:00:00Z"}, nil
+	}}
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = commands
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+	for range 3 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	<-started
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "setting up HTTPS…") {
+		t.Fatalf("pending Share state missing:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if commands.issueCalls != 1 {
+		t.Fatalf("pending Share accepted duplicate issue: %d", commands.issueCalls)
+	}
+	close(release)
+}
+func (s *workspaceShareCommandsStub) RevokeShare(_ context.Context, ref string) error {
+	s.ref = ref
+	return nil
+}
+
+func TestSection_WorkspaceShareUsesWorkspaceRefAndOneDayDefault(t *testing.T) {
+	commands := &workspaceShareCommandsStub{result: shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET", ExpiresAt: "2026-09-11T00:00:00Z"}}
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = commands
+	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
+	defer h.Close()
+	// disclosure, name, endpoint, share
+	for range 3 {
+		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	frame := h.FrameTrimmed()
+	for _, want := range []string{"> 1 day", "7 days · preview", "30 days · preview", "until revoked · preview"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("workspace expiry picker missing %q:\n%s", want, frame)
+		}
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if commands.ref != "dev" || commands.expiry != sharestate.ExpiryOneDay {
+		t.Fatalf("issue = %q %q", commands.ref, commands.expiry)
+	}
+	if section.Model.Share == nil || section.Model.Share.Hostname != "d-example.share.swobu.com" {
+		t.Fatalf("workspace Share not projected: %#v", section.Model.Share)
+	}
+	testkit.AssertFocusedFrame(t, h.Frame(), "> share")
+	testkit.AssertUnfocusedFrame(t, h.Frame(), "> delete")
 }
 
 func TestSection_UpdatePropsKeepsPendingDeleteWorkspaceIDForSameWorkspace(t *testing.T) {
@@ -146,7 +274,7 @@ func TestSection_FocusTraversal(t *testing.T) {
 	}
 	focusables := collectFocusables(root)
 	// header, name, endpoint, delete = 4
-	if got, want := len(focusables), 4; got != want {
+	if got, want := len(focusables), 5; got != want {
 		t.Fatalf("workspace focusables = %d, want %d", got, want)
 	}
 }
@@ -260,6 +388,7 @@ func TestSection_DeleteRowShowsMarkerWhenFocused(t *testing.T) {
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 
 	frame := h.Frame()
 	testkit.AssertFocusedFrame(t, frame, "> delete")
@@ -291,6 +420,7 @@ func TestSection_DeleteConfirmation_CancelOnEscape(t *testing.T) {
 	defer h.Close()
 
 	// Navigate to the delete row.
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})

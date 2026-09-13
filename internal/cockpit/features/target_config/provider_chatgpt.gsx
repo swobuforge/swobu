@@ -108,6 +108,7 @@ func ChatGPTAuthSignedIn(w *TargetConfig) *ui.SelectableRow {
 
 func ChatGPTAuthFailed(w *TargetConfig) *ui.SelectableRow {
 	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-failed"), "authentication", "failed", "retry ↵", w.startInteractiveAuth)
+	row.ValueTone = ui.ToneFailure
 	row.AutoFocus = true
 	return row
 }

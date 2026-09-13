@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/profile"
 )
@@ -67,6 +68,7 @@ func classifyCatalogError(errText string) catalogErrorClassification {
 func ModelCatalogRetry(w *TargetConfig) *ui.SelectableRow {
 	cls := classifyCatalogError(w.Catalog.Get().Err)
 	row := ui.NewSelectableRow(TargetAddMountKey(w, "catalog-retry"), "models", cls.summary, "retry ↵", w.RetryCatalog)
+	row.ValueTone = ui.ToneFailure
 	row.AutoFocus = !w.permitsManualModelRecovery()
 	return row
 }
@@ -83,7 +85,11 @@ func ModelSelectRow(w *TargetConfig) *ui.Select {
 	if value == "" {
 		value, action = "required", "choose ↵"
 	}
-	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "model-display"), Label: TargetModelLabel(w), Value: value, Action: action, AutoFocus: model == "" && setupAllowsModelChoice(w), CanEnter: func() bool { return setupAllowsModelChoice(w) }, Body: func(backout func()) tui.Component { return ModelPicker(w, backout) }})
+	tone := ui.ToneNeutral
+	if model == "" {
+		tone = ui.ToneWarning
+	}
+	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "model-display"), Label: TargetModelLabel(w), Value: value, ValueTone: tone, Action: action, AutoFocus: model == "" && setupAllowsModelChoice(w), CanEnter: func() bool { return setupAllowsModelChoice(w) }, Body: func(backout func()) tui.Component { return ModelPicker(w, backout) }})
 }
 
 func ManualModelInput(w *TargetConfig) *ui.EditableRow {
@@ -168,7 +174,11 @@ func ProtocolSelect(w *TargetConfig) *ui.Select {
 }
 
 func PlacementSelect(w *TargetConfig) *ui.Select {
-	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), Action: "change ↵", CanEnter: w.readyToCreate, Body: func(backout func()) tui.Component { return PlacementPicker(w, backout) }})
+	tone := ui.ToneAccent
+	if w.Placement.Get().Kind == readmodel.PlacementFallback && w.Placement.Get().PeerTargetID != "" {
+		tone = ui.ToneFallback
+	}
+	return ui.NewSelect(ui.SelectProps{ID: TargetAddMountKey(w, "placement-display"), Label: "routing", Value: w.Placement.Get().Summary(), ValueTone: tone, Action: "change ↵", CanEnter: w.readyToCreate, Body: func(backout func()) tui.Component { return PlacementPicker(w, backout) }})
 }
 
 func PlacementPicker(w *TargetConfig, backout func()) *ui.ChoicePicker {
@@ -207,7 +217,9 @@ func TargetConfigHeader(w *TargetConfig) *ui.SelectableRow {
 }
 
 func CreateRetryControl(w *TargetConfig) *ui.SelectableRow {
-	return ui.NewSelectableRow(TargetAddMountKey(w, "create-retry"), w.saveVerb(), "failed", "retry ↵", w.RetryCreate)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "create-retry"), w.saveVerb(), "failed", "retry ↵", w.RetryCreate)
+	row.ValueTone = ui.ToneFailure
+	return row
 }
 
 func DeleteControl(w *TargetConfig) *ui.SelectableRow {
@@ -228,7 +240,11 @@ func DeleteControl(w *TargetConfig) *ui.SelectableRow {
 			w.DeleteArmed.Set(false)
 		}
 	}
-	return ui.NewSelectableRow(TargetAddMountKey(w, "delete"), "delete", value, action, activate)
+	row := ui.NewSelectableRow(TargetAddMountKey(w, "delete"), "delete", value, action, activate)
+	if w.DeleteArmed.Get() {
+		row.ValueTone = ui.ToneFailure
+	}
+	return row
 }
 
 func CreateControl(w *TargetConfig) *ui.SelectableRow {
@@ -292,6 +308,77 @@ func InertTargetField(label string, value string, action string) *InertTargetFie
 	var view InertTargetFieldView
 	var watchers []tui.Watcher
 
+	__tui_0 := InertTargetFieldWithTone(label, value, action, ui.ToneNeutral)
+
+	watchers = append(watchers, __tui_0.GetWatchers()...)
+
+	__bindApp := func(app *tui.App) {
+		if binder, ok := any(__tui_0).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+	}
+
+	__unbindApp := func() {
+		if unbinder, ok := any(__tui_0).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+	}
+
+	view = InertTargetFieldView{
+		Root:      __tui_0.Root,
+		watchers:  watchers,
+		bindApp:   __bindApp,
+		unbindApp: __unbindApp,
+	}
+	return &view
+}
+
+type InertTargetFieldWithToneView struct {
+	Root      *tui.Element
+	watchers  []tui.Watcher
+	bindApp   func(*tui.App)
+	unbindApp func()
+}
+
+func (v *InertTargetFieldWithToneView) UnbindApp() {
+	if v.unbindApp != nil {
+		v.unbindApp()
+	}
+}
+
+func (v *InertTargetFieldWithToneView) GetRoot() *tui.Element { return v.Root }
+
+func (v *InertTargetFieldWithToneView) GetWatchers() []tui.Watcher { return v.watchers }
+
+func (v *InertTargetFieldWithToneView) Render(app *tui.App) *tui.Element { return v.Root }
+
+func (v *InertTargetFieldWithToneView) BindApp(app *tui.App) {
+	if v.bindApp != nil {
+		v.bindApp(app)
+	}
+}
+
+func (v *InertTargetFieldWithToneView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*InertTargetFieldWithToneView)
+	if !ok {
+		return
+	}
+	v.Root = f.Root
+	v.watchers = f.watchers
+	v.bindApp = f.bindApp
+	v.unbindApp = f.unbindApp
+}
+
+var _ tui.AppBinder = (*InertTargetFieldWithToneView)(nil)
+
+var _ tui.AppUnbinder = (*InertTargetFieldWithToneView)(nil)
+
+var _ tui.PropsUpdater = (*InertTargetFieldWithToneView)(nil)
+
+func InertTargetFieldWithTone(label string, value string, action string, tone ui.Tone) *InertTargetFieldWithToneView {
+	var view InertTargetFieldWithToneView
+	var watchers []tui.Watcher
+
 	__tui_0 := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100.00),
@@ -311,14 +398,25 @@ func InertTargetField(label string, value string, action string) *InertTargetFie
 		tui.WithTruncate(true),
 		tui.WithWrap(false),
 		tui.WithMinWidth(0),
+		tui.WithTextStyle(ui.ToneStyle(tone)),
 	)
 	__tui_0.AddChild(__tui_3)
 	if action != "" {
-		__tui_4 := tui.New(
-			tui.WithText(action),
-			tui.WithWidth(14),
-		)
-		__tui_0.AddChild(__tui_4)
+		if tone == ui.ToneWarning || tone == ui.ToneFailure {
+			__tui_4 := tui.New(
+				tui.WithText(action),
+				tui.WithWidth(14),
+				tui.WithTextStyle(ui.ToneStyle(tone)),
+			)
+			__tui_0.AddChild(__tui_4)
+		} else {
+			__tui_5 := tui.New(
+				tui.WithText(action),
+				tui.WithWidth(14),
+				tui.WithTextStyle(ui.ToneStyle(ui.ToneMuted)),
+			)
+			__tui_0.AddChild(__tui_5)
+		}
 	}
 
 	__bindApp := func(app *tui.App) {
@@ -327,7 +425,7 @@ func InertTargetField(label string, value string, action string) *InertTargetFie
 	__unbindApp := func() {
 	}
 
-	view = InertTargetFieldView{
+	view = InertTargetFieldWithToneView{
 		Root:      __tui_0,
 		watchers:  watchers,
 		bindApp:   __bindApp,
@@ -363,6 +461,7 @@ func (t *targetTail) Render(app *tui.App) *tui.Element {
 			__tui_5 := tui.New(
 				tui.WithWidthPercent(100.00),
 				tui.WithPaddingTRBL(0, 0, 0, 20),
+				tui.WithTextStyle(ui.ToneStyle(ui.ToneFailure)),
 			)
 			__tui_6 := app.Mount(t, 3, func() tui.Component {
 				return FlowText(strings.TrimSpace(t.root.Catalog.Get().Err))
@@ -426,19 +525,26 @@ func (t *targetTail) Render(app *tui.App) *tui.Element {
 		})
 		__tui_0.AddChild(__tui_17)
 	} else {
-		__tui_18 := InertTargetField(targetSaveVerb(t.root), "", "complete setup")
+		__tui_18 := InertTargetFieldWithTone(targetSaveVerb(t.root), "", "complete setup", ui.ToneWarning)
 		__tui_0.AddChild(__tui_18.Root)
 	}
 
 	return __tui_0
 }
 
-func (t *targetTail) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (t *targetTail) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*targetTail)
 	if !ok {
 		return
 	}
 	t.root = f.root
+}
+
+func (t *targetTail) UpdateProps(fresh tui.Component) {
+	t.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*targetTail)(nil)

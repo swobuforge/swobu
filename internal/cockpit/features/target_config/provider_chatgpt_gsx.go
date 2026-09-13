@@ -117,6 +117,7 @@ func ChatGPTAuthSignedIn(w *TargetConfig) *ui.SelectableRow {
 
 func ChatGPTAuthFailed(w *TargetConfig) *ui.SelectableRow {
 	row := ui.NewSelectableRow(TargetAddMountKey(w, "auth-failed"), "authentication", "failed", "retry ↵", w.startInteractiveAuth)
+	row.ValueTone = ui.ToneFailure
 	row.AutoFocus = true
 	return row
 }
@@ -191,12 +192,19 @@ func (f *chatGPTProviderForm) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (f *chatGPTProviderForm) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (f *chatGPTProviderForm) updatePropsFields(fresh tui.Component) {
 	ff, ok := fresh.(*chatGPTProviderForm)
 	if !ok {
 		return
 	}
 	f.target = ff.target
+}
+
+func (f *chatGPTProviderForm) UpdateProps(fresh tui.Component) {
+	f.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*chatGPTProviderForm)(nil)
@@ -218,13 +226,20 @@ func (m *chatGPTAuthModeMenu) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (m *chatGPTAuthModeMenu) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (m *chatGPTAuthModeMenu) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*chatGPTAuthModeMenu)
 	if !ok {
 		return
 	}
 	m.target = f.target
 	m.replaceSession = f.replaceSession
+}
+
+func (m *chatGPTAuthModeMenu) UpdateProps(fresh tui.Component) {
+	m.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*chatGPTAuthModeMenu)(nil)

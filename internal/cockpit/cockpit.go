@@ -55,6 +55,7 @@ func Run(ctx context.Context, addr string, stdin io.Reader, stdout, stderr io.Wr
 	if err != nil {
 		return err
 	}
+	configureColorCapability(app, os.Getenv("NO_COLOR") != "")
 	if ctx.Done() != nil {
 		go stopCockpitOnContext(ctx, app.StopCh(), app.Stop)
 	}
@@ -62,6 +63,18 @@ func Run(ctx context.Context, addr string, stdin io.Reader, stdout, stderr io.Wr
 		return err
 	}
 	return ctx.Err()
+}
+
+func configureColorCapability(app *tui.App, noColor bool) {
+	if app == nil || !noColor {
+		return
+	}
+	caps := app.Terminal().Caps()
+	caps.Colors = tui.ColorNone
+	caps.TrueColor = false
+	if terminal, ok := app.Terminal().(interface{ SetCaps(tui.Capabilities) }); ok {
+		terminal.SetCaps(caps)
+	}
 }
 
 // stopCockpitOnContext binds root cancellation only to the app lifetime.

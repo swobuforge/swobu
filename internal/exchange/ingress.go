@@ -481,6 +481,12 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 		}
 		return ListModelsOutput{}, canonical.BadEndpoint("endpoint could not be resolved")
 	}
+	return ListModelsWithWorkspace(workspace), nil
+}
+
+// ListModelsWithWorkspace projects the normal client-visible route surface
+// from already-resolved routing truth.
+func ListModelsWithWorkspace(workspace routing.Workspace) ListModelsOutput {
 	out := ListModelsOutput{
 		DefaultModelID: workspace.DefaultRoute().String(),
 		Models:         make([]ModelOption, 0, len(workspace.Routes())),
@@ -489,7 +495,7 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 		out.Models = append(out.Models, ModelOption{ID: route.Name().String()})
 	}
 	sort.Slice(out.Models, func(i, j int) bool { return out.Models[i].ID < out.Models[j].ID })
-	return out, nil
+	return out
 }
 
 func workspaceNotFoundMessage(slug routing.WorkspaceSlug) string {

@@ -24,22 +24,30 @@ func (a *LiveOperatorAdapter) workspaceFromView(ctx context.Context, workspace w
 
 func projectWorkspaceShares(workspace readmodel.WorkspaceReadModel, summaries []shares.Summary) (readmodel.WorkspaceReadModel, error) {
 	routes := append([]readmodel.RouteReadModel(nil), workspace.Routes...)
-	for i := range routes {
-		for _, summary := range summaries {
-			if summary.Workspace != workspace.Slug || summary.Route != string(routes[i].ID) {
-				continue
+	var workspaceShare *readmodel.ShareReadModel
+	for _, summary := range summaries {
+		if summary.Workspace != workspace.Slug {
+			continue
+		}
+		share := &readmodel.ShareReadModel{Hostname: summary.Hostname, Never: summary.ExpiresAt == nil}
+		if summary.ExpiresAt != nil {
+			expiresAt, err := time.Parse(time.RFC3339, *summary.ExpiresAt)
+			if err != nil {
+				return readmodel.WorkspaceReadModel{}, adapterFailure("decode share expiry", err)
 			}
-			share := &readmodel.ShareReadModel{Hostname: summary.Hostname, Never: summary.ExpiresAt == nil}
-			if summary.ExpiresAt != nil {
-				expiresAt, err := time.Parse(time.RFC3339, *summary.ExpiresAt)
-				if err != nil {
-					return readmodel.WorkspaceReadModel{}, adapterFailure("decode share expiry", err)
-				}
-				share.ExpiresAt = expiresAt
+			share.ExpiresAt = expiresAt
+		}
+		if summary.Route == "" {
+			workspaceShare = share
+			continue
+		}
+		for i := range routes {
+			if summary.Route == string(routes[i].ID) {
+				routes[i].Share = share
 			}
-			routes[i].Share = share
 		}
 	}
+	workspace.Share = workspaceShare
 	workspace.Routes = routes
 	return workspace, nil
 }

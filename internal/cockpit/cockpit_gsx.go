@@ -375,7 +375,10 @@ func (c *Cockpit) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (c *Cockpit) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (c *Cockpit) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*Cockpit)
 	if !ok {
 		return
@@ -388,6 +391,10 @@ func (c *Cockpit) UpdateProps(fresh tui.Component) {
 	c.Context = f.Context
 	c.WorkspacePorts = f.WorkspacePorts
 	c.WorkspaceQuery = f.WorkspaceQuery
+}
+
+func (c *Cockpit) UpdateProps(fresh tui.Component) {
+	c.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*Cockpit)(nil)
@@ -533,7 +540,6 @@ func ShellHeader(model readmodel.CockpitReadModel) *ShellHeaderView {
 		tui.WithText("⛉ SWOBU"),
 		tui.WithWidth(9),
 		tui.WithWrap(false),
-		tui.WithTextStyle(tui.NewStyle().Bold()),
 	)
 	__tui_0.AddChild(__tui_1)
 	__tui_2 := tui.New(
@@ -550,6 +556,7 @@ func ShellHeader(model readmodel.CockpitReadModel) *ShellHeaderView {
 				tui.WithTruncate(true),
 				tui.WithWrap(false),
 				tui.WithMinWidth(0),
+				tui.WithTextStyle(ui.ActiveTabStyle()),
 			)
 			__tui_2.AddChild(__tui_3)
 		} else {
@@ -558,6 +565,7 @@ func ShellHeader(model readmodel.CockpitReadModel) *ShellHeaderView {
 				tui.WithTruncate(true),
 				tui.WithWrap(false),
 				tui.WithMinWidth(0),
+				tui.WithTextStyle(ui.ToneStyle(ui.ToneMuted)),
 			)
 			__tui_2.AddChild(__tui_4)
 		}
@@ -639,26 +647,128 @@ func ShellFooter(model readmodel.CockpitReadModel) *ShellFooterView {
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithGap(3),
 	)
+	__tui_1 := FooterHint("↑↓", "move")
+	__tui_0.AddChild(__tui_1.Root)
+	__tui_2 := FooterHint("↵", "action")
+	__tui_0.AddChild(__tui_2.Root)
+	__tui_3 := FooterHint("F1", "help")
+	__tui_0.AddChild(__tui_3.Root)
+	__tui_4 := FooterHint("esc", "back")
+	__tui_0.AddChild(__tui_4.Root)
+	__tui_5 := FooterHint("tab", "switch")
+	__tui_0.AddChild(__tui_5.Root)
+
+	watchers = append(watchers, __tui_1.GetWatchers()...)
+	watchers = append(watchers, __tui_2.GetWatchers()...)
+	watchers = append(watchers, __tui_3.GetWatchers()...)
+	watchers = append(watchers, __tui_4.GetWatchers()...)
+	watchers = append(watchers, __tui_5.GetWatchers()...)
+
+	__bindApp := func(app *tui.App) {
+		if binder, ok := any(__tui_1).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+		if binder, ok := any(__tui_2).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+		if binder, ok := any(__tui_3).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+		if binder, ok := any(__tui_4).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+		if binder, ok := any(__tui_5).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+	}
+
+	__unbindApp := func() {
+		if unbinder, ok := any(__tui_1).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+		if unbinder, ok := any(__tui_2).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+		if unbinder, ok := any(__tui_3).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+		if unbinder, ok := any(__tui_4).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+		if unbinder, ok := any(__tui_5).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+	}
+
+	view = ShellFooterView{
+		Root:      __tui_0,
+		watchers:  watchers,
+		bindApp:   __bindApp,
+		unbindApp: __unbindApp,
+	}
+	return &view
+}
+
+type FooterHintView struct {
+	Root      *tui.Element
+	watchers  []tui.Watcher
+	bindApp   func(*tui.App)
+	unbindApp func()
+}
+
+func (v *FooterHintView) UnbindApp() {
+	if v.unbindApp != nil {
+		v.unbindApp()
+	}
+}
+
+func (v *FooterHintView) GetRoot() *tui.Element { return v.Root }
+
+func (v *FooterHintView) GetWatchers() []tui.Watcher { return v.watchers }
+
+func (v *FooterHintView) Render(app *tui.App) *tui.Element { return v.Root }
+
+func (v *FooterHintView) BindApp(app *tui.App) {
+	if v.bindApp != nil {
+		v.bindApp(app)
+	}
+}
+
+func (v *FooterHintView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*FooterHintView)
+	if !ok {
+		return
+	}
+	v.Root = f.Root
+	v.watchers = f.watchers
+	v.bindApp = f.bindApp
+	v.unbindApp = f.unbindApp
+}
+
+var _ tui.AppBinder = (*FooterHintView)(nil)
+
+var _ tui.AppUnbinder = (*FooterHintView)(nil)
+
+var _ tui.PropsUpdater = (*FooterHintView)(nil)
+
+func FooterHint(key string, description string) *FooterHintView {
+	var view FooterHintView
+	var watchers []tui.Watcher
+
+	__tui_0 := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+	)
 	__tui_1 := tui.New(
-		tui.WithText("↑↓ move"),
+		tui.WithText(key),
+		tui.WithTextStyle(ui.ToneStyle(ui.ToneAccent)),
 	)
 	__tui_0.AddChild(__tui_1)
 	__tui_2 := tui.New(
-		tui.WithText("↵ action"),
+		tui.WithText(description),
+		tui.WithMarginTRBL(0, 0, 0, 1),
+		tui.WithTextStyle(ui.ToneStyle(ui.ToneMuted)),
 	)
 	__tui_0.AddChild(__tui_2)
-	__tui_3 := tui.New(
-		tui.WithText("? help"),
-	)
-	__tui_0.AddChild(__tui_3)
-	__tui_4 := tui.New(
-		tui.WithText("esc back"),
-	)
-	__tui_0.AddChild(__tui_4)
-	__tui_5 := tui.New(
-		tui.WithText("tab switch"),
-	)
-	__tui_0.AddChild(__tui_5)
 
 	__bindApp := func(app *tui.App) {
 	}
@@ -666,7 +776,7 @@ func ShellFooter(model readmodel.CockpitReadModel) *ShellFooterView {
 	__unbindApp := func() {
 	}
 
-	view = ShellFooterView{
+	view = FooterHintView{
 		Root:      __tui_0,
 		watchers:  watchers,
 		bindApp:   __bindApp,

@@ -12,8 +12,15 @@ type SelectProps struct {
 	Label     string
 	Value     string // committed value shown in the row
 	Action    string // optional row action; defaults from state if empty
+	ValueTone Tone   // semantic rendition of the committed value
 	Detail    string // optional committed-value detail shown only while closed
 	AutoFocus bool
+
+	// OnActivate replaces entry when the closed control represents an immediate
+	// action instead of a choice. Keeping that action on Select lets one mounted
+	// control project idle, pending, and completed phases without changing its
+	// concrete component identity.
+	OnActivate func()
 
 	// CanEnter determines if the select can be entered. If nil, always allows entry.
 	CanEnter func() bool
@@ -30,12 +37,15 @@ type SelectProps struct {
 	Body func(backout func()) tui.Component
 }
 
-// Select is a self-managing row that owns its own entered state: it renders a
-// SelectableRow and, when entered, the Body beneath it. Entered state lives
-// here — callers compose selects without a shared "which is open" enum.
+// Select is a self-managing control that owns its entered state and stable
+// selectable shell. It renders the Body beneath that shell while entered and
+// may project a closed immediate action through OnActivate. Callers therefore
+// change props across workflow phases without replacing the mounted control or
+// coordinating a shared "which is open" enum.
 type Select struct {
-	props   SelectProps
-	entered *tui.State[bool]
+	props           SelectProps
+	entered         *tui.State[bool]
+	selectShellNext bool
 }
 
 func NewSelect(props SelectProps) *Select {
@@ -63,12 +73,13 @@ func (s *Select) UpdateProps(fresh tui.Component) {
 
 func (s *Select) headerRow() *SelectableRow {
 	row := NewSelectableRow(s.props.ID, s.props.Label, s.props.Value, s.actionLabel(), s.activate)
+	row.ValueTone = s.props.ValueTone
 	// Only own Escape while entered; when not entered, Escape bubbles to the
 	// caller's back navigation.
 	if s.entered.Get() {
 		row.OnEscape = s.Backout
 	}
-	row.AutoFocus = s.props.AutoFocus
+	row.AutoFocus = s.props.AutoFocus || s.selectShellNext
 	return row
 }
 
@@ -89,6 +100,9 @@ func (s *Select) actionLabel() string {
 	if s.entered.Get() {
 		return "close ↵"
 	}
+	if s.props.OnActivate != nil {
+		return s.props.Action
+	}
 	if s.props.Action != "" {
 		return s.props.Action
 	}
@@ -103,6 +117,10 @@ func (s *Select) actionLabel() string {
 func (s *Select) activate() {
 	if s.entered.Get() {
 		s.Backout()
+		return
+	}
+	if s.props.OnActivate != nil {
+		s.props.OnActivate()
 		return
 	}
 	s.Enter()
@@ -121,6 +139,7 @@ func (s *Select) Enter() {
 		return
 	}
 
+	s.selectShellNext = false
 	s.entered.Set(true)
 
 	if s.props.OnEnter != nil {
@@ -137,6 +156,10 @@ func (s *Select) Backout() {
 		return
 	}
 
+	// Exiting removes the selected descendants. Declare the surviving shell as
+	// the next selection target before that subtree disappears; SelectableRow
+	// owns the framework-level one-shot handoff during reconciliation.
+	s.selectShellNext = true
 	s.entered.Set(false)
 
 	if s.props.OnBackout != nil {

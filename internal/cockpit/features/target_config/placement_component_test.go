@@ -41,9 +41,9 @@ func TestEditPlacementOptionsUsePostRemovalCollapsedTopology(t *testing.T) {
 	got := placementOptions(route, targetConfigModeEdit, b.ID)
 	want := []readmodel.PlacementOptionReadModel{
 		{Label: "primary", Kind: readmodel.PlacementFallback},
-		{Label: "balance with step 1", PeerTargetID: a.ID, Kind: readmodel.PlacementBalance},
+		{Label: "balance with primary", PeerTargetID: a.ID, Kind: readmodel.PlacementBalance},
 		{Label: "fallback 1", PeerTargetID: a.ID, Kind: readmodel.PlacementFallback},
-		{Label: "balance with step 2", PeerTargetID: c.ID, Kind: readmodel.PlacementBalance},
+		{Label: "balance with fallback 1", PeerTargetID: c.ID, Kind: readmodel.PlacementBalance},
 		{Label: "fallback 2", PeerTargetID: c.ID, Kind: readmodel.PlacementFallback},
 	}
 	if len(got) != len(want) {
@@ -97,7 +97,7 @@ func TestFirstTargetTailOmitsRoutingDecision(t *testing.T) {
 
 	frame := testkit.RenderMountedTrimmed(t, TargetConfigTail(config), 100, 12)
 
-	if strings.Contains(frame, "routing") || strings.Contains(frame, "fallback after step") {
+	if strings.Contains(frame, "routing") {
 		t.Fatalf("first target must not render a placement decision:\n%s", frame)
 	}
 }
@@ -109,7 +109,7 @@ func TestLaterTargetTailRendersRoutingDecision(t *testing.T) {
 
 	frame := testkit.RenderMountedTrimmed(t, TargetConfigTail(config), 100, 12)
 
-	if !strings.Contains(frame, "routing") || !strings.Contains(frame, "fallback after step 1") {
+	if !strings.Contains(frame, "routing") || !strings.Contains(frame, "fallback 1") {
 		t.Fatalf("later target must render its placement decision:\n%s", frame)
 	}
 }
@@ -147,7 +147,7 @@ func TestPlacementPickerIsAClosedChoiceWithoutSearch(t *testing.T) {
 	if strings.Count(frame, "routing") != 1 {
 		t.Fatalf("entered placement must have one parent routing label:\n%s", frame)
 	}
-	if !strings.Contains(frame, "balance with step 1") || !strings.Contains(frame, "fallback 1") {
+	if !strings.Contains(frame, "balance with primary") || !strings.Contains(frame, "fallback 1") {
 		t.Fatalf("routing placement choices missing:\n%s", frame)
 	}
 }

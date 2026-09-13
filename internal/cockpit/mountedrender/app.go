@@ -18,7 +18,6 @@ func NewApp(width, height int, opts ...tui.AppOption) (*tui.App, *tui.MockEventR
 	buffer := tui.NewBuffer(width, height)
 	stopCh := make(chan struct{})
 	inputEvents := make(chan tui.Event, 256)
-	updates := make(chan tui.Event, 256)
 	merged := make(chan tui.Event, 256)
 	watcherQueue := make(chan func(), 256)
 
@@ -37,7 +36,10 @@ func NewApp(width, height int, opts ...tui.AppOption) (*tui.App, *tui.MockEventR
 	if err := setAppField(app, "inputEvents", reflect.ValueOf(inputEvents)); err != nil {
 		return nil, nil, err
 	}
-	if err := setAppField(app, "updates", reflect.ValueOf(updates)); err != nil {
+	// The real app's fan-in loop makes QueueUpdate visible to Events. Mounted
+	// tests do not run that loop, so use the merged queue directly instead of
+	// introducing a scheduler race through a test-only forwarding goroutine.
+	if err := setAppField(app, "updates", reflect.ValueOf(merged)); err != nil {
 		return nil, nil, err
 	}
 	if err := setAppField(app, "merged", reflect.ValueOf(merged)); err != nil {
@@ -58,7 +60,7 @@ func NewApp(width, height int, opts ...tui.AppOption) (*tui.App, *tui.MockEventR
 		}
 	}
 
-	startUpdateBridge(app, stopCh, watcherQueue, updates, merged)
+	startWatcherBridge(app, stopCh, watcherQueue)
 
 	return app, reader, nil
 }
@@ -89,12 +91,10 @@ func Trimmed(component tui.Component, width, height int) (string, error) {
 	return app.Buffer().StringTrimmed(), nil
 }
 
-func startUpdateBridge(
+func startWatcherBridge(
 	app *tui.App,
 	stopCh <-chan struct{},
 	watcherQueue <-chan func(),
-	updates <-chan tui.Event,
-	merged chan<- tui.Event,
 ) {
 	go func() {
 		for {
@@ -104,21 +104,6 @@ func startUpdateBridge(
 					continue
 				}
 				app.QueueUpdate(fn)
-			case <-stopCh:
-				return
-			}
-		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case ev := <-updates:
-				select {
-				case merged <- ev:
-				case <-stopCh:
-					return
-				}
 			case <-stopCh:
 				return
 			}

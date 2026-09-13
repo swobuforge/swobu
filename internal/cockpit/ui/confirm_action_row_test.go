@@ -49,6 +49,10 @@ func TestConfirmActionRow_EscapeClosesConfirmWithoutActing(t *testing.T) {
 	if !strings.Contains(frame, "delete gpt?") || !strings.Contains(frame, "confirm ↵") {
 		t.Fatalf("expected armed confirm state:\n%s", frame)
 	}
+	value := h.App().Buffer().Cell(20, 0).Style
+	if !value.Equal(toneStyle(ToneFailure)) {
+		t.Fatalf("armed consequence rendition = %+v, want bold failure red", value)
+	}
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 	if acts != 0 {
 		t.Fatalf("acts after Escape = %d, want 0", acts)
@@ -85,5 +89,28 @@ func TestConfirmActionRow_FailedConfirmShowsRetryAndError(t *testing.T) {
 	frame := h.Frame()
 	if !strings.Contains(frame, "delete failed") || !strings.Contains(frame, "retry ↵") || !strings.Contains(frame, "boom") {
 		t.Fatalf("expected local failure state:\n%s", frame)
+	}
+}
+
+func TestConfirmActionRow_ArmedStateIsNotFailure(t *testing.T) {
+	row := NewConfirmActionRow("delete.route", ConfirmActionCopy{
+		Label:         "delete",
+		IdleValue:     "model route",
+		IdleAction:    "delete ↵",
+		ConfirmValue:  "delete gpt?",
+		ConfirmAction: "confirm ↵",
+	}, func() error { return nil })
+
+	h, err := testkit.NewHarness(row)
+	if err != nil {
+		t.Fatalf("NewHarness: %v", err)
+	}
+	defer h.Close()
+	h.Open()
+	h.App().FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	frame := h.Frame()
+	if !strings.Contains(frame, "delete gpt?") || !strings.Contains(frame, "confirm ↵") {
+		t.Fatalf("armed state missing confirmation copy:\n%s", frame)
 	}
 }

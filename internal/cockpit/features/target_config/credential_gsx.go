@@ -421,12 +421,19 @@ func (r *credentialRow) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (r *credentialRow) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (r *credentialRow) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*credentialRow)
 	if !ok {
 		return
 	}
 	r.props = f.props
+}
+
+func (r *credentialRow) UpdateProps(fresh tui.Component) {
+	r.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*credentialRow)(nil)
@@ -570,12 +577,19 @@ func (b *credentialChooserBody) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (b *credentialChooserBody) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (b *credentialChooserBody) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*credentialChooserBody)
 	if !ok {
 		return
 	}
 	b.row = f.row
+}
+
+func (b *credentialChooserBody) UpdateProps(fresh tui.Component) {
+	b.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*credentialChooserBody)(nil)

@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"html/template"
+	_ "embed"
 	"net/http"
 	"strings"
 
@@ -41,32 +41,40 @@ func (h ShareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	route, ok := workspace.Route(grant.Route)
-	if !ok {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		return
+	projected := workspace
+	workspaceScope := grant.Route.String() == ""
+	if !workspaceScope {
+		route, ok := workspace.Route(grant.Route)
+		if !ok {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		projected, err = routing.NewWorkspace(workspace.Slug(), route.Name(), []routing.Route{route})
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 	}
-	projected, err := routing.NewWorkspace(workspace.Slug(), route.Name(), []routing.Route{route})
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	bound := workspaceBoundIngress{workspace: projected, ingress: h.ingress}
+	bound := workspaceBoundIngress{workspace: projected, ingress: h.ingress, workspaceScope: workspaceScope}
 	request := r.Clone(r.Context())
 	request.URL.Path = "/c/" + projected.Slug().String() + shareProtocolPath(r.URL.Path)
 	NewHandler(bound, h.traffic).ServeHTTP(w, request)
 }
 
 type workspaceBoundIngress struct {
-	workspace routing.Workspace
-	ingress   exchange.RequestIngress
+	workspace      routing.Workspace
+	ingress        exchange.RequestIngress
+	workspaceScope bool
 }
 
 func (b workspaceBoundIngress) HandleRequest(ctx context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
 	return b.ingress.HandleRequestWithWorkspace(ctx, b.workspace, in)
 }
 
-func (b workspaceBoundIngress) ListModels(context.Context, exchange.ListModelsInput) (exchange.ListModelsOutput, error) {
+func (b workspaceBoundIngress) ListModels(ctx context.Context, in exchange.ListModelsInput) (exchange.ListModelsOutput, error) {
+	if b.workspaceScope {
+		return exchange.ListModelsWithWorkspace(b.workspace), nil
+	}
 	return exchange.ListModelsOutput{DefaultModelID: routing.PublicDefaultRouteID}, nil
 }
 
@@ -85,12 +93,33 @@ func shareProtocolPath(path string) string {
 }
 
 func serveShareInvite(w http.ResponseWriter) {
+	setShareSecurityHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(shareInvitePage)
+}
+
+func setShareSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = shareInviteTemplate.Execute(w, nil)
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'")
 }
 
-var shareInviteTemplate = template.Must(template.New("share-invite").Parse(`<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Swobu Shared Route</title><style>body{font:16px system-ui;max-width:48rem;margin:4rem auto;padding:0 1rem}code{word-break:break-all}</style><h1>Swobu Shared Route</h1><p>Use these values in any OpenAI- or Anthropic-compatible client.</p><dl><dt>OpenAI Base URL</dt><dd><code id="openai"></code></dd><dt>Anthropic Base URL</dt><dd><code id="anthropic"></code></dd><dt>API key</dt><dd><code id="key"></code></dd></dl><script>const key=location.hash.slice(1);history.replaceState(null,'',location.pathname);const base=location.origin;document.getElementById('openai').textContent=base+'/v1';document.getElementById('anthropic').textContent=base;document.getElementById('key').textContent=key;if(!key.startsWith('swsh_'))document.getElementById('key').textContent='Open the complete invite URL to reveal the API key.';</script>`))
+var (
+	//go:embed share_invite/index.html
+	shareInviteHTML string
+	//go:embed share_invite/styles.css
+	shareInviteCSS string
+	//go:embed share_invite/vendor/qrcode.min.js
+	shareInviteQRCode string
+	//go:embed share_invite/app.js
+	shareInviteApp string
+
+	// The response remains one document so the bearer cannot leak through asset
+	// requests. Replacement markers are private build seams, never user input.
+	shareInvitePage = []byte(strings.NewReplacer(
+		"/* SWOBU_STYLES */", shareInviteCSS,
+		"/* SWOBU_QRCODE */", shareInviteQRCode,
+		"/* SWOBU_APP */", shareInviteApp,
+	).Replace(shareInviteHTML))
+)

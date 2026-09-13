@@ -40,29 +40,29 @@ templ (s *SectionView) Render() {
 										@ShareRevokeRowComponent(s, route)
 									</div>
 								}
-								// --- Target rows by step --------------------------------
+								// --- Inline tier target rows -----------------------------
 								for tierIdx, tierTargets := range groupedTargets(route) {
-									@StepHeaderRow(tierHeaderText(tierIdx, len(tierTargets) > 1))
-									<div class="pl-3 w-full">
-										for _, target := range tierTargets {
-												if s.State.OpenTarget.Get() == target.ID {
-													config := s.targetEditConfig(route, target)
-													<div key={s.targetConfigKey(route, target.ID)} class="w-full">
-														@TargetConfigComponent(config)
-													</div>
-												} else {
-													<div key={targetMountKey(route, target)} class="w-full">
-														@TargetRowComponent(s, route, target)
-													</div>
-												}
-												// --- Delete confirmation for a target --------
-												if s.State.DeleteConfirmTarget.Get() == target.ID {
-													<div key={"del:" + string(target.ID)} class="w-full">
-														@TargetDeleteConfirmRow(s, route, target)
-													</div>
-												}
+									for targetIdx, target := range tierTargets {
+										if s.State.OpenTarget.Get() == target.ID {
+											if targetIdx == 0 {
+												@TierContextRow(tierLabel(tierIdx), tierTone(tierIdx))
+											}
+											config := s.targetEditConfig(route, target)
+											<div key={s.targetConfigKey(route, target.ID)} class="w-full">
+												@TargetConfigComponent(config)
+											</div>
+										} else {
+											<div key={targetMountKey(route, target)} class={tierTargetRowClass(targetIdx)}>
+												@TargetRowComponent(s, route, target, tierIdx, targetIdx)
+											</div>
 										}
-									</div>
+										// --- Delete confirmation for a target --------
+										if s.State.DeleteConfirmTarget.Get() == target.ID {
+											<div key={"del:" + string(target.ID)} class="w-full">
+												@TargetDeleteConfirmRow(s, route, target)
+											</div>
+										}
+									}
 								}
 								// --- Add target trigger / config -------------------
 								if s.State.AddTargetRoute.Get() == route.ID {
@@ -108,11 +108,19 @@ templ (s *SectionView) Render() {
 	</div>
 }
 
-templ StepHeaderRow(label string) {
+templ TierContextRow(label string, tone ui.Tone) {
 	<div class="flex-row w-full mt-1">
 		<span class="w-2"></span>
-		<span class="grow truncate nowrap" minWidth={0}>{label}</span>
+		<span class="w-18" textStyle={ui.ToneStyle(tone)}>{label}</span>
+		<span class="grow" minWidth={0}></span>
 	</div>
+}
+
+func tierTargetRowClass(targetIndex int) string {
+	if targetIndex == 0 {
+		return "w-full mt-1"
+	}
+	return "w-full"
 }
 
 templ SectionInertRow(label string, value string, action string) {

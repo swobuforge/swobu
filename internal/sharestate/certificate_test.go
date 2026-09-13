@@ -189,6 +189,7 @@ func TestTLSCredentialReplacementKeepsIdentityAndRotatesLeafKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	identityBefore, _ := store.EndpointID()
+	hostnameBefore := Hostname(identityBefore)
 	workspace, _ := routing.ParseWorkspaceSlug("personal")
 	route, _ := routing.ParseRouteName("coding")
 	grant, err := store.Issue(workspace, route, ExpirySevenDays)
@@ -197,6 +198,7 @@ func TestTLSCredentialReplacementKeepsIdentityAndRotatesLeafKey(t *testing.T) {
 	}
 	now := time.Now()
 	var prior *ecdsa.PrivateKey
+	var firstSPKI []byte
 	for serial := int64(1); serial <= 2; serial++ {
 		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: big.NewInt(serial), DNSNames: []string{Hostname(identityBefore)}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(90 * 24 * time.Hour)}, &x509.Certificate{SerialNumber: big.NewInt(serial), DNSNames: []string{Hostname(identityBefore)}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(90 * 24 * time.Hour)}, &key.PublicKey, key)
@@ -212,11 +214,23 @@ func TestTLSCredentialReplacementKeepsIdentityAndRotatesLeafKey(t *testing.T) {
 		if prior != nil && prior.PublicKey.X.Cmp(key.PublicKey.X) == 0 {
 			t.Fatal("TLS key did not rotate")
 		}
+		spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstSPKI == nil {
+			firstSPKI = spki
+		} else if bytes.Equal(firstSPKI, spki) {
+			t.Fatal("TLS SPKI did not rotate")
+		}
 		prior = key
 	}
 	identityAfter, _ := store.EndpointID()
 	if identityAfter != identityBefore {
 		t.Fatalf("EndpointID changed: %q -> %q", identityBefore, identityAfter)
+	}
+	if Hostname(identityAfter) != hostnameBefore {
+		t.Fatal("TLS replacement changed hostname")
 	}
 	grants := store.Snapshot().Grants
 	if len(grants) != 1 || grants[0].Bearer != grant.Bearer {

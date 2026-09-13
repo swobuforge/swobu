@@ -30,7 +30,7 @@ type Result struct {
 
 type Summary struct {
 	Workspace string  `json:"workspace"`
-	Route     string  `json:"route"`
+	Route     string  `json:"route,omitempty"`
 	Hostname  string  `json:"hostname"`
 	ExpiresAt *string `json:"expires_at"`
 }
@@ -46,17 +46,17 @@ func NewService(configStore *configstore.Store, shareStore *sharestate.Store, ru
 	return service, nil
 }
 
-func (s Service) Issue(ctx context.Context, routeRef string, expiry sharestate.Expiry) (Result, error) {
-	workspaceSlug, routeName, err := parseRouteRef(routeRef)
+func (s Service) Issue(ctx context.Context, rawRef string, expiry sharestate.Expiry) (Result, error) {
+	ref, err := parseRef(rawRef)
 	if err != nil {
 		return Result{}, err
 	}
-	workspace, err := s.configStore.GetWorkspace(ctx, workspaceSlug)
+	workspace, err := s.configStore.GetWorkspace(ctx, ref.workspace)
 	if err != nil {
-		return Result{}, fmt.Errorf("resolve shared route: %w", err)
+		return Result{}, fmt.Errorf("resolve shared workspace: %w", err)
 	}
-	if _, ok := workspace.Route(routeName); !ok {
-		return Result{}, fmt.Errorf("shared route %q does not exist", routeRef)
+	if err := validateRef(workspace, ref, rawRef); err != nil {
+		return Result{}, err
 	}
 	lease, err := s.runtime.EnsureReady(ctx)
 	if err != nil {
@@ -68,14 +68,14 @@ func (s Service) Issue(ctx context.Context, routeRef string, expiry sharestate.E
 		unlock = s.bindings.Lock()
 	}
 	defer unlock()
-	workspace, err = s.configStore.GetWorkspace(ctx, workspaceSlug)
+	workspace, err = s.configStore.GetWorkspace(ctx, ref.workspace)
 	if err != nil {
-		return Result{}, fmt.Errorf("resolve shared route: %w", err)
+		return Result{}, fmt.Errorf("resolve shared workspace: %w", err)
 	}
-	if _, ok := workspace.Route(routeName); !ok {
-		return Result{}, fmt.Errorf("shared route %q does not exist", routeRef)
+	if err := validateRef(workspace, ref, rawRef); err != nil {
+		return Result{}, err
 	}
-	grant, err := s.shareStore.Issue(workspaceSlug, routeName, expiry)
+	grant, err := s.shareStore.Issue(ref.workspace, ref.route, expiry)
 	if err != nil {
 		return Result{}, err
 	}
@@ -104,18 +104,18 @@ func (s Service) List() ([]Summary, error) {
 	return summaries, nil
 }
 
-func (s Service) Reveal(routeRef string) (Result, error) {
-	workspace, route, err := parseRouteRef(routeRef)
+func (s Service) Reveal(rawRef string) (Result, error) {
+	ref, err := parseRef(rawRef)
 	if err != nil {
 		return Result{}, err
 	}
 	for _, grant := range s.shareStore.ActiveGrants() {
-		if grant.Workspace != workspace || grant.Route != route {
+		if grant.Workspace != ref.workspace || grant.Route != ref.route {
 			continue
 		}
 		return s.result(grant)
 	}
-	return Result{}, fmt.Errorf("shared route %q is not active", routeRef)
+	return Result{}, fmt.Errorf("share %q is not active", rawRef)
 }
 
 func (s Service) result(grant sharestate.Grant) (Result, error) {
@@ -131,8 +131,8 @@ func (s Service) result(grant sharestate.Grant) (Result, error) {
 	return Result{ShareURL: host + "/#" + grant.Bearer, OpenAIBaseURL: host + "/v1", AnthropicBaseURL: host, APIKey: grant.Bearer, ExpiresAt: expires}, nil
 }
 
-func (s Service) Revoke(routeRef string) error {
-	workspace, route, err := parseRouteRef(routeRef)
+func (s Service) Revoke(rawRef string) error {
+	ref, err := parseRef(rawRef)
 	if err != nil {
 		return err
 	}
@@ -141,25 +141,42 @@ func (s Service) Revoke(routeRef string) error {
 		unlock = s.bindings.Lock()
 	}
 	defer unlock()
-	if err := s.shareStore.Revoke(workspace, route); err != nil {
+	if err := s.shareStore.Revoke(ref.workspace, ref.route); err != nil {
 		return err
 	}
 	s.runtime.StopIfInactive()
 	return nil
 }
 
-func parseRouteRef(raw string) (routing.WorkspaceSlug, routing.RouteName, error) {
+type shareRef struct {
+	workspace routing.WorkspaceSlug
+	route     routing.RouteName
+}
+
+func parseRef(raw string) (shareRef, error) {
 	workspaceRaw, routeRaw, ok := strings.Cut(strings.TrimSpace(raw), "/")
-	if !ok || strings.Contains(routeRaw, "/") {
-		return routing.WorkspaceSlug{}, routing.RouteName{}, fmt.Errorf("route must use <workspace>/<route>")
+	if strings.Contains(routeRaw, "/") {
+		return shareRef{}, fmt.Errorf("share must use <workspace> or <workspace>/<route>")
 	}
 	workspace, err := routing.ParseWorkspaceSlug(workspaceRaw)
 	if err != nil {
-		return routing.WorkspaceSlug{}, routing.RouteName{}, err
+		return shareRef{}, err
+	}
+	if !ok {
+		return shareRef{workspace: workspace}, nil
 	}
 	route, err := routing.ParseRouteName(routeRaw)
 	if err != nil {
-		return routing.WorkspaceSlug{}, routing.RouteName{}, err
+		return shareRef{}, err
 	}
-	return workspace, route, nil
+	return shareRef{workspace: workspace, route: route}, nil
+}
+
+func validateRef(workspace routing.Workspace, ref shareRef, raw string) error {
+	if ref.route.String() != "" {
+		if _, ok := workspace.Route(ref.route); !ok {
+			return fmt.Errorf("shared route %q does not exist", raw)
+		}
+	}
+	return nil
 }

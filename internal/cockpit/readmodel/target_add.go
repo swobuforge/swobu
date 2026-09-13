@@ -94,7 +94,7 @@ func (p PlacementOptionReadModel) Summary() string {
 	}
 	switch p.Kind {
 	case PlacementFallback:
-		return "fallback after current steps"
+		return "fallback"
 	case PlacementBalance:
 		return fmt.Sprintf("balance with %s", p.PeerTargetID)
 	default:

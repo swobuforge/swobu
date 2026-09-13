@@ -64,9 +64,19 @@ func (l terminalProjectionWorkspaceLookup) GetWorkspace(context.Context, routing
 	return l.workspace, nil
 }
 
-type terminalProjectionTransport struct{ body string }
+type terminalProjectionTransport struct {
+	body         string
+	documentBody string
+	onSend       func(provider.TargetSnapshot)
+}
 
-func (t terminalProjectionTransport) Send(context.Context, provider.TargetSnapshot, carrier.Document) (provider.Ingress, error) {
+func (t terminalProjectionTransport) Send(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
+	if t.onSend != nil {
+		t.onSend(target)
+	}
+	if t.documentBody != "" {
+		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(t.documentBody), carrier.Meta{})}, nil
+	}
 	body := t.body
 	if body == "" {
 		body = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_provider\",\"model\":\"responses-model\",\"status\":\"in_progress\"}}\n\n" +

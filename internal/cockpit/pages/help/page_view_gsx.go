@@ -110,7 +110,7 @@ func IssueRowComponent(v *PageView) *ui.SelectableRow {
 }
 
 func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.CopyPasteRowComponent(
+	row := ui.CopyPasteRowComponent(
 		"help:diagnostics",
 		"diagnostics",
 		v.diagnosticsValue(),
@@ -118,6 +118,7 @@ func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
 		func() ui.CopyResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
 		v.onDiagnosticsCopied,
 	)
+	return row
 }
 
 func (v *PageView) Render(app *tui.App) *tui.Element {
@@ -132,6 +133,7 @@ func (v *PageView) Render(app *tui.App) *tui.Element {
 	)
 	__tui_2 := tui.New(
 		tui.WithText("help"),
+		tui.WithTextStyle(ui.HeadingStyle()),
 	)
 	__tui_1.AddChild(__tui_2)
 	__tui_0.AddChild(__tui_1)
@@ -170,7 +172,10 @@ func (v *PageView) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (v *PageView) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (v *PageView) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*PageView)
 	if !ok {
 		return
@@ -178,6 +183,10 @@ func (v *PageView) UpdateProps(fresh tui.Component) {
 	v.Version = f.Version
 	v.DaemonVersion = f.DaemonVersion
 	v.DiagnosticsStatus = f.DiagnosticsStatus
+}
+
+func (v *PageView) UpdateProps(fresh tui.Component) {
+	v.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*PageView)(nil)

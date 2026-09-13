@@ -1,2 +1,2 @@
-// Package screenassert owns declarative screen predicates over testscreen/buf.View.
+// Package screenassert owns declarative predicates over rendered terminal text.
 package screenassert

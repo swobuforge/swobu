@@ -1,0 +1,16 @@
+  new target · Azure AI                                                               [90mcancel ↵[0m
+     provider          Azure AI                                                       [90mchange ↵[0m
+     project           example/demo                                                   [90medit ↵[0m
+     credential        environment · AZURE_OPENAI_API_KEY                             [90mchange ↵[0m
+     deployment        claude-opus-4-8                                                [90mclose ↵[0m
+        deployment
+        search            claude_
+
+      [1;38;2;70;167;88m>[0m [1mclaude[0m                                                                        [1;38;2;70;167;88muse ↵[0m
+        claude-opus-4-8                                                               [90mselect ↵[0m
+        claude-sonnet-4-6                                                             [90mselect ↵[0m
+
+        2 of 2 shown                                                                  [90m↑↓ search[0m
+     protocol          Anthropic · Messages · buffered                                [90mchange ↵[0m
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+     create                                                                           [90mcreate ↵[0m

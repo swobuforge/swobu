@@ -3,6 +3,7 @@ package cockpit
 import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type cockpitBodyViewport struct {
@@ -20,7 +21,7 @@ func (v *cockpitBodyViewport) Render(app *tui.App) *tui.Element {
 		tui.WithWidthPercent(100),
 		tui.WithScrollable(tui.ScrollVertical),
 		tui.WithScrollOffset(0, c.BodyViewport.ScrollY.Get()),
-		tui.WithScrollbarStyle(tui.NewStyle().Dim()),
+		tui.WithScrollbarStyle(ui.ToneStyle(ui.ToneMuted)),
 		tui.WithScrollbarThumbStyle(tui.NewStyle()),
 	)
 	c.BodyViewport.Ref.Set(root)

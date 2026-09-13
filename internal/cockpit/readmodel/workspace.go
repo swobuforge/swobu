@@ -18,6 +18,7 @@ type WorkspaceReadModel struct {
 	// sources may still supply a tolerated /v1 spelling; consumers normalize it
 	// to workspace identity and never expose a second canonical base.
 	WorkspaceURL    string
+	Share           *ShareReadModel
 	Routes          []RouteReadModel
 	Activity        ActivityReadModel
 	ProviderOptions []ProviderOptionReadModel

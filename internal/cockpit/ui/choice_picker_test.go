@@ -100,6 +100,34 @@ func TestChoicePickerPreservesTraversalAcrossSelectRerenders(t *testing.T) {
 	if selected != "balance" || selectControl.IsEntered() {
 		t.Fatalf("selected=%q entered=%v, want balance and closed", selected, selectControl.IsEntered())
 	}
+	if frame := harness.FrameTrimmed(); !strings.Contains(frame, "> routing") {
+		t.Fatalf("committing a choice did not return selection to the owning shell:\n%s", frame)
+	}
+}
+
+func TestChoicePickerEscapeReturnsSelectionToOwningSelect(t *testing.T) {
+	selectControl := NewSelect(SelectProps{
+		ID: "routing-select", Label: "routing", Action: "change ↵",
+		Body: func(backout func()) tui.Component {
+			return NewChoicePicker("routing-picker", []ChoiceOption{{ID: "primary", Label: "primary"}}, "primary", nil, backout)
+		},
+	})
+	harness, err := testkit.NewHarnessAt(selectControl, 80, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer harness.Close()
+	harness.Open()
+	harness.App().FocusNext()
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+
+	if selectControl.IsEntered() {
+		t.Fatal("Escape left Select entered")
+	}
+	if frame := harness.FrameTrimmed(); !strings.Contains(frame, "> routing") {
+		t.Fatalf("Escape did not return selection to the owning shell:\n%s", frame)
+	}
 }
 
 func TestChoicePickerRevealsSelectedValueBeyondInitialWindow(t *testing.T) {

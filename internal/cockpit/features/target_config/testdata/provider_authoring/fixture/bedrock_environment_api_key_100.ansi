@@ -1,0 +1,11 @@
+  new target · AWS Bedrock                                                            [90mcancel ↵[0m
+     provider          AWS Bedrock                                                    [90mchange ↵[0m
+     region            Europe (London) · eu-west-2                                    [90mchange ↵[0m
+     authentication    Bedrock API key · environment                                  [90mmanage ↵[0m
+                       AWS_BEARER_TOKEN_BEDROCK
+     model             Claude Sonnet 4.6                                              [90mchange ↵[0m
+     protocol          Anthropic · Messages · buffered                                [90mchange ↵[0m
+     API URL           https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1          [90medit ↵[0m
+                       Explicit API URL.
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mcreate[0m                                                                           [1;38;2;70;167;88mcreate ↵[0m

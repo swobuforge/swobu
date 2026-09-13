@@ -98,6 +98,12 @@ templ DetailRow(value string) {
 	</div>
 }
 
+templ DangerDetailRow(value string) {
+	<div class="pl-20 w-full">
+		@FlowText(value)
+	</div>
+}
+
 templ (d *Disclosure) Render() {
 	<div class="flex-col w-full" deps={d.EndpointOpen, d.DiscoveryPending, d.Observations, d.Child, d.Feedback}>
 		@EndpointRow(d)
@@ -124,7 +130,7 @@ templ (d *Disclosure) Render() {
 								@InertRow("status", "current")
 								if obs.Err != "" { @DetailRow(obs.Err) }
 							} else if obs.Kind == observationFailed {
-								@DetailRow(obs.Err)
+								@DangerDetailRow(obs.Err)
 							} else if obs.Kind == observationNeedsChange {
 								for _, change := range obs.Plan.Changes { @PlanChangeRow(change.Field, displayChange(d.Target, change)) }
 								@PlanActionRow(d, obs)
@@ -154,7 +160,7 @@ templ (d *Disclosure) Render() {
 							@DetailRow(d.Feedback.Get().result.Path)
 						}
 						if d.Feedback.Get().result.Status == cockpitui.CopyFailed {
-							@DetailRow("copy failed · run swobu doctor --copy")
+							@DangerDetailRow("copy failed · run swobu doctor --copy")
 						}
 					</div>
 				} else if d.Child.Get().kind == childNone {

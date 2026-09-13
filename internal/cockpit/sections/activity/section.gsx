@@ -9,6 +9,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 // SectionView renders recent static activity rows under an always-expanded
@@ -161,7 +162,7 @@ func activityShowsClient(app *tui.App) bool {
 templ ActivityHeader() {
 	<div class="flex-row w-full">
 		<span class="w-2"></span>
-		<span>activity</span>
+		<span textStyle={ui.HeadingStyle()}>activity</span>
 	</div>
 }
 

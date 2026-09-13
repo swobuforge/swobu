@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1
 	github.com/creack/pty v1.1.24
-	github.com/grindlemire/go-tui v0.17.0
+	github.com/grindlemire/go-tui v0.20.2
 	github.com/klauspost/compress v1.17.11
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.8.1
@@ -43,7 +43,6 @@ require (
 	github.com/lmittmann/tint v1.2.0
 	github.com/mattn/go-colorable v0.1.13
 	github.com/mattn/go-isatty v0.0.16 // indirect
-	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/rogpeppe/go-internal v1.12.1-0.20240709150035-ccf4b4329d21 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
@@ -64,11 +63,12 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
-	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require github.com/hashicorp/yamux v0.1.2
+
+require github.com/rivo/uniseg v0.2.0 // indirect
 
 tool github.com/grindlemire/go-tui/cmd/tui

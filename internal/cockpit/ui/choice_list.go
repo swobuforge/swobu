@@ -427,7 +427,7 @@ func (r *ChoiceRow) IsFocused() bool { return r.target.IsFocused() }
 func (r *ChoiceRow) Render(*tui.App) *tui.Element {
 	r.target.SetRenderProps(r.props())
 	opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.choose))
-	root := ActionRow(r.target.Marker(), "", r.Row.Item.Label, r.Row.Item.Action, opts...)
+	root := ActionRowWithTone(r.target.Marker(), "", r.Row.Item.Label, r.Row.Item.Action, ToneNeutral, opts...)
 	r.target.BindElement(root)
 	return root
 }

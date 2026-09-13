@@ -22,7 +22,7 @@ import (
 	"github.com/swobuforge/swobu/shareprotocol"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 var ErrUnauthorized = errors.New("share bearer is invalid or expired")
 
@@ -71,7 +71,7 @@ type diskState struct {
 
 type diskGrant struct {
 	Workspace string    `json:"workspace"`
-	Route     string    `json:"route"`
+	Route     string    `json:"route,omitempty"`
 	Bearer    string    `json:"bearer"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
@@ -182,8 +182,10 @@ func (s *Store) Revoke(workspace routing.WorkspaceSlug, route routing.RouteName)
 	return err
 }
 
-// RevokeBindings atomically removes every Grant for a workspace, or one route
-// when route is non-nil. It includes expired Grants so old bearers cannot revive.
+// RevokeBindings atomically removes every Grant rooted in a workspace when
+// route is nil. A non-nil route removes that exact scope: its zero value is the
+// workspace Share, while a non-zero value is the corresponding route Share.
+// Expired Grants are included so old bearers cannot revive.
 func (s *Store) RevokeBindings(workspace routing.WorkspaceSlug, route *routing.RouteName) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -236,10 +238,10 @@ func Hostname(endpointID string) string { return shareprotocol.Hostname(endpoint
 
 func (e Expiry) duration() (time.Duration, bool, error) {
 	switch e {
-	case "", ExpirySevenDays:
-		return 7 * 24 * time.Hour, false, nil
-	case ExpiryOneDay:
+	case "", ExpiryOneDay:
 		return 24 * time.Hour, false, nil
+	case ExpirySevenDays:
+		return 7 * 24 * time.Hour, false, nil
 	case ExpiryThirtyDays:
 		return 30 * 24 * time.Hour, false, nil
 	case ExpiryNever:
@@ -305,7 +307,7 @@ func decode(raw []byte) (State, error) {
 	if err := json.Unmarshal(raw, &disk); err != nil {
 		return State{}, fmt.Errorf("decode share state: %w", err)
 	}
-	if disk.SchemaVersion != SchemaVersion {
+	if disk.SchemaVersion != 2 && disk.SchemaVersion != SchemaVersion {
 		return State{}, fmt.Errorf("unsupported share state schema version %d", disk.SchemaVersion)
 	}
 	identity, err := decodePrivateKey(disk.IdentityPrivateKeyPEM, "Endpoint identity key")
@@ -333,9 +335,15 @@ func decode(raw []byte) (State, error) {
 		if err != nil {
 			return State{}, fmt.Errorf("decode grant workspace: %w", err)
 		}
-		route, err := routing.ParseRouteName(persisted.Route)
-		if err != nil {
-			return State{}, fmt.Errorf("decode grant route: %w", err)
+		if disk.SchemaVersion == 2 && persisted.Route == "" {
+			return State{}, errors.New("decode v2 grant route: required")
+		}
+		var route routing.RouteName
+		if persisted.Route != "" {
+			route, err = routing.ParseRouteName(persisted.Route)
+			if err != nil {
+				return State{}, fmt.Errorf("decode grant route: %w", err)
+			}
 		}
 		if !strings.HasPrefix(persisted.Bearer, "swsh_") {
 			return State{}, errors.New("decode grant bearer: invalid format")

@@ -52,3 +52,40 @@ func TestActionRowLayoutContract(t *testing.T) {
 		})
 	}
 }
+
+func TestActionRowStylesInteractionWithoutClassifyingBusinessVerbs(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, marker, label, value, action string
+		selected                           bool
+	}{
+		{name: "focused remove", marker: ">", value: "remove credential", action: "remove ↵", selected: true},
+		{name: "focused edit", marker: ">", label: "model", value: "gpt-5", action: "edit ↵", selected: true},
+		{name: "unfocused delete", label: "delete", value: "target", action: "delete ↵"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			harness, err := testkit.NewFuncHarness(ActionRow(tc.marker, tc.label, tc.value, tc.action))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(harness.Close)
+			harness.Frame()
+
+			buffer := harness.App().Buffer()
+			fieldX := 2
+			if tc.label == "" {
+				fieldX = 2
+			}
+			marker, field, action := buffer.Cell(0, 0).Style, buffer.Cell(fieldX, 0).Style, buffer.Cell(106, 0).Style
+			if tc.selected {
+				if !marker.HasAttr(tui.AttrBold) || !field.HasAttr(tui.AttrBold) || field.HasAttr(tui.AttrUnderline) || !action.HasAttr(tui.AttrBold) {
+					t.Fatalf("selected hierarchy marker=%+v field=%+v action=%+v", marker, field, action)
+				}
+			} else if !action.Equal(toneStyle(ToneMuted)) || !marker.Equal(tui.NewStyle()) || !field.Equal(tui.NewStyle()) {
+				t.Fatalf("unselected hierarchy marker=%+v field=%+v action=%+v", marker, field, action)
+			}
+		})
+	}
+}

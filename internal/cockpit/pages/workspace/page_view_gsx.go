@@ -33,6 +33,7 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 		ActivitySection: activitysection.Section(workspace, ctx, activityQuery),
 	}
 	if shareCommands, ok := any(commands).(ports.ShareCommands); ok {
+		page.OverviewSection.ShareCommands = shareCommands
 		page.RoutesSection.ShareCommands = shareCommands
 	}
 	if setupQueries != nil {
@@ -173,7 +174,10 @@ func (v *PageView) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (v *PageView) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (v *PageView) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*PageView)
 	if !ok {
 		return
@@ -181,6 +185,10 @@ func (v *PageView) UpdateProps(fresh tui.Component) {
 	v.OverviewSection = f.OverviewSection
 	v.RoutesSection = f.RoutesSection
 	v.ActivitySection = f.ActivitySection
+}
+
+func (v *PageView) UpdateProps(fresh tui.Component) {
+	v.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*PageView)(nil)

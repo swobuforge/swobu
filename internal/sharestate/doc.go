@@ -1,4 +1,4 @@
-// Package sharestate owns daemon-private Shared Routes Endpoint identity,
+// Package sharestate owns daemon-private Share Endpoint identity,
 // replaceable application-TLS credentials, certificate lifecycle state, and
 // bearer Grants. A missing state file is a valid cold Store; EnsureEndpoint
 // creates only the stable identity key. EndpointID and hostname derive solely

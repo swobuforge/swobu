@@ -44,7 +44,7 @@ templ SearchPickerFooterRow(countLabel string, hint string) {
 		<div class="flex-row w-full">
 			<span class="w-2"></span>
 			<span class="grow truncate nowrap">{countLabel}</span>
-			<span class="w-14">{hint}</span>
+			<span class="w-14" textStyle={ToneStyle(ToneMuted)}>{hint}</span>
 		</div>
 	</div>
 }

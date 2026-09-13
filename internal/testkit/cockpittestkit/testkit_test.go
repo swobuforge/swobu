@@ -7,6 +7,7 @@ import (
 
 	"github.com/grindlemire/go-tui"
 
+	"github.com/swobuforge/swobu/internal/testkit/testscreen"
 	"github.com/swobuforge/swobu/internal/testkit/testscreen/fixture"
 )
 
@@ -46,21 +47,6 @@ func TestRender_FlexLayout(t *testing.T) {
 	}
 }
 
-// TestRenderBuffer_MatchesBufView proves RenderBuffer feeds the testscreen
-// family correctly.
-func TestRenderBuffer_MatchesBufView(t *testing.T) {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex),
-		tui.WithDirection(tui.Row),
-	)
-	left := tui.New(tui.WithText("L"), tui.WithWidth(1))
-	right := tui.New(tui.WithText("R"), tui.WithWidth(1))
-	root.AddChild(left, right)
-
-	view := RenderBuffer(root, 10, 1)
-	AssertNowView(t, view, Text("L").LeftOf(Text("R")).Exists())
-}
-
 // TestRenderTrimmed_StripsTrailingSpaces proves trailing-space normalization.
 func TestRenderTrimmed_StripsTrailingSpaces(t *testing.T) {
 	el := tui.New(tui.WithText("x"))
@@ -79,27 +65,12 @@ func TestAssertNow_TextExists(t *testing.T) {
 	AssertNow(t, rendered, Text("target phrase").Exists())
 }
 
-// TestAssertNowView_SpatialBelow proves AssertNowView works with Layoutable
-// coordinates.
-func TestAssertNowView_SpatialBelow(t *testing.T) {
-	root := tui.New(
-		tui.WithDisplay(tui.DisplayFlex),
-		tui.WithDirection(tui.Column),
-	)
-	top := tui.New(tui.WithText("header"))
-	bot := tui.New(tui.WithText("footer"))
-	root.AddChild(top, bot)
-
-	view := RenderBuffer(root, 20, 2)
-	AssertNowView(t, view, Text("footer").Below(Text("header")).Exists())
-}
-
 // TestAssertVisual_DerivesCanonicalPath proves Cockpit visual fixtures use the
 // same path shape as PTY visual assertions.
 func TestAssertVisual_DerivesCanonicalPath(t *testing.T) {
 	assertion := AssertVisual("default")
 	cfg := assertion.fixture.Config()
-	want := "testdata/testkit__testassertvisual_derivescanonicalpath/fixture/default.txt"
+	want := "testdata/testkit__testassertvisual_derivescanonicalpath/fixture/default.ansi"
 	if cfg.Path != want {
 		t.Fatalf("AssertVisual path = %q, want %q", cfg.Path, want)
 	}
@@ -111,26 +82,33 @@ func TestAssertVisual_DerivesCanonicalPath(t *testing.T) {
 // TestAssertVisual_ConfiguresSharedFixtureShape proves Cockpit and PTY visual
 // assertions expose the same core configuration chain.
 func TestAssertVisual_ConfiguresSharedFixtureShape(t *testing.T) {
-	normalize := func(s string) string { return strings.TrimSpace(s) }
-	assertion := AssertVisual("ignored").Fixture("custom/path.txt").Normalize(normalize).Viewport(120, 40)
+	assertion := AssertVisual("ignored").Fixture("custom/path.ansi").Viewport(120, 40)
 	cfg := assertion.fixture.Config()
 
-	if cfg.Path != "custom/path.txt" {
-		t.Fatalf("Fixture() path = %q, want custom/path.txt", cfg.Path)
-	}
-	if cfg.Normalize == nil {
-		t.Fatal("Normalize() did not set fixture normalizer")
+	if cfg.Path != "custom/path.ansi" {
+		t.Fatalf("Fixture() path = %q, want custom/path.ansi", cfg.Path)
 	}
 	if cfg.MinCols != 120 || cfg.MinRows != 40 {
 		t.Fatalf("Viewport() = (%d, %d), want (120, 40)", cfg.MinCols, cfg.MinRows)
 	}
 }
 
+func TestAssertVisual_ConfiguresExactViewport(t *testing.T) {
+	cfg := AssertVisual("full").ExactViewport(100, 24).fixture.Config()
+	if !cfg.ExactViewport || cfg.MinCols != 100 || cfg.MinRows != 24 {
+		t.Fatalf("ExactViewport() config = %+v", cfg)
+	}
+}
+
 // TestAssertVisual_CompareMissingFixture reports missing golden file through
 // the shared fixture kernel and update environment.
 func TestAssertVisual_CompareMissingFixture(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing.txt")
-	report := AssertVisual("missing").Fixture(path).Compare("snapshot text")
+	path := filepath.Join(t.TempDir(), "missing.ansi")
+	screen, err := testscreen.ParseANSI([]byte("snapshot text"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := AssertVisual("missing").Fixture(path).Compare(screen)
 	if report.Err == nil {
 		t.Fatal("expected error for missing fixture")
 	}
@@ -147,13 +125,10 @@ func TestAssertVisual_CompareMissingFixture(t *testing.T) {
 func TestReexports_AreKernelSymbols(t *testing.T) {
 	// If these compile, they are aliases to the kernel types declared via
 	// type aliases in this package.
-	var _ Expr = Text("x")
 	var _ Predicate = Text("x").Exists()
 	var _ Predicate = All(Text("x").Exists(), TextRE("y").Exists())
 	var _ Predicate = Not(Text("x").Exists())
-	var _ Predicate = Within(Box(Text("a")), Text("b").Exists())
 
-	// EvalNow and EvalNowView must exist.
+	// EvalNow must exist.
 	_ = EvalNow
-	_ = EvalNowView
 }

@@ -32,8 +32,8 @@ func (c *Client) ListShares(ctx context.Context) ([]shares.Summary, error) {
 	return summaries, nil
 }
 
-func (c *Client) RevealShare(ctx context.Context, route string) (shares.Result, error) {
-	query := url.Values{"route": []string{route}}
+func (c *Client) RevealShare(ctx context.Context, ref string) (shares.Result, error) {
+	query := url.Values{"route": []string{ref}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/shares?"+query.Encode(), nil)
 	if err != nil {
 		return shares.Result{}, fmt.Errorf("operator client: share reveal request could not be built")
@@ -53,8 +53,8 @@ func (c *Client) RevealShare(ctx context.Context, route string) (shares.Result, 
 	return result, nil
 }
 
-func (c *Client) IssueShare(ctx context.Context, route string, expiry sharestate.Expiry) (shares.Result, error) {
-	body, _ := json.Marshal(map[string]any{"route": route, "expires": expiry})
+func (c *Client) IssueShare(ctx context.Context, ref string, expiry sharestate.Expiry) (shares.Result, error) {
+	body, _ := json.Marshal(map[string]any{"route": ref, "expires": expiry})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/shares", bytes.NewReader(body))
 	if err != nil {
 		return shares.Result{}, fmt.Errorf("operator client: share request could not be built")
@@ -75,8 +75,8 @@ func (c *Client) IssueShare(ctx context.Context, route string, expiry sharestate
 	return result, nil
 }
 
-func (c *Client) RevokeShare(ctx context.Context, route string) error {
-	body, _ := json.Marshal(map[string]string{"route": route})
+func (c *Client) RevokeShare(ctx context.Context, ref string) error {
+	body, _ := json.Marshal(map[string]string{"route": ref})
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/_swobu/shares", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("operator client: revoke request could not be built")

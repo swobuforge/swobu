@@ -760,37 +760,43 @@ func (s *SectionView) shareRevokeRowKey(route readmodel.RouteReadModel) string {
 }
 
 func ShareRowComponent(s *SectionView, route readmodel.RouteReadModel) tui.Component {
+	props := ui.SelectProps{ID: s.shareRowKey(route), Label: "share"}
 	if s.State.SharePendingRoute.Get() == route.ID {
-		return ui.NewSelectableRow(s.shareRowKey(route), "share", "setting up HTTPS…", "", func() {})
+		props.Value = "setting up HTTPS…"
+		props.OnActivate = func() {}
+		return ui.NewSelect(props)
 	}
 	if route.Share != nil {
-		value := abbreviatedShareValue(route.Share.Hostname)
+		value := route.Share.EndpointValue()
 		if s.State.ShareCopiedRoute.Get() == route.ID {
 			value = "copied"
 		}
-		return ui.NewSelectableRow(s.shareRowKey(route), "share", value, "copy ↵", func() { s.copyShare(route) })
+		props.Value = value
+		props.Action = "copy ↵"
+		props.OnActivate = func() { s.copyShare(route) }
+		return ui.NewSelect(props)
 	}
-	return ui.NewSelect(ui.SelectProps{
-		ID: s.shareRowKey(route), Label: "share", Value: "not shared", Action: "share ↵",
-		Body: func(backout func()) tui.Component {
-			options := []ui.ChoiceOption{
-				{ID: string(sharestate.ExpiryOneDay), Label: "1 day"},
-				{ID: string(sharestate.ExpirySevenDays), Label: "7 days"},
-				{ID: string(sharestate.ExpiryThirtyDays), Label: "30 days"},
-				{ID: string(sharestate.ExpiryNever), Label: "never"},
-			}
-			return ui.NewChoicePicker(s.shareRowKey(route)+":expiry", options, string(sharestate.ExpirySevenDays), func(value string) {
-				backout()
-				s.issueShare(route, sharestate.Expiry(value))
-			}, backout)
-		},
-	})
+	props.Value = "not shared"
+	props.Action = "share ↵"
+	props.Body = func(backout func()) tui.Component {
+		options := []ui.ChoiceOption{
+			{ID: string(sharestate.ExpiryOneDay), Label: "1 day"},
+			{ID: string(sharestate.ExpirySevenDays), Label: "7 days · preview"},
+			{ID: string(sharestate.ExpiryThirtyDays), Label: "30 days · preview"},
+			{ID: string(sharestate.ExpiryNever), Label: "until revoked · preview"},
+		}
+		return ui.NewChoicePicker(s.shareRowKey(route)+":expiry", options, string(sharestate.ExpiryOneDay), func(value string) {
+			backout()
+			s.issueShare(route, sharestate.Expiry(value))
+		}, backout)
+	}
+	return ui.NewSelect(props)
 }
 
 func ShareRevokeRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.ConfirmActionRow {
-	expires := "never"
-	if route.Share != nil && !route.Share.Never {
-		expires = route.Share.ExpiresAt.Local().Format("2 Jan 2006")
+	expires := ""
+	if route.Share != nil {
+		expires = route.Share.ExpiryValue()
 	}
 	copy := ui.ConfirmActionCopy{
 		Label:           "expires",
@@ -804,15 +810,6 @@ func ShareRevokeRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui
 		FailedAction:    "retry ↵",
 	}
 	return ui.NewConfirmActionRow(s.shareRevokeRowKey(route), copy, func() error { return s.revokeShare(route) })
-}
-
-func abbreviatedShareValue(hostname string) string {
-	const suffix = ".share.swobu.com"
-	prefix := strings.TrimSuffix(hostname, suffix)
-	if prefix == hostname || len(prefix) <= 8 {
-		return hostname + "/#••••"
-	}
-	return prefix[:8] + "…" + suffix + "/#••••"
 }
 
 func (s *SectionView) applyRouteSaved(previousID readmodel.RouteID, route readmodel.RouteReadModel) {
@@ -921,15 +918,18 @@ func groupedTargets(route readmodel.RouteReadModel) [][]readmodel.TargetReadMode
 	return out
 }
 
-func tierHeaderText(tierIndex int, balanced bool) string {
-	label := "primary"
-	if tierIndex > 0 {
-		label = fmt.Sprintf("fallback %d", tierIndex)
+func tierLabel(tierIndex int) string {
+	if tierIndex == 0 {
+		return "primary"
 	}
-	if balanced {
-		return label + "        balance"
+	return fmt.Sprintf("fallback %d", tierIndex)
+}
+
+func tierTone(tierIndex int) ui.Tone {
+	if tierIndex == 0 {
+		return ui.ToneAccent
 	}
-	return label
+	return ui.ToneFallback
 }
 
 func modelSendsRowValue(route readmodel.RouteReadModel) string { return "model = " + route.ModelName }
@@ -972,18 +972,26 @@ func RouteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.Selec
 
 // TargetRowComponent mounts a selectable target row indented as a route child.
 // Target rows show provider/model and equal share inside balanced tiers.
-func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel) *ui.SelectableRow {
+func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel, tierIndex, targetIndex int) *ui.SelectableRow {
 	value := targetValue(target)
 	if tierIndex, ok := route.TargetTier(target.ID); ok && len(route.Tiers[tierIndex].Targets) > 1 {
 		value = value + " · " + fmt.Sprint(100/len(route.Tiers[tierIndex].Targets)) + "%"
 	}
 	row := ui.NewSelectableRow(
 		targetMountKey(route, target),
-		"",
+		func() string {
+			if targetIndex == 0 {
+				return tierLabel(tierIndex)
+			}
+			return ""
+		}(),
 		value,
 		"edit ↵",
 		func() { s.openTarget(target) },
 	)
+	row.ReserveLabelColumn = true
+	row.LabelTone = tierTone(tierIndex)
+	row.FocusValue = true
 	if s.State.OpenTarget.Get() == target.ID {
 		row.OnEscape = func() { s.State.OpenTarget.Set("") }
 	}

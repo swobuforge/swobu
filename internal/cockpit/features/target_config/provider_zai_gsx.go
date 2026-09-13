@@ -83,12 +83,19 @@ func (f *zaiProviderForm) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (f *zaiProviderForm) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (f *zaiProviderForm) updatePropsFields(fresh tui.Component) {
 	ff, ok := fresh.(*zaiProviderForm)
 	if !ok {
 		return
 	}
 	f.target = ff.target
+}
+
+func (f *zaiProviderForm) UpdateProps(fresh tui.Component) {
+	f.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*zaiProviderForm)(nil)

@@ -1,0 +1,7 @@
+  new target · OpenAI API                                                             [90mcancel ↵[0m
+     provider          OpenAI API                                                     [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mcredential[0m        required                                                       [1;38;2;70;167;88mchoose ↵[0m
+     model             waiting for setup
+     protocol          waiting for model
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+     create                                                                           [1;33mcomplete setup[0m

@@ -1,0 +1,8 @@
+  new target · OpenAI · ChatGPT subscription                      [90mcancel ↵[0m
+     provider          OpenAI · ChatGPT subscription              [90mchange ↵[0m
+     authentication    browser login                              [90mclose ↵[0m
+      [1;38;2;70;167;88m>[0m [1mbrowser login[0m                                             [1;38;2;70;167;88msign in ↵[0m
+        device code                                               [90msign in ↵[0m
+     model             waiting for setup
+     routing           [1;38;2;247;107;21mfallback 1[0m                                 [90mchange ↵[0m
+     create                                                       [1;33mcomplete setup[0m

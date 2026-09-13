@@ -488,6 +488,82 @@ func DetailRow(value string) *DetailRowView {
 	return &view
 }
 
+type DangerDetailRowView struct {
+	Root      *tui.Element
+	watchers  []tui.Watcher
+	bindApp   func(*tui.App)
+	unbindApp func()
+}
+
+func (v *DangerDetailRowView) UnbindApp() {
+	if v.unbindApp != nil {
+		v.unbindApp()
+	}
+}
+
+func (v *DangerDetailRowView) GetRoot() *tui.Element { return v.Root }
+
+func (v *DangerDetailRowView) GetWatchers() []tui.Watcher { return v.watchers }
+
+func (v *DangerDetailRowView) Render(app *tui.App) *tui.Element { return v.Root }
+
+func (v *DangerDetailRowView) BindApp(app *tui.App) {
+	if v.bindApp != nil {
+		v.bindApp(app)
+	}
+}
+
+func (v *DangerDetailRowView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*DangerDetailRowView)
+	if !ok {
+		return
+	}
+	v.Root = f.Root
+	v.watchers = f.watchers
+	v.bindApp = f.bindApp
+	v.unbindApp = f.unbindApp
+}
+
+var _ tui.AppBinder = (*DangerDetailRowView)(nil)
+
+var _ tui.AppUnbinder = (*DangerDetailRowView)(nil)
+
+var _ tui.PropsUpdater = (*DangerDetailRowView)(nil)
+
+func DangerDetailRow(value string) *DangerDetailRowView {
+	var view DangerDetailRowView
+	var watchers []tui.Watcher
+
+	__tui_0 := tui.New(
+		tui.WithWidthPercent(100.00),
+		tui.WithPaddingTRBL(0, 0, 0, 20),
+	)
+	__tui_1 := FlowText(value)
+	__tui_0.AddChild(__tui_1.Root)
+
+	watchers = append(watchers, __tui_1.GetWatchers()...)
+
+	__bindApp := func(app *tui.App) {
+		if binder, ok := any(__tui_1).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+	}
+
+	__unbindApp := func() {
+		if unbinder, ok := any(__tui_1).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+	}
+
+	view = DangerDetailRowView{
+		Root:      __tui_0,
+		watchers:  watchers,
+		bindApp:   __bindApp,
+		unbindApp: __unbindApp,
+	}
+	return &view
+}
+
 func (d *Disclosure) Render(app *tui.App) *tui.Element {
 	__tui_0 := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
@@ -556,7 +632,7 @@ func (d *Disclosure) Render(app *tui.App) *tui.Element {
 						__tui_10.AddChild(__tui_13.Root)
 					}
 				} else if obs.Kind == observationFailed {
-					__tui_14 := DetailRow(obs.Err)
+					__tui_14 := DangerDetailRow(obs.Err)
 					__tui_10.AddChild(__tui_14.Root)
 				} else if obs.Kind == observationNeedsChange {
 					for __idx_1, change := range obs.Plan.Changes {
@@ -621,7 +697,7 @@ func (d *Disclosure) Render(app *tui.App) *tui.Element {
 				__tui_19.AddChild(__tui_28.Root)
 			}
 			if d.Feedback.Get().result.Status == cockpitui.CopyFailed {
-				__tui_29 := DetailRow("copy failed · run swobu doctor --copy")
+				__tui_29 := DangerDetailRow("copy failed · run swobu doctor --copy")
 				__tui_19.AddChild(__tui_29.Root)
 			}
 			__tui_6.AddChild(__tui_19)

@@ -102,6 +102,7 @@ func ChoicePickerFooterRow(countLabel string) *ChoicePickerFooterRowView {
 	__tui_3 := tui.New(
 		tui.WithText("↑↓ choose"),
 		tui.WithWidth(14),
+		tui.WithTextStyle(ToneStyle(ToneMuted)),
 	)
 	__tui_0.AddChild(__tui_3)
 

@@ -29,6 +29,38 @@ type indentedFlowTextFixture struct {
 	text        string
 }
 
+type rowFlowTextFixture struct {
+	text string
+}
+
+func (f rowFlowTextFixture) Render(*tui.App) *tui.Element {
+	row := tui.New(
+		tui.WithDisplay(tui.DisplayFlex),
+		tui.WithDirection(tui.Row),
+		tui.WithWidthPercent(100),
+	)
+	row.AddChild(tui.New(
+		tui.WithText("label"),
+		tui.WithWidth(10),
+		tui.WithFlexShrink(0),
+		tui.WithWrap(false),
+	))
+	flow := FlowText(f.text).Root
+	style := flow.Style()
+	style.FlexGrow = 1
+	flow.SetStyle(style)
+	row.AddChild(flow)
+
+	root := tui.New(
+		tui.WithDisplay(tui.DisplayFlex),
+		tui.WithDirection(tui.Column),
+		tui.WithWidthPercent(100),
+	)
+	root.AddChild(row)
+	root.AddChild(tui.New(tui.WithText("SENTINEL")))
+	return root
+}
+
 func (f indentedFlowTextFixture) Render(*tui.App) *tui.Element {
 	col := tui.New(
 		tui.WithDisplay(tui.DisplayFlex),
@@ -99,6 +131,25 @@ func TestFlowTextGeometryContract(t *testing.T) {
 				if strings.Contains(lines[i], "SENTINEL") {
 					t.Fatalf("SENTINEL leaked into line %d at width %d:\n%s", i, width, rendered)
 				}
+			}
+		}
+	})
+
+	t.Run("post-flex row width grows the row before its following sibling", func(t *testing.T) {
+		t.Parallel()
+
+		text := "aaaaa bbbbb ccccc ddddd eeeee fffff ggggg hhhhh iiiii jjjjj kkkkk lllll"
+		rendered := testkit.RenderMountedTrimmed(t, rowFlowTextFixture{text: text}, 40, 10)
+		lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("post-flex row rendered %d lines, want 3 wrapped rows plus sentinel:\n%s", len(lines), rendered)
+		}
+		if !strings.Contains(lines[3], "SENTINEL") {
+			t.Fatalf("following sibling overlaps post-flex wrapped row:\n%s", rendered)
+		}
+		for i := 0; i < 3; i++ {
+			if strings.Contains(lines[i], "SENTINEL") {
+				t.Fatalf("following sibling appeared on wrapped row %d:\n%s", i, rendered)
 			}
 		}
 	})

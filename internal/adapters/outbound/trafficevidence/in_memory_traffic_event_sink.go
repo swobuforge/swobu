@@ -62,8 +62,8 @@ type RecentTrafficRow struct {
 	Timing            *RecentTrafficTimingSnapshot        `json:"timing,omitempty"`
 	TokenUsage        *RecentTrafficTokenUsageSnapshot    `json:"token_usage,omitempty"`
 	ReusablePrefix    RecentTrafficReusablePrefixSnapshot `json:"reusable_prefix"`
-	// TODO(execution-system): Flattened token fields are preserved for continuity with existing
-	// trafficevidence integration tests and older readers.
+	// TODO(execution-system): Migrate remaining readers and integration assertions
+	// to TokenUsage, then delete these flattened continuity fields.
 	InputTokens           *int                          `json:"-"`
 	OutputTokens          *int                          `json:"-"`
 	CacheReadTokens       *int                          `json:"-"`

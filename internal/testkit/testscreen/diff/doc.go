@@ -1,2 +1,2 @@
-// Package diff owns visual diff semantics over testscreen/buf.View.
+// Package diff owns semantic visual comparison between terminal screens.
 package diff

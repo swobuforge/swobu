@@ -272,6 +272,7 @@ func SearchPickerFooterRow(countLabel string, hint string) *SearchPickerFooterRo
 	__tui_4 := tui.New(
 		tui.WithText(hint),
 		tui.WithWidth(14),
+		tui.WithTextStyle(ToneStyle(ToneMuted)),
 	)
 	__tui_1.AddChild(__tui_4)
 	__tui_0.AddChild(__tui_1)

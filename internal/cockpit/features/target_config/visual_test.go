@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	"github.com/swobuforge/swobu/internal/testkit/testscreen"
 )
 
 const providerAuthoringFixtureDir = "testdata/provider_authoring/fixture"
@@ -38,7 +39,7 @@ var requiredProviderAuthoringVisualNames = []string{
 type providerAuthoringVisualCase struct {
 	name   string
 	build  func(*testing.T) tui.Component
-	render func(*testing.T, int) string
+	render func(*testing.T, int) testscreen.Screen
 }
 
 func TestProviderAuthoringVisualContract(t *testing.T) {
@@ -48,17 +49,17 @@ func TestProviderAuthoringVisualContract(t *testing.T) {
 			for _, width := range providerAuthoringVisualWidths(visual.name) {
 				width := width
 				t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
-					frame := ""
+					var screen testscreen.Screen
 					if visual.render != nil {
-						frame = visual.render(t, width)
+						screen = visual.render(t, width)
 					} else {
-						frame = testkit.RenderMountedTrimmed(t, visual.build(t), width, providerAuthoringFixtureHeight)
+						screen = testkit.RenderMountedScreen(t, visual.build(t), width, providerAuthoringFixtureHeight)
 					}
-					fixture := fmt.Sprintf("%s/%s_%d.txt", providerAuthoringFixtureDir, visual.name, width)
+					fixture := fmt.Sprintf("%s/%s_%d.ansi", providerAuthoringFixtureDir, visual.name, width)
 					testkit.AssertVisual(visual.name).
 						Fixture(fixture).
 						Viewport(width, providerAuthoringFixtureHeight).
-						Now(t, frame)
+						Now(t, screen)
 				})
 			}
 		})
@@ -72,7 +73,7 @@ func TestProviderAuthoringVisualRegistryAndFixturesAreClosed(t *testing.T) {
 	for _, visual := range cases {
 		actualNames = append(actualNames, visual.name)
 		for _, width := range providerAuthoringVisualWidths(visual.name) {
-			expectedFiles[fmt.Sprintf("%s_%d.txt", visual.name, width)] = true
+			expectedFiles[fmt.Sprintf("%s_%d.ansi", visual.name, width)] = true
 		}
 	}
 	wantNames := slices.Clone(requiredProviderAuthoringVisualNames)
@@ -151,13 +152,13 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			w.Catalog.Set(catalogOperationState{Err: "Gemini Google identity (ADC) is unavailable"})
 			return w
 		}},
-		{name: "credential_source_menu", render: func(t *testing.T, width int) string {
+		{name: "credential_source_menu", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCredentialJourney(t, width, []tui.KeyEvent{{Key: tui.KeyEnter}}, nil)
 		}},
-		{name: "credential_environment_input", render: func(t *testing.T, width int) string {
+		{name: "credential_environment_input", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCredentialJourney(t, width, []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyEnter}}, nil)
 		}},
-		{name: "credential_file_browser", render: func(t *testing.T, width int) string {
+		{name: "credential_file_browser", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCredentialJourney(t, width, []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyDown}, {Key: tui.KeyEnter}}, func(w *TargetConfig) {
 				w.credentialInitialPath = "/home/operator/.config/swobu"
 				w.credentialReadDir = func(string) ([]ui.FileBrowserEntry, error) {
@@ -165,7 +166,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 				}
 			})
 		}},
-		{name: "credential_paste_input", render: func(t *testing.T, width int) string {
+		{name: "credential_paste_input", render: func(t *testing.T, width int) testscreen.Screen {
 			keys := []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyDown}, {Key: tui.KeyDown}, {Key: tui.KeyEnter}}
 			for _, char := range "sk-secret-example" {
 				keys = append(keys, tui.KeyEvent{Key: tui.KeyRune, Rune: char})
@@ -190,10 +191,10 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 			w.Catalog.Set(catalogOperationState{Err: "model catalog endpoint is unsupported"})
 			return w
 		}},
-		{name: "custom_credential_header_picker", render: func(t *testing.T, width int) string {
+		{name: "custom_credential_header_picker", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCustomHeaderJourney(t, width, "")
 		}},
-		{name: "custom_credential_header_open_value", render: func(t *testing.T, width int) string {
+		{name: "custom_credential_header_open_value", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCustomHeaderJourney(t, width, "X-Custom-Token")
 		}},
 		{name: "bedrock_aws_identity", build: func(t *testing.T) tui.Component {
@@ -211,13 +212,13 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "bedrock_auth_failure", build: func(t *testing.T) tui.Component {
 			return bedrockVisualConfig(t, "aws_identity_failure", "", readmodel.AWSIdentityReadModel{})
 		}},
-		{name: "bedrock_credential_menu", render: func(t *testing.T, width int) string {
+		{name: "bedrock_credential_menu", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderBedrockVisual(t, width, "aws_identity", "", readmodel.AWSIdentityReadModel{
 				State: "resolved", Account: "123456789012",
 				ARN: "arn:aws:sts::123456789012:assumed-role/Developer/session",
 			}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 		}},
-		{name: "credential_optional_remove", render: func(t *testing.T, width int) string {
+		{name: "credential_optional_remove", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderBedrockVisual(t, width, "explicit_api_key", "secret:bedrock-target", readmodel.AWSIdentityReadModel{}, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 		}},
 		{name: "chatgpt_signed_out", build: func(t *testing.T) tui.Component {
@@ -296,7 +297,7 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 	}
 }
 
-func renderProviderPickerCodex(t *testing.T, width int) string {
+func renderProviderPickerCodex(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
 	w.UpdateProviderOptions([]readmodel.ProviderOptionReadModel{
@@ -314,7 +315,7 @@ func renderProviderPickerCodex(t *testing.T, width int) string {
 	for _, char := range "codex" {
 		harness.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: char})
 	}
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
 func ambientOrReferenceVisual(ref string) *ambientOrReferenceAuthentication {
@@ -324,7 +325,7 @@ func ambientOrReferenceVisual(ref string) *ambientOrReferenceAuthentication {
 	}).(*ambientOrReferenceAuthentication)
 }
 
-func renderModelPicker(t *testing.T, width int) string {
+func renderModelPicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "env:OPENAI_API_KEY")
 	selectReadyModel(w, "GPT-4.1", "responses")
@@ -339,7 +340,7 @@ func renderModelPicker(t *testing.T, width int) string {
 	return renderAuthoringKeys(t, width, w, append(keys, runeKeys("gpt-4")...))
 }
 
-func renderDeploymentPicker(t *testing.T, width int) string {
+func renderDeploymentPicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecAzure, "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY")
 	selectReadyModel(w, "claude-opus-4-8", "messages")
@@ -353,14 +354,14 @@ func renderDeploymentPicker(t *testing.T, width int) string {
 	return renderAuthoringKeys(t, width, w, append(keys, runeKeys("claude")...))
 }
 
-func renderProtocolPicker(t *testing.T, width int) string {
+func renderProtocolPicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 	selectReadyModel(w, "model-x", "responses")
 	return renderAuthoringKeys(t, width, w, []tui.KeyEvent{{Key: tui.KeyUp}, {Key: tui.KeyUp}, {Key: tui.KeyEnter}})
 }
 
-func renderRoutingPicker(t *testing.T, width int) string {
+func renderRoutingPicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	control := PlacementSelect(readyPlacementConfig(t))
 	harness, err := testkit.NewHarnessAt(control, width, providerAuthoringFixtureHeight)
@@ -371,10 +372,10 @@ func renderRoutingPicker(t *testing.T, width int) string {
 	harness.Open()
 	harness.App().FocusNext()
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderCustomHeaderJourney(t *testing.T, width int, query string) string {
+func renderCustomHeaderJourney(t *testing.T, width int, query string) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecCustom, "https://api.example.com/v1", "env:CUSTOM_API_KEY")
 	selectReadyModel(w, "model-x", "responses")
@@ -383,7 +384,7 @@ func renderCustomHeaderJourney(t *testing.T, width int, query string) string {
 	return renderAuthoringKeys(t, width, w, keys)
 }
 
-func renderAuthoringKeys(t *testing.T, width int, w *TargetConfig, keys []tui.KeyEvent) string {
+func renderAuthoringKeys(t *testing.T, width int, w *TargetConfig, keys []tui.KeyEvent) testscreen.Screen {
 	t.Helper()
 	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
 	if err != nil {
@@ -394,7 +395,7 @@ func renderAuthoringKeys(t *testing.T, width int, w *TargetConfig, keys []tui.Ke
 	for _, key := range keys {
 		harness.DispatchKey(key)
 	}
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
 func runeKeys(value string) []tui.KeyEvent {
@@ -432,7 +433,7 @@ func bedrockVisualConfig(t *testing.T, authentication, credential string, identi
 	return w
 }
 
-func renderBedrockVisual(t *testing.T, width int, authentication, credential string, identity readmodel.AWSIdentityReadModel, keys []tui.KeyEvent) string {
+func renderBedrockVisual(t *testing.T, width int, authentication, credential string, identity readmodel.AWSIdentityReadModel, keys []tui.KeyEvent) testscreen.Screen {
 	t.Helper()
 	w := bedrockVisualConfig(t, authentication, credential, identity)
 	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
@@ -444,10 +445,10 @@ func renderBedrockVisual(t *testing.T, width int, authentication, credential str
 	for _, key := range keys {
 		harness.DispatchKey(key)
 	}
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderCredentialJourney(t *testing.T, width int, keys []tui.KeyEvent, configure func(*TargetConfig)) string {
+func renderCredentialJourney(t *testing.T, width int, keys []tui.KeyEvent, configure func(*TargetConfig)) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecOpenAI, "", "")
 	if configure != nil {
@@ -462,10 +463,10 @@ func renderCredentialJourney(t *testing.T, width int, keys []tui.KeyEvent, confi
 	for _, key := range keys {
 		harness.DispatchKey(key)
 	}
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderAzureCredentialRequired(t *testing.T, width int) string {
+func renderAzureCredentialRequired(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecAzure, "", "")
 	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
@@ -479,10 +480,10 @@ func renderAzureCredentialRequired(t *testing.T, width int) string {
 		harness.DispatchKey(tui.KeyEvent{Key: tui.KeyRune, Rune: char})
 	}
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderChatGPTOpenFailure(t *testing.T, width int) string {
+func renderChatGPTOpenFailure(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	var openedURL string
 	restoreEffects := ui.RegisterEffectHooks(func(url string) error {
@@ -515,11 +516,11 @@ func renderChatGPTOpenFailure(t *testing.T, width int) string {
 	if got := w.Error.Get(); got != "" {
 		t.Fatalf("open failure mutated form error = %q", got)
 	}
-	frame := harness.FrameTrimmed()
-	if !strings.Contains(compactVisualLines(frame), chatGPTVisualLoginURL) {
-		t.Fatalf("complete wrapped login URL is not visible:\n%s", frame)
+	screen := harness.Screen(t)
+	if !strings.Contains(compactVisualLines(screen.String()), chatGPTVisualLoginURL) {
+		t.Fatalf("complete wrapped login URL is not visible:\n%s", screen.String())
 	}
-	return frame
+	return screen
 }
 
 func compactVisualLines(frame string) string {
@@ -531,7 +532,7 @@ func compactVisualLines(frame string) string {
 	return compact.String()
 }
 
-func renderChatGPTAuthModePicker(t *testing.T, width int) string {
+func renderChatGPTAuthModePicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
 	harness, err := testkit.NewHarnessAt(w, width, providerAuthoringFixtureHeight)
@@ -541,10 +542,10 @@ func renderChatGPTAuthModePicker(t *testing.T, width int) string {
 	defer harness.Close()
 	harness.Open()
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderChatGPTPendingAuthModePicker(t *testing.T, width int) string {
+func renderChatGPTPendingAuthModePicker(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
 	w.AuthSession.Set(readmodel.AuthSessionReadModel{
@@ -562,10 +563,10 @@ func renderChatGPTPendingAuthModePicker(t *testing.T, width int) string {
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyUp})
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
-func renderChatGPTDevicePending(t *testing.T, width int) string {
+func renderChatGPTDevicePending(t *testing.T, width int) testscreen.Screen {
 	t.Helper()
 	commands := &authCommandsStub{
 		started: make(chan struct{}),
@@ -597,7 +598,7 @@ func renderChatGPTDevicePending(t *testing.T, width int) string {
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
 	harness.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-	return harness.FrameTrimmed()
+	return harness.Screen(t)
 }
 
 func authoringConfig(t *testing.T, provider profile.ProviderID, locator, credential string) *TargetConfig {

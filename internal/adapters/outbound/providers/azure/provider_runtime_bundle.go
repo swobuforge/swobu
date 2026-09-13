@@ -21,7 +21,8 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
-// FIXME swobuCallerUAHeaderValue must be DRY across all providers. Consider centralizing if more providers need it.
+// FIXME(provider-runtime): Move the caller user-agent to the shared HTTP edge
+// while updating every provider caller, then delete per-provider constants.
 const swobuCallerUAHeaderValue = "swobu/dev"
 const azureDeploymentListPath = "/deployments?api-version=v1&deploymentType=ModelDeployment"
 

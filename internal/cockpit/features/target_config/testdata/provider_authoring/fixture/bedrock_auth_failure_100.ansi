@@ -1,0 +1,11 @@
+  new target · AWS Bedrock                                                            [90mcancel ↵[0m
+     provider          AWS Bedrock                                                    [90mchange ↵[0m
+     region            Europe (London) · eu-west-2                                    [90mchange ↵[0m
+     authentication    AWS identity unavailable                                       [90mmanage ↵[0m
+                       AWS credentials are unavailable or expired
+     model             waiting for setup
+     protocol          waiting for model
+     API URL           https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1          [90medit ↵[0m
+                       Explicit API URL.
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+     create                                                                           [1;33mcomplete setup[0m

@@ -1,0 +1,7 @@
+  new target · Azure AI                                                               [90mcancel ↵[0m
+     provider          Azure AI                                                       [90mchange ↵[0m
+     project           example/demo                                                   [90medit ↵[0m
+     credential        environment · AZURE_OPENAI_API_KEY                             [90mchange ↵[0m
+     deployment        gpt-5.6-sol                                                    [90mchange ↵[0m
+     protocol          OpenAI · Responses · buffered                                  [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mcreate[0m                                                                           [1;38;2;70;167;88mcreate ↵[0m

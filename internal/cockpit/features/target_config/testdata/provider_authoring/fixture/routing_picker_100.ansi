@@ -1,0 +1,4 @@
+  routing           [1;38;2;247;107;21mfallback 1[0m                                                        [90mclose ↵[0m
+     primary                                                                          [90mselect ↵[0m
+     balance with primary                                                             [90mselect ↵[0m
+   [1;38;2;70;167;88m>[0m [1mfallback 1[0m                                                                       [1;38;2;70;167;88mselect ↵[0m

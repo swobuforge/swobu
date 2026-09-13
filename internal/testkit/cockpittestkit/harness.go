@@ -1,10 +1,12 @@
 package testkit
 
 import (
+	"testing"
 	"time"
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
+	"github.com/swobuforge/swobu/internal/testkit/testscreen"
 )
 
 // MockAppHarness is a lightweight, in-process interactive test fixture for go-tui
@@ -16,7 +18,7 @@ import (
 //
 // Use MockAppHarness for temporal tests that need focus management or event dispatch.
 // For one-shot mounted component assertions, prefer RenderMountedString /
-// RenderMountedBuffer. Use RenderString / RenderBuffer only for already-built
+// RenderMountedScreen. Use RenderString / RenderScreen only for already-built
 // inert element trees.
 type MockAppHarness struct {
 	app    *tui.App
@@ -44,6 +46,18 @@ func NewHarnessAt(root tui.Component, width, height int) (*MockAppHarness, error
 func (h *MockAppHarness) FrameTrimmed() string {
 	h.Frame()
 	return h.app.Buffer().StringTrimmed()
+}
+
+// Screen renders and returns the styled terminal-cell state, failing the test
+// when the buffer contains a cell outside the canonical fixture contract.
+func (h *MockAppHarness) Screen(t testing.TB) testscreen.Screen {
+	t.Helper()
+	h.Frame()
+	screen, err := ScreenFromBuffer(h.app.Buffer())
+	if err != nil {
+		t.Fatalf("capture harness screen: %v", err)
+	}
+	return screen
 }
 
 // NewFuncHarness creates a MockAppHarness from a bare element tree instead of a

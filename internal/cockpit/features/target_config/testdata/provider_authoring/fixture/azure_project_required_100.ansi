@@ -1,0 +1,9 @@
+  new target · Azure AI                                                               [90mcancel ↵[0m
+     provider          Azure AI                                                       [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mproject[0m           [1;33mrequired[0m                                                       [1;38;2;70;167;88medit ↵[0m
+                       Paste https://.../api/projects/...
+     credential        waiting for project endpoint
+     deployment        waiting for setup
+     protocol          waiting for deployment
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+     create                                                                           [1;33mcomplete setup[0m

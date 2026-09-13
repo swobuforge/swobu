@@ -12,6 +12,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 type SectionView struct {
@@ -180,7 +181,10 @@ func (s *SectionView) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (s *SectionView) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (s *SectionView) updatePropsFields(fresh tui.Component) {
 	f, ok := fresh.(*SectionView)
 	if !ok {
 		return
@@ -190,6 +194,10 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.ActivityQuery = f.ActivityQuery
 	s.RefreshInterval = f.RefreshInterval
 	s.RefreshLifecycle = f.RefreshLifecycle
+}
+
+func (s *SectionView) UpdateProps(fresh tui.Component) {
+	s.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*SectionView)(nil)
@@ -259,6 +267,7 @@ func ActivityHeader() *ActivityHeaderView {
 	__tui_0.AddChild(__tui_1)
 	__tui_2 := tui.New(
 		tui.WithText("activity"),
+		tui.WithTextStyle(ui.HeadingStyle()),
 	)
 	__tui_0.AddChild(__tui_2)
 

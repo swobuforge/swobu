@@ -1,0 +1,8 @@
+  new target · OpenAI · ChatGPT subscription                      [90mcancel ↵[0m
+     provider          OpenAI · ChatGPT subscription              [90mchange ↵[0m
+     authentication    signed in                                  [90mreconnect ↵[0m
+     models            [1;38;2;229;72;77mcatalog failed[0m                             [1;38;2;229;72;77mretry ↵[0m
+                       [1;38;2;229;72;77mcatalog transport unavailable[0m
+   [1;38;2;70;167;88m>[0m [1mmodel[0m             [1;33mrequired[0m                                   [1;38;2;70;167;88menter ↵[0m
+     routing           [1;38;2;247;107;21mfallback 1[0m                                 [90mchange ↵[0m
+     create                                                       [1;33mcomplete setup[0m

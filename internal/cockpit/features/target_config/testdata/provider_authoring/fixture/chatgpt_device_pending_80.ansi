@@ -1,0 +1,8 @@
+  new target · OpenAI · ChatGPT subscription                      [90mcancel ↵[0m
+     provider          OpenAI · ChatGPT subscription              [90mchange ↵[0m
+     authentication    device code                                [90mchange ↵[0m
+     login URL                                                    [90mopen ↵[0m
+        https://auth.openai.com/codex/device
+     code              ABCD-EFGH                                  [90mcopy ↵[0m
+   [1;38;2;70;167;88m>[0m [1mstatus[0m            waiting for login                          [1;38;2;70;167;88mrefresh ↵[0m
+     cancel                                                       [90mcancel ↵[0m

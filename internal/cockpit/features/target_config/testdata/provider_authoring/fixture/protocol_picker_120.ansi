@@ -1,0 +1,20 @@
+  new target · Custom Endpoint                                                                            [90mcancel ↵[0m
+     provider          Custom Endpoint                                                                    [90mchange ↵[0m
+     backend URL       https://api.example.com/v1                                                         [90medit ↵[0m
+     credential        environment · CUSTOM_API_KEY                                                       [90mchange ↵[0m
+     credential header Authorization                                                                      [90mchange ↵[0m
+     model             model-x                                                                            [90mchange ↵[0m
+     protocol          OpenAI · Responses · buffered                                                      [90mclose ↵[0m
+        protocol
+        search            _
+
+      [1;38;2;70;167;88m>[0m [1mOpenAI · Responses · buffered[0m                                                                     [1;38;2;70;167;88mselect ↵[0m
+        OpenAI · Responses · streaming                                                                    [90mselect ↵[0m
+        OpenAI · Chat Completions · buffered                                                              [90mselect ↵[0m
+        OpenAI · Chat Completions · streaming                                                             [90mselect ↵[0m
+        Anthropic · Messages · buffered                                                                   [90mselect ↵[0m
+        Anthropic · Messages · streaming                                                                  [90mselect ↵[0m
+
+        6 of 6 shown                                                                                      [90m↑↓ search[0m
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                                         [90mchange ↵[0m
+     create                                                                                               [90mcreate ↵[0m

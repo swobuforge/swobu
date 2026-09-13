@@ -45,12 +45,19 @@ func (f *httpProviderForm) Render(app *tui.App) *tui.Element {
 	return __tui_0
 }
 
-func (f *httpProviderForm) UpdateProps(fresh tui.Component) {
+// updatePropsFields is generated. It copies prop fields from fresh onto
+// the receiver. When you override UpdateProps, call this helper instead
+// of hand-maintaining the copy list.
+func (f *httpProviderForm) updatePropsFields(fresh tui.Component) {
 	ff, ok := fresh.(*httpProviderForm)
 	if !ok {
 		return
 	}
 	f.target = ff.target
+}
+
+func (f *httpProviderForm) UpdateProps(fresh tui.Component) {
+	f.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*httpProviderForm)(nil)

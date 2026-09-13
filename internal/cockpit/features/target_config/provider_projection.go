@@ -174,7 +174,7 @@ func defaultPlacementForRoute(route readmodel.RouteReadModel) readmodel.Placemen
 		anchor = route.Tiers[len(route.Tiers)-1].Targets[0].ID
 	}
 	return readmodel.PlacementOptionReadModel{
-		Label:        fmt.Sprintf("fallback after step %d", len(route.Tiers)),
+		Label:        fmt.Sprintf("fallback %d", len(route.Tiers)),
 		PeerTargetID: anchor,
 		Kind:         readmodel.PlacementFallback,
 	}
@@ -187,7 +187,7 @@ func placementOptions(route readmodel.RouteReadModel, mode targetConfigMode, edi
 	opts := []readmodel.PlacementOptionReadModel{{Label: "primary", Kind: readmodel.PlacementFallback}}
 	for tierIndex, tier := range route.Tiers {
 		for _, target := range tier.Targets {
-			opts = append(opts, readmodel.PlacementOptionReadModel{Label: "balance with " + fmt.Sprintf("step %d", tierIndex+1), PeerTargetID: target.ID, Kind: readmodel.PlacementBalance})
+			opts = append(opts, readmodel.PlacementOptionReadModel{Label: "balance with " + placementTierLabel(tierIndex), PeerTargetID: target.ID, Kind: readmodel.PlacementBalance})
 			break
 		}
 		if len(tier.Targets) > 0 {
@@ -226,7 +226,7 @@ func currentPlacementForTarget(route readmodel.RouteReadModel, id readmodel.Targ
 			if len(tier.Targets) > 1 {
 				for _, peer := range tier.Targets {
 					if peer.ID != id {
-						return readmodel.PlacementOptionReadModel{Label: fmt.Sprintf("balance with step %d", tierIndex+1), PeerTargetID: peer.ID, Kind: readmodel.PlacementBalance}
+						return readmodel.PlacementOptionReadModel{Label: "balance with " + placementTierLabel(tierIndex), PeerTargetID: peer.ID, Kind: readmodel.PlacementBalance}
 					}
 				}
 			}
@@ -238,6 +238,13 @@ func currentPlacementForTarget(route readmodel.RouteReadModel, id readmodel.Targ
 		}
 	}
 	return defaultPlacementForRoute(route)
+}
+
+func placementTierLabel(tierIndex int) string {
+	if tierIndex == 0 {
+		return "primary"
+	}
+	return fmt.Sprintf("fallback %d", tierIndex)
 }
 
 func placementOptionID(opt readmodel.PlacementOptionReadModel) string {

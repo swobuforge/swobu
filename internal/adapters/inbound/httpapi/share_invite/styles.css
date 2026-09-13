@@ -1,0 +1,45 @@
+:root { --share-fg:#1d211c; --share-muted:#666b65; --share-paper:#fcfdfc; --share-line:#d6d9d5; --share-grass:#46a758; --share-grass-field:#f5fbf5; --share-orange:#f76b15; --share-orange-field:#fff7ed; --share-sans:"Nimbus Sans","Helvetica Neue",helvetica,arial,sans-serif; --share-mono:"Noto Sans Mono","DejaVu Sans Mono",monospace; --share-page:61.75rem; }
+* { box-sizing:border-box; }
+html,body { min-height:100%; margin:0; color:var(--share-fg); background:var(--share-paper); color-scheme:light; }
+body { font-family:var(--share-sans); -webkit-font-smoothing:antialiased; }
+button { color:inherit; font:inherit; }
+[hidden] { display:none !important; }
+.sr-only { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); }
+button:focus-visible { outline:.125rem solid var(--share-fg); outline-offset:.1875rem; }
+.share-page { width:min(calc(100% - 3rem),var(--share-page)); margin-inline:auto; padding:1.75rem 0 5rem; }
+.share-mast { height:3rem; display:flex; align-items:center; justify-content:space-between; border-top:.0625rem solid var(--share-fg); border-bottom:.0625rem solid var(--share-line); font-size:.8125rem; }
+.share-brand { font:700 .6875rem/1 var(--share-mono); letter-spacing:.14em; }
+.share-mast span:last-child { color:var(--share-muted); }
+.share-intro { display:grid; grid-template-columns:8fr 4fr; min-height:21.875rem; padding-top:5.75rem; border-bottom:.0625rem solid var(--share-fg); }
+.share-title { display:flex; align-items:flex-end; min-width:0; padding:0 1.875rem 2.125rem 0; }
+.share-title h1 { margin:0; font-size:3.75rem; line-height:.92; letter-spacing:-.055em; font-weight:400; }
+.share-transfer { display:grid; align-content:end; justify-items:start; min-width:0; padding:0 0 1.875rem 1.875rem; border-left:.0625rem solid var(--share-line); }
+.share-qr { width:min(100%,14.25rem); aspect-ratio:1; display:grid; place-items:center; background:#fff; border:.0625rem solid var(--share-line); }
+.share-qr svg { display:block; width:100%; height:100%; }
+.share-transfer p { margin:.75rem 0 0; color:var(--share-muted); font-size:.8125rem; }
+.share-recipes { margin-top:2.25rem; }
+.share-recipe { --protocol:var(--share-grass); --protocol-field:var(--share-grass-field); display:grid; grid-template-columns:4fr 8fr; min-height:9.5rem; border-top:.25rem solid var(--protocol); border-bottom:.0625rem solid var(--share-fg); }
+.share-recipe + .share-recipe { margin-top:1.875rem; }
+.share-recipe.anthropic { --protocol:var(--share-orange); --protocol-field:var(--share-orange-field); }
+.recipe-id { position:relative; display:flex; align-items:flex-end; padding:1.25rem 2.875rem 1.875rem 1rem; background:var(--protocol-field); }
+.recipe-id h2 { margin:0; font-size:1.5625rem; line-height:1; letter-spacing:-.035em; font-weight:400; }
+.recipe-copy { position:absolute; top:1.5rem; right:1.5rem; }
+.recipe-copy,.recipe-reveal { width:1.75rem; height:1.75rem; padding:0; border:0; background:transparent; cursor:pointer; display:grid; place-items:center; }
+.recipe-data { display:grid; grid-template-columns:1fr 1fr; min-width:0; }
+.recipe-field { min-width:0; display:flex; flex-direction:column; justify-content:center; padding:1.25rem 1rem 1.25rem 2.875rem; }
+.recipe-field + .recipe-field { border-left:.0625rem solid var(--share-line); }
+.recipe-label { margin-bottom:.75rem; color:var(--share-muted); font-size:.75rem; }
+.recipe-value { display:flex; align-items:center; min-width:0; gap:1rem; }
+.recipe-value code { min-width:0; overflow-x:auto; white-space:nowrap; scrollbar-width:thin; font:400 .6875rem/1.5 var(--share-mono); }
+.recipe-reveal { flex:0 0 auto; margin-left:auto; }
+.i { width:1.125rem; height:1.125rem; fill:currentcolor; }
+.copy-done,.eye-closed { display:none; }
+.copy[data-state="copied"] .copy-normal,[aria-pressed="true"] .eye-open { display:none; }
+.copy[data-state="copied"] .copy-done,[aria-pressed="true"] .eye-closed { display:block; }
+.share-error { width:min(calc(100% - 3rem),var(--share-page)); margin:4rem auto 0; padding:2rem 0; border-block:.0625rem solid var(--share-fg); }
+.share-error h1 { margin:0 0 .75rem; font-size:2.5rem; font-weight:400; }
+.share-error p { margin:0; color:var(--share-muted); }
+@media (min-width:47.5rem) and (max-width:56.1875rem) { .share-intro { grid-template-columns:6fr 6fr; } .share-recipe { grid-template-columns:6fr 6fr; } .recipe-data { grid-template-columns:1fr; } .recipe-field + .recipe-field { border-left:0; border-top:.0625rem solid var(--share-line); } }
+@media (min-width:56.25rem) and (max-width:79.9375rem) { .share-intro { grid-template-columns:7fr 5fr; } .share-recipe { grid-template-columns:5fr 7fr; } .recipe-data { grid-template-columns:1fr; } .recipe-field + .recipe-field { border-left:0; border-top:.0625rem solid var(--share-line); } }
+@media (min-width:80rem) and (max-width:84.9375rem) { .share-recipe { grid-template-columns:5fr 7fr; } .recipe-data { grid-template-columns:1fr; } .recipe-field + .recipe-field { border-left:0; border-top:.0625rem solid var(--share-line); } }
+@media (max-width:47.4375rem) { .share-page { width:calc(100% - 2rem); padding-top:1rem; } .share-mast { height:2.75rem; } .share-intro { display:block; min-height:0; padding-top:3.25rem; } .share-title { padding:0 0 1.5rem; } .share-title h1 { font-size:3rem; } .share-transfer { grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:1rem; padding:1.5rem 0; border-left:0; border-top:.0625rem solid var(--share-line); } .share-qr { width:8.5rem; grid-column:2; grid-row:1 / span 2; } .share-transfer p { grid-column:1; grid-row:2; align-self:end; } .share-recipes { margin-top:1.5rem; } .share-recipe { display:block; min-height:0; } .share-recipe + .share-recipe { margin-top:1.5rem; } .recipe-id { min-height:6.25rem; padding:1.25rem 3.25rem 1.25rem 1rem; } .recipe-id h2 { font-size:1.375rem; } .recipe-copy { top:1rem; right:1rem; } .recipe-data { display:block; } .recipe-field { padding:1.25rem 1rem; } .recipe-field + .recipe-field { border-left:0; border-top:.0625rem solid var(--share-line); } .recipe-value code { font-size:.625rem; } .share-error { width:calc(100% - 2rem); } }

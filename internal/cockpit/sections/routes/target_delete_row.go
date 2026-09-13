@@ -23,6 +23,7 @@ func TargetDeleteConfirmRow(section *SectionView, route readmodel.RouteReadModel
 			section.deleteTargetAndClose(route.ID, target.ID)
 		},
 	)
+	row.ValueTone = ui.ToneFailure
 	row.OnEscape = section.closeDeleteTargetConfirm
 	return row
 }

@@ -61,6 +61,9 @@ func TestRun_NonInteractiveRendersLoadedCockpit(t *testing.T) {
 	if strings.Contains(out.String(), "placeholder") {
 		t.Fatalf("stdout = %q", out.String())
 	}
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Fatalf("non-interactive snapshot emitted ANSI: %q", out.String())
+	}
 	if !strings.HasSuffix(out.String(), "\n") {
 		t.Fatalf("snapshot output should end with newline: %q", out.String())
 	}

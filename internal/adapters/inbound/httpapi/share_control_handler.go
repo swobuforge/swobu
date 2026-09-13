@@ -15,8 +15,8 @@ func NewShareControlHandler(service shares.Service) ShareControlHandler {
 
 func (h ShareControlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		if routeRef := r.URL.Query().Get("route"); routeRef != "" {
-			result, err := h.service.Reveal(routeRef)
+		if ref := r.URL.Query().Get("route"); ref != "" {
+			result, err := h.service.Reveal(ref)
 			if err != nil {
 				writeWorkspaceJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				return
@@ -33,7 +33,7 @@ func (h ShareControlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Route   string            `json:"route"`
+		Ref     string            `json:"route"`
 		Expires sharestate.Expiry `json:"expires"`
 	}
 	if err := decodeOperatorJSONObject(w, r, &body, "share command"); err != nil {
@@ -42,14 +42,14 @@ func (h ShareControlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPost:
-		result, err := h.service.Issue(r.Context(), body.Route, body.Expires)
+		result, err := h.service.Issue(r.Context(), body.Ref, body.Expires)
 		if err != nil {
 			writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		writeWorkspaceJSON(w, http.StatusOK, result)
 	case http.MethodDelete:
-		if err := h.service.Revoke(body.Route); err != nil {
+		if err := h.service.Revoke(body.Ref); err != nil {
 			writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}

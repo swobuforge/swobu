@@ -1,0 +1,7 @@
+  new target · OpenAI · ChatGPT subscription                                          [90mcancel ↵[0m
+     provider          OpenAI · ChatGPT subscription                                  [90mchange ↵[0m
+     authentication    signed in                                                      [90mreconnect ↵[0m
+     model             GPT-5.2                                                        [90mchange ↵[0m
+     protocol          OpenAI · Responses · streaming                                 [90mfixed[0m
+     routing           [1;38;2;247;107;21mfallback 1[0m                                                     [90mchange ↵[0m
+   [1;38;2;70;167;88m>[0m [1mcreate[0m                                                                           [1;38;2;70;167;88mcreate ↵[0m

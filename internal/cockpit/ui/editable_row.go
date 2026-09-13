@@ -235,7 +235,11 @@ func (r *EditableRow) renderView() *tui.Element {
 			r.Open()
 		}
 	}))
-	root := ActionRow(r.Arrow(), r.Label, r.viewValue(), r.ActionLabel(), opts...)
+	tone := ToneNeutral
+	if r.Validation != EditableRowValidationNone || (strings.TrimSpace(r.Value.Get()) == "" && strings.TrimSpace(r.Placeholder) != "") {
+		tone = ToneWarning
+	}
+	root := ActionRowWithTone(r.Arrow(), r.Label, r.viewValue(), r.ActionLabel(), tone, opts...)
 	r.target.BindElement(root)
 	return r.wrapWithHint(root)
 }

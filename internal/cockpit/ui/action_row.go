@@ -17,6 +17,17 @@ const ActionRowValueWidth = 35
 // left-aligned (default), so short hints like "add ↵" start at the left
 // edge of the container.
 func ActionRow(arrow, label, value, action string, opts ...tui.Option) *tui.Element {
+	return ActionRowWithTone(arrow, label, value, action, ToneNeutral, opts...)
+}
+
+// ActionRowWithTone renders the shared row hierarchy plus an optional
+// semantic value tone. Selection is derived from the structural marker, never
+// from action copy or business meaning.
+func ActionRowWithTone(arrow, label, value, action string, valueTone Tone, opts ...tui.Option) *tui.Element {
+	return actionRow(arrow, label, value, action, valueTone, false, ToneNeutral, false, opts...)
+}
+
+func actionRow(arrow, label, value, action string, valueTone Tone, reserveLabelColumn bool, labelTone Tone, focusValue bool, opts ...tui.Option) *tui.Element {
 	row := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithWidthPercent(100),
@@ -27,10 +38,19 @@ func ActionRow(arrow, label, value, action string, opts ...tui.Option) *tui.Elem
 		arrowText = arrowText + "  "
 	}
 	arrowText = arrowText[:2]
-	row.AddChild(tui.New(tui.WithText(arrowText), tui.WithWidth(2), tui.WithFlexShrink(0)))
+	markerOpts := []tui.Option{tui.WithText(arrowText), tui.WithWidth(2), tui.WithFlexShrink(0)}
+	selected := arrow == ">"
+	if selected {
+		markerOpts = append(markerOpts, tui.WithTextStyle(selectedMarkerStyle()))
+	}
+	row.AddChild(tui.New(markerOpts...))
 
-	if label != "" {
-		row.AddChild(tui.New(tui.WithText(label), tui.WithWidth(18), tui.WithFlexShrink(0)))
+	if label != "" || reserveLabelColumn {
+		labelStyle := toneStyle(labelTone)
+		if selected && !focusValue {
+			labelStyle = activeFieldStyle()
+		}
+		row.AddChild(tui.New(tui.WithText(label), tui.WithTextStyle(labelStyle), tui.WithWidth(18), tui.WithFlexShrink(0)))
 	}
 
 	valueText := value
@@ -50,13 +70,18 @@ func ActionRow(arrow, label, value, action string, opts ...tui.Option) *tui.Elem
 	//     back up to its full text length and defeat the shrink.
 	// Both are no-ops when the value fits. The exact-fit/adjacency case (value
 	// fills the column to its last cell) is handled by the separator below.
-	row.AddChild(tui.New(
-		tui.WithText(valueText),
+	valueStyle := toneStyle(valueTone)
+	if selected && (label == "" || focusValue) && valueTone != ToneFailure {
+		valueStyle = activeFieldStyle()
+	}
+	valueOpts := []tui.Option{
+		tui.WithText(valueText), tui.WithTextStyle(valueStyle),
 		tui.WithFlexGrow(1),
 		tui.WithWrap(false),
 		tui.WithTruncate(true),
 		tui.WithMinWidth(0),
-	))
+	}
+	row.AddChild(tui.New(valueOpts...))
 
 	// A reserved separator between the value and the action column. go-tui lays
 	// flex children out adjacent, so when the value text fills its column to the
@@ -69,8 +94,15 @@ func ActionRow(arrow, label, value, action string, opts ...tui.Option) *tui.Elem
 	if action != "" {
 		row.AddChild(tui.New(tui.WithWidth(2), tui.WithFlexShrink(0)))
 
+		actionStyle := toneStyle(ToneMuted)
+		if selected {
+			actionStyle = activeActionStyle()
+		} else if valueTone == ToneFailure {
+			actionStyle = toneStyle(ToneFailure)
+		}
 		row.AddChild(tui.New(
 			tui.WithText(action),
+			tui.WithTextStyle(actionStyle),
 			tui.WithWidth(ActionRowActionWidth),
 			tui.WithFlexShrink(0),
 		))

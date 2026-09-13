@@ -12,12 +12,22 @@ import (
 // Escape is handled only when the caller supplies OnEscape for row-local opened
 // state such as an inline confirmation. Plain rows deliberately ignore Escape.
 type SelectableRow struct {
-	target   *interaction.Selectable
-	Label    string
-	Value    string
-	Action   string
-	Activate func()
-	OnEscape func()
+	target    *interaction.Selectable
+	Label     string
+	Value     string
+	Action    string
+	ValueTone Tone
+	// ReserveLabelColumn keeps the standard 18-cell label allocation even when
+	// Label is empty. Route target rows use it for balanced-tier alignment;
+	// ordinary empty-label rows retain their compact layout.
+	ReserveLabelColumn bool
+	// LabelTone styles semantic metadata carried in the label column.
+	LabelTone Tone
+	// FocusValue makes the value, rather than the label metadata, the focused
+	// object. Route target rows use this without creating a second cursor.
+	FocusValue bool
+	Activate   func()
+	OnEscape   func()
 	// AutoFocus seeds the row as selected on mount, or on the first transition
 	// from false to true on an already-mounted row.
 	AutoFocus bool
@@ -44,6 +54,10 @@ func (r *SelectableRow) UpdateProps(fresh tui.Component) {
 	r.Label = f.Label
 	r.Value = f.Value
 	r.Action = f.Action
+	r.ValueTone = f.ValueTone
+	r.ReserveLabelColumn = f.ReserveLabelColumn
+	r.LabelTone = f.LabelTone
+	r.FocusValue = f.FocusValue
 	r.Activate = f.Activate
 	r.OnEscape = f.OnEscape
 	r.AutoFocus = f.AutoFocus
@@ -72,7 +86,7 @@ func (r *SelectableRow) Render(app *tui.App) *tui.Element {
 	// UpdateProps.
 	r.target.SetRenderProps(r.props())
 	opts := append(r.target.ShellOptions(), tui.WithOnActivate(r.Activate))
-	root := ActionRow(r.Arrow(), r.Label, r.Value, r.Action, opts...)
+	root := actionRow(r.Arrow(), r.Label, r.Value, r.Action, r.ValueTone, r.ReserveLabelColumn, r.LabelTone, r.FocusValue, opts...)
 	r.target.BindElement(root)
 	return root
 }
