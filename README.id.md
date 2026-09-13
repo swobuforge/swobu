@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · **Bahasa Indonesia** · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Satu endpoint untuk Claude Code, Codex, dan agen AI lain agar dapat memakai DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock, dan lainnya — dengan routing, load balancing, dan failover otomatis.**
 
-Jadikan kapasitas AI dapat dirutekan. Agen Anda meminta sebuah model; Swobu mengubah nama model itu menjadi route lintas provider, akun, region, dan server lokal, sambil menangani load balancing, failover, translasi reasoning, serta kompatibilitas protokol secara semantik di belakang layar.
+Jadikan kapasitas AI dapat dirutekan. Agen Anda meminta sebuah model; Swobu mengubah nama model itu menjadi route lintas provider, akun, region, dan server lokal, sambil menangani load balancing, failover, serta translasi protokol saat semantik yang diminta dapat direpresentasikan.
 
 [Dokumentasi](https://swobu.com/docs/) · [Mulai cepat](https://swobu.com/docs/start/first-route/) · [Rilis](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ Dengan begitu, beberapa agen dapat berbagi kebijakan routing tanpa menanam konfi
 
 Kuota habis. Region tidak tersedia. Endpoint gagal. Akun mencapai batas.
 
-Swobu dapat mencoba target berikutnya yang memenuhi syarat sesuai route.
+Swobu mencoba permintaan nyata pada target yang dikonfigurasi. Jika percobaan itu gagal, Swobu mencoba target berikutnya dalam route; tidak ada pemeriksaan kompatibilitas sebelumnya.
 
 ```text
 agent

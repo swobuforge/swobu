@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · **简体中文** · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **一个端点，让 Claude Code、Codex 和其他 AI Agent 在 DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock 等模型与提供商之间自动路由、负载均衡和故障切换。**
 
-让 AI 算力变得可路由。你的 Agent 只需要请求一个模型名；Swobu 会把这个名字变成一条跨提供商、账号、区域和本地服务器的路由，并在底层处理负载均衡、故障切换、推理语义转换和协议兼容。
+让 AI 算力变得可路由。你的 Agent 只需要请求一个模型名；Swobu 会把这个名字变成一条跨提供商、账号、区域和本地服务器的路由，并在底层处理负载均衡、故障切换，以及在请求语义可表示时进行协议转换。
 
 [文档](https://swobu.com/docs/) · [快速开始](https://swobu.com/docs/start/first-route/) · [版本发布](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ review
 
 配额耗尽。区域不可用。端点故障。账号触发限制。
 
-Swobu 会按照路由规则尝试下一个符合条件的 target。
+Swobu 会向已配置的 target 发出真实请求。如果该尝试失败，它会继续尝试路由中的下一个 target；Swobu 不会预先判断兼容性。
 
 ```text
 agent

@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · **Русский** · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Один endpoint для Claude Code, Codex и других AI-агентов: DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock и другие — с автоматическим роутингом, балансировкой и failover.**
 
-Сделайте AI-вычисления маршрутизируемым ресурсом. Агент запрашивает имя модели; Swobu превращает его в route через провайдеров, аккаунты, регионы и локальные серверы, а под капотом выполняет балансировку, failover, преобразование reasoning и семантическую совместимость протоколов.
+Сделайте AI-вычисления маршрутизируемым ресурсом. Агент запрашивает имя модели; Swobu превращает его в route через провайдеров, аккаунты, регионы и локальные серверы, а под капотом выполняет балансировку, failover и преобразование протоколов, когда запрошенную семантику можно представить.
 
 [Документация](https://swobu.com/docs/) · [Быстрый старт](https://swobu.com/docs/start/first-route/) · [Релизы](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ review
 
 Закончилась квота. Недоступен регион. Упал endpoint. Аккаунт достиг лимита.
 
-Swobu может попробовать следующий подходящий target согласно route.
+Swobu отправляет реальный запрос настроенному target. Если попытка завершается ошибкой, Swobu пробует следующий target в route; предварительной проверки совместимости нет.
 
 ```text
 agent

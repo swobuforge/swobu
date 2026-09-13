@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · [简体中文](README.zh-CN.md) · **日本語** · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code、Codex、その他の AI エージェントを 1 つのエンドポイントから DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock などへルーティング。負荷分散とフェイルオーバーも自動化します。**
 
-AI の計算資源をルーティング可能にします。エージェントはモデル名を指定するだけ。Swobu がその名前を、プロバイダー、アカウント、リージョン、ローカルサーバーをまたぐルートへ変換し、負荷分散、フェイルオーバー、reasoning の変換、意味を保つプロトコル互換性を裏側で処理します。
+AI の計算資源をルーティング可能にします。エージェントはモデル名を指定するだけ。Swobu がその名前を、プロバイダー、アカウント、リージョン、ローカルサーバーをまたぐルートへ変換し、負荷分散、フェイルオーバー、要求された意味を表現できる場合のプロトコル変換を裏側で処理します。
 
 [ドキュメント](https://swobu.com/docs/) · [クイックスタート](https://swobu.com/docs/start/first-route/) · [リリース](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ review
 
 クォータ切れ。リージョン障害。エンドポイント障害。アカウントの制限到達。
 
-Swobu はルートに従って、次に利用可能な target を試します。
+Swobu は設定された target に実際のリクエストを送ります。その試行が失敗すると、ルート内の次の target を試します。互換性の事前判定は行いません。
 
 ```text
 agent

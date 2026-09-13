@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · **한국어** · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code, Codex 및 다른 AI 에이전트를 하나의 엔드포인트에서 DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock 등으로 연결하고 자동 라우팅, 로드 밸런싱, 페일오버를 적용합니다.**
 
-AI 용량을 라우팅 가능한 자원으로 만듭니다. 에이전트는 모델 이름 하나만 요청합니다. Swobu는 그 이름을 프로바이더, 계정, 리전, 로컬 서버를 아우르는 route로 바꾸고, 그 아래에서 로드 밸런싱, 페일오버, reasoning 변환, 의미 보존형 프로토콜 호환성을 처리합니다.
+AI 용량을 라우팅 가능한 자원으로 만듭니다. 에이전트는 모델 이름 하나만 요청합니다. Swobu는 그 이름을 프로바이더, 계정, 리전, 로컬 서버를 아우르는 route로 바꾸고, 그 아래에서 로드 밸런싱, 페일오버, 요청된 의미를 표현할 수 있는 경우의 프로토콜 변환을 처리합니다.
 
 [문서](https://swobu.com/docs/) · [빠른 시작](https://swobu.com/docs/start/first-route/) · [릴리스](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ review
 
 쿼터 소진. 리전 장애. endpoint 실패. 계정 한도 도달.
 
-Swobu는 route에 따라 다음으로 적합한 target을 시도할 수 있습니다.
+Swobu는 구성된 target에 실제 요청을 시도합니다. 그 시도가 실패하면 route의 다음 target을 시도하며, 호환성을 미리 판정하지 않습니다.
 
 ```text
 agent

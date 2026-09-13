@@ -1,301 +1,110 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
-**English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
+**Pool the LLM capacity you already have.**
 
-**Your agent asks for a model. You control where it runs.**
+Put AWS/Azure credits, provider accounts and quota, free APIs and local GPUs behind stable routes for Claude Code, Codex and other agents. Change the capacity behind a route without reconfiguring every client.
 
-Make AI capacity routable. A Swobu route looks like a model to the agent; behind it can be your provider accounts, cloud regions, hosted endpoints, and local servers. Swobu handles routing, fallback, and protocol translation where the required semantics are representable.
-
-[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
-
-<p align="center">
-  <img src="./assets/readme/clients.png" alt="Agents and clients supported by Swobu" width="900">
-  <img src="./assets/readme/providers.png" alt="Providers supported by Swobu" width="1100">
-</p>
-
----
-
-## Your agent chooses a model. Swobu chooses where it runs.
-
-A Swobu **route looks like a model** to your agent.
-
-Behind that name can be one endpoint, the same model available from several places, or a cross-provider pool.
-
-The diagrams illustrate configurations. Choose models available from your providers.
-
-```text
-claude-opus-5
-    │
-    ├─ Anthropic / claude-opus-5
-    ├─ AWS Bedrock / account A / claude-opus-5
-    └─ AWS Bedrock / account B / claude-opus-5
-```
-
-Keep using `claude-opus-5`. Swobu can balance capacity and fail over underneath it.
-
-Or make the model name describe a job:
-
-```text
-codex-auto-review
-    │
-    ├─ Deepseek / Deepseek V4 Flash
-    ├─ Google / Gemini 3.7 Flash
-    └─ another review model
-```
-
-Or build a pool that deliberately crosses models and providers:
-
-```text
-free
-    │
-    ├─ Cerebras / Gemma 4 31B
-    ├─ Groq / gpt-oss-20b
-    ├─ LLM7 / default
-    ├─ OpenRouter / free
-    ├─ Mistral / Ministral 3B
-    ├─ NVIDIA NIM / Nemotron Mini 4B
-    └─ Ollama / Qwen 3.8 27b
-```
-
-The model field your agent already understands becomes a programmable routing boundary.
-
----
-
-## Start routing in one command
-
-macOS, Linux, or WSL:
+[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [Releases](https://github.com/swobuforge/swobu/releases) · [VS Code](https://marketplace.visualstudio.com/items?itemName=swobu.swobu)
 
 ```bash
 curl -fsSL https://swobu.com/install.sh | sh
 ```
 
-Windows PowerShell:
+Windows PowerShell: `irm https://swobu.com/install.ps1 | iex`
 
-```powershell
-irm https://swobu.com/install.ps1 | iex
-```
+<p align="center">
+  <img src="./assets/readme/cockpit-workspace.png" alt="Swobu Cockpit workspace with balanced Azure targets and an AWS Bedrock fallback" width="1100">
+</p>
 
-The installer opens **Cockpit**, where you can add a provider, create a route,
-and connect your first agent. It verifies the download, preserves an existing
-standalone installation if setup fails, and leaves your shell profile and Swobu
-data alone.
+## One route. Your capacity underneath.
 
-Already using a standalone installation? Update it with:
+A Swobu route looks like a model name to the client. You decide what sits behind it.
 
 ```text
-swobu update
+Claude Code / Codex / OpenCode
+              │
+              │  model: work
+              ▼
+            Swobu
+              │
+              ├─ Azure / westus2 / gpt-5.6-sol
+              ├─ Azure / westcentralus / gpt-5.6-sol
+              └─ fallback: OpenAI / gpt-5.6-sol
 ```
 
-Source, package-manager, and custom-directory installations remain owned by
-the method that installed them.
+The client keeps asking for `work`. You can change accounts, regions, providers or models behind that route independently.
 
-[Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
+**Runtime rule:** Swobu does not preflight compatibility. It attempts the real request against the configured target. If that attempt fails, it tries the next target in the route. Protocol translation happens per attempt; providers remain different.
 
-### Connect an agent
+## What the switchboard is for
 
-Cockpit can configure supported clients for you.
+| Job | Route pattern |
+| --- | --- |
+| **Use funded capacity before cash** | AWS/Azure/GCP-backed targets before direct paid APIs |
+| **Aggregate quota** | same model across regions or accounts |
+| **Make cheap capacity useful** | free/local targets first, paid fallback behind them |
+| **Route agents by workload** | premium main route, cheap/free worker routes |
+| **Keep policy out of clients** | local-first, region/provider restrictions, funded-first ordering |
+| **Share configured capacity** | one HTTPS endpoint while routing and provider credentials stay owner-side |
 
-Or use the CLI:
+Swobu does not inspect your credit balance, remaining TPM, price or latency. The route expresses your policy; Swobu executes it.
 
-```bash
-swobu connect claude
-swobu connect codex
-swobu connect muse
-swobu connect openclaw
-swobu connect pi
-swobu connect kilo
-swobu connect opencode
-swobu connect hermes
-```
-
-After that, your agent talks to Swobu. Provider configuration and routing stay behind the gateway.
-
----
-
-## What changes when the model name becomes a route?
-
-### Pool capacity
-
-A target is not just a model.
-
-It can represent a particular:
-
-- provider
-- account
-- cloud region
-- hosted endpoint
-- local server
-- model
-
-Put several targets in the same tier to balance across them.
-
-Add fallback tiers to define what happens when preferred capacity is unavailable.
-
-```text
-route: gpt-5.6-sol
-
-primary
-├─ Azure / westcentralus / gpt-5.6-sol
-└─ Azure / westus2 / gpt-5.6-sol
-
-fallback
-└─ OpenAI / gpt-5.6-sol
-```
-
-The agent still asks for `gpt-5.6-sol`.
-
----
-
-### Route across providers
-
-Routes don't have to preserve model identity.
-
-A name such as `review`, `cheap`, `free`, or `codex-auto-review` can represent whatever capacity makes sense for that workload.
-
-```text
-review
-├─ Z.AI / GLM-5.3
-├─ Kimi / Kimi-2.8
-└─ Ollama / Qwen3-Coder
-```
-
-This lets different agents share routing policy without hard-coding provider configuration into each one.
-
----
-
-### Fail over without reconfiguring the agent
-
-Quota exhausted. Region unavailable. Endpoint fails. Account hits a limit.
-
-Swobu can try the next eligible target according to the route.
-
-```text
-agent
-  │
-  │ model: gpt-5.6-sol
-  ▼
-Swobu
-  │
-  ├─ Azure ────── unavailable
-  │
-  └─ OpenAI ──────── ✓
-```
-
-The route name does not change.
-
----
-
-## One boundary, multiple protocols
+## One client endpoint, multiple provider protocols
 
 ```text
 Claude Code ─┐
 Codex ───────┤
-Muse Code ───┤
-OpenClaw ────┤
-Pi ──────────┤
+OpenCode ────┤
 Kilo ────────┤
-OpenCode ────┼──── Swobu ────┬─ OpenAI
-Hermes ──────┤                ├─ Anthropic
-Other agents ┘                ├─ Gemini
-                              ├─ AWS Bedrock
-                              ├─ Azure AI
-                              ├─ Cerebras
-                              ├─ Cloudflare
-                              ├─ Ollama
-                              ├─ LM Studio
-                              ├─ vLLM
-                              └─ ...
+Pi ──────────┼──── Swobu ────┬─ OpenAI Responses / Chat Completions
+OpenClaw ────┤                ├─ Anthropic Messages
+Hermes ──────┘                ├─ Gemini
+                              └─ provider-specific endpoints
 ```
 
-Swobu currently supports provider integrations across protocols including:
+Swobu translates supported request semantics for each target attempt. Translation is not equivalence: provider-specific behavior remains observable, and unsupported combinations can fail and advance through the route.
 
-- OpenAI Responses
-- OpenAI Chat Completions
-- Anthropic Messages
-- Gemini Interactions
+Current docs cover **40 provider integrations**, including local inference, frontier APIs, hyperscalers and specialized inference platforms.
 
-Exact protocol and capability support varies by provider.
+[Clients and provider setup →](https://swobu.com/docs/)
 
-Routes control provider differences. They do not erase them.
+## Share the endpoint. Keep provider keys at home.
 
-[Capability matrix →](https://swobu.com/docs/)
-
----
-
-## Providers
-
-Swobu supports local inference, frontier APIs, hyperscalers, specialized inference platforms, and aggregators.
-
-[Find providers and setup instructions in the documentation.](https://swobu.com/docs/)
-
----
-
-## Examples
-
-### Share a live AI gateway
-
-Give a remote agent one HTTPS endpoint and bearer without copying Swobu or
-provider credentials to the recipient:
-
-```text
-workspace dev
-  coding → Bedrock → Anthropic fallback
-  cheap  → OpenRouter
-  local  → Ollama
-
-swobu share dev
+```bash
+swobu share dev/coding
 ```
 
-The recipient can use `coding`, `cheap`, and `local`. If you change the targets
-behind `coding`, their endpoint, bearer, and model name stay the same. Share one
-route instead with `swobu share dev/coding`.
+A shared route gives the recipient an HTTPS endpoint and Swobu bearer. Routing, fallback and provider credentials remain on the owner side. Change the targets later without changing the recipient's endpoint or route name.
 
-Shares default to one day. `7d`, `30d`, and `never` are free during preview.
-The Owner Swobu process must be running: application TLS terminates there,
-certificates renew automatically without changing the Share URL, and
-`swobu share revoke dev` closes that workspace access.
+<p align="center">
+  <img src="./assets/readme/shared-api.png" alt="Swobu Shared API page showing OpenAI-compatible and Anthropic-compatible endpoints" width="1000">
+</p>
 
-[Workspace and Route Share details →](https://swobu.com/docs/concepts/sharing/)
+[Workspace and Route Share →](https://swobu.com/docs/concepts/sharing/)
 
-### Same model, multiple providers
+## Connect an agent
 
-Keep the model name the agent already uses while adding redundant capacity underneath it.
+Cockpit can configure supported clients, or use the CLI:
 
-### Cross-provider free pool
+```bash
+swobu connect claude
+swobu connect codex
+swobu connect opencode
+swobu connect kilo
+swobu connect pi
+```
 
-Combine recurring free capacity behind one model name.
-
-### Local first, cloud when needed
-
-Prefer Ollama, LM Studio, or vLLM and fall through to hosted capacity according to policy.
-
-### Agent-specific routes
-
-Expose names such as `codex-auto-review` or `claude-plan` while changing the providers and models behind them independently.
-
----
+Provider credentials and routing stay behind Swobu rather than being copied into every client.
 
 ## Local-first
 
-Swobu runs locally and exposes the endpoint your agents connect to.
+Swobu runs locally and exposes the endpoint your agents connect to. No Swobu account is required for local use.
 
-Your provider credentials stay at the gateway rather than being copied into every client.
+Swobu sends privacy-minimized usage and reliability telemetry tied to a random installation ID. It does **not** send prompts, responses, credentials, endpoints or user-defined names. Disable it with `swobu telemetry off` or `DO_NOT_TRACK`.
 
-No Swobu account is required for local use.
+[Security and privacy →](https://swobu.com/docs/)
 
-Operational telemetry is deliberately limited, and can be disabled.
-
-[Security & privacy →](https://swobu.com/docs/)
-
----
-
-## Releases
-
-Swobu publishes versioned binaries for Linux, macOS, and Windows, with SHA-256 checksums.
-
-[Latest release →](https://github.com/swobuforge/swobu/releases/latest)
-
-Build from source:
+## Build from source
 
 ```bash
 git clone https://github.com/swobuforge/swobu.git
@@ -304,16 +113,14 @@ make build
 ./.out/swobu --version
 ```
 
+Swobu publishes versioned binaries for Linux, macOS and Windows with SHA-256 checksums.
+
+[Latest release →](https://github.com/swobuforge/swobu/releases/latest)
+
+## License
+
+Swobu is available under the [GNU AGPLv3](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is also available.
+
 ---
 
-<p align="center">
-  <strong>One model name. Any capacity underneath.</strong>
-</p>
-
-<p align="center">
-  <a href="https://swobu.com/docs/start/first-route/">Get started</a>
-  ·
-  <a href="https://swobu.com/docs/">Docs</a>
-  ·
-  <a href="https://github.com/swobuforge/swobu/releases">Releases</a>
-</p>
+**Translations:** [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)

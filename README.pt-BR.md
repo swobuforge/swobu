@@ -1,10 +1,10 @@
-# [Swobu](https://swobu.com/)
+# [Swobu](https://swobu.com/) — LLM Switchboard
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · **Português (Brasil)** · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Um único endpoint para Claude Code, Codex e outros agentes de IA usarem DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock e mais — com roteamento, balanceamento e failover automáticos.**
 
-Transforme capacidade de IA em algo roteável. Seu agente pede um modelo; o Swobu transforma esse nome em uma rota entre provedores, contas, regiões e servidores locais, cuidando por baixo dos panos de balanceamento, failover, tradução de reasoning e compatibilidade semântica entre protocolos.
+Transforme capacidade de IA em algo roteável. Seu agente pede um modelo; o Swobu transforma esse nome em uma rota entre provedores, contas, regiões e servidores locais, cuidando por baixo dos panos de balanceamento, failover e tradução de protocolos quando a semântica solicitada pode ser representada.
 
 [Documentação](https://swobu.com/docs/) · [Início rápido](https://swobu.com/docs/start/first-route/) · [Releases](https://github.com/swobuforge/swobu/releases)
 
@@ -155,7 +155,7 @@ Assim, vários agentes podem compartilhar a mesma política de roteamento sem em
 
 Quota acabou. Região indisponível. Endpoint falhou. A conta bateu no limite.
 
-O Swobu pode tentar o próximo target elegível conforme a rota.
+O Swobu tenta a solicitação real no target configurado. Se essa tentativa falhar, tenta o próximo target da rota; não há verificação prévia de compatibilidade.
 
 ```text
 agent
