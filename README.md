@@ -13,7 +13,7 @@ curl -fsSL https://swobu.com/install.sh | sh
 Windows PowerShell: `irm https://swobu.com/install.ps1 | iex`
 
 <p align="center">
-  <img src="./assets/readme/swobu-demo.gif" alt="Claude Code using one Swobu route across Azure, Bedrock, Gemini and OpenAI" width="960">
+  <img src="./assets/readme/swobu-demo.gif" alt="Pooling capacity, switching a Claude Code route, and sharing the endpoint with Swobu" width="960">
 </p>
 
 ## One route. Your capacity underneath.
