@@ -23,8 +23,8 @@ $StartSwobu = -not $NoStart
 if (-not $NoStart -and $env:START_SWOBU) { $StartSwobu = [System.Convert]::ToBoolean($env:START_SWOBU) }
 
 function Say { param([string]$Message) Write-Host $Message }
-function Step { param([string]$Message) Write-Host "→ $Message" }
-function Ok { param([string]$Message) Write-Host "✓ $Message" }
+function Step { param([string]$Message) Write-Host "[*] $Message" }
+function Ok { param([string]$Message) Write-Host "[ok] $Message" }
 function Warn { param([string]$Message) Write-Warning $Message }
 function DebugLog {
   param([string]$Message)
@@ -72,9 +72,26 @@ function Resolve-Architecture {
   param([Parameter(Mandatory = $true)][string]$Architecture)
   switch ($Architecture.ToLowerInvariant()) {
     'x64' { return 'amd64' }
+    'amd64' { return 'amd64' }
     'arm64' { return 'arm64' }
     default { Die "unsupported architecture: $Architecture (supported: amd64, arm64)" }
   }
+}
+
+function Get-Architecture {
+  $architecture = if (-not [string]::IsNullOrWhiteSpace($env:PROCESSOR_ARCHITEW6432)) {
+    $env:PROCESSOR_ARCHITEW6432
+  }
+  elseif (-not [string]::IsNullOrWhiteSpace($env:PROCESSOR_ARCHITECTURE)) {
+    $env:PROCESSOR_ARCHITECTURE
+  }
+  else {
+    [string][System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  }
+  if ([string]::IsNullOrWhiteSpace($architecture)) {
+    Die 'unable to determine system architecture'
+  }
+  return Resolve-Architecture -Architecture $architecture
 }
 
 function Get-BinaryVersion {
@@ -259,8 +276,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 Assert-ValidVersion -Value $Version
 
 $os = 'windows'
-$archRaw = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-$arch = Resolve-Architecture -Architecture $archRaw
+$arch = Get-Architecture
 
 $productVersion = $Version -replace '^swobu-', ''
 $archive = "${ProjectName}_${productVersion}_${os}_${arch}.zip"
