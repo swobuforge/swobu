@@ -396,9 +396,17 @@ try {
     Say ''
     Step 'Starting Swobu'
     try {
-      $process = Start-Process -FilePath $installPath -Wait -PassThru
-      if ($process.ExitCode -ne 0) {
-        Warn "Swobu was installed, but startup exited with code $($process.ExitCode)."
+      $startupErrorActionPreference = $ErrorActionPreference
+      try {
+        $ErrorActionPreference = 'Continue'
+        & $installPath
+        $startupExitCode = $LASTEXITCODE
+      }
+      finally {
+        $ErrorActionPreference = $startupErrorActionPreference
+      }
+      if ($startupExitCode -ne 0) {
+        Warn "Swobu was installed, but startup exited with code $startupExitCode."
         Say 'Try again:'
         Say "  $installPath"
       }
