@@ -9,61 +9,36 @@ import (
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-// connectionFromDraft is the single authoring boundary from an incomplete
-// Cockpit draft to the durable provider-specific connection sum type.
-func connectionFromDraft(draft readmodel.TargetDraft) (routing.Connection, error) {
+// connectionDraftFromTarget projects Cockpit authoring state into raw connection
+// facts. The daemon owns semantic validation and durable construction.
+func connectionDraftFromTarget(draft readmodel.TargetDraft) (routing.ConnectionDraft, error) {
+	provider := strings.TrimSpace(draft.ProviderSpec)
 	credential := strings.TrimSpace(draft.CredentialRef)
 	locator := strings.TrimSpace(draft.Locator)
-	shape, ok := profile.ConnectionShapeForSpec(draft.ProviderSpec)
+	connection := routing.ConnectionDraft{Provider: provider}
+	shape, ok := profile.ConnectionShapeForSpec(provider)
 	if !ok {
-		return nil, fmt.Errorf("unsupported provider %q", draft.ProviderSpec)
+		return routing.ConnectionDraft{}, fmt.Errorf("unsupported provider %q", provider)
 	}
 	switch shape {
 	case routing.ConnectionShapeStandard:
-		return routing.FinalizeConnection(routing.ConnectionDraft{
-			Provider: draft.ProviderSpec,
-			Standard: &routing.StandardConnectionDraft{Locator: locator, Credential: credential},
-		}, profile.RoutingConstructionFacts())
+		connection.Standard = &routing.StandardConnectionDraft{Locator: locator, Credential: credential}
 	case routing.ConnectionShapeZAI:
-		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
-		if err != nil {
-			return nil, err
-		}
-		access, err := routing.ParseZAIAccess(draft.ZAIAccess)
-		if err != nil {
-			return nil, err
-		}
-		return routing.NewZAIConnection(provider, access, credential)
+		connection.ZAI = &routing.ZAIConnectionDraft{Access: strings.TrimSpace(draft.ZAIAccess), Credential: credential}
 	case routing.ConnectionShapeBedrock:
-		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
-		if err != nil {
-			return nil, err
-		}
-		region, err := routing.ParseBedrockRegion(locator)
-		if err != nil {
-			return nil, err
-		}
-		return routing.NewBedrockConnection(provider, region, strings.TrimSpace(draft.Endpoint), credential)
+		connection.Bedrock = &routing.BedrockConnectionDraft{Region: locator, Endpoint: strings.TrimSpace(draft.Endpoint), Credential: credential}
 	case routing.ConnectionShapeCustom:
-		provider, err := routing.ParseProvider(draft.ProviderSpec, profile.SupportsSpec)
-		if err != nil {
-			return nil, err
-		}
-		var auth routing.CustomAuth
+		connection.Custom = &routing.CustomConnectionDraft{BaseURL: locator}
 		if credential != "" {
-			header, err := routing.NewCustomHeaderAuth(
-				resolvedCredentialHeader(draft.ProviderSpec, draft.CredentialHeader),
-				credential,
-			)
-			if err != nil {
-				return nil, err
+			connection.Custom.Header = &routing.CustomHeaderDraft{
+				Name:       resolvedCredentialHeader(provider, draft.CredentialHeader),
+				Credential: credential,
 			}
-			auth = header
 		}
-		return routing.NewCustomConnection(provider, locator, auth)
 	default:
-		return nil, fmt.Errorf("unsupported connection configuration for provider %q", draft.ProviderSpec)
+		return routing.ConnectionDraft{}, fmt.Errorf("unsupported connection configuration for provider %q", provider)
 	}
+	return connection, nil
 }
 
 func validateTargetDraftEndpoint(draft readmodel.TargetDraft) error {

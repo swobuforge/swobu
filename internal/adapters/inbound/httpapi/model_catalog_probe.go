@@ -54,16 +54,21 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		http.Error(w, "target probe request is invalid", http.StatusBadRequest)
 		return
 	}
+	draft := input.Connection.Draft()
 	var connection routing.Connection
 	providerSpec := ""
 	credentialRef := ""
-	bedrock, isBedrock := input.Connection.BedrockDraft()
-	if isBedrock && strings.TrimSpace(bedrock.Endpoint) == "" {
-		providerSpec = string(profile.ProviderSpecBedrock)
-		credentialRef = strings.TrimSpace(bedrock.Credential)
+	bedrock := workspaceapi.BedrockConnection{}
+	incompleteBedrock := draft.Bedrock != nil && strings.TrimSpace(draft.Bedrock.Endpoint) == ""
+	if incompleteBedrock {
+		bedrock = workspaceapi.BedrockConnection{
+			Region: strings.TrimSpace(draft.Bedrock.Region), Endpoint: "", Credential: strings.TrimSpace(draft.Bedrock.Credential),
+		}
+		providerSpec = strings.TrimSpace(draft.Provider)
+		credentialRef = bedrock.Credential
 	} else {
 		var err error
-		connection, err = input.Connection.RoutingConnection()
+		connection, err = routing.FinalizeConnection(draft, profile.RoutingConstructionFacts())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -75,7 +80,7 @@ func (h TargetProbeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	var probe provider.TargetProbeResult
 	var resolvedVariant string
 	var probeErr error
-	if isBedrock && strings.TrimSpace(bedrock.Endpoint) == "" {
+	if incompleteBedrock {
 		probe, resolvedVariant, probeErr = probeBedrockCatalog(
 			req.Context(), h.providers, bedrock, input.ProviderProtocol,
 		)

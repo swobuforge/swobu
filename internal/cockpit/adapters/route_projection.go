@@ -9,7 +9,6 @@ import (
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/routing"
 )
 
 func routesFromWorkspace(workspace workspaceapi.Workspace) ([]readmodel.RouteReadModel, error) {
@@ -39,37 +38,30 @@ func routeFromWorkspaceRoute(defaultRoute string, route workspaceapi.Route) (rea
 	return out, nil
 }
 func targetFromWorkspaceTarget(target workspaceapi.Target) (readmodel.TargetReadModel, error) {
-	connection, err := target.Connection.RoutingConnection()
-	if err != nil {
-		return readmodel.TargetReadModel{}, fmt.Errorf("decode operator connection: %w", err)
-	}
-	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: string(connection.Provider()), Model: target.Model, ProviderProtocol: target.Protocol}
-	switch connection := connection.(type) {
-	case routing.StandardConnection:
-		locator, _ := connection.Locator()
-		out.BaseURL = locator.String()
-		out.CredentialRef = connection.Credential().String()
-	case routing.ZAIConnection:
-		out.ZAIAccess = string(connection.Access())
-		out.CredentialRef = connection.Credential().String()
-	case routing.BedrockConnection:
-		// The read model preserves the independently authored signing region and
-		// complete inference API URL verbatim.
-		out.BaseURL = connection.Endpoint()
-		out.BedrockRegion = connection.Region().String()
-		out.CredentialRef = connection.Credential().String()
-	case routing.CustomConnection:
-		out.BaseURL = connection.BaseURL().String()
-		if auth := connection.Auth(); auth != nil {
-			header, ok := auth.(routing.CustomHeaderAuth)
-			if !ok {
-				return readmodel.TargetReadModel{}, fmt.Errorf("unsupported custom authentication %T", auth)
-			}
-			out.AuthHeader = header.Name()
-			out.CredentialRef = header.Credential().String()
+	connection := target.Connection.Draft()
+	out := readmodel.TargetReadModel{ID: readmodel.TargetID(target.ID), Name: target.ID, Provider: connection.Provider, Model: target.Model, ProviderProtocol: target.Protocol}
+	switch {
+	case connection.Standard != nil:
+		out.BaseURL = connection.Standard.Locator
+		out.CredentialRef = connection.Standard.Credential
+	case connection.ZAI != nil:
+		out.ZAIAccess = connection.ZAI.Access
+		out.CredentialRef = connection.ZAI.Credential
+	case connection.Bedrock != nil:
+		out.BaseURL = connection.Bedrock.Endpoint
+		out.BedrockRegion = connection.Bedrock.Region
+		out.CredentialRef = connection.Bedrock.Credential
+	case connection.Custom != nil:
+		out.BaseURL = connection.Custom.BaseURL
+		if connection.Custom.Header != nil {
+			out.AuthHeader = connection.Custom.Header.Name
+			out.CredentialRef = connection.Custom.Header.Credential
 		}
 	default:
-		return readmodel.TargetReadModel{}, fmt.Errorf("unsupported routing connection %T", connection)
+		return readmodel.TargetReadModel{}, errors.New("invalid operator connection shape")
+	}
+	if target.Provider != "" && target.Provider != connection.Provider {
+		return readmodel.TargetReadModel{}, fmt.Errorf("operator target provider %q does not match connection provider %q", target.Provider, connection.Provider)
 	}
 	return out, nil
 }
@@ -87,12 +79,12 @@ func targetFromWorkspace(workspace workspaceapi.Workspace, id string) (readmodel
 }
 
 func targetFromSaveRequest(request ports.SaveTargetRequest, id string) (workspaceapi.TargetDraft, error) {
-	if request.Connection == nil {
-		return workspaceapi.TargetDraft{}, errors.New("validated target connection is required")
+	if strings.TrimSpace(request.Connection.Provider) == "" {
+		return workspaceapi.TargetDraft{}, errors.New("target connection provider is required")
 	}
 	return workspaceapi.TargetDraft{
 		ID: id, Model: strings.TrimSpace(request.ModelID), Protocol: strings.TrimSpace(request.Protocol),
-		Connection: workspaceapi.ConnectionFromRouting(request.Connection),
+		Connection: workspaceapi.ConnectionFromDraft(request.Connection),
 	}, nil
 }
 func newTargetID() (string, error) {

@@ -120,15 +120,6 @@ func CustomConnectionDocument(baseURL string, header *CustomHeader) Connection {
 	return Connection{draft: draft}
 }
 
-// BedrockDraft returns the boundary-only Bedrock fields for the one special
-// catalog probe that can run before an operator supplies an inference endpoint.
-func (c Connection) BedrockDraft() (BedrockConnection, bool) {
-	if c.draft.Provider != string(profile.ProviderSpecBedrock) || c.draft.Bedrock == nil {
-		return BedrockConnection{}, false
-	}
-	return BedrockConnection{Region: c.draft.Bedrock.Region, Endpoint: c.draft.Bedrock.Endpoint, Credential: c.draft.Bedrock.Credential}, true
-}
-
 func (c Connection) MarshalJSON() ([]byte, error) {
 	provider := strings.TrimSpace(c.draft.Provider)
 	shape, ok := profile.ConnectionShapeForSpec(provider)
@@ -317,7 +308,7 @@ func projectTarget(target routing.Target) Target {
 	// protocol from authoring and persisted config, but diagnostics and external
 	// operator clients still receive the effective routed protocol here.
 	out := Target{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), Provider: string(target.Provider())}
-	out.Connection = ConnectionFromRouting(target.Connection())
+	out.Connection = connectionFromRouting(target.Connection())
 	return out
 }
 
@@ -354,14 +345,51 @@ func (s RouteSpec) routingSpec() (routing.RouteSpec, error) {
 	return out, nil
 }
 
-// ConnectionFromRouting is the shared routing-to-operator transport codec used
-// by both target persistence and target probing.
-func ConnectionFromRouting(connection routing.Connection) Connection {
+// ConnectionFromDraft wraps raw connection facts in the canonical provider-keyed
+// operator document. It is structural only; the daemon finalizes the draft at
+// command and probe boundaries.
+func ConnectionFromDraft(draft routing.ConnectionDraft) Connection {
+	return Connection{draft: cloneConnectionDraft(draft)}
+}
+
+func connectionFromRouting(connection routing.Connection) Connection {
 	draft, err := connectionDraftFromRouting(connection)
 	if err != nil {
 		panic(err)
 	}
-	return Connection{draft: draft}
+	return ConnectionFromDraft(draft)
+}
+
+// Draft returns an independent copy of the raw connection facts carried by the
+// operator document. Reading the document must not reinterpret daemon-owned
+// locators in the caller's environment.
+func (c Connection) Draft() routing.ConnectionDraft {
+	return cloneConnectionDraft(c.draft)
+}
+
+func cloneConnectionDraft(draft routing.ConnectionDraft) routing.ConnectionDraft {
+	cloned := routing.ConnectionDraft{Provider: draft.Provider}
+	if draft.Standard != nil {
+		value := *draft.Standard
+		cloned.Standard = &value
+	}
+	if draft.ZAI != nil {
+		value := *draft.ZAI
+		cloned.ZAI = &value
+	}
+	if draft.Bedrock != nil {
+		value := *draft.Bedrock
+		cloned.Bedrock = &value
+	}
+	if draft.Custom != nil {
+		value := *draft.Custom
+		if draft.Custom.Header != nil {
+			header := *draft.Custom.Header
+			value.Header = &header
+		}
+		cloned.Custom = &value
+	}
+	return cloned
 }
 
 func (t TargetDraft) routingTarget() (routing.Target, error) {
@@ -369,17 +397,9 @@ func (t TargetDraft) routingTarget() (routing.Target, error) {
 }
 
 func finalizeTargetDraft(id, model, protocol string, connection Connection) (routing.Target, error) {
-	draft, err := connection.routingDraft()
-	if err != nil {
-		return routing.Target{}, err
-	}
 	return routing.FinalizeTarget(routing.TargetDraft{
-		ID: id, Model: model, Protocol: protocol, Connection: draft,
+		ID: id, Model: model, Protocol: protocol, Connection: connection.Draft(),
 	}, profile.RoutingConstructionFacts())
-}
-
-func (c Connection) routingDraft() (routing.ConnectionDraft, error) {
-	return c.draft, nil
 }
 
 func connectionDraftFromRouting(connection routing.Connection) (routing.ConnectionDraft, error) {
@@ -405,16 +425,6 @@ func connectionDraftFromRouting(connection routing.Connection) (routing.Connecti
 		return routing.ConnectionDraft{}, fmt.Errorf("unsupported routing connection %T", connection)
 	}
 	return draft, nil
-}
-
-// RoutingConnection parses the operator connection union through the routing
-// domain's single connection finalizer.
-func (c Connection) RoutingConnection() (routing.Connection, error) {
-	draft, err := c.routingDraft()
-	if err != nil {
-		return nil, err
-	}
-	return routing.FinalizeConnection(draft, profile.RoutingConstructionFacts())
 }
 
 func normalize(raw string) string { return strings.TrimSpace(raw) }

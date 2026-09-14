@@ -69,8 +69,8 @@ func TestZAICreateFlow(t *testing.T) {
 	if saved.Protocol != "" {
 		t.Fatalf("Z.AI save protocol = %q, want omitted", saved.Protocol)
 	}
-	connection, ok := saved.Connection.(routing.ZAIConnection)
-	if !ok || connection.Access() != routing.ZAIAccessCodingPlan || connection.Credential().String() != ref || saved.ModelID != "manual-model" {
+	connection := saved.Connection.ZAI
+	if connection == nil || connection.Access != string(routing.ZAIAccessCodingPlan) || connection.Credential != ref || saved.ModelID != "manual-model" {
 		t.Fatalf("saved Z.AI target = %#v, connection = %#v", saved, saved.Connection)
 	}
 }
@@ -171,12 +171,12 @@ func TestZAIEditFlow(t *testing.T) {
 	if draft.ZAIAccess != string(routing.ZAIAccessGeneralAPI) || draft.ProviderProtocol != "" {
 		t.Fatalf("draft after access change = %#v", draft)
 	}
-	connection, err := connectionFromDraft(draft)
+	connection, err := connectionDraftFromTarget(draft)
 	if err != nil {
 		t.Fatal(err)
 	}
-	zai, ok := connection.(routing.ZAIConnection)
-	if !ok || zai.Access() != routing.ZAIAccessGeneralAPI || zai.Credential().String() != target.CredentialRef {
+	zai := connection.ZAI
+	if zai == nil || zai.Access != string(routing.ZAIAccessGeneralAPI) || zai.Credential != target.CredentialRef {
 		t.Fatalf("reconstructed Z.AI connection = %#v", connection)
 	}
 }

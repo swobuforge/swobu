@@ -26,3 +26,32 @@ jobs:
           cache: false
       - name: Check standalone public source
         run: make check
+
+  windows-runtime:
+    runs-on: windows-latest
+    env:
+      GOWORK: off
+      GOENV: off
+      GOFLAGS: ''
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test native connection ownership
+        run: >-
+          go test -mod=readonly -failfast -timeout=5m
+          ./internal/routing
+          ./internal/profile
+          ./internal/app/operator/workspaces
+          ./internal/app/operator/client
+          ./internal/cockpit/adapters
+          ./internal/cockpit/features/target_config
+          ./internal/cockpit/ports
+          ./internal/adapters/inbound/httpapi
+      - name: Build native CLI
+        run: go build -mod=readonly -trimpath -buildvcs=false ./cmd/swobu

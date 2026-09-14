@@ -15,7 +15,6 @@ import (
 	"github.com/swobuforge/swobu/internal/platform/browser"
 	"github.com/swobuforge/swobu/internal/platform/clipboard"
 	"github.com/swobuforge/swobu/internal/platform/config"
-	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
@@ -305,21 +304,8 @@ func (a *LiveOperatorAdapter) StorePastedCredential(ctx context.Context, req por
 	return ports.StorePastedCredentialResult{CredentialRef: ref}, nil
 }
 func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-	var connection workspaceapi.Connection
-	bedrockProbe := false
-	switch probe := req.Probe.(type) {
-	case ports.BedrockCatalogProbe:
-		bedrockProbe = true
-		connection = workspaceapi.BedrockConnectionDocument(strings.TrimSpace(probe.Region), "", strings.TrimSpace(probe.CredentialRef))
-	case ports.ConnectionCatalogProbe:
-		if probe.Connection == nil {
-			return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")
-		}
-		connection = workspaceapi.ConnectionFromRouting(probe.Connection)
-		_, bedrockProbe = probe.Connection.(routing.BedrockConnection)
-	default:
-		return readmodel.ModelCatalogReadModel{}, errors.New("model catalog connection is required")
-	}
+	connection := workspaceapi.ConnectionFromDraft(req.Connection)
+	bedrockProbe := req.Connection.Bedrock != nil
 	result, err := a.client.ProbeTarget(ctx, connection, req.ProviderProtocol)
 	if err != nil {
 		return readmodel.ModelCatalogReadModel{}, err

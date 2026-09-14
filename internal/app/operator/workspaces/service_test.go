@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestConnectionJSONRoundTripCoversEveryProfile(t *testing.T) {
 	}
 }
 
-func TestRunPodOperatorJSONNormalizesEndpointAndFinalizesStandardConnection(t *testing.T) {
+func TestRunPodOperatorJSONAndDaemonProjectionExposeNormalizedEndpoint(t *testing.T) {
 	var connection Connection
 	if err := json.Unmarshal([]byte(`{"runpod":{"base_url":"abc123","credential":"env:RUNPOD_API_KEY"}}`), &connection); err != nil {
 		t.Fatal(err)
@@ -111,17 +112,16 @@ func TestRunPodOperatorJSONNormalizesEndpointAndFinalizesStandardConnection(t *t
 		t.Fatalf("Runpod JSON = %s, want %s", raw, want)
 	}
 
-	finalized, err := connection.RoutingConnection()
+	finalized, err := routing.FinalizeTarget(routing.TargetDraft{
+		ID: "runpod", Model: "model", Protocol: "responses", Connection: connection.Draft(),
+	}, profile.RoutingConstructionFacts())
 	if err != nil {
 		t.Fatal(err)
 	}
-	standard, ok := finalized.(routing.StandardConnection)
-	if !ok {
-		t.Fatalf("Runpod connection type = %T, want routing.StandardConnection", finalized)
-	}
-	locator, ok := standard.Locator()
-	if !ok || locator.String() != "https://api.runpod.ai/v2/abc123/openai/v1" {
-		t.Fatalf("Runpod locator = %q/%t", locator.String(), ok)
+	projected := projectTarget(finalized)
+	projectedDraft := projected.Connection.Draft()
+	if projectedDraft.Standard == nil || projectedDraft.Standard.Locator != "https://api.runpod.ai/v2/abc123/openai/v1" {
+		t.Fatalf("daemon-projected RunPod connection = %#v", projectedDraft)
 	}
 }
 
@@ -225,6 +225,33 @@ func operatorCredentialForProfile(entry profile.Profile) string {
 func TestNewServiceRejectsNilStore(t *testing.T) {
 	if _, err := NewService(nil); err == nil {
 		t.Fatal("NewService(nil) unexpectedly succeeded")
+	}
+}
+
+func TestServiceFinalizesFileCredentialsInDaemonEnvironment(t *testing.T) {
+	native := "file:/home/operator/key"
+	foreign := "file:C:\\Users\\operator\\key"
+	if runtime.GOOS == "windows" {
+		native, foreign = foreign, native
+	}
+	for _, test := range []struct {
+		name       string
+		credential string
+		wantErr    bool
+	}{
+		{"native", native, false},
+		{"foreign", foreign, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _, _ := testService(t)
+			_, err := service.CreateWorkspace(context.Background(), CreateWorkspace{
+				Slug: "dev", InitialRoute: "chat",
+				Target: TargetDraft{ID: "target", Model: "model", Protocol: "responses", Connection: StandardConnection("openai", "", test.credential)},
+			})
+			if (err != nil) != test.wantErr {
+				t.Fatalf("CreateWorkspace(%q) error = %v, wantErr %t", test.credential, err, test.wantErr)
+			}
+		})
 	}
 }
 
@@ -511,7 +538,7 @@ func TestServiceSetCredentialPreservesTargetFactsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := workspace.Routes[0].Tiers[0].Targets[0]
-	connection, err := target.Connection.RoutingConnection()
+	connection, err := routing.FinalizeConnection(target.Connection.Draft(), profile.RoutingConstructionFacts())
 	standard, ok := connection.(routing.StandardConnection)
 	if err != nil || !ok || target.Model != "gpt-5" || target.Protocol != "responses" || target.Provider != "openai" || standard.Credential().String() != "env:ROTATED" {
 		t.Fatalf("target = %#v", target)

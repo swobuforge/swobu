@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -37,10 +38,19 @@ func TestCredentialLocatorsMatchResolverSyntax(t *testing.T) {
 			t.Errorf("NewStandardConnection(%q) unexpectedly succeeded", raw)
 		}
 	}
-	for _, raw := range []string{"env:OPENAI_API_KEY", "file:/tmp/token", "file:~/.config/swobu/token", "secret:openai/default", "secretfile:chatgpt/plus/session_1"} {
+	nativeFile := "file:/tmp/token"
+	foreign := "file:C:\\Users\\operator\\token"
+	if runtime.GOOS == "windows" {
+		nativeFile = "file:C:\\Users\\operator\\token"
+		foreign = "file:/home/operator/token"
+	}
+	for _, raw := range []string{"env:OPENAI_API_KEY", nativeFile, "file:~/.config/swobu/token", "secret:openai/default", "secretfile:chatgpt/plus/session_1"} {
 		if _, err := NewStandardConnection(provider, "", raw); err != nil {
 			t.Errorf("NewStandardConnection(%q): %v", raw, err)
 		}
+	}
+	if _, err := NewStandardConnection(provider, "", foreign); err == nil {
+		t.Errorf("NewStandardConnection accepted foreign-OS path %q", foreign)
 	}
 }
 

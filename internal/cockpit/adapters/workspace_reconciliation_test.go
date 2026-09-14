@@ -102,11 +102,7 @@ func TestSaveTargetUsesAuthoritativeCommandResponse(t *testing.T) {
 		}}},
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
-	connection, err := routing.NewStandardConnection(provider, "", "env:CLIENT")
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := routing.ConnectionDraft{Provider: "openai", Standard: &routing.StandardConnectionDraft{Credential: "env:CLIENT"}}
 
 	result, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
 		WorkspaceID: "dev",
@@ -140,11 +136,8 @@ func TestSaveTargetPreservesOmittedDerivedProtocolFromCanonicalRouteSpec(t *test
 		replaceResponse: workspaceapi.Workspace{Slug: "dev", DefaultRoute: "chat", Routes: []workspaceapi.Route{{Name: "chat", Tiers: []workspaceapi.Tier{{Targets: []workspaceapi.Target{{ID: chatGPT.ID, Model: chatGPT.Model, Connection: chatGPT.Connection}}}}}}},
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	connection, err := chatGPT.Connection.RoutingConnection()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
+	connection := chatGPT.Connection.Draft()
+	_, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
 		WorkspaceID: "dev", RouteID: "chat", TargetID: "chatgpt", ModelID: "gpt-5", Connection: connection,
 		Placement: readmodel.PlacementOptionReadModel{Kind: readmodel.PlacementFallback},
 	})
@@ -222,11 +215,7 @@ func TestSaveFirstTargetAtomicallyPersistsNamedDraft(t *testing.T) {
 		echoCreatedTarget: true,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:7926"}
-	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
-	connection, err := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := routing.ConnectionDraft{Provider: "openai", Standard: &routing.StandardConnectionDraft{Credential: "env:OPENAI_API_KEY"}}
 	result, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
 		WorkspaceID: "buildweek", RouteID: "chat", TargetID: "a", ModelID: "gpt-4.1", Protocol: "responses", Connection: connection,
 	})
@@ -249,11 +238,7 @@ func TestSaveFirstTargetAtomicallyPersistsConventionalDefault(t *testing.T) {
 		echoCreatedTarget: true,
 	}
 	adapter := &LiveOperatorAdapter{client: stub, addr: "127.0.0.1:9000"}
-	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
-	connection, err := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := routing.ConnectionDraft{Provider: "openai", Standard: &routing.StandardConnectionDraft{Credential: "env:OPENAI_API_KEY"}}
 	result, err := adapter.SaveTarget(context.Background(), ports.SaveTargetRequest{
 		WorkspaceID: "default", RouteID: "coding", ModelID: "gpt-5.3-codex", Protocol: "responses", Connection: connection,
 	})

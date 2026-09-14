@@ -97,6 +97,18 @@ func TestModelCatalogProbeHandlerCarriesConnectionAndOpaqueDiagnostics(t *testin
 	}
 }
 
+func TestModelCatalogProbeHandlerFinalizesCompleteBedrockConnection(t *testing.T) {
+	stub := &stubTargetProber{result: provider.TargetProbeResult{Options: []profile.ModelAuthoringOption{{Name: "model-1"}}}}
+	const endpoint = "https://bedrock-mantle.eu-west-2.api.aws/v1"
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.BedrockConnectionDocument("eu-west-2", endpoint, "env:AWS_BEARER_TOKEN_BEDROCK"), "responses")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(stub.attempts) != 1 || stub.attempts[0].ProviderSpec != "bedrock" || stub.attempts[0].BaseURL != endpoint || stub.attempts[0].BedrockRegion() != "eu-west-2" {
+		t.Fatalf("attempts = %#v", stub.attempts)
+	}
+}
+
 func TestModelCatalogProbeHandlerCustomConnectionPreservesHeaderAuth(t *testing.T) {
 	stub := &stubTargetProber{result: provider.TargetProbeResult{Options: []profile.ModelAuthoringOption{{Name: "model-1"}}}}
 	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.CustomConnectionDocument("https://example.test/v1", &workspaceapi.CustomHeader{Name: "X-Custom-Auth", Credential: "env:CUSTOM_KEY"}), "responses")
@@ -154,7 +166,7 @@ func TestModelCatalogProbeHandlerRejectsInvalidConnectionUnion(t *testing.T) {
 
 func TestModelCatalogProbeHandlerNormalizesFileCredentialResolutionError(t *testing.T) {
 	stub := &stubTargetProber{err: errors.New("BAD_ENDPOINT: credential reference could not be resolved")}
-	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("openai", "", "file:/missing/key"), "responses")
+	rec := postTargetProbe(t, NewTargetProbeHandler(stub), workspaceapi.StandardConnection("openai", "", "file:"+t.TempDir()), "responses")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "credential file could not be resolved") {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}

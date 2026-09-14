@@ -96,11 +96,10 @@ func TestBedrockEndpointPersistsNormalizedAuthoredURL(t *testing.T) {
 	if got := w.Draft.Get().Endpoint; got != wantURL {
 		t.Fatalf("authored endpoint = %q, want %q", got, wantURL)
 	}
-	connection, ok := saved.Connection.(routing.BedrockConnection)
-	if !ok {
-		t.Fatalf("saved connection = %T, want routing.BedrockConnection", saved.Connection)
+	if saved.Connection.Bedrock == nil {
+		t.Fatalf("saved connection = %#v, want Bedrock draft", saved.Connection)
 	}
-	if got := connection.Endpoint(); got != wantURL {
+	if got := saved.Connection.Bedrock.Endpoint; got != wantURL {
 		t.Fatalf("saved endpoint = %q, want %q", got, wantURL)
 	}
 }
@@ -462,15 +461,15 @@ func readyBedrockConfig(t *testing.T) *TargetConfig {
 
 func TestRemovingBedrockCredentialReprobesWithoutTargetOverride(t *testing.T) {
 	w := readyBedrockConfig(t)
-	var probed ports.BedrockCatalogProbe
+	var probed routing.ConnectionDraft
 	w.TargetSetupQueries = targetProbeQueriesFunc(func(_ context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
-		probed, _ = req.Probe.(ports.BedrockCatalogProbe)
+		probed = req.Connection
 		return readmodel.ModelCatalogReadModel{Options: []readmodel.ModelAuthoringOptionReadModel{{ID: "model-1", ModelName: "model-1"}}, BedrockAuthentication: readmodel.BedrockAuthenticationEvidence{Authentication: readmodel.BedrockAuthenticationAWSIdentity}}, nil
 	})
 	row := newCredentialRow(w, false)
 	row.props.Apply("")
 	w.ProbeCatalog()
-	if probed.Region != "eu-west-2" || probed.CredentialRef != "" {
+	if probed.Bedrock == nil || probed.Bedrock.Region != "eu-west-2" || probed.Bedrock.Credential != "" || probed.Bedrock.Endpoint != "" {
 		t.Fatalf("probe intent = %#v", probed)
 	}
 	if got := w.catalogResult().BedrockAuthentication.Authentication; got != readmodel.BedrockAuthenticationAWSIdentity {

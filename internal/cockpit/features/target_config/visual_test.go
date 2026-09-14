@@ -25,7 +25,7 @@ const chatGPTVisualLoginURL = "https://auth.openai.com/oauth/authorize?client_id
 var requiredProviderAuthoringVisualNames = []string{
 	"api_key_missing", "api_key_environment_ready",
 	"gemini_adc_default", "gemini_adc_menu", "gemini_api_key_environment", "gemini_api_key_menu", "gemini_credential_chooser", "gemini_adc_catalog_failed",
-	"credential_source_menu", "credential_environment_input", "credential_file_browser", "credential_paste_input", "credential_optional_remove",
+	"credential_source_menu", "credential_environment_input", "credential_file_input", "credential_paste_input", "credential_optional_remove",
 	"custom_loopback_anonymous", "custom_remote_credential_required", "custom_credential_header_picker", "custom_credential_header_open_value", "custom_ready",
 	"custom_manual_model",
 	"bedrock_aws_identity", "bedrock_environment_api_key", "bedrock_target_api_key", "bedrock_auth_failure", "bedrock_credential_menu",
@@ -107,7 +107,7 @@ func TestProviderAuthoringVisualRegistryAndFixturesAreClosed(t *testing.T) {
 
 func providerAuthoringVisualWidths(name string) []int {
 	switch name {
-	case "bedrock_aws_identity", "credential_file_browser", "model_picker", "protocol_picker", "routing_picker",
+	case "bedrock_aws_identity", "credential_file_input", "model_picker", "protocol_picker", "routing_picker",
 		"chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending",
 		"chatgpt_open_failed", "provider_picker_codex", "chatgpt_signed_out", "chatgpt_catalog_loading", "chatgpt_signed_in", "chatgpt_catalog_failed":
 		return []int{80, 100, 120}
@@ -158,13 +158,12 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "credential_environment_input", render: func(t *testing.T, width int) testscreen.Screen {
 			return renderCredentialJourney(t, width, []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyEnter}}, nil)
 		}},
-		{name: "credential_file_browser", render: func(t *testing.T, width int) testscreen.Screen {
-			return renderCredentialJourney(t, width, []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyDown}, {Key: tui.KeyEnter}}, func(w *TargetConfig) {
-				w.credentialInitialPath = "/home/operator/.config/swobu"
-				w.credentialReadDir = func(string) ([]ui.FileBrowserEntry, error) {
-					return []ui.FileBrowserEntry{{Name: "openai.key"}, {Name: "anthropic.key"}, {Name: "development", IsDir: true}, {Name: "production", IsDir: true}}, nil
-				}
-			})
+		{name: "credential_file_input", render: func(t *testing.T, width int) testscreen.Screen {
+			keys := []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyDown}, {Key: tui.KeyEnter}}
+			for _, char := range "/home/operator/.config/swobu/openai.key" {
+				keys = append(keys, tui.KeyEvent{Key: tui.KeyRune, Rune: char})
+			}
+			return renderCredentialJourney(t, width, keys, nil)
 		}},
 		{name: "credential_paste_input", render: func(t *testing.T, width int) testscreen.Screen {
 			keys := []tui.KeyEvent{{Key: tui.KeyEnter}, {Key: tui.KeyDown}, {Key: tui.KeyDown}, {Key: tui.KeyEnter}}

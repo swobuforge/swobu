@@ -86,16 +86,14 @@ type TargetConfig struct {
 	// All disclosure regions are gone: model + placement + provider are fresh
 	// ui.Selects / reset-to-empty, and the credential drill-down lives on the
 	// local component state (no disclosure control structs remain).
-	app                   *tui.App
-	catalogProbeSeq       int64
-	catalogProbeInFlight  bool
-	authObserverSeq       int64
-	cancelAuthObserver    context.CancelFunc
-	operationContext      context.Context
-	cancelOperations      context.CancelFunc
-	credentialReadDir     func(string) ([]ui.FileBrowserEntry, error)
-	credentialInitialPath string
-	credentialSlot        string
+	app                  *tui.App
+	catalogProbeSeq      int64
+	catalogProbeInFlight bool
+	authObserverSeq      int64
+	cancelAuthObserver   context.CancelFunc
+	operationContext     context.Context
+	cancelOperations     context.CancelFunc
+	credentialSlot       string
 }
 
 func (w *TargetConfig) actionContext() context.Context {

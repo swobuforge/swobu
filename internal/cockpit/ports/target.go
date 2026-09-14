@@ -12,9 +12,9 @@ type SaveTargetRequest struct {
 	TargetID    readmodel.TargetID
 	ModelID     string
 	Protocol    string
-	// Connection is validated authoring output. Persistence projects it to
-	// transport without receiving or reinterpreting incomplete UI draft state.
-	Connection routing.Connection
+	// Connection carries raw operator intent. The daemon owns validation and
+	// finalization before routing publication.
+	Connection routing.ConnectionDraft
 	Placement  readmodel.PlacementOptionReadModel
 }
 

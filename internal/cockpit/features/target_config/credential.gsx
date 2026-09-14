@@ -1,8 +1,6 @@
 package target_config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	tui "github.com/grindlemire/go-tui"
@@ -57,8 +55,7 @@ type credentialRow struct {
 	envName      *tui.State[string]
 	filePath     *tui.State[string]
 	secret       *tui.State[string]
-	localError   *tui.State[string]
-	readDir      func(string) ([]ui.FileBrowserEntry, error)
+	localError *tui.State[string]
 }
 
 // CredentialFieldProps is the complete feature-to-component contract. The
@@ -79,7 +76,7 @@ func newCredentialField(props CredentialFieldProps) *credentialRow {
 	return &credentialRow{
 		props: props,
 		stage: tui.NewState(credStageClosed), envName: tui.NewState(""),
-		filePath: tui.NewState(""), secret: tui.NewState(""), localError: tui.NewState(""), readDir: ui.OSReadDir,
+		filePath: tui.NewState(""), secret: tui.NewState(""), localError: tui.NewState(""),
 	}
 }
 
@@ -100,12 +97,23 @@ func (r *credentialRow) KeyMap() tui.KeyMap {
 	return ui.BackScope(func() bool { return r.stage.Get() != credStageClosed }, r.retreat)
 }
 
-func FileCredentialBrowser(r *credentialRow) *ui.FileBrowser {
-	dir := r.filePath.Get()
-	if info, err := os.Stat(dir); dir != "" && err == nil && !info.IsDir() { dir = filepath.Dir(dir) }
-	browser := ui.NewFileBrowser(r.key("file-browser"), "credential file", dir, r.readDir, func(path string) { r.filePath.Set(path); r.saveFile(path) }, r.retreat)
-	browser.AutoFocus = true
-	return browser
+func FileCredentialInput(r *credentialRow) *ui.EditableRow {
+	row := ui.NewEditableRow(
+		r.key("file-input"),
+		"daemon path",
+		r.filePath,
+	)
+	row.Placeholder = "_"
+	row.ViewAction = "edit ↵"
+	row.EditAction = "save ↵"
+	row.StartEditing = true
+	row.AutoFocus = true
+	row.OnSubmit = func(raw string) {
+		r.filePath.Set(strings.TrimSpace(raw))
+		r.saveFile(r.filePath.Get())
+	}
+	row.OnClose = r.retreat
+	return row
 }
 
 func (r *credentialRow) toggle() {
@@ -172,7 +180,16 @@ func (r *credentialRow) saveEnv(raw string) {
 }
 
 func (r *credentialRow) openFile() {
-	r.enter(credStageFile)
+	if !r.enter(credStageFile) {
+		return
+	}
+	if strings.TrimSpace(r.filePath.Get()) != "" {
+		return
+	}
+	ref := strings.TrimSpace(r.props.Ref) // swobu:io-string source=boundary
+	if strings.HasPrefix(ref, "file:") {
+		r.filePath.Set(strings.TrimPrefix(ref, "file:"))
+	}
 }
 
 func (r *credentialRow) saveFile(raw string) {
@@ -347,7 +364,7 @@ templ (r *credentialRow) Render() {
 					@CredentialPasteSecretOption(r)
 					if r.optional() && strings.TrimSpace(r.props.Ref) != "" { @CredentialRemoveOption(r) }
 				} else if r.stage.Get() == credStageEnv { @EnvCredentialInput(r)
-				} else if r.stage.Get() == credStageFile { @FileCredentialBrowser(r)
+				} else if r.stage.Get() == credStageFile { @FileCredentialInput(r)
 				} else if r.stage.Get() == credStagePaste { @PasteSecretInput(r) }
 			</div>
 			if strings.TrimSpace(r.localError.Get()) != "" { @CredentialInputError(r.localError.Get()) }
@@ -373,7 +390,7 @@ templ (b *credentialChooserBody) Render() {
 			@CredentialFileOption(b.row)
 			@CredentialPasteSecretOption(b.row)
 		} else if b.row.stage.Get() == credStageEnv { @EnvCredentialInput(b.row)
-		} else if b.row.stage.Get() == credStageFile { @FileCredentialBrowser(b.row)
+		} else if b.row.stage.Get() == credStageFile { @FileCredentialInput(b.row)
 		} else if b.row.stage.Get() == credStagePaste { @PasteSecretInput(b.row) }
 		if strings.TrimSpace(b.row.localError.Get()) != "" { @CredentialInputError(b.row.localError.Get()) }
 	</div>

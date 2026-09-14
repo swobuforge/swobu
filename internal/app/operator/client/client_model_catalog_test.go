@@ -24,11 +24,11 @@ func TestClientProbeTargetEncodesTypedConnectionBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			t.Fatal(err)
 		}
-		connection, err := input.Connection.RoutingConnection()
-		if err != nil || input.ProviderProtocol != "responses" {
+		connection := input.Connection.Draft()
+		if input.ProviderProtocol != "responses" {
 			t.Fatalf("probe input = %#v", input)
 		}
-		if got := string(connection.Provider()); got != "openai" {
+		if got := connection.Provider; got != "openai" {
 			t.Fatalf("probe provider = %q, want openai", got)
 		}
 

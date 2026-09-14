@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -9,10 +10,25 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
+
+func TestOperatorTargetJSONWithForeignFileCredentialProjectsOpaqueFacts(t *testing.T) {
+	const credential = "file:/home/operator/.config/gemini.key"
+	raw := []byte(`{"id":"tgt_fc3b36ea-de10-4a6a-b295-e02bc683f9a8","model":"gemini-3.7-flash","protocol":"interactions_stream","provider":"gemini","connection":{"gemini":{"credential":"` + credential + `"}}}`)
+	var target workspaceapi.Target
+	if err := json.Unmarshal(raw, &target); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := targetFromWorkspaceTarget(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.Provider != "gemini" || projected.Model != "gemini-3.7-flash" || projected.ProviderProtocol != "interactions_stream" || projected.CredentialRef != credential {
+		t.Fatalf("projection = %#v", projected)
+	}
+}
 
 func TestDeepSeekOperatorConnectionSurvivesMountedTargetEdit(t *testing.T) {
 	const credential = "file:/home/example/.config/deepseek.key"
@@ -48,7 +64,6 @@ func TestOperatorConnectionFactsSurviveCockpitProjection(t *testing.T) {
 		{"openai", workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), readmodel.TargetReadModel{Provider: "openai", CredentialRef: "env:OPENAI_API_KEY"}},
 		{"anthropic", workspaceapi.StandardConnection("anthropic", "", "env:ANTHROPIC_API_KEY"), readmodel.TargetReadModel{Provider: "anthropic", CredentialRef: "env:ANTHROPIC_API_KEY"}},
 		{"deepseek", workspaceapi.StandardConnection("deepseek", "", "file:/home/example/.config/deepseek.key"), readmodel.TargetReadModel{Provider: "deepseek", CredentialRef: "file:/home/example/.config/deepseek.key"}},
-		{"runpod", workspaceapi.StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), readmodel.TargetReadModel{Provider: "runpod", BaseURL: "https://api.runpod.ai/v2/abc123/openai/v1", CredentialRef: "env:RUNPOD_API_KEY"}},
 		{"openrouter", workspaceapi.StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), readmodel.TargetReadModel{Provider: "openrouter", CredentialRef: "env:OPENROUTER_API_KEY"}},
 		{"chatgpt", workspaceapi.StandardConnection("chatgpt", "", "secret:chatgpt/session"), readmodel.TargetReadModel{Provider: "chatgpt", CredentialRef: "secret:chatgpt/session"}},
 		{"zai", workspaceapi.ZAIConnectionDocument("coding_plan", "env:ZAI_API_KEY"), readmodel.TargetReadModel{Provider: "zai", ZAIAccess: "coding_plan", CredentialRef: "env:ZAI_API_KEY"}},
@@ -83,61 +98,26 @@ func TestNewTargetIDUsesOpaqueTypedUUID(t *testing.T) {
 }
 
 func TestTargetFromSaveRequestPreservesProviderKeyAcrossAdapters(t *testing.T) {
-	bedrockRegion, err := routing.ParseBedrockRegion("eu-west-1")
-	if err != nil {
-		t.Fatal(err)
+	tests := []routing.ConnectionDraft{
+		{Provider: "openai", Standard: &routing.StandardConnectionDraft{Credential: "env:OPENAI_API_KEY"}},
+		{Provider: "anthropic", Standard: &routing.StandardConnectionDraft{Credential: "env:ANTHROPIC_API_KEY"}},
+		{Provider: "openrouter", Standard: &routing.StandardConnectionDraft{Credential: "env:OPENROUTER_API_KEY"}},
+		{Provider: "chatgpt", Standard: &routing.StandardConnectionDraft{Credential: "secret:chatgpt/session"}},
+		{Provider: "ollama", Standard: &routing.StandardConnectionDraft{Locator: "http://127.0.0.1:11434"}},
+		{Provider: "lmstudio", Standard: &routing.StandardConnectionDraft{Locator: "http://127.0.0.1:1234/v1", Credential: "env:LM_API_TOKEN"}},
+		{Provider: "azure", Standard: &routing.StandardConnectionDraft{Locator: "https://example.services.ai.azure.com/api/projects/demo", Credential: "env:AZURE_OPENAI_API_KEY"}},
+		{Provider: "zai", ZAI: &routing.ZAIConnectionDraft{Access: "coding_plan", Credential: "env:ZAI_API_KEY"}},
+		{Provider: "bedrock", Bedrock: &routing.BedrockConnectionDraft{Region: "eu-west-1", Endpoint: "https://bedrock-mantle.eu-west-2.api.aws/v1"}},
+		{Provider: "custom", Custom: &routing.CustomConnectionDraft{BaseURL: "https://example.com/v1", Header: &routing.CustomHeaderDraft{Name: "X-API-Key", Credential: "env:CUSTOM_KEY"}}},
 	}
-	customAuth, err := routing.NewCustomHeaderAuth("X-API-Key", "env:CUSTOM_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
-	standard := func(spec, locator, credential string) func() (routing.Connection, error) {
-		return func() (routing.Connection, error) {
-			provider, err := routing.ParseProvider(spec, profile.SupportsSpec)
-			if err != nil {
-				return nil, err
-			}
-			return routing.NewStandardConnection(provider, locator, credential)
-		}
-	}
-	tests := []struct {
-		name string
-		make func() (routing.Connection, error)
-		want string
-	}{
-		{"openai", standard("openai", "", "env:OPENAI_API_KEY"), "openai"},
-		{"anthropic", standard("anthropic", "", "env:ANTHROPIC_API_KEY"), "anthropic"},
-		{"openrouter", standard("openrouter", "", "env:OPENROUTER_API_KEY"), "openrouter"},
-		{"chatgpt", standard("chatgpt", "", "secret:chatgpt/session"), "chatgpt"},
-		{"ollama", standard("ollama", "http://127.0.0.1:11434", ""), "ollama"},
-		{"lmstudio", standard("lmstudio", "http://127.0.0.1:1234/v1", "env:LM_API_TOKEN"), "lmstudio"},
-		{"azure", standard("azure", "https://example.services.ai.azure.com/api/projects/demo", "env:AZURE_OPENAI_API_KEY"), "azure"},
-		{"zai", func() (routing.Connection, error) {
-			provider, _ := routing.ParseProvider("zai", profile.SupportsSpec)
-			return routing.NewZAIConnection(provider, routing.ZAIAccessCodingPlan, "env:ZAI_API_KEY")
-		}, "zai"},
-		{"bedrock", func() (routing.Connection, error) {
-			provider, _ := routing.ParseProvider("bedrock", profile.SupportsSpec)
-			return routing.NewBedrockConnection(provider, bedrockRegion, "https://bedrock-mantle.eu-west-2.api.aws/v1", "")
-		}, "bedrock"},
-		{"custom", func() (routing.Connection, error) {
-			provider, _ := routing.ParseProvider("custom", profile.SupportsSpec)
-			return routing.NewCustomConnection(provider, "https://example.com/v1", customAuth)
-		}, "custom"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			connection, err := test.make()
-			if err != nil {
-				t.Fatal(err)
-			}
+	for _, connection := range tests {
+		t.Run(connection.Provider, func(t *testing.T) {
 			target, err := targetFromSaveRequest(ports.SaveTargetRequest{ModelID: "model", Protocol: "responses", Connection: connection}, "target")
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected, err := target.Connection.RoutingConnection()
-			if err != nil || string(projected.Provider()) != test.want {
-				t.Fatalf("projected provider = %v, %v; want %q", projected, err, test.want)
+			if got := target.Connection.Draft().Provider; got != connection.Provider {
+				t.Fatalf("projected provider = %q, want %q", got, connection.Provider)
 			}
 		})
 	}

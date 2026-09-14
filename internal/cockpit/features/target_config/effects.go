@@ -42,12 +42,6 @@ func newCredentialRow(target *TargetConfig, autoFocus bool) *credentialRow {
 		return target.storePastedCredential(target.actionContext(), secret)
 	}
 	row := newCredentialField(props)
-	if target.credentialReadDir != nil {
-		row.readDir = target.credentialReadDir
-	}
-	if target.credentialInitialPath != "" {
-		row.filePath.Set(target.credentialInitialPath)
-	}
 	return row
 }
 
@@ -502,19 +496,14 @@ func probeCatalogSnapshot(ctx context.Context, queries ports.TargetSetupQueries,
 		if len(protocols) > 0 {
 			providerProtocol = protocols[0]
 		}
-		request := ports.ProbeProviderModelsRequest{ProviderProtocol: providerProtocol}
-		if profile.ProviderID(provider) == profile.ProviderSpecBedrock {
-			request.Probe = ports.BedrockCatalogProbe{
-				Region:        strings.TrimSpace(draft.Locator),
-				CredentialRef: strings.TrimSpace(draft.CredentialRef),
-			}
-		} else {
-			connection, err := connectionFromDraft(draft)
-			if err != nil {
-				return readmodel.ModelCatalogReadModel{}, err
-			}
-			request.Probe = ports.ConnectionCatalogProbe{Connection: connection}
+		connection, err := connectionDraftFromTarget(draft)
+		if err != nil {
+			return readmodel.ModelCatalogReadModel{}, err
 		}
+		if connection.Bedrock != nil {
+			connection.Bedrock.Endpoint = ""
+		}
+		request := ports.ProbeProviderModelsRequest{Connection: connection, ProviderProtocol: providerProtocol}
 		result, err := queries.ProbeProviderModels(ctx, request)
 		if err != nil {
 			return result, err
@@ -801,7 +790,7 @@ func (w *TargetConfig) Create(ctx context.Context) {
 		w.SaveOperation.Set(createOperationState{Err: err.Error()})
 		return
 	}
-	connection, err := connectionFromDraft(draft)
+	connection, err := connectionDraftFromTarget(draft)
 	if err != nil {
 		w.Error.Set(err.Error())
 		w.SaveOperation.Set(createOperationState{Err: err.Error()})
@@ -868,7 +857,7 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 		w.Error.Set(err.Error())
 		return
 	}
-	connection, err := connectionFromDraft(draft)
+	connection, err := connectionDraftFromTarget(draft)
 	if err != nil {
 		w.Error.Set(err.Error())
 		return
