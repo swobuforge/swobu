@@ -31,10 +31,13 @@ func TestShareInviteIsSelfContainedAndSecurityBounded(t *testing.T) {
 		"Shared API",
 		`<link rel="icon" href="data:image/svg+xml,`,
 		"Incomplete share link",
-		"Copy complete OpenAI connection recipe",
-		"Copy complete Anthropic connection recipe",
-		"OPENAI_BASE_URL=${urls.openai}",
-		"ANTHROPIC_BASE_URL=${urls.anthropic}",
+		"Copy OpenAI base URL",
+		"Copy Anthropic base URL",
+		"Copy API key",
+		">Reveal</button>",
+		"button.textContent = 'Copied'",
+		"OpenAI base URL",
+		"Anthropic base URL",
 		"history.replaceState(null, '', location.pathname + location.search)",
 		"document.addEventListener('DOMContentLoaded', bindInvite, { once: true })",
 		"code.addData(originalInvite, 'Byte')",
@@ -53,6 +56,9 @@ func TestShareInviteIsSelfContainedAndSecurityBounded(t *testing.T) {
 		"SwobuQR",
 		"/_swobu/share-info",
 		"fetch(",
+		"data-copy=",
+		"protocol-mark",
+		"field-copy",
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("invite retained external or custom implementation marker %q", forbidden)
