@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 )
 
 // derivedDomain is a compatibility token. Changing it would remap existing
@@ -22,17 +22,16 @@ type Key struct{ key string }
 // Explicit preserves one client-supplied cache-locality key exactly.
 func Explicit(key string) Key { return Key{key: key} }
 
-// Derived creates a compact, non-revealing locality heuristic for one workspace
-// lineage. The lineage remains the conversation-continuity authority.
-func Derived(workspace, lineage string) Key {
-	sum := sha256.Sum256([]byte(derivedDomain + "\x00" + workspace + "\x00" + lineage))
+// Derived creates a compact, non-revealing cache-placement heuristic.
+func Derived(workspace, affinity string) Key {
+	sum := sha256.Sum256([]byte(derivedDomain + "\x00" + workspace + "\x00" + affinity))
 	return Key{key: "swobu_" + hex.EncodeToString(sum[:])}
 }
 
-// FromThread derives cache placement from Thread equality without exposing a
-// printable Thread representation to callers.
-func FromThread(id thread.ID) (Key, error) {
-	projected, err := thread.Project("cache-locality/v1", id)
+// FromExecutionAffinity derives cache placement from execution affinity without
+// making either key conversation-state authority.
+func FromExecutionAffinity(id executionaffinity.Key) (Key, error) {
+	projected, err := executionaffinity.Project("cache-locality/v1", id)
 	if err != nil {
 		return Key{}, err
 	}

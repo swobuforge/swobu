@@ -15,8 +15,8 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
@@ -65,7 +65,7 @@ func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
 }
 
 func TestStandardProtocolCodecDoesNotProjectThreadHeaders(t *testing.T) {
-	threadID, err := thread.Derive("protocol-codec-test/v1", "conversation")
+	executionAffinity, err := executionaffinity.Derive("protocol-codec-test/v1", "conversation")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestStandardProtocolCodecDoesNotProjectThreadHeaders(t *testing.T) {
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")},
 	})
 	document, _, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
-		Attempt: provider.AttemptContext{ThreadID: threadID}, Canonical: request, Delivery: delivery.BufferedDelivery(),
+		Attempt: provider.AttemptContext{ExecutionAffinity: executionAffinity}, Canonical: request, Delivery: delivery.BufferedDelivery(),
 	})
 	if err != nil {
 		t.Fatal(err)

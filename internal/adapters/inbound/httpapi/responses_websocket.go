@@ -19,7 +19,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -219,7 +219,7 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, transportHeaders http.Header, threadID thread.ID, raw []byte) error {
+func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, transportHeaders http.Header, executionAffinity executionaffinity.Key, raw []byte) error {
 	if int64(len(raw)) > maxOperatorJSONBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
@@ -246,14 +246,14 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	timing := trafficevidence.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
-		Workspace:       workspace,
-		Request:         newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
-		ClientHandler:   trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
-		ClientFamily:    canonical.ClientFamilyResponses,
-		ResponseFraming: delivery.FramingWebSocket,
-		Timing:          &timing,
-		ThreadID:        threadID,
-		ExchangeID:      requestID,
+		Workspace:         workspace,
+		Request:           newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
+		ClientHandler:     trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
+		ClientFamily:      canonical.ClientFamilyResponses,
+		ResponseFraming:   delivery.FramingWebSocket,
+		Timing:            &timing,
+		ExecutionAffinity: executionAffinity,
+		ExchangeID:        requestID,
 	})
 	if err != nil {
 		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err})

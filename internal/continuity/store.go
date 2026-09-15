@@ -6,39 +6,42 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
-var (
-	ErrCheckpointExists     = errors.New("thread checkpoint already exists")
-	ErrThreadExists         = errors.New("thread already exists")
-	ErrStaleThreadHead      = errors.New("thread head changed")
-	ErrThreadSchemeMismatch = errors.New("thread client codec scheme changed")
-)
+var ErrCheckpointExists = errors.New("checkpoint already exists")
 
-// Thread records the current checkpoint head for one codec scheme.
-type Thread struct {
-	ID     thread.ID
-	Scheme historyfingerprint.Scheme
-	Head   canonical.SwobuResponseID
+// StorageReuse is opaque evidence already established by continuity
+// resolution. Its sealed token is owned by the producing Store backend.
+type StorageReuse struct {
+	token        storageReuseToken
+	history      *historyfingerprint.History
+	prefixLength int
 }
 
-// HistoryResolution is the closed result of exact current-head lookup.
-type HistoryResolution uint8
+type storageReuseToken interface{ isStorageReuseToken() }
 
-const (
-	HistoryNotFound HistoryResolution = iota
-	HistoryUniqueHead
-	HistoryAmbiguous
-)
+// ReuseCheckpoint identifies an exact selected checkpoint's physical tail.
+func ReuseCheckpoint(checkpoint Checkpoint) StorageReuse {
+	return checkpoint.storageReuse
+}
 
-// Store retains immutable checkpoints and one atomic current head per Thread
-// inside workspace partitions.
+// ReuseVisibleHistory records the codec-declared historical prefix boundary.
+// The length counts retained canonical items, not request-scoped prelude.
+func ReuseVisibleHistory(history historyfingerprint.History, prefixLength int) StorageReuse {
+	return StorageReuse{history: &history, prefixLength: prefixLength}
+}
+
+// Commit is the immutable checkpoint and its optional storage-only reuse
+// evidence written at one successful response boundary.
+type Commit struct {
+	Checkpoint Checkpoint
+	Reuse      StorageReuse
+}
+
+// Store retains immutable checkpoints inside workspace partitions. History
+// lookup succeeds only when exactly one live checkpoint carries the key.
 type Store interface {
-	GetCheckpoint(context.Context, string, canonical.SwobuResponseID) (Checkpoint, bool, error)
-	GetThread(context.Context, string, thread.ID) (Thread, bool, error)
-	IsCurrentHead(context.Context, string, thread.ID, canonical.SwobuResponseID) (bool, error)
-	ResolveHeadByHistory(context.Context, string, historyfingerprint.History, thread.ID) (Checkpoint, HistoryResolution, error)
-	StartThread(context.Context, string, Checkpoint) (Thread, error)
-	AdvanceThread(context.Context, string, thread.ID, canonical.SwobuResponseID, Checkpoint) error
+	Get(context.Context, string, canonical.SwobuResponseID) (Checkpoint, bool, error)
+	FindByHistory(context.Context, string, historyfingerprint.History) (Checkpoint, bool, error)
+	Put(context.Context, string, Commit) error
 }

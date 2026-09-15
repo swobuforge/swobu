@@ -400,9 +400,8 @@ func TestCheckpointRecoveryPreservesAndProjectsTargetBoundReplay(t *testing.T) {
 
 	// Resume continuity from the checkpoint.
 	resolved, err := continuity.Resume(turn2Request, continuity.Checkpoint{
-		ResponseID: "swobu_turn1",
-		Request:    turn1Request,
-		Response:   turn1Response,
+		Request:  turn1Request,
+		Response: turn1Response,
 	})
 	if err != nil {
 		t.Fatalf("continuity.Resume failed: %v", err)

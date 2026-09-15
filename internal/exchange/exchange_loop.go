@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/observation"
@@ -34,7 +34,7 @@ func runExchange(
 	workspace routing.Workspace,
 	timing *trafficevidence.Timing,
 	requestPath canonical.NormalizedPath,
-	explicitThreadID thread.ID,
+	explicitExecutionAffinity executionaffinity.Key,
 ) (RequestOutput, error) {
 	if err := validateCheckpointRuntime(runner); err != nil {
 		return RequestOutput{}, err
@@ -62,8 +62,8 @@ func runExchange(
 			mcpAccess:             decoded.MCPAccess,
 			explicitCacheLocality: decoded.CacheLocality,
 			workspace:             workspace, timing: timing,
-			explicitThreadID: explicitThreadID,
-			requestPath:      requestPath,
+			explicitExecutionAffinity: explicitExecutionAffinity,
+			requestPath:               requestPath,
 		},
 		swobuResponseID:  responseID,
 		phase:            startingPhase{},
@@ -396,25 +396,14 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	switch c := cmd.(type) {
 	case loadCheckpointCommand:
 		var record continuity.Checkpoint
-		var resolution continuity.HistoryResolution
-		var current bool
+		var found bool
 		var err error
 		if c.explicit {
-			var found bool
-			record, found, err = c.store.GetCheckpoint(ctx, c.workspaceSlug, c.reference)
-			if found {
-				resolution = continuity.HistoryUniqueHead
-				current, err = c.store.IsCurrentHead(ctx, c.workspaceSlug, record.ThreadID, record.ResponseID)
-			} else {
-				resolution = continuity.HistoryNotFound
-			}
+			record, found, err = c.store.Get(ctx, c.workspaceSlug, c.reference)
 		} else {
-			record, resolution, err = c.store.ResolveHeadByHistory(ctx, c.workspaceSlug, c.history, c.preferred)
+			record, found, err = c.store.FindByHistory(ctx, c.workspaceSlug, c.history)
 		}
-		return checkpointLoaded{record: record, resolution: resolution, current: current, err: err}
-	case loadThreadCommand:
-		value, found, err := c.store.GetThread(ctx, c.workspaceSlug, c.threadID)
-		return threadLoaded{thread: value, found: found, err: err}
+		return checkpointLoaded{record: record, found: found, err: err}
 	case prepareMCPCommand:
 		full, run, changes, err := mcp.Open(ctx, c.full, c.access)
 		return mcpPrepared{full: full, run: run, changes: changes, err: err}

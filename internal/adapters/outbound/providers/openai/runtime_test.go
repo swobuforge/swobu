@@ -348,7 +348,7 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 		Items:            []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn two")},
 		PreviousResponse: &canonical.ResponseRef{SwobuID: "swobu_previous"},
 	})
-	prepared, err := continuity.Resume(turnTwo, continuity.Checkpoint{HistoryScheme: "responses/v1", Request: turnOne, Response: *turnOneResponse})
+	prepared, err := continuity.Resume(turnTwo, continuity.Checkpoint{Request: turnOne, Response: *turnOneResponse})
 	if err != nil {
 		t.Fatal(err)
 	}

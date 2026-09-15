@@ -6,7 +6,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 )
 
 // EncodeContext carries request-scoped capabilities that an exact provider
@@ -21,7 +21,7 @@ type EncodeContext struct {
 // canonical request semantics, credentials, and transport-owned state.
 type AttemptContext struct {
 	ExchangeID            string
-	ThreadID              thread.ID
+	ExecutionAffinity     executionaffinity.Key
 	CacheLocality         cachelocality.Key
 	HasNextRouteCandidate bool
 }

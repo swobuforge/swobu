@@ -14,13 +14,13 @@ func TestDerivedIsStableSeparatedAndOpaque(t *testing.T) {
 		t.Fatal("derived locality is not stable and non-zero")
 	}
 	if first == Derived("beta", "resp_1") || first == Derived("alpha", "resp_2") {
-		t.Fatal("workspace and lineage must both separate derived locality")
+		t.Fatal("workspace and affinity must both separate derived locality")
 	}
 	if len(first.Key()) != len("swobu_")+sha256HexLength {
 		t.Fatalf("derived key length = %d", len(first.Key()))
 	}
 	if first.Key() == "resp_1" {
-		t.Fatal("lineage identity leaked")
+		t.Fatal("affinity identity leaked")
 	}
 }
 

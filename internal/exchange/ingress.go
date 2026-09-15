@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -112,13 +112,13 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 }
 
 type RequestInput struct {
-	Workspace       routing.WorkspaceSlug
-	Request         carrier.TransportRequest
-	ClientHandler   trafficevidence.ClientHandler
-	ClientFamily    canonical.ClientFamily
-	ResponseFraming delivery.Framing
-	Timing          *trafficevidence.Timing
-	ThreadID        thread.ID
+	Workspace         routing.WorkspaceSlug
+	Request           carrier.TransportRequest
+	ClientHandler     trafficevidence.ClientHandler
+	ClientFamily      canonical.ClientFamily
+	ResponseFraming   delivery.Framing
+	Timing            *trafficevidence.Timing
+	ExecutionAffinity executionaffinity.Key
 	// ExchangeID is the request-scoped identifier used for event and decision
 	// tracing. Callers must supply one unique value per exchange run.
 	ExchangeID string
@@ -231,7 +231,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	// The normalized path is threaded into the exchange input so terminal evidence
 	// is complete on both success and failure — an exchange error finalizes the
 	// evidence inside runExchange, where it already holds the path.
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ThreadID)
+	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ExecutionAffinity)
 	if err != nil {
 		return out, err
 	}

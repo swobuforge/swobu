@@ -23,13 +23,13 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"ResponseID", "ThreadID", "HistoryScheme", "History", "Request", "Response", "CreatedAt", "ExpiresAt"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"History", "ExecutionAffinity", "Request", "Response", "CreatedAt", "ExpiresAt", "storageReuse"})
 	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "previousHistory"})
 	assertFields("previousHistory", reflect.TypeOf(previousHistory{}), []string{"response", "omitItems"})
 	assertFields("requestItemRange", reflect.TypeOf(requestItemRange{}), []string{"start", "end"})
 
 	store := reflect.TypeOf((*Store)(nil)).Elem()
-	wantMethods := []string{"AdvanceThread", "GetCheckpoint", "GetThread", "IsCurrentHead", "ResolveHeadByHistory", "StartThread"}
+	wantMethods := []string{"FindByHistory", "Get", "Put"}
 	if store.NumMethod() != len(wantMethods) {
 		t.Fatalf("Store has %d methods, want %d", store.NumMethod(), len(wantMethods))
 	}
@@ -79,7 +79,12 @@ func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 		"historicalMediaForAttempt",
 		"ShiftItems(",
 		"ResumeHistory",
-		"FindByHistory",
+		"AdvanceThread",
+		"ResolveHeadByHistory",
+		"IsCurrentHead",
+		"StartThread",
+		"GetThread",
+		"ErrStaleThreadHead",
 		"ResolvedMedia",
 		"HistoricalMedia",
 		"ResolveMedia",

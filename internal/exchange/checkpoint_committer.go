@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,30 +9,28 @@ import (
 
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 )
 
-// checkpointCommitter joins canonical capture with a mandatory codec scheme
-// and optional history leaf, then atomically starts or advances one Thread
-// lineage. A successful
+// checkpointCommitter joins canonical capture with an optional history leaf,
+// then atomically stores one immutable checkpoint. A successful
 // client-visible response ID is gated on its canonical checkpoint because
 // client projections can omit continuation-critical opaque reasoning. Client
 // wire storage hints never participate. Fingerprint composition is best effort;
-// failure leaves the scheme-qualified lineage explicitly resumable but
+// failure leaves the response-ID checkpoint explicitly resumable but
 // unindexed for implicit history lookup.
 type checkpointCommitter struct {
 	once sync.Once
 	err  error
 
-	exchangeID    string
-	workspaceSlug string
-	store         continuity.Store
-	request       canonical.CanonicalRequest
-	historyScheme historyfingerprint.Scheme
-	advance       *historyAdvance
-	threadID      thread.ID
-	expectedHead  canonical.SwobuResponseID
+	exchangeID        string
+	workspaceSlug     string
+	store             continuity.Store
+	request           canonical.CanonicalRequest
+	advance           *historyAdvance
+	executionAffinity executionaffinity.Key
+	storageReuse      continuity.StorageReuse
 }
 
 // CheckpointCommitError identifies failure to make a client-visible response
@@ -60,11 +57,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 		return nil
 	}
 	c.once.Do(func() {
-		record := continuity.Checkpoint{
-			Request: c.request.Clone(), Response: response.Clone(),
-			HistoryScheme: c.historyScheme, CreatedAt: time.Now().UTC(),
-		}
-		record.ResponseID = response.Response().SwobuID
+		record := continuity.Checkpoint{Request: c.request.Clone(), Response: response.Clone(), ExecutionAffinity: c.executionAffinity, CreatedAt: time.Now().UTC()}
 		if c.advance != nil && fingerprint != nil {
 			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *fingerprint)
 			if err != nil {
@@ -73,17 +66,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 				record.History = &history
 			}
 		}
-		var err error
-		if c.threadID.IsZero() {
-			c.err = checkpointCommitError(errors.New("checkpoint thread ID is absent"))
-			return
-		}
-		record.ThreadID = c.threadID
-		if c.expectedHead == "" {
-			_, err = c.store.StartThread(ctx, c.workspaceSlug, record)
-		} else {
-			err = c.store.AdvanceThread(ctx, c.workspaceSlug, c.threadID, c.expectedHead, record)
-		}
+		err := c.store.Put(ctx, c.workspaceSlug, continuity.Commit{Checkpoint: record, Reuse: c.storageReuse})
 		if err != nil {
 			c.logFailure("store", err)
 			c.err = checkpointCommitError(fmt.Errorf("checkpoint store failed: %w", err))

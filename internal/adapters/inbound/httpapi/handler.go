@@ -16,7 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
@@ -114,20 +114,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transportRequest, threadID, err := ingressTransportRequest(r.Method, operationPath, workspace.String(), r.Header, requestBody)
+	transportRequest, executionAffinity, err := ingressTransportRequest(r.Method, operationPath, workspace.String(), r.Header, requestBody)
 	if err != nil {
 		writeExchangeError(writer, family, err)
 		return
 	}
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
-		Workspace:       workspace,
-		Request:         transportRequest,
-		ClientHandler:   clientHandler,
-		ClientFamily:    family,
-		ResponseFraming: delivery.FramingSSE,
-		Timing:          &timing,
-		ThreadID:        threadID,
-		ExchangeID:      requestID,
+		Workspace:         workspace,
+		Request:           transportRequest,
+		ClientHandler:     clientHandler,
+		ClientFamily:      family,
+		ResponseFraming:   delivery.FramingSSE,
+		Timing:            &timing,
+		ExecutionAffinity: executionAffinity,
+		ExchangeID:        requestID,
 	})
 	if err != nil {
 		deliveryResult := exchangeFailureDeliveryResult(err)
@@ -271,7 +271,7 @@ func newTransportRequest(method string, url string, header http.Header, body []b
 
 const openCodeSessionHeader = "X-Opencode-Session"
 
-func ingressTransportRequest(method, url, workspace string, header http.Header, body []byte) (carrier.TransportRequest, thread.ID, error) {
+func ingressTransportRequest(method, url, workspace string, header http.Header, body []byte) (carrier.TransportRequest, executionaffinity.Key, error) {
 	request := newTransportRequest(method, url, header, body)
 	var selected string
 	for _, value := range request.Header.Values(openCodeSessionHeader) {
@@ -282,11 +282,11 @@ func ingressTransportRequest(method, url, workspace string, header http.Header, 
 	}
 	request.Header.Del(openCodeSessionHeader)
 	if selected == "" {
-		return request, thread.ID{}, nil
+		return request, executionaffinity.Key{}, nil
 	}
-	id, err := thread.Derive("client/x-opencode-session/v1", workspace, selected)
+	id, err := executionaffinity.Derive("client/x-opencode-session/v1", workspace, selected)
 	if err != nil {
-		return carrier.TransportRequest{}, thread.ID{}, canonical.InternalError("client thread identity could not be derived")
+		return carrier.TransportRequest{}, executionaffinity.Key{}, canonical.InternalError("client execution affinity could not be derived")
 	}
 	return request, id, nil
 }

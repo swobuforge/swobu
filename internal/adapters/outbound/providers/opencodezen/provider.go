@@ -9,7 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -40,10 +40,10 @@ func (r openCodeBackendResolver) ResolveBackend(target provider.TargetSnapshot) 
 }
 
 func projectOpenCodeRequestHeaders(attempt provider.AttemptContext, header http.Header) error {
-	if attempt.ThreadID.IsZero() {
-		return errors.New("OpenCode request requires thread identity")
+	if attempt.ExecutionAffinity.IsZero() {
+		return nil
 	}
-	value, err := thread.Project("provider/opencode-session/v1", attempt.ThreadID)
+	value, err := executionaffinity.Project("provider/opencode-session/v1", attempt.ExecutionAffinity)
 	if err != nil {
 		return err
 	}

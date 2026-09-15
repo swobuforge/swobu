@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -12,8 +13,8 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -34,8 +35,8 @@ type exchangeState struct {
 	evaluatedCandidateCount int
 	phase                   phase
 	advance                 *historyAdvance
-	threadID                thread.ID
-	expectedHead            canonical.SwobuResponseID
+	storageReuse            continuity.StorageReuse
+	executionAffinity       executionaffinity.Key
 	mcp                     *mcp.Run
 	providerUsage           []canonical.TokenUsage
 	effectiveChanges        []compat.Change
@@ -54,19 +55,19 @@ type historyAdvance struct {
 }
 
 type exchangeInput struct {
-	exchangeID            string
-	clientHandler         trafficevidence.ClientHandler
-	clientProduct         trafficevidence.ClientFamily
-	clientFamily          canonical.ClientFamily
-	clientDelivery        delivery.Delivery
-	request               canonical.CanonicalRequest
-	rebasedRequest        *wire.RebasedRequest
-	requestFingerprint    historyfingerprint.Request
-	mcpAccess             mcp.Access
-	explicitCacheLocality cachelocality.Key
-	explicitThreadID      thread.ID
-	workspace             routing.Workspace
-	timing                *trafficevidence.Timing
+	exchangeID                string
+	clientHandler             trafficevidence.ClientHandler
+	clientProduct             trafficevidence.ClientFamily
+	clientFamily              canonical.ClientFamily
+	clientDelivery            delivery.Delivery
+	request                   canonical.CanonicalRequest
+	rebasedRequest            *wire.RebasedRequest
+	requestFingerprint        historyfingerprint.Request
+	mcpAccess                 mcp.Access
+	explicitCacheLocality     cachelocality.Key
+	explicitExecutionAffinity executionaffinity.Key
+	workspace                 routing.Workspace
+	timing                    *trafficevidence.Timing
 	// requestPath is the ingress-owned normalized path, captured before the
 	// exchange runs so terminal evidence is complete on both success and failure.
 	requestPath canonical.NormalizedPath
@@ -98,14 +99,9 @@ type loadingCheckpointPhase struct {
 	explicit  bool
 	reference canonical.SwobuResponseID
 	history   historyfingerprint.History
-	scheme    historyfingerprint.Scheme
 }
 
 func (loadingCheckpointPhase) isPhase() {}
-
-type checkingThreadPhase struct{}
-
-func (checkingThreadPhase) isPhase() {}
 
 type preparingMCPPhase struct{}
 
@@ -158,21 +154,12 @@ type exchangeStarted struct{}
 func (exchangeStarted) isExchangeEvent() {}
 
 type checkpointLoaded struct {
-	record     continuity.Checkpoint
-	resolution continuity.HistoryResolution
-	current    bool
-	err        error
-}
-
-func (checkpointLoaded) isExchangeEvent() {}
-
-type threadLoaded struct {
-	thread continuity.Thread
+	record continuity.Checkpoint
 	found  bool
 	err    error
 }
 
-func (threadLoaded) isExchangeEvent() {}
+func (checkpointLoaded) isExchangeEvent() {}
 
 type mcpPrepared struct {
 	full    canonical.CanonicalRequest
@@ -224,19 +211,9 @@ type loadCheckpointCommand struct {
 	explicit      bool
 	reference     canonical.SwobuResponseID
 	history       historyfingerprint.History
-	scheme        historyfingerprint.Scheme
-	preferred     thread.ID
 }
 
 func (loadCheckpointCommand) isCommand() {}
-
-type loadThreadCommand struct {
-	store         continuity.Store
-	workspaceSlug string
-	threadID      thread.ID
-}
-
-func (loadThreadCommand) isCommand() {}
 
 type prepareMCPCommand struct {
 	full   canonical.CanonicalRequest
@@ -292,10 +269,9 @@ type providerCall struct {
 	fullRequest        canonical.CanonicalRequest
 	decodeContext      canonical.CanonicalRequest
 	inputSegment       canonical.CanonicalRequest
-	historyScheme      historyfingerprint.Scheme
 	advance            *historyAdvance
-	threadID           thread.ID
-	expectedHead       canonical.SwobuResponseID
+	storageReuse       continuity.StorageReuse
+	executionAffinity  executionaffinity.Key
 	delayClientHandoff bool
 	providerRound      int
 	targetGeneration   targetExceptionGeneration
@@ -313,8 +289,6 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reduceStarting(s, event, runner)
 	case loadingCheckpointPhase:
 		return reduceLoadingCheckpoint(s, p, event, runner)
-	case checkingThreadPhase:
-		return reduceCheckingThread(s, event, runner)
 	case preparingMCPPhase:
 		return reducePreparingMCP(ctx, s, event, runner)
 	case callingProviderPhase:
@@ -338,31 +312,27 @@ func reduceStarting(s exchangeState, event exchangeEvent, runner runtimeBundle) 
 		s.phase = failedPhase{problem: err}
 		return reducerOutcome{nextState: s}, nil
 	} else if ok {
-		s.phase = loadingCheckpointPhase{explicit: true, reference: reference, scheme: s.input.requestFingerprint.Scheme()}
+		s.phase = loadingCheckpointPhase{explicit: true, reference: reference}
 		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
 			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), explicit: true, reference: reference,
-			scheme: s.input.requestFingerprint.Scheme(), preferred: s.input.explicitThreadID,
 		}}, nil
 	}
 	if s.input.rebasedRequest != nil {
 		s.phase = loadingCheckpointPhase{history: s.input.rebasedRequest.Previous}
 		return reducerOutcome{nextState: s, command: loadCheckpointCommand{
 			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), history: s.input.rebasedRequest.Previous,
-			preferred: s.input.explicitThreadID,
 		}}, nil
 	}
-	if !s.input.explicitThreadID.IsZero() {
-		s.phase = checkingThreadPhase{}
-		return reducerOutcome{nextState: s, command: loadThreadCommand{
-			store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), threadID: s.input.explicitThreadID,
-		}}, nil
+	if !s.input.explicitExecutionAffinity.IsZero() {
+		s.executionAffinity = s.input.explicitExecutionAffinity
+		return beginNewExchange(s, runner)
 	}
-	derived, err := thread.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
+	derived, err := executionaffinity.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
 	if err != nil {
 		return reducerOutcome{}, err
 	}
-	s.threadID = derived
-	return beginNewThread(s, runner)
+	s.executionAffinity = derived
+	return beginNewExchange(s, runner)
 }
 
 func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
@@ -371,50 +341,45 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: loading checkpoint received %T", event)
 	}
 	if loaded.err != nil {
+		logCheckpointResolution(s, phase, loaded)
 		s.phase = failedPhase{problem: loaded.err}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if phase.explicit && loaded.resolution == continuity.HistoryNotFound {
+	logCheckpointResolution(s, phase, loaded)
+	if phase.explicit && !loaded.found {
 		s.phase = failedPhase{problem: canonical.BadRequest("unknown previous_response_id")}
 		return reducerOutcome{nextState: s}, nil
 	}
-	if phase.explicit && (!loaded.current || loaded.record.HistoryScheme != phase.scheme) {
-		s.phase = failedPhase{problem: canonical.BadRequest("previous_response_id is not the current checkpoint for this client codec")}
-		return reducerOutcome{nextState: s}, nil
-	}
-	if phase.explicit && !s.input.explicitThreadID.IsZero() && loaded.record.ThreadID != s.input.explicitThreadID {
-		s.phase = failedPhase{problem: canonical.BadRequest("request contains contradictory thread identity evidence")}
-		return reducerOutcome{nextState: s}, nil
-	}
 	record := loaded.record
-	found := loaded.resolution == continuity.HistoryUniqueHead
+	found := loaded.found
 	var draft continuity.Draft
 	var err error
 	if phase.explicit {
 		draft, err = continuity.PrepareResume(s.input.request, record)
-		if record.History != nil {
+		s.storageReuse = continuity.ReuseCheckpoint(record)
+		if record.History != nil && record.History.Scheme() == s.input.requestFingerprint.Scheme() {
 			history := *record.History
 			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 		}
 	} else if found {
 		draft, err = continuity.PrepareResume(s.input.rebasedRequest.Request, record)
+		s.storageReuse = continuity.ReuseCheckpoint(record)
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	} else {
-		if !s.input.explicitThreadID.IsZero() {
-			history := phase.history
-			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
-			s.phase = checkingThreadPhase{}
-			return reducerOutcome{nextState: s, command: loadThreadCommand{
-				store: runner.CheckpointStore, workspaceSlug: s.input.workspace.Slug().String(), threadID: s.input.explicitThreadID,
-			}}, nil
+		if s.input.explicitExecutionAffinity.IsZero() {
+			derived, deriveErr := executionaffinity.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
+			if deriveErr != nil {
+				return reducerOutcome{}, deriveErr
+			}
+			s.executionAffinity = derived
+		} else {
+			s.executionAffinity = s.input.explicitExecutionAffinity
 		}
-		derived, deriveErr := thread.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
-		if deriveErr != nil {
-			return reducerOutcome{}, deriveErr
-		}
-		s.threadID = derived
 		draft, err = continuity.PrepareBegin(s.input.request)
+		completeRetained := canonical.RetainedHistory(s.input.request.Items())
+		currentRetained := canonical.RetainedHistory(s.input.rebasedRequest.Request.Items())
+		s.storageReuse = continuity.ReuseVisibleHistory(phase.history, len(completeRetained)-len(currentRetained))
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	}
@@ -424,8 +389,13 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	}
 	s.draft = &draft
 	if found || phase.explicit {
-		s.threadID = record.ThreadID
-		s.expectedHead = record.ResponseID
+		if !s.input.explicitExecutionAffinity.IsZero() {
+			s.executionAffinity = s.input.explicitExecutionAffinity
+		} else if !record.ExecutionAffinity.IsZero() {
+			s.executionAffinity = record.ExecutionAffinity
+		} else {
+			s.executionAffinity, err = executionaffinity.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
+		}
 		previous := record.Request.Clone()
 		s.previousRequest = &previous
 	}
@@ -437,28 +407,39 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	return beginMCPPreparation(s, runner)
 }
 
-func reduceCheckingThread(s exchangeState, event exchangeEvent, runner runtimeBundle) (reducerOutcome, error) {
-	loaded, ok := event.(threadLoaded)
-	if !ok {
-		return reducerOutcome{}, fmt.Errorf("exchange invariant: checking thread received %T", event)
-	}
+func logCheckpointResolution(state exchangeState, phase loadingCheckpointPhase, loaded checkpointLoaded) {
+	resolution := "miss_or_ambiguous"
 	if loaded.err != nil {
-		s.phase = failedPhase{problem: loaded.err}
-		return reducerOutcome{nextState: s}, nil
+		resolution = "error"
+	} else if loaded.found {
+		resolution = "unique"
 	}
-	if loaded.found {
-		message := "thread identity cannot start a new history without an identified predecessor"
-		if loaded.thread.Scheme != s.input.requestFingerprint.Scheme() {
-			message = "thread identity uses a different client codec"
-		}
-		s.phase = failedPhase{problem: canonical.BadRequest(message)}
-		return reducerOutcome{nextState: s}, nil
-	}
-	s.threadID = s.input.explicitThreadID
-	return beginNewThread(s, runner)
+	scheme := phase.history.Scheme()
+	slog.Debug("history checkpoint resolved",
+		"component", "exchange",
+		"event", "history_checkpoint_resolved",
+		"request_id", state.input.exchangeID,
+		"lookup", map[bool]string{true: "explicit", false: "implicit"}[phase.explicit],
+		"resolution", resolution,
+		"fingerprint_scheme", string(scheme),
+		"selected_checkpoint_has_opaque_reasoning", loaded.found && checkpointHasOpaqueReasoning(loaded.record),
+		"error", loaded.err != nil,
+	)
 }
 
-func beginNewThread(s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
+func checkpointHasOpaqueReasoning(checkpoint continuity.Checkpoint) bool {
+	for _, items := range [][]canonical.CanonicalItem{checkpoint.Request.Items(), checkpoint.Response.Items()} {
+		for _, item := range items {
+			reasoning, ok := item.Reasoning()
+			if ok && !reasoning.Opaque().IsZero() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func beginNewExchange(s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
 	draft, err := continuity.PrepareBegin(s.input.request)
 	if err != nil {
 		s.phase = failedPhase{problem: err}
@@ -486,7 +467,7 @@ func applyRoutePlan(s exchangeState) (exchangeState, error) {
 	}
 	locality := s.input.explicitCacheLocality
 	if locality.IsZero() {
-		locality, err = cachelocality.FromThread(s.threadID)
+		locality, err = cachelocality.FromExecutionAffinity(s.executionAffinity)
 		if err != nil {
 			return s, err
 		}

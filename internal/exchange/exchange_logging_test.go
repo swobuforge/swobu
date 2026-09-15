@@ -16,6 +16,36 @@ import (
 	"github.com/swobuforge/swobu/internal/wire"
 )
 
+func TestCheckpointResolutionLoggingIsMetadataOnly(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	history := testExchangeHistory(t, "private-history")
+	state := reducerTestState(t)
+	state.input.exchangeID = "request-checkpoint"
+	phase := loadingCheckpointPhase{history: history}
+	for _, found := range []bool{true, false} {
+		logCheckpointResolution(state, phase, checkpointLoaded{found: found})
+	}
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 2 {
+		t.Fatalf("log entries = %#v, want two resolution outcomes", entries)
+	}
+	for index, want := range []string{"unique", "miss_or_ambiguous"} {
+		assertLogField(t, entries[index], "event", "history_checkpoint_resolved")
+		assertLogField(t, entries[index], "request_id", "request-checkpoint")
+		assertLogField(t, entries[index], "lookup", "implicit")
+		assertLogField(t, entries[index], "resolution", want)
+		assertLogField(t, entries[index], "fingerprint_scheme", string(history.Scheme()))
+	}
+	if strings.Contains(logs.String(), "private-history") {
+		t.Fatalf("checkpoint logs exposed fingerprint input: %s", logs.String())
+	}
+}
+
 func TestProviderFailureLogClassificationUsesTypedFailureAuthority(t *testing.T) {
 	t.Parallel()
 

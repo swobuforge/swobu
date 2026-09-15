@@ -12,7 +12,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -41,7 +41,7 @@ func TestTargetBackoffSkipsUnavailableTargetAcrossExchanges(t *testing.T) {
 	decoded.CacheLocality = locality
 
 	for _, exchangeID := range []string{"ex_discovery", "ex_avoids"} {
-		if _, err := runExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses, thread.ID{}); err != nil {
+		if _, err := runExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{}); err != nil {
 			t.Fatal(err)
 		}
 	}

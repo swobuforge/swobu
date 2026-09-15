@@ -11,8 +11,8 @@ import (
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -72,19 +72,19 @@ func TestProjectModelSelectsExactZenProtocol(t *testing.T) {
 
 func TestOpenCodeProjectsThreadAcrossBufferedAndStreamingRails(t *testing.T) {
 	const rawClientSession = "secret-marker-123"
-	threadID, err := thread.Derive("client/x-opencode-session/v1", "alpha", rawClientSession)
+	executionAffinity, err := executionaffinity.Derive("client/x-opencode-session/v1", "alpha", rawClientSession)
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherThreadID, err := thread.Derive("client/x-opencode-session/v1", "alpha", "other-marker")
+	otherAffinity, err := executionaffinity.Derive("client/x-opencode-session/v1", "alpha", "other-marker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSession, err := thread.Project("provider/opencode-session/v1", threadID)
+	wantSession, err := executionaffinity.Project("provider/opencode-session/v1", executionAffinity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantOtherSession, err := thread.Project("provider/opencode-session/v1", otherThreadID)
+	wantOtherSession, err := executionaffinity.Project("provider/opencode-session/v1", otherAffinity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +132,8 @@ func TestOpenCodeProjectsThreadAcrossBufferedAndStreamingRails(t *testing.T) {
 					t.Fatal(err)
 				}
 				request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hello")}})
-				for _, id := range []thread.ID{threadID, threadID, otherThreadID} {
-					doc, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ThreadID: id}, Canonical: request, Delivery: mode})
+				for _, id := range []executionaffinity.Key{executionAffinity, executionAffinity, otherAffinity} {
+					doc, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExecutionAffinity: id}, Canonical: request, Delivery: mode})
 					if err != nil {
 						t.Fatal(err)
 					}

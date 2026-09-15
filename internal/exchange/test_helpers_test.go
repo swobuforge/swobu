@@ -15,9 +15,9 @@ import (
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -30,8 +30,8 @@ type Runner = runtimeBundle
 
 const testHistoryScheme historyfingerprint.Scheme = "responses/v1"
 
-func testThreadID(material string) thread.ID {
-	id, err := thread.Derive("exchange-test/v1", material)
+func testExecutionAffinity(material string) executionaffinity.Key {
+	id, err := executionaffinity.Derive("exchange-test/v1", material)
 	if err != nil {
 		panic(err)
 	}
@@ -128,11 +128,11 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 	}
 	clientCodec := runner.Runtime.ClientCodec(in.ClientFamily)
 	request := provider.Request{Canonical: in.Prepared.Request(), Delivery: in.ProviderDelivery}
-	threadID, err := thread.Derive("swobu/genesis-response/v1", in.WorkspaceSlug, responseID.String())
+	executionAffinity, err := executionaffinity.Derive("swobu/genesis-response/v1", in.WorkspaceSlug, responseID.String())
 	if err != nil {
 		return nil, err
 	}
-	request.Attempt = provider.AttemptContext{ThreadID: threadID}
+	request.Attempt = provider.AttemptContext{ExecutionAffinity: executionAffinity}
 	if previous, ok := in.Prepared.PreviousHistory(backend.Target.TargetID, backend.Target.TargetVersion); ok {
 		request.PreviousHistory = &previous
 	}
@@ -140,9 +140,8 @@ func runPreparedProviderForTest(ctx context.Context, runner Runner, in ExchangeI
 		backend: backend, request: request, clientCodec: clientCodec,
 		clientDelivery: in.ClientDelivery, exchangeID: in.ExchangeID,
 		workspaceSlug: in.WorkspaceSlug, fullRequest: in.Prepared.Request(),
-		historyScheme: testHistoryScheme,
-		advance:       &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
-		threadID:      threadID,
+		advance:           &historyAdvance{Request: testHistoryRequest([]byte("test-request"))},
+		executionAffinity: executionAffinity,
 	}
 	document, _, err := backend.Codec.Encode(request)
 	call.document = document

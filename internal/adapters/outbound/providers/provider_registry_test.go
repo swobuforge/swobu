@@ -12,8 +12,8 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -128,7 +128,7 @@ func TestAdvertisedProviderCodecsAreTotalWithValidLossForCanonicalBasis(t *testi
 // conservation for the relations they encode.
 func assertAdvertisedProviderProjection(t *testing.T, registry ProviderRegistry, request canonical.CanonicalRequest) {
 	t.Helper()
-	threadID, err := thread.Derive("provider-registry-test/v1", "canonical-basis")
+	executionAffinity, err := executionaffinity.Derive("provider-registry-test/v1", "canonical-basis")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func assertAdvertisedProviderProjection(t *testing.T, registry ProviderRegistry,
 						t.Fatalf("build attempt tool names: %v", err)
 					}
 					document, changes, err := backend.Codec.Encode(provider.Request{
-						Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality), ThreadID: threadID}, Canonical: request,
+						Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality), ExecutionAffinity: executionAffinity}, Canonical: request,
 						Delivery: mode, ToolNames: names,
 						EncodeContext: provider.EncodeContext{Context: context.Background(), ResolveImage: func(context.Context, canonical.URLImage) (provider.InspectedImage, error) {
 							return provider.InspectedImage{MediaType: canonical.ImageMediaPNG, Bytes: []byte("PNG"), Width: 1, Height: 1}, nil

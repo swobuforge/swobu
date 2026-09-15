@@ -74,7 +74,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		Attempt: provider.AttemptContext{
 			ExchangeID:            s.input.exchangeID,
 			CacheLocality:         s.cacheLocality,
-			ThreadID:              s.threadID,
+			ExecutionAffinity:     s.executionAffinity,
 			HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
 		},
 		Canonical:   bindRequestToTarget(attemptRequest, path.target.Model),
@@ -125,12 +125,11 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		decodeContext:  bindRequestToTarget(attemptRequest, path.target.Model),
 		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
 		workspaceSlug: workspaceSlug, fullRequest: resolved.Request(),
-		historyScheme:      s.input.requestFingerprint.Scheme(),
 		targetGeneration:   generation,
 		factReads:          factReads,
 		advance:            s.advance,
-		threadID:           s.threadID,
-		expectedHead:       s.expectedHead,
+		storageReuse:       s.storageReuse,
+		executionAffinity:  s.executionAffinity,
 		delayClientHandoff: delayClientHandoff,
 		providerRound:      len(s.providerUsage),
 	}, path.target, requestChanges, fetchCache, nil
@@ -250,8 +249,8 @@ func handoffResponseStream(ctx context.Context, call providerCall, stream canoni
 	capture := newCheckpointCaptureResponseStream(stream, binding)
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
-		store: runner.CheckpointStore, request: call.fullRequest.Clone(), historyScheme: call.historyScheme,
-		advance: call.advance, threadID: call.threadID, expectedHead: call.expectedHead,
+		store: runner.CheckpointStore, request: call.fullRequest.Clone(),
+		advance: call.advance, executionAffinity: call.executionAffinity, storageReuse: call.storageReuse,
 	}
 	gated := newCheckpointTerminalGate(capture, call.clientCodec, call.fullRequest, committer)
 	return encodeClientOutput(ctx, call, gated, incremental)

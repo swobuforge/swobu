@@ -12,8 +12,8 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -103,11 +103,11 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 }
 
 func TestCharacterizeTargetFactReusesOneSyntheticThreadIdentity(t *testing.T) {
-	var projected []thread.ID
+	var projected []executionaffinity.Key
 	codec := Codec{
 		Protocol: protocolkind.ChatCompletions,
 		ProjectRequestHeaders: func(attempt provider.AttemptContext, _ http.Header) error {
-			projected = append(projected, attempt.ThreadID)
+			projected = append(projected, attempt.ExecutionAffinity)
 			return nil
 		},
 	}
@@ -124,7 +124,7 @@ func TestCharacterizeTargetFactReusesOneSyntheticThreadIdentity(t *testing.T) {
 		t.Fatalf("resolution = %#v, want conclusive false", resolution)
 	}
 	if len(projected) != 2 || projected[0].IsZero() || projected[0] != projected[1] {
-		t.Fatal("preferred and control characterization did not share one synthetic thread identity")
+		t.Fatal("preferred and control characterization did not share one synthetic execution affinity")
 	}
 }
 

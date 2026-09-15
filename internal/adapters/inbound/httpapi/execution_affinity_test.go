@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/swobuforge/swobu/internal/domain/thread"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 )
 
 func TestIngressTransportRequestConsumesFirstNonblankOpenCodeSession(t *testing.T) {
@@ -17,7 +17,7 @@ func TestIngressTransportRequestConsumesFirstNonblankOpenCodeSession(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := thread.Derive("client/x-opencode-session/v1", "alpha", "secret-marker-123")
+	want, err := executionaffinity.Derive("client/x-opencode-session/v1", "alpha", "secret-marker-123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestIngressTransportRequestLeavesBlankOpenCodeSessionUnknown(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !got.IsZero() {
-		t.Fatal("blank-only OpenCode session header derived a thread identity")
+		t.Fatal("blank-only OpenCode session header derived an execution affinity")
 	}
 	if request.Header.Get(openCodeSessionHeader) != "" {
 		t.Fatal("blank OpenCode session header survived ingress sanitization")

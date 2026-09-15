@@ -1,7 +1,8 @@
 // Package continuity resolves durable conversation continuation state.
 //
-// Checkpoints and thread heads are partitioned by workspace. The memory store
-// retains a bounded process-local window; expiry and restart discard it.
-// Head advancement checks the expected current head before replacing it.
+// Immutable checkpoints are partitioned by workspace. The memory store retains
+// a bounded process-local window and structurally shares canonical history
+// prefixes; expiry and restart discard it. Exact response IDs or unique History
+// matches select state. Execution affinity never does.
 // Transport authentication and client encoding remain outside this package.
 package continuity

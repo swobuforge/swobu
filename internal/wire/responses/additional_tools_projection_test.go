@@ -10,8 +10,8 @@ import (
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/domain/thread"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -45,14 +45,14 @@ func TestAdditionalToolsCanonicalProjectionAcrossProtocolsAndCheckpoint(t *testi
 		t.Fatal(err)
 	}
 	store := continuity.NewMemoryStore()
-	threadID, err := thread.Derive("responses-test/v1", "additional-tools")
+	executionAffinity, err := executionaffinity.Derive("responses-test/v1", "additional-tools")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.StartThread(context.Background(), "dev", continuity.Checkpoint{ThreadID: threadID, HistoryScheme: "responses/v1", Request: decoded.Request.Request, Response: response}); err != nil {
+	if err := store.Put(context.Background(), "dev", continuity.Commit{Checkpoint: continuity.Checkpoint{ExecutionAffinity: executionAffinity, Request: decoded.Request.Request, Response: response}}); err != nil {
 		t.Fatal(err)
 	}
-	checkpoint, found, err := store.GetCheckpoint(context.Background(), "dev", responseID)
+	checkpoint, found, err := store.Get(context.Background(), "dev", responseID)
 	if err != nil || !found {
 		t.Fatalf("checkpoint = (%t, %v)", found, err)
 	}
