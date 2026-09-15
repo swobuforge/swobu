@@ -2272,3 +2272,10 @@ func TestOtherClientsManualSetupDoesNotCancelDiscovery(t *testing.T) {
 		t.Fatalf("discovered client missing after manual setup closed:\n%s", frame)
 	}
 }
+
+func TestDisclosureClosedDoesNotClaimEscape(t *testing.T) {
+	d := New(clientconnect.Target{}, nil)
+	if keys := d.KeyMap(); len(keys) != 0 {
+		t.Fatalf("closed disclosure Escape bindings = %d, want none", len(keys))
+	}
+}

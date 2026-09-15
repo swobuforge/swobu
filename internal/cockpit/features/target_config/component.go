@@ -9,7 +9,6 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 func targetConfigTitle(w *TargetConfig) string {
@@ -43,6 +42,8 @@ func TargetAddMountKey(w *TargetConfig, suffix string) string {
 	return fmt.Sprintf("target-add:%s:%s:%s", w.WorkspaceID, w.Route.ID, suffix)
 }
 
+func (w *TargetConfig) Title() string { return targetConfigTitle(w) }
+
 // SaveTargetFunc is the narrow command boundary for target creation.
 type SaveTargetFunc func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error)
 
@@ -66,6 +67,7 @@ type TargetConfig struct {
 	Route       readmodel.RouteReadModel
 	Target      readmodel.TargetReadModel
 	mode        targetConfigMode
+	Embedded    bool
 
 	appState
 
@@ -108,7 +110,7 @@ func NewTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.RouteRea
 	st := newStates()
 	st.Placement = tui.NewState(defaultPlacementForRoute(route))
 	operationContext, cancelOperations := context.WithCancel(context.Background())
-	return &TargetConfig{
+	w := &TargetConfig{
 		WorkspaceID:      workspaceID,
 		Route:            route,
 		appState:         st,
@@ -118,6 +120,7 @@ func NewTargetConfig(workspaceID readmodel.WorkspaceID, route readmodel.RouteRea
 		cancelOperations: cancelOperations,
 		credentialSlot:   newCredentialSlot(workspaceID, route.ID, ""),
 	}
+	return w
 }
 
 // NewEditTargetConfig builds an idle target config seeded from an existing target.
@@ -194,6 +197,7 @@ func (w *TargetConfig) Back() bool {
 
 // Close forcibly closes the target config from any phase.
 func (w *TargetConfig) Close() {
+	w.cancelPendingAuthSession()
 	w.Lifecycle.Set(LifecycleClosed)
 	w.DeleteArmed.Set(false)
 	w.stopAuthSessionObserver()
@@ -203,14 +207,6 @@ func (w *TargetConfig) Close() {
 	if w.OnClose != nil {
 		w.OnClose()
 	}
-}
-
-// KeyMap returns back/cancel bindings when the target config is open.
-func (w *TargetConfig) KeyMap() tui.KeyMap {
-	if !w.IsOpen() {
-		return nil
-	}
-	return ui.BackScope(w.IsOpen, func() { w.Back() })
 }
 
 // UpdateProps supports go-tui remounts. Production refresh paths should call
@@ -231,6 +227,7 @@ func (w *TargetConfig) UpdateProps(fresh tui.Component) {
 	w.OnSaved = f.OnSaved
 	w.OnDeleteConfirmed = f.OnDeleteConfirmed
 	w.OnClose = f.OnClose
+	w.Embedded = f.Embedded
 	w.UpdateProviderOptions(f.providerOptions)
 }
 

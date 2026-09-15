@@ -74,14 +74,16 @@ func (w *TargetConfig) Render(app *tui.App) *tui.Element {
 		tui.WithWidthPercent(100.00),
 	)
 	if w.IsOpen() {
-		__tui_1 := tui.New(
-			tui.WithWidthPercent(100.00),
-		)
-		__tui_2 := app.Mount(w, tui.MountKey(0, TargetAddMountKey(w, "target-config-parent")), func() tui.Component {
-			return TargetConfigHeader(w)
-		})
-		__tui_1.AddChild(__tui_2)
-		__tui_0.AddChild(__tui_1)
+		if !w.Embedded {
+			__tui_1 := tui.New(
+				tui.WithWidthPercent(100.00),
+			)
+			__tui_2 := app.Mount(w, tui.MountKey(0, TargetAddMountKey(w, "target-config-parent")), func() tui.Component {
+				return TargetConfigHeader(w)
+			})
+			__tui_1.AddChild(__tui_2)
+			__tui_0.AddChild(__tui_1)
+		}
 		__tui_3 := tui.New(
 			tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 			tui.WithWidthPercent(100.00),

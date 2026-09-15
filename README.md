@@ -9,7 +9,7 @@ A Swobu route looks like a model name to the agent; behind it can be your provid
 [Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
 
 <p align="center">
-  <img src="./assets/readme/swobu-demo.gif" alt="Pooling capacity, switching a Claude Code route, and sharing the endpoint with Swobu" width="960">
+  <img src="./assets/readme/swobu-demo.gif" alt="Sharing an HTTPS endpoint, switching its backend without changing the remote client, and revoking access with Swobu" width="960">
 </p>
 
 ---

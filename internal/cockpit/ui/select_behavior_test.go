@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 // TestSelect_EnterActivatesBody verifies that Enter activates the select body.
@@ -340,5 +342,50 @@ func TestSelect_EnterIdempotent(t *testing.T) {
 
 	if !s.IsEntered() {
 		t.Fatal("Should still be entered")
+	}
+}
+
+func TestSelectControlledEntryRestoresStableShell(t *testing.T) {
+	entered := false
+	control := NewSelect(SelectProps{
+		ID: "controlled", Label: "target", Action: "edit ↵", BackoutAction: "cancel ↵",
+		Entered:   func() bool { return entered },
+		OnEnter:   func() { entered = true },
+		OnBackout: func() { entered = false },
+		Body:      func(func()) tui.Component { return NewSelectableRow("child", "child", "", "", nil) },
+	})
+	h, err := testkit.NewHarnessAt(control, 80, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	h.Open()
+	h.FocusNext()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	if !control.IsEntered() {
+		t.Fatal("controlled Select did not enter")
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+	if control.IsEntered() {
+		t.Fatal("controlled Select did not back out")
+	}
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "> target") {
+		t.Fatalf("controlled Select did not restore shell selection:\n%s", frame)
+	}
+}
+
+func TestSelectBackClosesPlainEnteredBody(t *testing.T) {
+	s := NewSelect(SelectProps{ID: "plain", Body: func(func()) tui.Component {
+		return NewSelectableRow("child", "child", "", "", nil)
+	}})
+	s.Enter()
+	if !s.Back() {
+		t.Fatal("entered Select did not consume semantic Back")
+	}
+	if s.IsEntered() {
+		t.Fatal("semantic Back left Select entered")
+	}
+	if s.Back() {
+		t.Fatal("closed Select consumed semantic Back")
 	}
 }

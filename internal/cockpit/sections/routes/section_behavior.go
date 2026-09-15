@@ -38,6 +38,7 @@ type SectionView struct {
 	ShareCommands        ports.ShareCommands
 	OnNotice             func(readmodel.Notice)
 	app                  *tui.App
+	headerRef            *tui.Ref
 	ApplyRouteDraft      func(context.Context, ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error)
 	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
 	OnWorkspaceCommitted func(readmodel.WorkspaceReadModel)
@@ -49,6 +50,7 @@ func Section(model readmodel.WorkspaceReadModel, commands ports.RouteCommands) *
 		Expanded:      tui.NewState(true),
 		State:         NewRouteSectionState(model.Routes),
 		TargetConfigs: NewTargetConfigMounts(model.RoutingWorkspaceID()),
+		headerRef:     tui.NewRef(),
 	}
 	section.TargetConfigs.ProviderOptions = model.ProviderOptions
 	section.configureTargetConfigMounts()
@@ -70,13 +72,6 @@ func (s *SectionView) RequestAddRouteFocus() {
 	}
 }
 
-func (s *SectionView) KeyMap() tui.KeyMap {
-	return tui.KeyMap{
-		tui.OnStop(tui.KeyEnter, ui.ActivateCurrentSelection),
-		tui.OnStop(tui.Rune(' '), ui.ActivateCurrentSelection),
-	}
-}
-
 // BindApp binds the route section's semantic state so route backout redraws
 // the mounted section immediately instead of leaving stale inline detail on
 // screen.
@@ -87,7 +82,6 @@ func (s *SectionView) BindApp(app *tui.App) {
 	s.State.ExpandedRoute.BindApp(app)
 	s.State.OpenTarget.BindApp(app)
 	s.State.AddTargetRoute.BindApp(app)
-	s.State.DeleteConfirmTarget.BindApp(app)
 	s.State.FocusRoute.BindApp(app)
 	s.State.SharePendingRoute.BindApp(app)
 	s.State.ShareCopiedRoute.BindApp(app)
@@ -107,13 +101,13 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.ApplyRouteDraft = f.ApplyRouteDraft
 	s.OnWorkspacePersisted = f.OnWorkspacePersisted
 	s.OnWorkspaceCommitted = f.OnWorkspaceCommitted
+	if f.addRouteFocusPending {
+		s.RequestAddRouteFocus()
+	}
 	if s.State == nil {
 		s.State = f.State
 	} else if f.State != nil {
 		s.State.Routes = append([]readmodel.RouteReadModel(nil), f.State.Routes...)
-	}
-	if s.State != nil && s.State.DeleteConfirmTarget == nil {
-		s.State.DeleteConfirmTarget = tui.NewState(readmodel.TargetID(""))
 	}
 	if s.State != nil && s.State.FocusRoute == nil {
 		s.State.FocusRoute = tui.NewState(readmodel.RouteID(""))
@@ -230,24 +224,10 @@ func (s *SectionView) revokeShare(route readmodel.RouteReadModel) error {
 	return nil
 }
 
-func sectionHeaderKey(s *SectionView) string {
-	if s.Model.ID != "" {
-		return "section-header:routes:" + string(s.Model.ID)
-	}
-	if s.Model.Slug != "" {
-		return "section-header:routes:" + s.Model.Slug
-	}
-	return "section-header:routes:+"
-}
-
 func SectionHeaderComponent(s *SectionView) tui.Component {
-	return ui.NewSectionDisclosure(sectionHeaderKey(s), "model routes", s.Expanded)
-}
-
-// TargetConfigComponent is a mount shim so the target config itself
-// receives go-tui app binding instead of being rendered as a plain element tree.
-func TargetConfigComponent(config *target_config.TargetConfig) *target_config.TargetConfig {
-	return config
+	disclosure := ui.NewSectionDisclosure("routes-header", "model routes", s.Expanded)
+	disclosure.UseRef(s.headerRef)
+	return disclosure
 }
 
 func (s *SectionView) configureTargetConfigMounts() {
@@ -256,6 +236,8 @@ func (s *SectionView) configureTargetConfigMounts() {
 	}
 	s.TargetConfigs.WorkspaceID = s.Model.RoutingWorkspaceID()
 	s.TargetConfigs.Callbacks.OnCreated = func(result ports.SaveTargetResult) {
+		openRoute := s.State.AddTargetRoute.Get()
+		s.TargetConfigs.DiscardAdd(openRoute)
 		s.applyCommittedWorkspace(result.Workspace)
 		s.State.AddTargetRoute.Set("")
 		if s.Model.IsOnboarding() && result.Workspace.ID != "" && s.OnWorkspacePersisted != nil {
@@ -263,6 +245,7 @@ func (s *SectionView) configureTargetConfigMounts() {
 		}
 	}
 	s.TargetConfigs.Callbacks.OnSaved = func(result ports.SaveTargetResult) {
+		s.TargetConfigs.DiscardEdit(result.Route.ID, result.Target.ID)
 		s.applyCommittedWorkspace(result.Workspace)
 		s.State.OpenTarget.Set("")
 	}
@@ -270,11 +253,13 @@ func (s *SectionView) configureTargetConfigMounts() {
 		return s.deleteTargetAndClose(routeID, targetID)
 	}
 	s.TargetConfigs.Callbacks.OnAddClose = func(routeID readmodel.RouteID) {
+		s.TargetConfigs.DiscardAdd(routeID)
 		if s.State != nil && s.State.AddTargetRoute.Get() == routeID {
 			s.State.AddTargetRoute.Set("")
 		}
 	}
-	s.TargetConfigs.Callbacks.OnEditClose = func(targetID readmodel.TargetID) {
+	s.TargetConfigs.Callbacks.OnEditClose = func(routeID readmodel.RouteID, targetID readmodel.TargetID) {
+		s.TargetConfigs.DiscardEdit(routeID, targetID)
 		if s.State != nil && s.State.OpenTarget.Get() == targetID {
 			s.State.OpenTarget.Set("")
 		}
@@ -411,9 +396,9 @@ func (s *SectionView) deleteTargetAndClose(routeID readmodel.RouteID, targetID r
 	if err != nil {
 		return err
 	}
+	s.State.FocusRoute.Set(routeID)
 	s.applyCommittedWorkspace(committed.Workspace)
 	s.State.OpenTarget.Set("")
-	s.State.DeleteConfirmTarget.Set("")
 	return nil
 }
 
@@ -443,45 +428,29 @@ func (s *SectionView) routeWithoutTarget(routeID readmodel.RouteID, targetID rea
 	return readmodel.RouteReadModel{}, false
 }
 
-func (s *SectionView) confirmDeleteTarget(targetID readmodel.TargetID) {
-	s.State.OpenTarget.Set("")
-	s.State.DeleteConfirmTarget.Set(targetID)
-}
-
-func (s *SectionView) closeDeleteTargetConfirm() {
-	s.State.DeleteConfirmTarget.Set("")
-}
-
 func (s *SectionView) Back() bool {
-	if s.State.DeleteConfirmTarget.Get() != "" {
-		s.State.DeleteConfirmTarget.Set("")
-		return true
-	}
-	if s.State.OpenTarget.Get() != "" {
-		s.State.OpenTarget.Set("")
-		return true
-	}
-	if s.State.AddTargetRoute.Get() != "" {
-		s.State.AddTargetRoute.Set("")
-		return true
-	}
 	if s.DraftRoute != nil {
 		s.closeDraftRoute()
+		s.RequestAddRouteFocus()
 		return true
 	}
-	if s.State.ExpandedRoute.Get() != "" {
+	if routeID := s.State.ExpandedRoute.Get(); routeID != "" {
+		s.State.FocusRoute.Set(routeID)
 		s.State.ExpandedRoute.Set("")
+		return true
+	}
+	if s.Expanded.Get() {
+		s.Expanded.Set(false)
 		return true
 	}
 	return false
 }
 
-func (s *SectionView) targetConfigKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
-	return s.TargetConfigs.MountKey(route, targetID)
-}
-
-func (s *SectionView) targetConfigMountKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
-	return s.targetConfigKey(route, targetID)
+func (s *SectionView) BackRef() *tui.Ref {
+	if s.Expanded.Get() {
+		return nil
+	}
+	return s.headerRef
 }
 
 func (s *SectionView) applyRouteUpsert(route readmodel.RouteReadModel) {
@@ -635,7 +604,6 @@ func (s *SectionView) finishRouteDeleteInteraction(routeID readmodel.RouteID, de
 	s.State.ExpandedRoute.Set("")
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
-	s.State.DeleteConfirmTarget.Set("")
 	s.TargetConfigs.DeleteRoute(routeID)
 }
 
@@ -847,7 +815,6 @@ func (s *SectionView) applyRouteDeleted(routeID readmodel.RouteID) {
 	}
 	s.State.OpenTarget.Set("")
 	s.State.AddTargetRoute.Set("")
-	s.State.DeleteConfirmTarget.Set("")
 	s.TargetConfigs.DeleteRoute(routeID)
 }
 
@@ -942,11 +909,9 @@ func addTargetMountKey(route readmodel.RouteReadModel) string {
 	return "add-target:" + string(route.ID)
 }
 
-func targetAddMountKey(route readmodel.RouteReadModel) string {
-	return "target-add:" + string(route.ID)
-}
-
 func addRouteMountKey() string { return "add-route" }
+
+func routeMountKey(route readmodel.RouteReadModel) string { return "route:" + string(route.ID) }
 
 // RouteRowComponent mounts a selectable route disclosure row.
 func RouteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
@@ -968,47 +933,6 @@ func RouteRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.Selec
 		row.OnEscape = func() { s.State.ExpandedRoute.Set("") }
 	}
 	return row
-}
-
-// TargetRowComponent mounts a selectable target row indented as a route child.
-// Target rows show provider/model and equal share inside balanced tiers.
-func TargetRowComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel, tierIndex, targetIndex int) *ui.SelectableRow {
-	value := targetValue(target)
-	if tierIndex, ok := route.TargetTier(target.ID); ok && len(route.Tiers[tierIndex].Targets) > 1 {
-		value = value + " · " + fmt.Sprint(100/len(route.Tiers[tierIndex].Targets)) + "%"
-	}
-	row := ui.NewSelectableRow(
-		targetMountKey(route, target),
-		func() string {
-			if targetIndex == 0 {
-				return tierLabel(tierIndex)
-			}
-			return ""
-		}(),
-		value,
-		"edit ↵",
-		func() { s.openTarget(target) },
-	)
-	row.ReserveLabelColumn = true
-	row.LabelTone = tierTone(tierIndex)
-	row.FocusValue = true
-	if s.State.OpenTarget.Get() == target.ID {
-		row.OnEscape = func() { s.State.OpenTarget.Set("") }
-	}
-	return row
-}
-
-func routeMountKey(route readmodel.RouteReadModel) string { return "route:" + string(route.ID) }
-
-// AddTargetRowComponent mounts an "add target" selectable row.
-func AddTargetRowComponent(s *SectionView, route readmodel.RouteReadModel) *ui.SelectableRow {
-	return ui.NewSelectableRow(
-		addTargetMountKey(route),
-		"add target",
-		"",
-		"add ↵",
-		func() { s.AddTarget(route) },
-	)
 }
 
 // AddRouteRowComponent mounts an "add model route" selectable row.
@@ -1047,3 +971,45 @@ var (
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
+
+func TargetControlComponent(s *SectionView, route readmodel.RouteReadModel, target readmodel.TargetReadModel, tierIndex, targetIndex int) *ui.Select {
+	value := targetValue(target)
+	if index, ok := route.TargetTier(target.ID); ok && len(route.Tiers[index].Targets) > 1 {
+		value += " · " + fmt.Sprint(100/len(route.Tiers[index].Targets)) + "%"
+	}
+	label := ""
+	if targetIndex == 0 {
+		label = tierLabel(tierIndex)
+	}
+	active := s.State.OpenTarget.Get() == target.ID
+	props := ui.SelectProps{
+		ID: targetMountKey(route, target), Label: label, Value: value, Action: "edit ↵",
+		ReserveLabelColumn: true, LabelTone: tierTone(tierIndex), FocusValue: true,
+		Entered: func() bool { return s.State.OpenTarget.Get() == target.ID },
+		OnEnter: func() { s.openTarget(target) }, BackoutAction: "cancel ↵", BodyFlush: true,
+	}
+	if active {
+		config := s.targetEditConfig(route, target)
+		props.Value = config.Title()
+		props.OnBackout = config.Close
+		props.Body = func(_ func()) tui.Component { return config }
+	}
+	return ui.NewSelect(props)
+}
+
+func AddTargetControlComponent(s *SectionView, route readmodel.RouteReadModel) *ui.Select {
+	active := s.State.AddTargetRoute.Get() == route.ID
+	props := ui.SelectProps{
+		ID: addTargetMountKey(route), Label: "add target", Action: "add ↵",
+		Entered: func() bool { return s.State.AddTargetRoute.Get() == route.ID },
+		OnEnter: func() { s.AddTarget(route) }, BackoutAction: "cancel ↵", BodyFlush: true,
+	}
+	if active {
+		config := s.targetAddConfig(route)
+		props.Label = ""
+		props.Value = config.Title()
+		props.OnBackout = config.Close
+		props.Body = func(_ func()) tui.Component { return config }
+	}
+	return ui.NewSelect(props)
+}

@@ -634,14 +634,23 @@ func (w *TargetConfig) RefreshAuthSession() {
 	w.applyAuthSessionResult(result)
 }
 
-func (w *TargetConfig) CancelAuthSession() {
+func (w *TargetConfig) cancelPendingAuthSession() {
 	w.stopAuthSessionObserver()
 	session := w.AuthSession.Get()
-	if w.TargetAuthCommands != nil && strings.TrimSpace(session.SessionID) != "" {
-		ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
-		_ = w.TargetAuthCommands.CancelAuthSession(ctx, session.SessionID)
-		cancel()
+	if !strings.EqualFold(strings.TrimSpace(session.State), "pending") || strings.TrimSpace(session.SessionID) == "" {
+		return
 	}
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{})
+	if w.TargetAuthCommands == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
+	_ = w.TargetAuthCommands.CancelAuthSession(ctx, session.SessionID)
+	cancel()
+}
+
+func (w *TargetConfig) CancelAuthSession() {
+	w.cancelPendingAuthSession()
 	w.resetFlowState()
 	w.Lifecycle.Set(LifecycleOpen)
 }

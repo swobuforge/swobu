@@ -27,10 +27,6 @@ type TargetConfigKey struct {
 	TargetID    readmodel.TargetID
 }
 
-func (k TargetConfigKey) mountKey() string {
-	return "target-config:" + string(k.Mode) + ":" + string(k.WorkspaceID) + ":" + string(k.RouteID) + ":" + string(k.TargetID)
-}
-
 // TargetConfigCommands are the domain effects a mounted target config may
 // execute. Static provider picker options are page/readmodel data, not commands.
 type TargetConfigCommands struct {
@@ -47,7 +43,7 @@ type TargetConfigCallbacks struct {
 	OnSaved           func(ports.SaveTargetResult)
 	OnDeleteConfirmed func(readmodel.RouteID, readmodel.TargetID) error
 	OnAddClose        func(readmodel.RouteID)
-	OnEditClose       func(readmodel.TargetID)
+	OnEditClose       func(readmodel.RouteID, readmodel.TargetID)
 }
 
 // TargetConfigMounts owns mounted target add/edit target config instances for one
@@ -199,9 +195,14 @@ func (h *TargetConfigMounts) DeleteRoute(routeID readmodel.RouteID) {
 	}
 }
 
-func (h *TargetConfigMounts) DeleteEdit(route readmodel.RouteReadModel, targetID readmodel.TargetID) {
+func (h *TargetConfigMounts) DiscardAdd(routeID readmodel.RouteID) {
 	h.ensureMaps()
-	delete(h.components, h.editKey(route.ID, targetID))
+	delete(h.components, h.addKey(routeID))
+}
+
+func (h *TargetConfigMounts) DiscardEdit(routeID readmodel.RouteID, targetID readmodel.TargetID) {
+	h.ensureMaps()
+	delete(h.components, h.editKey(routeID, targetID))
 }
 
 func (h *TargetConfigMounts) HasAdd(routeID readmodel.RouteID) bool {
@@ -219,10 +220,6 @@ func (h *TargetConfigMounts) HasEdit(route readmodel.RouteReadModel, targetID re
 	h.ensureMaps()
 	_, ok := h.components[h.editKey(route.ID, targetID)]
 	return ok
-}
-
-func (h *TargetConfigMounts) MountKey(route readmodel.RouteReadModel, targetID readmodel.TargetID) string {
-	return h.editKey(route.ID, targetID).mountKey()
 }
 
 func (h *TargetConfigMounts) newAdd(route readmodel.RouteReadModel) *target_config.TargetConfig {
@@ -255,7 +252,7 @@ func (h *TargetConfigMounts) newEdit(route readmodel.RouteReadModel, target read
 		h.saveTarget,
 		func() {
 			if h.Callbacks.OnEditClose != nil {
-				h.Callbacks.OnEditClose(wf.Target.ID)
+				h.Callbacks.OnEditClose(wf.Route.ID, wf.Target.ID)
 			}
 		},
 	)
@@ -304,12 +301,14 @@ func (h *TargetConfigMounts) refreshAddConfig(wf *target_config.TargetConfig, ro
 	wf.UpdateRoute(h.WorkspaceID, route)
 	wf.UpdateCommands(h.Commands.SaveTarget, h.Commands.Setup, h.Commands.Auth, h.Commands.Credentials)
 	wf.UpdateProviderOptions(h.ProviderOptions)
+	wf.Embedded = true
 }
 
 func (h *TargetConfigMounts) refreshEditConfig(wf *target_config.TargetConfig, route readmodel.RouteReadModel, target readmodel.TargetReadModel) {
 	wf.UpdateTarget(h.WorkspaceID, route, target)
 	wf.UpdateCommands(h.Commands.SaveTarget, h.Commands.Setup, h.Commands.Auth, h.Commands.Credentials)
 	wf.UpdateProviderOptions(h.ProviderOptions)
+	wf.Embedded = true
 }
 
 func (h *TargetConfigMounts) refreshCachedTargetConfigDependencies() {

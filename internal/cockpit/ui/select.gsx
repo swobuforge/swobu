@@ -12,9 +12,11 @@ templ (s *Select) Render() {
 		}
 
 		if s.IsEntered() && s.props.Body != nil {
-			<div class="pl-3 flex-col w-full">
-				@SelectBodyComponent(s)
-			</div>
+			if s.props.BodyFlush {
+				<div class="flex-col w-full">@SelectBodyComponent(s)</div>
+			} else {
+				<div class="pl-3 flex-col w-full">@SelectBodyComponent(s)</div>
+			}
 		}
 	</div>
 }

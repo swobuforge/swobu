@@ -66,3 +66,45 @@ func TestPersistedRouteRenameRekeysOpenEditTargetBeforeRefresh(t *testing.T) {
 		t.Fatalf("edit draft model = %q, want unsaved-edit", got)
 	}
 }
+
+func TestTargetConfigCancelStartsFreshInteractionLifetime(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Enabled: true}
+	section := Section(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{route}}, nil)
+	section.AddTarget(route)
+	first := section.TargetConfigs.CachedAdd(route.ID)
+	first.Draft.Update(func(d readmodel.TargetDraft) readmodel.TargetDraft {
+		d.ProviderSpec = "unsaved-provider"
+		return d
+	})
+	first.Close()
+	section.AddTarget(route)
+	second := section.TargetConfigs.CachedAdd(route.ID)
+	if second == first {
+		t.Fatal("canceled create reused its target config instance")
+	}
+	if got := second.Draft.Get().ProviderSpec; got != "" {
+		t.Fatalf("reopened create retained provider %q", got)
+	}
+}
+
+func TestTargetEditCancelReseedsLatestDurableTarget(t *testing.T) {
+	target := readmodel.TargetReadModel{ID: "one", Provider: "openai", Model: "gpt-old", CredentialRef: "env:OPENAI_API_KEY"}
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Enabled: true, Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{target}}}}
+	section := Section(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{route}}, nil)
+	section.OpenTargetEditor(route, target)
+	first := section.TargetConfigs.Edit(route, target)
+	first.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{ModelName: "unsaved"})
+	first.Close()
+
+	target.Model = "gpt-new"
+	route.Tiers[0].Targets[0] = target
+	section.State.Routes[0] = route
+	section.OpenTargetEditor(route, target)
+	second := section.TargetConfigs.Edit(route, target)
+	if second == first {
+		t.Fatal("canceled edit reused its target config instance")
+	}
+	if got := second.SelectedModel.Get().ModelName; got != "gpt-new" {
+		t.Fatalf("reopened edit model = %q, want latest durable value", got)
+	}
+}

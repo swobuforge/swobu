@@ -35,6 +35,7 @@ type SectionView struct {
 	// delete row is armed. The parent keeps the request here so Back() can clear
 	// it without holding a persistent child reference.
 	PendingDeleteWorkspaceID *tui.State[readmodel.WorkspaceID]
+	headerRef                *tui.Ref
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceCommands) *SectionView {
@@ -44,6 +45,7 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 		SharePending:             tui.NewState(false),
 		ShareCopied:              tui.NewState(false),
+		headerRef:                tui.NewRef(),
 	}
 	if len(commands) > 0 && commands[0] != nil {
 		section.RenameWorkspace = commands[0].RenameWorkspace
@@ -84,11 +86,11 @@ func (s *SectionView) resetTransientState() {
 }
 
 func (s *SectionView) Back() bool {
-	if s.deleteIsOpen() {
-		s.closeDelete()
-		return true
+	if s.Model.IsDraft() || !s.Expanded.Get() {
+		return false
 	}
-	return false
+	s.Expanded.Set(false)
+	return true
 }
 
 func (s *SectionView) deleteIsOpen() bool { return s.PendingDeleteWorkspaceID.Get() != "" }
@@ -259,12 +261,21 @@ func workspaceIdentity(s *SectionView) string {
 	return "+"
 }
 
-func sectionHeaderKey(s *SectionView) string { return "section-header:" + workspaceIdentity(s) }
+func sectionHeaderKey(s *SectionView) string { return "workspace-header" }
 
 func WorkspaceDisclosureComponent(s *SectionView) tui.Component {
 	disclosure := ui.NewSectionDisclosure(sectionHeaderKey(s), "workspace", s.Expanded)
 	disclosure.AutoFocus = true
+	disclosure.UseRef(s.headerRef)
 	return disclosure
+}
+
+func (s *SectionView) BackRef() *tui.Ref { return s.headerRef }
+
+func (s *SectionView) UpdateProps(fresh tui.Component) {
+	headerRef := s.headerRef
+	s.updatePropsFields(fresh)
+	s.headerRef = headerRef
 }
 
 func (s *SectionView) Render(app *tui.App) *tui.Element {
@@ -386,10 +397,6 @@ func (s *SectionView) updatePropsFields(fresh tui.Component) {
 	s.DeleteWorkspace = f.DeleteWorkspace
 	s.ShareCommands = f.ShareCommands
 	s.app = f.app
-}
-
-func (s *SectionView) UpdateProps(fresh tui.Component) {
-	s.updatePropsFields(fresh)
 }
 
 var _ tui.PropsUpdater = (*SectionView)(nil)

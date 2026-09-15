@@ -72,7 +72,9 @@ func (d *Disclosure) SetRenderProps(props DisclosureProps) {
 func (d *Disclosure) Init() func() { return d.selectable.Init() }
 
 // IsFocused satisfies go-tui's focus-gated dispatch contract.
-func (d *Disclosure) IsFocused() bool { return d.selectable.IsFocused() }
+func (d *Disclosure) IsFocused() bool     { return d.selectable.IsFocused() }
+func (d *Disclosure) SetRef(ref *tui.Ref) { d.selectable.Cell.Ref = ref }
+func (d *Disclosure) Ref() *tui.Ref       { return d.selectable.Ref() }
 
 // Marker returns the shared focus marker.
 func (d *Disclosure) Marker() string { return d.selectable.Marker() }

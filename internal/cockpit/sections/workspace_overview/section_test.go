@@ -506,3 +506,32 @@ func workspaceSectionModel() readmodel.WorkspaceReadModel {
 		WorkspaceURL: "http://127.0.0.1:7926/c/dev",
 	}
 }
+
+type mountedOverviewRoot struct{ section *SectionView }
+
+func (r *mountedOverviewRoot) Render(app *tui.App) *tui.Element {
+	return app.Mount(r, "overview", func() tui.Component { return r.section })
+}
+
+func TestSection_UpdatePropsPreservesBackOwnershipAndHeaderHandoff(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	h, err := testkit.NewHarnessAt(&mountedOverviewRoot{section: section}, 100, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	h.Open()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+
+	section.UpdateProps(Section(workspaceSectionModel()))
+	h.Frame()
+	if !ui.BackFocused(h.App()) {
+		t.Fatal("refreshed overview did not own semantic backout")
+	}
+	if section.Expanded.Get() {
+		t.Fatal("refreshed overview remained expanded")
+	}
+	if frame := h.FrameTrimmed(); !strings.Contains(frame, "> workspace") {
+		t.Fatalf("backout did not return selection to workspace header:\n%s", frame)
+	}
+}

@@ -30,16 +30,28 @@ func (s *Select) Render(app *tui.App) *tui.Element {
 		__tui_0.AddChild(__tui_2)
 	}
 	if s.IsEntered() && s.props.Body != nil {
-		__tui_4 := tui.New(
-			tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-			tui.WithWidthPercent(100.00),
-			tui.WithPaddingTRBL(0, 0, 0, 3),
-		)
-		__tui_5 := app.Mount(s, 2, func() tui.Component {
-			return SelectBodyComponent(s)
-		})
-		__tui_4.AddChild(__tui_5)
-		__tui_0.AddChild(__tui_4)
+		if s.props.BodyFlush {
+			__tui_4 := tui.New(
+				tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
+				tui.WithWidthPercent(100.00),
+			)
+			__tui_5 := app.Mount(s, 2, func() tui.Component {
+				return SelectBodyComponent(s)
+			})
+			__tui_4.AddChild(__tui_5)
+			__tui_0.AddChild(__tui_4)
+		} else {
+			__tui_6 := tui.New(
+				tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
+				tui.WithWidthPercent(100.00),
+				tui.WithPaddingTRBL(0, 0, 0, 3),
+			)
+			__tui_7 := app.Mount(s, 3, func() tui.Component {
+				return SelectBodyComponent(s)
+			})
+			__tui_6.AddChild(__tui_7)
+			__tui_0.AddChild(__tui_6)
+		}
 	}
 
 	return __tui_0

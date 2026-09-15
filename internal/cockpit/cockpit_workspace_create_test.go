@@ -536,3 +536,45 @@ func TestCockpit_DiscardStartsFreshDraftInteractionLifetime(t *testing.T) {
 		t.Fatalf("provider picker lost ambient options after discard:\n%s", frame)
 	}
 }
+
+func TestCockpit_SameIDRefreshPreservesMountedRoutesAndDeliversAddRouteIntent(t *testing.T) {
+	workspace := readmodel.WorkspaceReadModel{
+		ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting,
+		Routes: []readmodel.RouteReadModel{{ID: "chat", ModelName: "chat", Enabled: true}},
+	}
+	root := NewCockpit(readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "dev", Slug: "dev", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "dev", SelectedWorkspace: workspace,
+		Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"dev": workspace},
+		ActivePage: readmodel.CockpitWorkspacePage,
+	})
+	h, err := testkit.NewHarnessAt(root, 100, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	h.Open()
+
+	mountedPage := root.currentWorkspacePage()
+	mountedRoutes := mountedPage.RoutesSection
+	mountedRoutes.State.ExpandedRoute.Set("chat")
+	committed := workspace
+	committed.Routes = append([]readmodel.RouteReadModel(nil), workspace.Routes...)
+	committed.Routes[0].ModelName = "chat-updated"
+
+	// Drive the production save callback: it requests the one-shot focus intent
+	// before Cockpit rebuilds fresh PageView props under the same mount key.
+	mountedPage.OverviewSection.OnWorkspaceSaved(committed)
+	if freshRoutes := root.currentWorkspacePage().RoutesSection; freshRoutes == mountedRoutes {
+		t.Fatal("same-ID refresh did not produce a fresh routes prop snapshot")
+	}
+	h.Frame()
+
+	if got := mountedRoutes.State.ExpandedRoute.Get(); got != "chat" {
+		t.Fatalf("mounted route state after refresh = %q, want preserved chat", got)
+	}
+	addRoute := mountedRoutes.AddRouteRow
+	if addRoute == nil || addRoute.Ref().El() == nil || h.App().Focused() != addRoute.Ref().El() {
+		t.Fatalf("same-ID refresh lost add-route focus intent:\n%s", h.FrameTrimmed())
+	}
+}

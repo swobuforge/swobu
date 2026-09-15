@@ -123,13 +123,12 @@ func (d *Disclosure) UpdateProps(fresh tui.Component) {
 }
 
 func (d *Disclosure) KeyMap() tui.KeyMap {
-	return tui.KeyMap{
-		tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) {
-			if d.EndpointOpen.Get() {
-				d.Back()
-			}
-		}),
+	if !d.EndpointOpen.Get() {
+		return nil
 	}
+	return tui.KeyMap{tui.OnPreemptStop(tui.KeyEscape, func(tui.KeyEvent) {
+		d.Back()
+	})}
 }
 
 func (d *Disclosure) Back() bool {

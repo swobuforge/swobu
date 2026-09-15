@@ -119,15 +119,21 @@ func (v *PageView) selectNext(event tui.KeyEvent) {
 	ui.SelectNext(event)
 }
 
+func OverviewSectionComponent(v *PageView) tui.Component { return v.OverviewSection }
+
+func RoutesSectionComponent(v *PageView) tui.Component {
+	if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
+		v.RoutesSection.RequestAddRouteFocus()
+	}
+	return v.RoutesSection
+}
+
 func (v *PageView) backOut(event tui.KeyEvent) {
-	if v.OverviewSection != nil && v.OverviewSection.Back() {
+	app := event.App()
+	if ui.BackFocused(app) {
 		return
 	}
-	if v.RoutesSection != nil && v.RoutesSection.Back() {
-		return
-	}
-	// No workspace-owned semantic state consumed Escape, so it closes the app.
-	if app := event.App(); app != nil {
+	if app != nil {
 		app.Stop()
 	}
 }
@@ -137,18 +143,19 @@ func (v *PageView) Render(app *tui.App) *tui.Element {
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 		tui.WithWidthPercent(100.00),
 	)
-	__tui_1 := v.OverviewSection.Render(app)
+	__tui_1 := app.Mount(v, 0, func() tui.Component {
+		return OverviewSectionComponent(v)
+	})
 	__tui_0.AddChild(__tui_1)
 	if !v.OverviewSection.Model.IsDraft() || v.OverviewSection.Model.Slug != "" {
-		if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
-			v.RoutesSection.RequestAddRouteFocus()
-		}
 		__tui_2 := tui.New(
 			tui.WithWidth(0),
 			tui.WithHeight(1),
 		)
 		__tui_0.AddChild(__tui_2)
-		__tui_3 := v.RoutesSection.Render(app)
+		__tui_3 := app.Mount(v, 1, func() tui.Component {
+			return RoutesSectionComponent(v)
+		})
 		__tui_0.AddChild(__tui_3)
 		if !v.OverviewSection.Model.IsDraft() {
 			__tui_4 := tui.New(
@@ -197,12 +204,6 @@ var _ tui.PropsUpdater = (*PageView)(nil)
 // State, Events, and TextArea fields to app. When you override BindApp,
 // call this helper instead of hand-maintaining the delegation list.
 func (v *PageView) bindAppFields(app *tui.App) {
-	if binder, ok := any(v.OverviewSection).(tui.AppBinder); ok {
-		binder.BindApp(app)
-	}
-	if binder, ok := any(v.RoutesSection).(tui.AppBinder); ok {
-		binder.BindApp(app)
-	}
 	if binder, ok := any(v.ActivitySection).(tui.AppBinder); ok {
 		binder.BindApp(app)
 	}
@@ -218,12 +219,6 @@ var _ tui.AppBinder = (*PageView)(nil)
 // subscriptions and any component-expression AppUnbinder fields.
 // Call this from your UnbindApp if you override it.
 func (v *PageView) unbindAppFields() {
-	if unbinder, ok := any(v.OverviewSection).(tui.AppUnbinder); ok {
-		unbinder.UnbindApp()
-	}
-	if unbinder, ok := any(v.RoutesSection).(tui.AppUnbinder); ok {
-		unbinder.UnbindApp()
-	}
 	if unbinder, ok := any(v.ActivitySection).(tui.AppUnbinder); ok {
 		unbinder.UnbindApp()
 	}

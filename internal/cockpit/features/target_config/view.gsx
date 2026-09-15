@@ -67,9 +67,11 @@ func EndpointInput(w *TargetConfig, autoFocus bool) *ui.EditableRow {
 templ (w *TargetConfig) Render() {
 	<div class="flex-col w-full" deps={w.Lifecycle}>
 		if w.IsOpen() {
-			<div key={TargetAddMountKey(w, "target-config-parent")} class="w-full">
-				@TargetConfigHeader(w)
-			</div>
+			if !w.Embedded {
+				<div key={TargetAddMountKey(w, "target-config-parent")} class="w-full">
+					@TargetConfigHeader(w)
+				</div>
+			}
 			<div class="pl-3 flex-col w-full" deps={w.Draft}>
 				if strings.TrimSpace(w.Draft.Get().ProviderSpec) == "" {
 					@ProviderSelect(w)

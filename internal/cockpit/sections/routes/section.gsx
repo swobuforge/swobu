@@ -6,7 +6,7 @@ package routes
 
 templ (s *SectionView) Render() {
 	<div class="flex-col w-full">
-		<div key={sectionHeaderKey(s)} class="w-full">
+		<div key={"routes-header"} class="w-full">
 			@SectionHeaderComponent(s)
 		</div>
 		if s.Expanded.Get() {
@@ -43,40 +43,16 @@ templ (s *SectionView) Render() {
 								// --- Inline tier target rows -----------------------------
 								for tierIdx, tierTargets := range groupedTargets(route) {
 									for targetIdx, target := range tierTargets {
-										if s.State.OpenTarget.Get() == target.ID {
-											if targetIdx == 0 {
-												@TierContextRow(tierLabel(tierIdx), tierTone(tierIdx))
-											}
-											config := s.targetEditConfig(route, target)
-											<div key={s.targetConfigKey(route, target.ID)} class="w-full">
-												@TargetConfigComponent(config)
-											</div>
-										} else {
-											<div key={targetMountKey(route, target)} class={tierTargetRowClass(targetIdx)}>
-												@TargetRowComponent(s, route, target, tierIdx, targetIdx)
-											</div>
-										}
-										// --- Delete confirmation for a target --------
-										if s.State.DeleteConfirmTarget.Get() == target.ID {
-											<div key={"del:" + string(target.ID)} class="w-full">
-												@TargetDeleteConfirmRow(s, route, target)
-											</div>
-										}
+										<div key={targetMountKey(route, target)} class={tierTargetRowClass(targetIdx)}>
+											@TargetControlComponent(s, route, target, tierIdx, targetIdx)
+										</div>
 									}
 								}
 								// --- Add target trigger / config -------------------
-								if s.State.AddTargetRoute.Get() == route.ID {
-									config := s.targetAddConfig(route)
-									<div key={targetAddMountKey(route)} class="w-full mt-1">
-										@TargetConfigComponent(config)
-									</div>
-								} else {
-									<div key={addTargetMountKey(route)} class="w-full mt-1">
-										@AddTargetRowComponent(s, route)
-									</div>
-									// --- Route-level delete --------------------------
-									// Hidden while the add-target workflow is active so the
-									// operator does not delete the route mid-edit.
+								<div key={addTargetMountKey(route)} class="w-full mt-1">
+									@AddTargetControlComponent(s, route)
+								</div>
+								if s.State.AddTargetRoute.Get() != route.ID {
 									<div key={s.routeDeleteRowKey(route)} class="w-full">
 										@RouteDeleteRowComponent(s, route)
 									</div>

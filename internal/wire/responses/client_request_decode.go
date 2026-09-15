@@ -114,6 +114,7 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID), exchangeID, decodeView) // swobu:io-string source=boundary
+	logResponsesInputStructure(dto.Input, exchangeID, decodeView)
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
@@ -298,6 +299,74 @@ func logResponsesRawInput(input json.RawMessage, previousResponseID string, exch
 		"has_previous_response_id", previousResponseID != "",
 		"input_shape", shape,
 		"encoded_bytes", len(input),
+	)
+}
+
+// logResponsesInputStructure records only ordered item-shape evidence needed to
+// diagnose history partitioning and tool correlation. Call IDs and every
+// content-bearing field remain inside the request decoder.
+func logResponsesInputStructure(input json.RawMessage, exchangeID string, decodeView string) {
+	var items []responsesInputItemDTO
+	if err := json.Unmarshal(input, &items); err != nil {
+		return
+	}
+	pending := make(map[string]struct{})
+	compactionCount := 0
+	firstCompaction, lastCompaction := -1, -1
+	callCount, resultCount := 0, 0
+	repeatedPendingCallCount, firstRepeatedPendingCall := 0, -1
+	unmatchedResultCount, firstUnmatchedResult := 0, -1
+	for index, item := range items {
+		switch strings.TrimSpace(item.Type) { // swobu:io-string source=boundary
+		case "compaction":
+			compactionCount++
+			if firstCompaction < 0 {
+				firstCompaction = index
+			}
+			lastCompaction = index
+		case "function_call", "custom_tool_call":
+			callCount++
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			if callID == "" {
+				callID = strings.TrimSpace(item.ID) // swobu:io-string source=boundary
+			}
+			if callID != "" {
+				if _, exists := pending[callID]; exists {
+					repeatedPendingCallCount++
+					if firstRepeatedPendingCall < 0 {
+						firstRepeatedPendingCall = index
+					}
+				}
+				pending[callID] = struct{}{}
+			}
+		case "function_call_output", "custom_tool_call_output":
+			resultCount++
+			callID := strings.TrimSpace(item.CallID) // swobu:io-string source=boundary
+			if _, ok := pending[callID]; ok && callID != "" {
+				delete(pending, callID)
+				continue
+			}
+			unmatchedResultCount++
+			if firstUnmatchedResult < 0 {
+				firstUnmatchedResult = index
+			}
+		}
+	}
+	slog.Debug("responses input structure",
+		"component", "httpapi",
+		"event", "responses_input_structure",
+		"exchange_id", exchangeID,
+		"decode_view", decodeView,
+		"item_count", len(items),
+		"compaction_count", compactionCount,
+		"first_compaction_item", firstCompaction,
+		"last_compaction_item", lastCompaction,
+		"tool_call_count", callCount,
+		"tool_result_count", resultCount,
+		"repeated_pending_tool_call_count", repeatedPendingCallCount,
+		"first_repeated_pending_tool_call_item", firstRepeatedPendingCall,
+		"unmatched_tool_result_count", unmatchedResultCount,
+		"first_unmatched_tool_result_item", firstUnmatchedResult,
 	)
 }
 

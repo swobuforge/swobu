@@ -100,6 +100,53 @@ func TestResponsesDecodeLogsFullAndRebasedViewsWithOneExchangeID(t *testing.T) {
 	}
 }
 
+func TestResponsesDecodeLogsContentFreeCompactionAndCorrelationShape(t *testing.T) {
+	restore, logs := captureResponsesDebugLogs()
+	defer restore()
+
+	raw := []byte(`{
+		"model":"m",
+		"tools":[{"type":"function","name":"private_tool","parameters":{"type":"object"}}],
+		"input":[
+			{"type":"function_call","call_id":"private_call","name":"private_tool","arguments":"{\"secret\":true}"},
+			{"type":"function_call_output","call_id":"private_call","output":"private result"},
+			{"type":"compaction","encrypted_content":"private opaque state"},
+			{"type":"function_call_output","call_id":"orphan_call","output":"orphan private result"}
+		]
+	}`)
+	_, _ = (ClientRequestDecoder{}).DecodeClientRequest(
+		carrier.NewDocument(protocolkind.Responses, "application/json", nil, raw, carrier.Meta{
+			Opaque: map[string]string{"exchange_id": "req_structure"},
+		}),
+	)
+
+	got := logs.String()
+	for _, want := range []string{
+		"event=responses_input_structure",
+		"exchange_id=req_structure",
+		"decode_view=full",
+		"item_count=4",
+		"compaction_count=1",
+		"first_compaction_item=2",
+		"last_compaction_item=2",
+		"tool_call_count=1",
+		"tool_result_count=2",
+		"repeated_pending_tool_call_count=0",
+		"first_repeated_pending_tool_call_item=-1",
+		"unmatched_tool_result_count=1",
+		"first_unmatched_tool_result_item=3",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("logs missing %q\nlogs:\n%s", want, got)
+		}
+	}
+	for _, secret := range []string{"private_call", "orphan_call", "private_tool", "private opaque state", "private result", "secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("logs exposed %q\nlogs:\n%s", secret, got)
+		}
+	}
+}
+
 func captureResponsesDebugLogs() (func(), *bytes.Buffer) {
 	var logs bytes.Buffer
 	previous := slog.Default()

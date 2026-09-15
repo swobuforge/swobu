@@ -78,7 +78,9 @@ func (d *SectionDisclosure) BindApp(app *tui.App) { d.disclosure.BindApp(app) }
 
 func (d *SectionDisclosure) UnbindApp() { d.disclosure.UnbindApp() }
 
-func (d *SectionDisclosure) IsFocused() bool { return d.disclosure.IsFocused() }
+func (d *SectionDisclosure) IsFocused() bool     { return d.disclosure.IsFocused() }
+func (d *SectionDisclosure) UseRef(ref *tui.Ref) { d.disclosure.SetRef(ref) }
+func (d *SectionDisclosure) Ref() *tui.Ref       { return d.disclosure.Ref() }
 
 func (d *SectionDisclosure) props() interaction.DisclosureProps {
 	return d.propsWithID(d.disclosure.Props().ID)

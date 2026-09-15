@@ -8,13 +8,22 @@ import (
 
 // SelectProps configures a Select.
 type SelectProps struct {
-	ID        string
-	Label     string
-	Value     string // committed value shown in the row
-	Action    string // optional row action; defaults from state if empty
-	ValueTone Tone   // semantic rendition of the committed value
-	Detail    string // optional committed-value detail shown only while closed
-	AutoFocus bool
+	ID                 string
+	Label              string
+	Value              string // committed value shown in the row
+	Action             string // optional row action; defaults from state if empty
+	ValueTone          Tone   // semantic rendition of the committed value
+	Detail             string // optional committed-value detail shown only while closed
+	AutoFocus          bool
+	ReserveLabelColumn bool
+	LabelTone          Tone
+	FocusValue         bool
+	BackoutAction      string
+	BodyFlush          bool
+
+	// Entered makes Select externally controlled when non-nil. The caller owns
+	// which control is open; Select retains only shell identity and focus handoff.
+	Entered func() bool
 
 	// OnActivate replaces entry when the closed control represents an immediate
 	// action instead of a choice. Keeping that action on Select lets one mounted
@@ -37,19 +46,20 @@ type SelectProps struct {
 	Body func(backout func()) tui.Component
 }
 
-// Select is a self-managing control that owns its entered state and stable
-// selectable shell. It renders the Body beneath that shell while entered and
-// may project a closed immediate action through OnActivate. Callers therefore
-// change props across workflow phases without replacing the mounted control or
-// coordinating a shared "which is open" enum.
+// Select owns one stable selectable shell and its entered body. It may own
+// entered state itself or project caller-owned entered state when Entered is
+// supplied; focus restoration remains local in both modes.
 type Select struct {
-	props           SelectProps
-	entered         *tui.State[bool]
-	selectShellNext bool
+	props            SelectProps
+	entered          *tui.State[bool]
+	selectShellNext  bool
+	projectedEntered bool
 }
 
 func NewSelect(props SelectProps) *Select {
-	return &Select{props: props, entered: tui.NewState(false)}
+	s := &Select{props: props, entered: tui.NewState(false)}
+	s.projectedEntered = s.IsEntered()
+	return s
 }
 
 func (s *Select) Init() func() { return nil }
@@ -63,8 +73,15 @@ func (s *Select) BindApp(app *tui.App) {
 func (s *Select) UnbindApp() {}
 
 func (s *Select) UpdateProps(fresh tui.Component) {
-	if f, ok := fresh.(*Select); ok {
-		s.props = f.props
+	f, ok := fresh.(*Select)
+	if !ok {
+		return
+	}
+	wasEntered := s.projectedEntered
+	s.props = f.props
+	s.projectedEntered = s.IsEntered()
+	if wasEntered && !s.projectedEntered {
+		s.selectShellNext = true
 	}
 }
 
@@ -74,9 +91,12 @@ func (s *Select) UpdateProps(fresh tui.Component) {
 func (s *Select) headerRow() *SelectableRow {
 	row := NewSelectableRow(s.props.ID, s.props.Label, s.props.Value, s.actionLabel(), s.activate)
 	row.ValueTone = s.props.ValueTone
+	row.ReserveLabelColumn = s.props.ReserveLabelColumn
+	row.LabelTone = s.props.LabelTone
+	row.FocusValue = s.props.FocusValue
 	// Only own Escape while entered; when not entered, Escape bubbles to the
 	// caller's back navigation.
-	if s.entered.Get() {
+	if s.IsEntered() {
 		row.OnEscape = s.Backout
 	}
 	row.AutoFocus = s.props.AutoFocus || s.selectShellNext
@@ -97,7 +117,10 @@ func SelectBodyComponent(s *Select) tui.Component {
 }
 
 func (s *Select) actionLabel() string {
-	if s.entered.Get() {
+	if s.IsEntered() {
+		if s.props.BackoutAction != "" {
+			return s.props.BackoutAction
+		}
 		return "close ↵"
 	}
 	if s.props.OnActivate != nil {
@@ -115,7 +138,7 @@ func (s *Select) actionLabel() string {
 // activate runs the primary action. If entered, it backs out. If not entered,
 // it attempts to enter.
 func (s *Select) activate() {
-	if s.entered.Get() {
+	if s.IsEntered() {
 		s.Backout()
 		return
 	}
@@ -130,7 +153,7 @@ func (s *Select) activate() {
 // entry is refused. Otherwise, entered state is set to true and OnEnter is called.
 // OnEnter is only called when transitioning from not-entered to entered state.
 func (s *Select) Enter() {
-	if s.entered.Get() {
+	if s.IsEntered() {
 		// Already entered, no-op
 		return
 	}
@@ -140,11 +163,14 @@ func (s *Select) Enter() {
 	}
 
 	s.selectShellNext = false
-	s.entered.Set(true)
+	if s.props.Entered == nil {
+		s.entered.Set(true)
+	}
 
 	if s.props.OnEnter != nil {
 		s.props.OnEnter()
 	}
+	s.projectedEntered = s.IsEntered()
 }
 
 // Backout exits the select. If entered, it sets entered to false and calls
@@ -152,7 +178,7 @@ func (s *Select) Enter() {
 // "backout" is a public grammar verb; feature packages may drive a Select's
 // backout from feature-level lifecycle code (e.g. Escape fallbacks).
 func (s *Select) Backout() {
-	if !s.entered.Get() {
+	if !s.IsEntered() {
 		return
 	}
 
@@ -160,15 +186,32 @@ func (s *Select) Backout() {
 	// the next selection target before that subtree disappears; SelectableRow
 	// owns the framework-level one-shot handoff during reconciliation.
 	s.selectShellNext = true
-	s.entered.Set(false)
+	if s.props.Entered == nil {
+		s.entered.Set(false)
+	}
 
 	if s.props.OnBackout != nil {
 		s.props.OnBackout()
 	}
+	s.projectedEntered = s.IsEntered()
+}
+
+// Back closes Select's entered body through the same transition as its shell.
+// Body-specific handlers may consume deeper local states before page fallback
+// reaches this semantic owner.
+func (s *Select) Back() bool {
+	if !s.IsEntered() {
+		return false
+	}
+	s.Backout()
+	return true
 }
 
 // IsEntered returns whether the select is currently in entered state.
 func (s *Select) IsEntered() bool {
+	if s.props.Entered != nil {
+		return s.props.Entered()
+	}
 	return s.entered.Get()
 }
 

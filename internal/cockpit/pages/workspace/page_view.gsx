@@ -124,28 +124,30 @@ func (v *PageView) selectNext(event tui.KeyEvent) {
 	ui.SelectNext(event)
 }
 
+func OverviewSectionComponent(v *PageView) tui.Component { return v.OverviewSection }
+func RoutesSectionComponent(v *PageView) tui.Component {
+	if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
+		v.RoutesSection.RequestAddRouteFocus()
+	}
+	return v.RoutesSection
+}
+
 func (v *PageView) backOut(event tui.KeyEvent) {
-	if v.OverviewSection != nil && v.OverviewSection.Back() {
+	app := event.App()
+	if ui.BackFocused(app) {
 		return
 	}
-	if v.RoutesSection != nil && v.RoutesSection.Back() {
-		return
-	}
-	// No workspace-owned semantic state consumed Escape, so it closes the app.
-	if app := event.App(); app != nil {
+	if app != nil {
 		app.Stop()
 	}
 }
 
 templ (v *PageView) Render() {
 	<div class="flex-col w-full">
-		@v.OverviewSection
+		@OverviewSectionComponent(v)
 		if !v.OverviewSection.Model.IsDraft() || v.OverviewSection.Model.Slug != "" {
-			if consumeAddRouteFocusAfterSave(v.OverviewSection.Model) {
-				v.RoutesSection.RequestAddRouteFocus()
-			}
 			<br />
-			@v.RoutesSection
+			@RoutesSectionComponent(v)
 			if !v.OverviewSection.Model.IsDraft() {
 				<br />
 				@v.ActivitySection

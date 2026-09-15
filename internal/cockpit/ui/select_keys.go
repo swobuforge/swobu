@@ -60,3 +60,37 @@ func BackScope(active func() bool, back func()) tui.KeyMap {
 		}
 	})
 }
+
+// BackOwner is a mounted semantic container that can close one local level.
+// Leaf controls continue to consume Escape in their own keymaps; this contract
+// is consulted only by a page fallback after no local handler matched.
+type BackOwner interface {
+	Back() bool
+}
+
+type backRefOwner interface {
+	BackRef() *tui.Ref
+}
+
+// BackFocused walks from the selected element toward the page and asks the
+// nearest semantic container to close one level.
+func BackFocused(app *tui.App) bool {
+	if app == nil {
+		return false
+	}
+	selected, ok := app.Focused().(*tui.Element)
+	if !ok || selected == nil {
+		return false
+	}
+	for el := selected; el != nil; el = el.Parent() {
+		owner, ok := el.Component().(BackOwner)
+		if !ok || !owner.Back() {
+			continue
+		}
+		if refOwner, ok := owner.(backRefOwner); ok {
+			interaction.FocusRefByTraversal(app, refOwner.BackRef())
+		}
+		return true
+	}
+	return false
+}

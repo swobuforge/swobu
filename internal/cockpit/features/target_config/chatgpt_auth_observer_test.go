@@ -85,6 +85,7 @@ func TestChatGPTManualRefreshPreservesPendingBrowserURL(t *testing.T) {
 
 func TestMountedChatGPTObserverStopsWhenFormCloses(t *testing.T) {
 	pollCanceled := make(chan struct{})
+	authCanceled := make(chan string, 1)
 	commands := &authCommandsStub{
 		started: make(chan struct{}),
 		polled:  make(chan struct{}, 1),
@@ -92,6 +93,10 @@ func TestMountedChatGPTObserverStopsWhenFormCloses(t *testing.T) {
 			<-ctx.Done()
 			close(pollCanceled)
 			return readmodel.AuthSessionReadModel{}, ctx.Err()
+		},
+		cancel: func(_ context.Context, sessionID string) error {
+			authCanceled <- sessionID
+			return nil
 		},
 	}
 	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
@@ -114,6 +119,14 @@ func TestMountedChatGPTObserverStopsWhenFormCloses(t *testing.T) {
 	}
 
 	w.Close()
+	select {
+	case sessionID := <-authCanceled:
+		if sessionID != "sess-browser" {
+			t.Fatalf("canceled session = %q", sessionID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("closing target form did not cancel daemon auth session")
+	}
 	select {
 	case <-pollCanceled:
 	case <-time.After(100 * time.Millisecond):
