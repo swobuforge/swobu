@@ -19,6 +19,7 @@ type AmbientOrReferenceAuthenticationProps struct {
 	Ref             string
 	Apply           func(string)
 	Store           func(string) (string, error)
+	BrowseFile      ui.FileBrowserBrowse
 }
 
 type ambientOrReferenceStage uint8
@@ -48,6 +49,7 @@ func AmbientOrReferenceAuthentication(props AmbientOrReferenceAuthenticationProp
 		ID:              props.ID + ":reference",
 		SuggestedEnvVar: props.SuggestedEnvVar,
 		Store:           props.Store,
+		BrowseFile:      props.BrowseFile,
 		ChoiceAction:    "select ↵",
 	})
 	chooser.props.Apply = func(ref string) {

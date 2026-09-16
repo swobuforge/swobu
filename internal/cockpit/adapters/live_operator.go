@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
+	"github.com/swobuforge/swobu/internal/app/operator/credentialfiles"
 	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
@@ -38,6 +39,7 @@ type operatorClient interface {
 	RetryAuthSession(context.Context, string) (operatorclient.AuthSessionRetryResult, error)
 	ProbeTarget(context.Context, workspaceapi.Connection, string) (operatorclient.ModelCatalogResult, error)
 	StorePastedCredential(context.Context, string, string, string) (string, error)
+	BrowseCredentialFiles(context.Context, string) (credentialfiles.Listing, error)
 	ListShares(context.Context) ([]shares.Summary, error)
 	IssueShare(context.Context, string, sharestate.Expiry) (shares.Result, error)
 	RevealShare(context.Context, string) (shares.Result, error)
@@ -341,6 +343,21 @@ func (a *LiveOperatorAdapter) ProbeProviderModels(ctx context.Context, req ports
 		return model, errors.New(result.Error)
 	}
 	return model, nil
+}
+
+func (a *LiveOperatorAdapter) BrowseCredentialFiles(ctx context.Context, path string) (ports.BrowseCredentialFilesResult, error) {
+	listing, err := a.client.BrowseCredentialFiles(ctx, path)
+	if operatorclient.IsNotFound(err) {
+		return ports.BrowseCredentialFilesResult{}, ui.FileBrowserError{Message: "restart or update the Swobu daemon to browse credential files"}
+	}
+	if err != nil {
+		return ports.BrowseCredentialFilesResult{}, err
+	}
+	result := ports.BrowseCredentialFilesResult{Path: listing.Path, Parent: listing.Parent, Entries: make([]ports.CredentialFileEntry, 0, len(listing.Entries))}
+	for _, entry := range listing.Entries {
+		result.Entries = append(result.Entries, ports.CredentialFileEntry{Name: entry.Name, Path: entry.Path, IsDir: entry.IsDir})
+	}
+	return result, nil
 }
 
 func (a *LiveOperatorAdapter) StartAuthSession(ctx context.Context, req ports.StartAuthSessionRequest) (readmodel.AuthSessionReadModel, error) {

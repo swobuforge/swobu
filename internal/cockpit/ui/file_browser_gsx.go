@@ -22,32 +22,39 @@ func (b *FileBrowser) Render(app *tui.App) *tui.Element {
 		__tui_1 := FileBrowserTitleRow(b.Title)
 		__tui_0.AddChild(__tui_1.Root)
 	}
-	__tui_2 := FileBrowserDirRow(win.CurrentDir)
-	__tui_0.AddChild(__tui_2.Root)
-	__tui_3 := FileBrowserSearchRow(win.Query)
-	__tui_0.AddChild(__tui_3.Root)
-	__tui_4 := tui.New(
-		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
-		tui.WithWidthPercent(100.00),
-	)
-	for i, row := range list.Window().Rows {
-		_ = i
+	if b.Loading.Get() {
+		__tui_2 := FileBrowserLoadingRow()
+		__tui_0.AddChild(__tui_2.Root)
+	} else {
+		__tui_3 := FileBrowserDirRow(win.CurrentDir)
+		__tui_0.AddChild(__tui_3.Root)
+		__tui_4 := FileBrowserSearchRow(win.Query)
+		__tui_0.AddChild(__tui_4.Root)
+	}
+	if !b.Loading.Get() && !win.HasError {
 		__tui_5 := tui.New(
+			tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 			tui.WithWidthPercent(100.00),
 		)
-		__tui_6 := app.Mount(b, tui.MountKey(0, b.ID+":entry:"+choiceRowKey(row)), func() tui.Component {
-			return FileBrowserEntryComponent(b, list, row, i == 0)
-		})
-		__tui_5.AddChild(__tui_6)
-		__tui_4.AddChild(__tui_5)
+		for i, row := range list.Window().Rows {
+			_ = i
+			__tui_6 := tui.New(
+				tui.WithWidthPercent(100.00),
+			)
+			__tui_7 := app.Mount(b, tui.MountKey(0, b.ID+":entry:"+choiceRowKey(row)), func() tui.Component {
+				return FileBrowserEntryComponent(b, list, row, i == 0)
+			})
+			__tui_6.AddChild(__tui_7)
+			__tui_5.AddChild(__tui_6)
+		}
+		__tui_0.AddChild(__tui_5)
+		__tui_8 := FileBrowserHintRow(fileBrowserCountLabel(win.ShownRows, win.TotalRows))
+		__tui_0.AddChild(__tui_8.Root)
 	}
-	__tui_0.AddChild(__tui_4)
 	if win.HasError {
-		__tui_7 := FileBrowserErrorRow(win.ErrorText)
-		__tui_0.AddChild(__tui_7.Root)
+		__tui_9 := FileBrowserErrorRow(win.ErrorText)
+		__tui_0.AddChild(__tui_9.Root)
 	}
-	__tui_8 := FileBrowserHintRow(fileBrowserCountLabel(win.ShownRows, win.TotalRows))
-	__tui_0.AddChild(__tui_8.Root)
 
 	return __tui_0
 }
@@ -362,6 +369,82 @@ func FileBrowserErrorRow(msg string) *FileBrowserErrorRowView {
 	}
 
 	view = FileBrowserErrorRowView{
+		Root:      __tui_0,
+		watchers:  watchers,
+		bindApp:   __bindApp,
+		unbindApp: __unbindApp,
+	}
+	return &view
+}
+
+type FileBrowserLoadingRowView struct {
+	Root      *tui.Element
+	watchers  []tui.Watcher
+	bindApp   func(*tui.App)
+	unbindApp func()
+}
+
+func (v *FileBrowserLoadingRowView) UnbindApp() {
+	if v.unbindApp != nil {
+		v.unbindApp()
+	}
+}
+
+func (v *FileBrowserLoadingRowView) GetRoot() *tui.Element { return v.Root }
+
+func (v *FileBrowserLoadingRowView) GetWatchers() []tui.Watcher { return v.watchers }
+
+func (v *FileBrowserLoadingRowView) Render(app *tui.App) *tui.Element { return v.Root }
+
+func (v *FileBrowserLoadingRowView) BindApp(app *tui.App) {
+	if v.bindApp != nil {
+		v.bindApp(app)
+	}
+}
+
+func (v *FileBrowserLoadingRowView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*FileBrowserLoadingRowView)
+	if !ok {
+		return
+	}
+	v.Root = f.Root
+	v.watchers = f.watchers
+	v.bindApp = f.bindApp
+	v.unbindApp = f.unbindApp
+}
+
+var _ tui.AppBinder = (*FileBrowserLoadingRowView)(nil)
+
+var _ tui.AppUnbinder = (*FileBrowserLoadingRowView)(nil)
+
+var _ tui.PropsUpdater = (*FileBrowserLoadingRowView)(nil)
+
+func FileBrowserLoadingRow() *FileBrowserLoadingRowView {
+	var view FileBrowserLoadingRowView
+	var watchers []tui.Watcher
+
+	__tui_0 := tui.New(
+		tui.WithWidthPercent(100.00),
+		tui.WithPaddingTRBL(0, 0, 0, 2),
+	)
+	__tui_1 := FlowText("loading…")
+	__tui_0.AddChild(__tui_1.Root)
+
+	watchers = append(watchers, __tui_1.GetWatchers()...)
+
+	__bindApp := func(app *tui.App) {
+		if binder, ok := any(__tui_1).(tui.AppBinder); ok {
+			binder.BindApp(app)
+		}
+	}
+
+	__unbindApp := func() {
+		if unbinder, ok := any(__tui_1).(tui.AppUnbinder); ok {
+			unbinder.UnbindApp()
+		}
+	}
+
+	view = FileBrowserLoadingRowView{
 		Root:      __tui_0,
 		watchers:  watchers,
 		bindApp:   __bindApp,

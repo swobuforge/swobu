@@ -358,7 +358,7 @@ func TestMountedBedrockNestedCredentialEscapeRetreatsOneLevelAtATime(t *testing.
 	}
 }
 
-func TestMountedCredentialFileValidationEndsWhenBackingOutToSourceMenu(t *testing.T) {
+func TestMountedCredentialFileBrowseFailureEscapesToSourceMenu(t *testing.T) {
 	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
 	w.Open()
 	w.SelectProvider(string(profile.ProviderSpecOpenCodeZen))
@@ -370,20 +370,19 @@ func TestMountedCredentialFileValidationEndsWhenBackingOutToSourceMenu(t *testin
 	h.Open()
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // credential source menu
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})  // file
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // file editor
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // submit empty path
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // file browser
 
 	frame := h.FrameTrimmed()
-	if !strings.Contains(frame, "file path is required") {
-		t.Fatalf("empty file path did not render validation feedback:\n%s", frame)
+	if !strings.Contains(frame, "could not browse directory") {
+		t.Fatalf("browse failure did not render recovery feedback:\n%s", frame)
 	}
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
 	frame = h.FrameTrimmed()
 	if !strings.Contains(frame, "environment variable") || !strings.Contains(frame, "file") || !strings.Contains(frame, "paste credential") {
 		t.Fatalf("Escape did not return to the credential source menu:\n%s", frame)
 	}
-	if strings.Contains(frame, "file path is required") {
-		t.Fatalf("file-editor validation survived after its owning input closed:\n%s", frame)
+	if strings.Contains(frame, "could not browse directory") {
+		t.Fatalf("file-browser failure survived after its owning input closed:\n%s", frame)
 	}
 }
 
@@ -464,6 +463,10 @@ type targetProbeQueriesFunc func(context.Context, ports.ProbeProviderModelsReque
 
 func (f targetProbeQueriesFunc) ProbeProviderModels(ctx context.Context, req ports.ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error) {
 	return f(ctx, req)
+}
+
+func (f targetProbeQueriesFunc) BrowseCredentialFiles(context.Context, string) (ports.BrowseCredentialFilesResult, error) {
+	return ports.BrowseCredentialFilesResult{}, errors.New("credential file browse is not configured")
 }
 
 func readyBedrockConfig(t *testing.T) *TargetConfig {

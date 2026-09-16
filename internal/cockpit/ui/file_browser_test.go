@@ -1,465 +1,289 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tui "github.com/grindlemire/go-tui"
-	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
-func TestFileBrowser_WindowListsEntries(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{
-			{Name: "alpha.txt", IsDir: false},
-			{Name: "beta", IsDir: true},
-		}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/home/demo", readDir, nil, nil)
-	win := b.Window()
+func listing(path, parent string, entries ...FileBrowserEntry) FileBrowserListing {
+	return FileBrowserListing{Path: path, Parent: parent, Entries: entries}
+}
 
-	if win.CurrentDir != "/home/demo" {
-		t.Fatalf("currentDir = %q, want /home/demo", win.CurrentDir)
+func TestFileBrowserProjectsOwnerSuppliedOpaquePaths(t *testing.T) {
+	b := NewFileBrowser("fb", "credential file", `seed`, nil, nil, nil)
+	b.completeBrowse(0, listing(`C:\Users\operator`, `C:\Users`,
+		FileBrowserEntry{Name: "key", Path: `C:\Users\operator\key`},
+		FileBrowserEntry{Name: "config", Path: `C:\Users\operator\config`, IsDir: true},
+	), nil)
+	win := b.Window()
+	if win.CurrentDir != `C:\Users\operator` || len(win.Rows) != 3 {
+		t.Fatalf("window = %#v", win)
 	}
-	if len(win.Rows) != 3 {
-		t.Fatalf("row count = %d, want 3", len(win.Rows))
-	}
-	if win.Rows[0].Name != "../" {
-		t.Fatalf("first row = %+v, want parent entry", win.Rows[0])
-	}
-	if win.Rows[1].Name != "beta" || !win.Rows[1].IsDir {
-		t.Fatalf("second row = %+v, want beta dir", win.Rows[1])
-	}
-	if win.Rows[2].Name != "alpha.txt" || win.Rows[2].IsDir {
-		t.Fatalf("third row = %+v, want alpha.txt file", win.Rows[2])
+	if win.Rows[0].Path != `C:\Users` || win.Rows[1].Path != `C:\Users\operator\config` || win.Rows[2].Path != `C:\Users\operator\key` {
+		t.Fatalf("rows changed opaque paths: %#v", win.Rows)
 	}
 }
 
-func TestFileBrowser_WindowProjectsVisibleRows(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(12), nil
-	}
-	b := NewFileBrowser("fb", "files", "/home/demo", readDir, nil, nil)
-	win := b.Window()
-
-	if len(win.Rows) != fileBrowserDefaultVisibleRows {
-		t.Fatalf("projected rows = %d, want %d", len(win.Rows), fileBrowserDefaultVisibleRows)
-	}
-	if win.ShownRows != fileBrowserDefaultVisibleRows {
-		t.Fatalf("shown rows = %d, want %d", win.ShownRows, fileBrowserDefaultVisibleRows)
-	}
-	if win.TotalRows != 13 {
-		t.Fatalf("total rows = %d, want parent plus 12 entries", win.TotalRows)
-	}
-	if got := fileBrowserCountLabel(win.ShownRows, win.TotalRows); got != "7 of 13 shown" {
-		t.Fatalf("count label = %q, want bounded shown count", got)
+func TestFileBrowserDirectoryNavigationUsesReturnedPath(t *testing.T) {
+	b := NewFileBrowser("fb", "files", "", nil, nil, nil)
+	b.activateRow(BrowserRow{Name: "foreign", Path: `/home/operator/foreign`, IsDir: true})
+	if b.pendingPath != `/home/operator/foreign` {
+		t.Fatalf("pending path = %q", b.pendingPath)
 	}
 }
 
-func TestFileBrowser_WindowFiltersEntriesAndKeepsParent(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{
-			{Name: "alpha.json", IsDir: false},
-			{Name: "beta.txt", IsDir: false},
-			{Name: "secrets", IsDir: true},
-		}, nil
+func TestFileBrowserFileSelectionUsesReturnedPath(t *testing.T) {
+	var selected string
+	b := NewFileBrowser("fb", "files", "", nil, func(path string) { selected = path }, nil)
+	b.activateRow(BrowserRow{Name: "key", Path: `/home/operator/key`})
+	if selected != `/home/operator/key` {
+		t.Fatalf("selected = %q", selected)
 	}
-	b := NewFileBrowser("fb", "files", "/home/demo", readDir, nil, nil)
+}
+
+func TestFileBrowserIgnoresStaleBrowseCompletion(t *testing.T) {
+	b := NewFileBrowser("fb", "files", "", nil, nil, nil)
+	b.generation = 2
+	b.completeBrowse(2, listing("B", "", FileBrowserEntry{Name: "b", Path: "B/b"}), nil)
+	b.completeBrowse(1, listing("A", "", FileBrowserEntry{Name: "a", Path: "A/a"}), nil)
+	if got := b.CurrentDir.Get(); got != "B" {
+		t.Fatalf("current dir = %q, want B", got)
+	}
+}
+
+func TestFileBrowserLoadingAndErrorProjection(t *testing.T) {
+	b := NewFileBrowser("fb", "credential file", "", nil, nil, nil)
+	b.Navigate("")
+	if !b.Loading.Get() {
+		t.Fatal("Navigate must enter loading")
+	}
+	b.completeBrowse(b.generation, FileBrowserListing{}, errors.New("denied"))
+	if b.Loading.Get() || b.Error.Get() != "could not browse directory" {
+		t.Fatalf("loading=%v error=%q", b.Loading.Get(), b.Error.Get())
+	}
+}
+
+func TestFileBrowserFiltersNamesWithoutChangingPaths(t *testing.T) {
+	b := NewFileBrowser("fb", "files", "", nil, nil, nil)
+	b.completeBrowse(0, listing("/", "", FileBrowserEntry{Name: "secret", Path: `C:\opaque\secret`}, FileBrowserEntry{Name: "other", Path: "/foreign/other"}), nil)
 	b.Query.Set("sec")
-
 	win := b.Window()
-	if len(win.Rows) != 2 {
-		t.Fatalf("rows = %+v, want parent plus secrets", win.Rows)
-	}
-	if win.Rows[0].Name != "../" {
-		t.Fatalf("first row = %+v, want parent entry", win.Rows[0])
-	}
-	if win.Rows[1].Name != "secrets" || !win.Rows[1].IsDir {
-		t.Fatalf("second row = %+v, want secrets dir", win.Rows[1])
+	if len(win.Rows) != 1 || win.Rows[0].Path != `C:\opaque\secret` {
+		t.Fatalf("rows = %#v", win.Rows)
 	}
 }
 
-func TestFileBrowser_NavigateClearsSearch(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "sub", IsDir: true}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/home/demo", readDir, nil, nil)
-	b.Query.Set("sub")
-	b.choiceList().WindowStart.Set(2)
-	b.choiceList().FocusKey.Set("sub")
-
-	b.activateRow(BrowserRow{Name: "sub", IsDir: true})
-	if b.Query.Get() != "" {
-		t.Fatalf("query after navigate = %q, want empty", b.Query.Get())
-	}
-	if b.choiceList().WindowStart.Get() != 0 {
-		t.Fatalf("window start after navigate = %d, want reset", b.choiceList().WindowStart.Get())
-	}
-	if b.choiceList().FocusKey.Get() != "" {
-		t.Fatalf("focus row key after navigate = %q, want reset", b.choiceList().FocusKey.Get())
-	}
-	if b.CurrentDir.Get() == "/home/demo" {
-		t.Fatalf("dir did not navigate, still %q", b.CurrentDir.Get())
+func TestFileBrowserSearchesNamesNotOpaquePaths(t *testing.T) {
+	b := NewFileBrowser("fb", "files", "", nil, nil, nil)
+	b.completeBrowse(0, listing("/home/secret-parent", "", FileBrowserEntry{Name: "key.json", Path: "/home/secret-parent/key.json"}), nil)
+	b.Query.Set("secret-parent")
+	if rows := b.Window().Rows; len(rows) != 0 {
+		t.Fatalf("parent path leaked into filename search: %#v", rows)
 	}
 }
 
-func TestFileBrowser_ActivateFileCallsOnSelect(t *testing.T) {
-	var selected string
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "secret.json", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/etc", readDir, func(path string) { selected = path }, nil)
-
-	b.activateRow(BrowserRow{Name: "secret.json", IsDir: false})
-	if !strings.Contains(selected, "secret.json") {
-		t.Fatalf("selected = %q, want path containing secret.json", selected)
+func TestFileBrowserErrorCopyDoesNotExposeBackendText(t *testing.T) {
+	b := NewFileBrowser("fb", "files", "", nil, nil, nil)
+	b.completeBrowse(0, FileBrowserListing{}, errors.New("sensitive absolute path"))
+	if strings.Contains(b.Error.Get(), "sensitive") {
+		t.Fatalf("error leaked backend text: %q", b.Error.Get())
 	}
 }
 
-func TestFileBrowser_ActivateParentNavigatesUp(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return nil, nil
-	}
-	b := NewFileBrowser("fb", "files", "/home/demo", readDir, nil, nil)
-
-	b.activateRow(BrowserRow{Name: "../", IsDir: true})
-	if b.CurrentDir.Get() != "/home" {
-		t.Fatalf("dir = %q, want /home", b.CurrentDir.Get())
+func TestFileBrowser_AppLoop_AsyncLoadFocusesFirstRow(t *testing.T) {
+	b := mountedFileBrowser(t, func(string) (FileBrowserListing, error) {
+		return listing("/opaque", "", FileBrowserEntry{Name: "first.key", Path: "/opaque/first.key"}), nil
+	}, nil, nil)
+	frame := waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "first.key") })
+	if !strings.Contains(frame, "> first.key") {
+		t.Fatalf("first asynchronously loaded row is not selected:\n%s", frame)
 	}
 }
 
-func TestFileBrowser_RefreshDirShowsError(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return nil, os.ErrPermission
-	}
-	b := NewFileBrowser("fb", "files", "/root", readDir, nil, nil)
-	win := b.Window()
-
-	if !win.HasError {
-		t.Fatal("expected HasError = true")
-	}
-	if !strings.Contains(win.ErrorText, "permission") {
-		t.Fatalf("error text = %q, want permission-related", win.ErrorText)
-	}
-}
-
-func TestFileBrowser_EmptyDirShowsOnlyParent(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return nil, nil
-	}
-	b := NewFileBrowser("fb", "files", "/empty", readDir, nil, nil)
-	win := b.Window()
-
-	if len(win.Rows) != 1 {
-		t.Fatalf("rows = %v, want just ../", win.Rows)
-	}
-}
-
-func TestFileBrowser_OSReadDirIncludesDotfiles(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(dir+"/visible.txt", []byte("a"), 0644)
-	os.WriteFile(dir+"/._hidden", []byte("b"), 0644)
-	os.Mkdir(dir+"/.git", 0755)
-
-	entries, err := OSReadDir(dir)
-	if err != nil {
-		t.Fatalf("OSReadDir: %v", err)
-	}
-	if len(entries) != 3 {
-		t.Fatalf("entries = %v, want visible files and dotfiles", entries)
-	}
-	want := []FileBrowserEntry{
-		{Name: "._hidden", IsDir: false},
-		{Name: ".git", IsDir: true},
-		{Name: "visible.txt", IsDir: false},
-	}
-	for i := range want {
-		if entries[i] != want[i] {
-			t.Fatalf("entry[%d] = %+v, want %+v; all entries = %+v", i, entries[i], want[i], entries)
+func TestFileBrowser_AppLoop_DownEnterSelectsExactReturnedPath(t *testing.T) {
+	selected := make(chan string, 1)
+	b := mountedFileBrowser(t, func(string) (FileBrowserListing, error) {
+		return listing("/opaque", "",
+			FileBrowserEntry{Name: "first.key", Path: `C:\opaque\first.key`},
+			FileBrowserEntry{Name: "second.key", Path: `C:\opaque\second.key`},
+		), nil
+	}, func(path string) { selected <- path }, nil)
+	waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "> first.key") })
+	b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
+	b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	select {
+	case got := <-selected:
+		if got != `C:\opaque\second.key` {
+			t.Fatalf("selected = %q", got)
 		}
+	case <-time.After(time.Second):
+		t.Fatal("mounted Enter did not select a file")
 	}
 }
 
-func TestFileBrowser_UpdatePropsPreservesDirectoryAndQuery(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "a.txt", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.Query.Set("a")
-
-	fresh := NewFileBrowser("fb", "files", "/other", readDir, nil, nil)
-	b.UpdateProps(fresh)
-
-	win := b.Window()
-	if win.CurrentDir != "/" {
-		t.Fatalf("UpdateProps should not change CurrentDir, got %q", win.CurrentDir)
-	}
-	if b.Query.Get() != "a" {
-		t.Fatalf("UpdateProps should preserve query, got %q", b.Query.Get())
-	}
-}
-
-func TestFileBrowser_UpdatePropsRefreshesBrowserID(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "a.txt", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("credential-browser", "files", "/", readDir, nil, nil)
-	fresh := NewFileBrowser("model-browser", "files", "/", readDir, nil, nil)
-
-	b.UpdateProps(fresh)
-
-	if got := b.ID; got != "model-browser" {
-		t.Fatalf("browser ID after update = %q, want model-browser", got)
+func TestFileBrowser_AppLoop_EnterDirectoryBrowsesExactReturnedPath(t *testing.T) {
+	calls := make(chan string, 2)
+	b := mountedFileBrowser(t, func(path string) (FileBrowserListing, error) {
+		calls <- path
+		if path == "seed" {
+			return listing("root", "", FileBrowserEntry{Name: "foreign", Path: `/home/operator/foreign`, IsDir: true}), nil
+		}
+		return listing(path, "", FileBrowserEntry{Name: "child", Path: path + "/child"}), nil
+	}, nil, nil)
+	waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "> foreign/") })
+	b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
+	waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "child") })
+	<-calls
+	if got := <-calls; got != `/home/operator/foreign` {
+		t.Fatalf("directory browse path = %q", got)
 	}
 }
 
-func TestFileBrowser_NoReadDirShowsError(t *testing.T) {
-	b := NewFileBrowser("fb", "files", "/", nil, nil, nil)
-	win := b.Window()
-	if !win.HasError {
-		t.Fatal("expected HasError when ReadDir is nil")
+func TestFileBrowser_AppLoop_EscapeCancelsLoadedAndLoading(t *testing.T) {
+	t.Run("loaded", func(t *testing.T) {
+		cancelled := make(chan struct{}, 1)
+		b := mountedFileBrowser(t, func(string) (FileBrowserListing, error) {
+			return listing("root", "", FileBrowserEntry{Name: "key", Path: "opaque-key"}), nil
+		}, nil, func() { cancelled <- struct{}{} })
+		waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "> key") })
+		b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+		waitForSignal(t, cancelled, "loaded browser Escape")
+	})
+
+	t.Run("loading", func(t *testing.T) {
+		release := make(chan struct{})
+		cancelled := make(chan struct{}, 1)
+		b := mountedFileBrowser(t, func(string) (FileBrowserListing, error) {
+			<-release
+			return listing("root", ""), nil
+		}, nil, func() { cancelled <- struct{}{} })
+		defer close(release)
+		frame := waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "loading…") })
+		if !strings.Contains(frame, "loading…") {
+			t.Fatalf("browser never entered loading:\n%s", frame)
+		}
+		b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+		waitForSignal(t, cancelled, "loading browser Escape")
+	})
+}
+
+func TestFileBrowser_AppLoop_PageDownKeepsBoundedProjection(t *testing.T) {
+	entries := make([]FileBrowserEntry, 12)
+	for i := range entries {
+		entries[i] = FileBrowserEntry{Name: fmt.Sprintf("key-%02d", i), Path: fmt.Sprintf("opaque-%02d", i)}
+	}
+	b := mountedFileBrowser(t, func(string) (FileBrowserListing, error) { return listing("root", "", entries...), nil }, nil, nil)
+	waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "> key-00") })
+	b.h.DispatchKey(tui.KeyEvent{Key: tui.KeyPageDown})
+	frame := b.h.FrameTrimmed()
+	if !strings.Contains(frame, "> key-07") || strings.Contains(frame, "key-00") {
+		t.Fatalf("PageDown did not shift the bounded projection:\n%s", frame)
+	}
+	if !strings.Contains(frame, "7 of 12 shown") {
+		t.Fatalf("bounded projection count changed:\n%s", frame)
 	}
 }
 
-func TestFileBrowser_EntryComponentIDIncludesBrowserID(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "secret.json", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("credential-browser", "files", "/", readDir, nil, nil)
-	list := b.choiceList()
-	row := ChoiceRowModel{Item: ChoiceItem{Key: "secret.json", Label: "secret.json"}}
-
-	entry := FileBrowserEntryComponent(b, list, row, false)
-
-	if got, want := entry.target.Props().ID, "credential-browser:entry:secret.json"; got != want {
-		t.Fatalf("entry component ID = %q, want %q", got, want)
+func TestFileBrowser_AppLoop_StaleResponseCannotReplaceNewerListing(t *testing.T) {
+	aResult := make(chan struct{})
+	aReturned := make(chan struct{}, 1)
+	b := mountedFileBrowser(t, func(path string) (FileBrowserListing, error) {
+		if path == "seed" {
+			<-aResult
+			aReturned <- struct{}{}
+			return listing("A", "", FileBrowserEntry{Name: "a", Path: "A/a"}), nil
+		}
+		return listing("B", "", FileBrowserEntry{Name: "b", Path: "B/b"}), nil
+	}, nil, nil)
+	b.browser.Navigate("B")
+	waitForFileBrowserFrame(t, b.h, func(frame string) bool { return strings.Contains(frame, "> b") })
+	close(aResult)
+	waitForSignal(t, aReturned, "stale A browse return")
+	b.h.Frame()
+	frame := b.h.FrameTrimmed()
+	if b.browser.CurrentDir.Get() != "B" || strings.Contains(frame, "> a") {
+		t.Fatalf("stale A replaced B:\n%s", frame)
 	}
 }
 
-func TestFileBrowser_RenderProducesSelectableRows(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "demo.txt", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
+func TestFileBrowserUnbindInvalidatesCompletionAndAllowsRebind(t *testing.T) {
+	release := make(chan struct{})
+	calls := make(chan struct{}, 2)
+	returned := make(chan struct{}, 2)
+	b := NewFileBrowser("fb", "files", "seed", func(string) (FileBrowserListing, error) {
+		calls <- struct{}{}
+		<-release
+		returned <- struct{}{}
+		return listing("late", "", FileBrowserEntry{Name: "late", Path: "late/file"}), nil
+	}, nil, nil)
 	b.AutoFocus = true
-
-	rendered := testkit.RenderMountedTrimmed(t, b, 120, 12)
-	if !strings.Contains(rendered, "> ../") {
-		t.Fatalf("first file-browser entry should be selected:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "demo.txt") {
-		t.Fatalf("file entry missing:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "2 of 2 shown") {
-		t.Fatalf("count missing:\n%s", rendered)
-	}
-}
-
-func TestFileBrowser_RenderDoesNotRepairWindowStart(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(8), nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
 	h, err := testkit.NewHarness(b)
 	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
+		t.Fatal(err)
 	}
-	defer h.Close()
+	t.Cleanup(h.Close)
 	h.Open()
-
-	list := b.choiceList()
-	list.VisibleRows = 3
-	list.SetItems(choiceListItems(8))
-	list.WindowStart.Set(5)
-	list.Items = choiceListItems(4)
-
-	rendered := h.Frame()
-
-	if got, want := list.WindowStart.Get(), 5; got != want {
-		t.Fatalf("window start after render = %d, want %d\n%s", got, want, rendered)
+	waitForSignal(t, calls, "initial browse")
+	b.UnbindApp()
+	close(release)
+	waitForSignal(t, returned, "detached browse return")
+	h.Frame()
+	if b.CurrentDir.Get() == "late" {
+		t.Fatal("completion after unbind mutated browser state")
 	}
-	if !strings.Contains(rendered, "Item 1") {
-		t.Fatalf("render should still use bounded projection:\n%s", rendered)
-	}
-}
-
-func TestFileBrowser_RenderBoundsLongDirectory(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(12), nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.AutoFocus = true
-
-	rendered := testkit.RenderMountedTrimmed(t, b, 120, 20)
-	if strings.Count(rendered, "select ↵") != 6 {
-		t.Fatalf("rendered file rows = %d, want first projected page only:\n%s", strings.Count(rendered, "select ↵"), rendered)
-	}
-	if strings.Contains(rendered, "file-011.txt") {
-		t.Fatalf("render should not mount entries beyond projection:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "7 of 13 shown") {
-		t.Fatalf("bounded count missing:\n%s", rendered)
+	b.BindApp(h.App())
+	waitForSignal(t, calls, "rebound browse")
+	waitForSignal(t, returned, "rebound browse return")
+	frame := waitForFileBrowserFrame(t, h, func(frame string) bool { return strings.Contains(frame, "> late") })
+	if b.CurrentDir.Get() != "late" {
+		t.Fatalf("rebound completion was not installed:\n%s", frame)
 	}
 }
 
-func TestFileBrowser_AppLoop_KeyDownMovesGlobalSelectionToNextEntry(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "demo.txt", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.AutoFocus = true
+type mountedBrowser struct {
+	browser *FileBrowser
+	h       *testkit.MockAppHarness
+}
 
-	h, err := testkit.NewHarness(b)
+func mountedFileBrowser(t *testing.T, browse FileBrowserBrowse, selectFile func(string), cancel func()) mountedBrowser {
+	t.Helper()
+	b := NewFileBrowser("fb", "credential file", "seed", browse, selectFile, cancel)
+	b.AutoFocus = true
+	h, err := testkit.NewHarnessAt(b, 100, 16)
 	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
+		t.Fatal(err)
 	}
-	defer h.Close()
+	t.Cleanup(h.Close)
 	h.Open()
-
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-
-	frame := h.Frame()
-	if !strings.Contains(frame, "> demo.txt") {
-		t.Fatalf("Down should select the file row through global selection:\n%s", frame)
-	}
+	return mountedBrowser{browser: b, h: h}
 }
 
-func TestFileBrowser_AppLoop_KeyDownAtProjectionEndRevealsNextEntry(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(12), nil
+func waitForFileBrowserFrame(t *testing.T, h *testkit.MockAppHarness, settled func(string) bool) string {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	var frame string
+	for time.Now().Before(deadline) {
+		frame = h.FrameTrimmed()
+		if settled(frame) {
+			return frame
+		}
+		time.Sleep(time.Millisecond)
 	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.AutoFocus = true
-
-	h, err := testkit.NewHarness(b)
-	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
-	}
-	defer h.Close()
-	h.Open()
-
-	for range fileBrowserDefaultVisibleRows {
-		h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	}
-
-	frame := h.Frame()
-	if !strings.Contains(frame, "> file-006.txt") {
-		t.Fatalf("edge Down should reveal and select the next file row:\n%s", frame)
-	}
-	if strings.Contains(frame, "../") {
-		t.Fatalf("parent row should have scrolled out of the projected file window:\n%s", frame)
-	}
-	if !strings.Contains(frame, "7 of 13 shown") {
-		t.Fatalf("bounded count should remain stable after projection move:\n%s", frame)
-	}
+	t.Fatalf("file browser did not settle:\n%s", frame)
+	return ""
 }
 
-func TestFileBrowser_AppLoop_PageDownMovesBoundedProjection(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(12), nil
+func waitForSignal(t *testing.T, signal <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", name)
 	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.AutoFocus = true
-
-	h, err := testkit.NewHarness(b)
-	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
-	}
-	defer h.Close()
-	h.Open()
-
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyPageDown})
-
-	frame := h.Frame()
-	if !strings.Contains(frame, "> file-006.txt") {
-		t.Fatalf("PageDown should select the next bounded file page:\n%s", frame)
-	}
-	if strings.Contains(frame, "../") {
-		t.Fatalf("PageDown should advance the file list projection before body scroll:\n%s", frame)
-	}
-	if !strings.Contains(frame, "7 of 13 shown") {
-		t.Fatalf("bounded count should remain stable after PageDown:\n%s", frame)
-	}
-}
-
-func TestFileBrowser_AppLoop_PageUpMovesBoundedProjection(t *testing.T) {
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return manyFileBrowserEntries(12), nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, nil)
-	b.AutoFocus = true
-
-	h, err := testkit.NewHarness(b)
-	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
-	}
-	defer h.Close()
-	h.Open()
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyPageDown})
-
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyPageUp})
-
-	frame := h.Frame()
-	if !strings.Contains(frame, "> ../") {
-		t.Fatalf("PageUp should return to the previous bounded file page:\n%s", frame)
-	}
-	if strings.Contains(frame, "file-006.txt") {
-		t.Fatalf("PageUp should move the file list projection back:\n%s", frame)
-	}
-	if !strings.Contains(frame, "7 of 13 shown") {
-		t.Fatalf("bounded count should remain stable after PageUp:\n%s", frame)
-	}
-}
-
-func TestFileBrowser_AppLoop_KeyEnterSelectsFocusedFile(t *testing.T) {
-	var selected string
-	readDir := func(string) ([]FileBrowserEntry, error) {
-		return []FileBrowserEntry{{Name: "demo.txt", IsDir: false}}, nil
-	}
-	b := NewFileBrowser("fb", "files", "/", readDir, func(path string) { selected = path }, nil)
-	b.AutoFocus = true
-
-	h, err := testkit.NewHarness(b)
-	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
-	}
-	defer h.Close()
-	h.Open()
-
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
-
-	if !strings.Contains(selected, "demo.txt") {
-		t.Fatalf("selected = %q, want demo.txt", selected)
-	}
-}
-
-func TestFileBrowser_AppLoop_KeyEscapeCancels(t *testing.T) {
-	var cancelled bool
-	readDir := func(string) ([]FileBrowserEntry, error) { return nil, nil }
-	b := NewFileBrowser("fb", "files", "/", readDir, nil, func() { cancelled = true })
-	b.AutoFocus = true
-
-	h, err := testkit.NewHarness(b)
-	if err != nil {
-		t.Fatalf("NewHarness: %v", err)
-	}
-	defer h.Close()
-
-	h.Open()
-	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
-
-	if !cancelled {
-		t.Fatal("OnCancel not fired via Escape dispatch")
-	}
-}
-
-func manyFileBrowserEntries(n int) []FileBrowserEntry {
-	entries := make([]FileBrowserEntry, 0, n)
-	for i := range n {
-		entries = append(entries, FileBrowserEntry{Name: fmt.Sprintf("file-%03d.txt", i), IsDir: false})
-	}
-	return entries
 }

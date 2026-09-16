@@ -76,6 +76,7 @@ type CredentialFieldProps struct {
 	AutoFocus    bool
 	Apply        func(string)
 	Store        func(string) (string, error)
+	BrowseFile   ui.FileBrowserBrowse
 	ChoiceAction string
 }
 
@@ -114,23 +115,13 @@ func (r *credentialRow) KeyMap() tui.KeyMap {
 	return ui.BackScope(func() bool { return r.stage.Get() != credStageClosed }, r.retreat)
 }
 
-func FileCredentialInput(r *credentialRow) *ui.EditableRow {
-	row := ui.NewEditableRow(
-		r.key("file-input"),
-		"daemon path",
-		r.filePath,
-	)
-	row.Placeholder = "_"
-	row.ViewAction = "edit ↵"
-	row.EditAction = "save ↵"
-	row.StartEditing = true
-	row.AutoFocus = true
-	row.OnSubmit = func(raw string) {
-		r.filePath.Set(strings.TrimSpace(raw))
-		r.saveFile(r.filePath.Get())
-	}
-	row.OnClose = r.retreat
-	return row
+func FileCredentialBrowser(r *credentialRow) *ui.FileBrowser {
+	browser := ui.NewFileBrowser(r.key("file-browser"), "credential file", r.filePath.Get(), r.props.BrowseFile, func(path string) {
+		r.filePath.Set(path)
+		r.saveFile(path)
+	}, r.retreat)
+	browser.AutoFocus = true
+	return browser
 }
 
 func (r *credentialRow) toggle() {
@@ -384,7 +375,7 @@ templ (r *credentialRow) Render() {
 					@CredentialPasteSecretOption(r)
 					if r.optional() && strings.TrimSpace(r.props.Ref) != "" { @CredentialRemoveOption(r) }
 				} else if r.stage.Get() == credStageEnv { @EnvCredentialInput(r)
-				} else if r.stage.Get() == credStageFile { @FileCredentialInput(r)
+			} else if r.stage.Get() == credStageFile { @FileCredentialBrowser(r)
 				} else if r.stage.Get() == credStagePaste { @PasteSecretInput(r) }
 			</div>
 			if r.validationMessage() != "" { @CredentialInputError(r.validationMessage()) }
@@ -410,7 +401,7 @@ templ (b *credentialChooserBody) Render() {
 			@CredentialFileOption(b.row)
 			@CredentialPasteSecretOption(b.row)
 		} else if b.row.stage.Get() == credStageEnv { @EnvCredentialInput(b.row)
-		} else if b.row.stage.Get() == credStageFile { @FileCredentialInput(b.row)
+		} else if b.row.stage.Get() == credStageFile { @FileCredentialBrowser(b.row)
 		} else if b.row.stage.Get() == credStagePaste { @PasteSecretInput(b.row) }
 		if b.row.validationMessage() != "" { @CredentialInputError(b.row.validationMessage()) }
 	</div>

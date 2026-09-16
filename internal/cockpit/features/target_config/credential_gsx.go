@@ -43,6 +43,7 @@ type CredentialFieldProps struct {
 	AutoFocus       bool
 	Apply           func(string)
 	Store           func(string) (string, error)
+	BrowseFile      ui.FileBrowserBrowse
 	ChoiceAction    string
 }
 
@@ -119,23 +120,13 @@ func (r *credentialRow) KeyMap() tui.KeyMap {
 	return ui.BackScope(func() bool { return r.stage.Get() != credStageClosed }, r.retreat)
 }
 
-func FileCredentialInput(r *credentialRow) *ui.EditableRow {
-	row := ui.NewEditableRow(
-		r.key("file-input"),
-		"daemon path",
-		r.filePath,
-	)
-	row.Placeholder = "_"
-	row.ViewAction = "edit ↵"
-	row.EditAction = "save ↵"
-	row.StartEditing = true
-	row.AutoFocus = true
-	row.OnSubmit = func(raw string) {
-		r.filePath.Set(strings.TrimSpace(raw))
-		r.saveFile(r.filePath.Get())
-	}
-	row.OnClose = r.retreat
-	return row
+func FileCredentialBrowser(r *credentialRow) *ui.FileBrowser {
+	browser := ui.NewFileBrowser(r.key("file-browser"), "credential file", r.filePath.Get(), r.props.BrowseFile, func(path string) {
+		r.filePath.Set(path)
+		r.saveFile(path)
+	}, r.retreat)
+	browser.AutoFocus = true
+	return browser
 }
 
 func (r *credentialRow) toggle() {
@@ -435,7 +426,7 @@ func (r *credentialRow) Render(app *tui.App) *tui.Element {
 			__tui_2.AddChild(__tui_7)
 		} else if r.stage.Get() == credStageFile {
 			__tui_8 := app.Mount(r, 6, func() tui.Component {
-				return FileCredentialInput(r)
+				return FileCredentialBrowser(r)
 			})
 			__tui_2.AddChild(__tui_8)
 		} else if r.stage.Get() == credStagePaste {
@@ -593,7 +584,7 @@ func (b *credentialChooserBody) Render(app *tui.App) *tui.Element {
 		__tui_0.AddChild(__tui_4)
 	} else if b.row.stage.Get() == credStageFile {
 		__tui_5 := app.Mount(b, 4, func() tui.Component {
-			return FileCredentialInput(b.row)
+			return FileCredentialBrowser(b.row)
 		})
 		__tui_0.AddChild(__tui_5)
 	} else if b.row.stage.Get() == credStagePaste {

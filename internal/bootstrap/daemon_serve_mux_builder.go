@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
+	"github.com/swobuforge/swobu/internal/app/operator/credentialfiles"
 	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
@@ -91,6 +92,11 @@ func buildDaemonServeMux(
 	mux.Handle("/_swobu/credentials", httpapi.NewCredentialStoreHandler(
 		func(_ context.Context, providerSpec string, keyName string, secret string) (string, error) {
 			return persistCredential(providerSpec, keyName, secret)
+		},
+	))
+	mux.Handle("/_swobu/credential-files", httpapi.NewCredentialFilesHandler(
+		func(_ context.Context, path string) (credentialfiles.Listing, error) {
+			return credentialfiles.Browse(path)
 		},
 	))
 	bindingCoordinator := &routebindings.Coordinator{}

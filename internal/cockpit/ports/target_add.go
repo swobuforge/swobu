@@ -14,6 +14,19 @@ import (
 // and operator client target probe.
 type TargetSetupQueries interface {
 	ProbeProviderModels(ctx context.Context, req ProbeProviderModelsRequest) (readmodel.ModelCatalogReadModel, error)
+	BrowseCredentialFiles(ctx context.Context, path string) (BrowseCredentialFilesResult, error)
+}
+
+type BrowseCredentialFilesResult struct {
+	Path    string
+	Parent  string
+	Entries []CredentialFileEntry
+}
+
+type CredentialFileEntry struct {
+	Name  string
+	Path  string
+	IsDir bool
 }
 
 type ProbeProviderModelsRequest struct {

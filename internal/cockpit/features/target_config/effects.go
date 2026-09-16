@@ -11,6 +11,7 @@ import (
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -41,6 +42,7 @@ func newCredentialRow(target *TargetConfig, autoFocus bool) *credentialRow {
 	props.Store = func(secret string) (string, error) {
 		return target.storePastedCredential(target.actionContext(), secret)
 	}
+	props.BrowseFile = target.browseCredentialFiles
 	row := newCredentialField(props)
 	return row
 }
@@ -58,7 +60,25 @@ func ambientOrReferenceAuthenticationProps(target *TargetConfig, credential prof
 		Store: func(secret string) (string, error) {
 			return target.storePastedCredential(target.actionContext(), secret)
 		},
+		BrowseFile: target.browseCredentialFiles,
 	}
+}
+
+func (w *TargetConfig) browseCredentialFiles(path string) (ui.FileBrowserListing, error) {
+	if w.TargetSetupQueries == nil {
+		return ui.FileBrowserListing{}, errors.New("credential file browser is not wired yet")
+	}
+	ctx, cancel := context.WithTimeout(w.actionContext(), 10*time.Second)
+	defer cancel()
+	result, err := w.TargetSetupQueries.BrowseCredentialFiles(ctx, path)
+	if err != nil {
+		return ui.FileBrowserListing{}, err
+	}
+	listing := ui.FileBrowserListing{Path: result.Path, Parent: result.Parent, Entries: make([]ui.FileBrowserEntry, 0, len(result.Entries))}
+	for _, entry := range result.Entries {
+		listing.Entries = append(listing.Entries, ui.FileBrowserEntry{Name: entry.Name, Path: entry.Path, IsDir: entry.IsDir})
+	}
+	return listing, nil
 }
 
 func (w *TargetConfig) changeCredentialRef(ref string) {

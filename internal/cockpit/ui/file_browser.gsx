@@ -3,23 +3,28 @@ package ui
 templ (b *FileBrowser) Render() {
 	win := b.Window()
 	list := b.choiceList()
-	<div class="flex-col w-full" deps={b.Query, b.CurrentDir, b.Error}>
+	<div class="flex-col w-full" deps={b.Query, b.CurrentDir, b.Error, b.Loading}>
 		if b.Title != "" {
 			@FileBrowserTitleRow(b.Title)
 		}
-		@FileBrowserDirRow(win.CurrentDir)
-		@FileBrowserSearchRow(win.Query)
-		<div class="flex-col w-full">
-			for i, row := range list.Window().Rows {
-				<div key={b.ID + ":entry:" + choiceRowKey(row)} class="w-full">
-					@FileBrowserEntryComponent(b, list, row, i == 0)
-				</div>
-			}
-		</div>
+		if b.Loading.Get() { @FileBrowserLoadingRow()
+		} else {
+			@FileBrowserDirRow(win.CurrentDir)
+			@FileBrowserSearchRow(win.Query)
+		}
+		if !b.Loading.Get() && !win.HasError {
+			<div class="flex-col w-full">
+				for i, row := range list.Window().Rows {
+					<div key={b.ID + ":entry:" + choiceRowKey(row)} class="w-full">
+						@FileBrowserEntryComponent(b, list, row, i == 0)
+					</div>
+				}
+			</div>
+			@FileBrowserHintRow(fileBrowserCountLabel(win.ShownRows, win.TotalRows))
+		}
 		if win.HasError {
 			@FileBrowserErrorRow(win.ErrorText)
 		}
-		@FileBrowserHintRow(fileBrowserCountLabel(win.ShownRows, win.TotalRows))
 	</div>
 }
 
@@ -53,6 +58,12 @@ func FileBrowserEntryComponent(b *FileBrowser, list *ChoiceList, row ChoiceRowMo
 templ FileBrowserErrorRow(msg string) {
 	<div class="pl-2 w-full">
 		@FlowText(msg)
+	</div>
+}
+
+templ FileBrowserLoadingRow() {
+	<div class="pl-2 w-full">
+		@FlowText("loading…")
 	</div>
 }
 
