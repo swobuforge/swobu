@@ -21,13 +21,18 @@ const (
 	credStagePaste
 )
 
+type credentialValidation struct {
+	stage   credentialStage
+	message string
+}
+
 type credentialRow struct {
 	props      CredentialFieldProps
 	stage      *tui.State[credentialStage]
 	envName    *tui.State[string]
 	filePath   *tui.State[string]
 	secret     *tui.State[string]
-	localError *tui.State[string]
+	validation *tui.State[credentialValidation]
 }
 
 type CredentialFieldProps struct {
@@ -80,7 +85,7 @@ func newCredentialField(props CredentialFieldProps) *credentialRow {
 	return &credentialRow{
 		props: props,
 		stage: tui.NewState(credStageClosed), envName: tui.NewState(""),
-		filePath: tui.NewState(""), secret: tui.NewState(""), localError: tui.NewState(""),
+		filePath: tui.NewState(""), secret: tui.NewState(""), validation: tui.NewState(credentialValidation{}),
 	}
 }
 
@@ -88,14 +93,24 @@ func (r *credentialRow) key(suffix string) string { return r.props.ID + ":" + su
 
 func (r *credentialRow) optional() bool { return r.props.Optional }
 
-func (r *credentialRow) fail(message string) { r.localError.Set(message) }
+func (r *credentialRow) fail(message string) {
+	r.validation.Set(credentialValidation{stage: r.stage.Get(), message: message})
+}
+
+func (r *credentialRow) validationMessage() string {
+	validation := r.validation.Get()
+	if validation.stage != r.stage.Get() {
+		return ""
+	}
+	return strings.TrimSpace(validation.message)
+}
 
 func (r *credentialRow) BindApp(app *tui.App) {
 	r.stage.BindApp(app)
 	r.envName.BindApp(app)
 	r.filePath.BindApp(app)
 	r.secret.BindApp(app)
-	r.localError.BindApp(app)
+	r.validation.BindApp(app)
 }
 
 func (r *credentialRow) UnbindApp() {}
@@ -150,11 +165,13 @@ func (r *credentialRow) enter(stage credentialStage) bool {
 	if r.stage.Get() != credStageMenu {
 		return false
 	}
+	r.validation.Set(credentialValidation{})
 	r.stage.Set(stage)
 	return true
 }
 
 func (r *credentialRow) retreat() {
+	r.validation.Set(credentialValidation{})
 	if r.stage.Get() == credStageMenu {
 		r.stage.Set(credStageClosed)
 		return
@@ -167,6 +184,7 @@ func (r *credentialRow) reset() {
 	r.envName.Set("")
 	r.filePath.Set("")
 	r.secret.Set("")
+	r.validation.Set(credentialValidation{})
 }
 
 func (r *credentialRow) openEnv() {
@@ -427,8 +445,8 @@ func (r *credentialRow) Render(app *tui.App) *tui.Element {
 			__tui_2.AddChild(__tui_9)
 		}
 		__tui_0.AddChild(__tui_2)
-		if strings.TrimSpace(r.localError.Get()) != "" {
-			__tui_10 := CredentialInputError(r.localError.Get())
+		if r.validationMessage() != "" {
+			__tui_10 := CredentialInputError(r.validationMessage())
 			__tui_0.AddChild(__tui_10.Root)
 		}
 	}
@@ -469,8 +487,8 @@ func (r *credentialRow) bindAppFields(app *tui.App) {
 	if r.secret != nil {
 		r.secret.BindApp(app)
 	}
-	if r.localError != nil {
-		r.localError.BindApp(app)
+	if r.validation != nil {
+		r.validation.BindApp(app)
 	}
 }
 
@@ -584,8 +602,8 @@ func (b *credentialChooserBody) Render(app *tui.App) *tui.Element {
 		})
 		__tui_0.AddChild(__tui_6)
 	}
-	if strings.TrimSpace(b.row.localError.Get()) != "" {
-		__tui_7 := CredentialInputError(b.row.localError.Get())
+	if b.row.validationMessage() != "" {
+		__tui_7 := CredentialInputError(b.row.validationMessage())
 		__tui_0.AddChild(__tui_7.Root)
 	}
 

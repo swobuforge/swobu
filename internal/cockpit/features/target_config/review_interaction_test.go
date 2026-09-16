@@ -358,6 +358,35 @@ func TestMountedBedrockNestedCredentialEscapeRetreatsOneLevelAtATime(t *testing.
 	}
 }
 
+func TestMountedCredentialFileValidationEndsWhenBackingOutToSourceMenu(t *testing.T) {
+	w := NewTargetConfig("dev", readmodel.RouteReadModel{ID: "chat"}, nil, nil)
+	w.Open()
+	w.SelectProvider(string(profile.ProviderSpecOpenCodeZen))
+	h, err := testkit.NewHarnessAt(w, 100, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	h.Open()
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // credential source menu
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyDown})  // file
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // file editor
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter}) // submit empty path
+
+	frame := h.FrameTrimmed()
+	if !strings.Contains(frame, "file path is required") {
+		t.Fatalf("empty file path did not render validation feedback:\n%s", frame)
+	}
+	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEscape})
+	frame = h.FrameTrimmed()
+	if !strings.Contains(frame, "environment variable") || !strings.Contains(frame, "file") || !strings.Contains(frame, "paste credential") {
+		t.Fatalf("Escape did not return to the credential source menu:\n%s", frame)
+	}
+	if strings.Contains(frame, "file path is required") {
+		t.Fatalf("file-editor validation survived after its owning input closed:\n%s", frame)
+	}
+}
+
 func TestCredentialPasteStoreFailurePreservesEditorAndSecret(t *testing.T) {
 	r := newCredentialField(CredentialFieldProps{ID: "credential", Store: func(string) (string, error) {
 		return "", errors.New("store unavailable")
@@ -371,7 +400,7 @@ func TestCredentialPasteStoreFailurePreservesEditorAndSecret(t *testing.T) {
 	if got := r.stage.Get(); got != credStagePaste {
 		t.Fatalf("stage = %v, want paste editor", got)
 	}
-	if got := r.localError.Get(); got != "store unavailable" {
+	if got := r.validationMessage(); got != "store unavailable" {
 		t.Fatalf("local error = %q", got)
 	}
 	if frame := testkit.RenderMountedTrimmed(t, r, 100, 8); !strings.Contains(frame, "store unavailable") {

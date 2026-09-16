@@ -47,6 +47,13 @@ const (
 	credStagePaste
 )
 
+// credentialValidation binds feedback to the entered input that produced it.
+// A source-menu or sibling-input projection must never display that feedback.
+type credentialValidation struct {
+	stage   credentialStage
+	message string
+}
+
 // credentialRow owns transient credential interaction state. TargetConfig owns
 // only the persisted credential reference on its durable target draft.
 type credentialRow struct {
@@ -55,7 +62,7 @@ type credentialRow struct {
 	envName      *tui.State[string]
 	filePath     *tui.State[string]
 	secret       *tui.State[string]
-	localError *tui.State[string]
+	validation *tui.State[credentialValidation]
 }
 
 // CredentialFieldProps is the complete feature-to-component contract. The
@@ -76,20 +83,30 @@ func newCredentialField(props CredentialFieldProps) *credentialRow {
 	return &credentialRow{
 		props: props,
 		stage: tui.NewState(credStageClosed), envName: tui.NewState(""),
-		filePath: tui.NewState(""), secret: tui.NewState(""), localError: tui.NewState(""),
+		filePath: tui.NewState(""), secret: tui.NewState(""), validation: tui.NewState(credentialValidation{}),
 	}
 }
 
 func (r *credentialRow) key(suffix string) string { return r.props.ID + ":" + suffix }
 func (r *credentialRow) optional() bool { return r.props.Optional }
-func (r *credentialRow) fail(message string) { r.localError.Set(message) }
+func (r *credentialRow) fail(message string) {
+	r.validation.Set(credentialValidation{stage: r.stage.Get(), message: message})
+}
+
+func (r *credentialRow) validationMessage() string {
+	validation := r.validation.Get()
+	if validation.stage != r.stage.Get() {
+		return ""
+	}
+	return strings.TrimSpace(validation.message)
+}
 
 func (r *credentialRow) BindApp(app *tui.App) {
 	r.stage.BindApp(app)
 	r.envName.BindApp(app)
 	r.filePath.BindApp(app)
 	r.secret.BindApp(app)
-	r.localError.BindApp(app)
+	r.validation.BindApp(app)
 }
 func (r *credentialRow) UnbindApp() {}
 
@@ -141,11 +158,13 @@ func (r *credentialRow) enter(stage credentialStage) bool {
 	if r.stage.Get() != credStageMenu {
 		return false
 	}
+	r.validation.Set(credentialValidation{})
 	r.stage.Set(stage)
 	return true
 }
 
 func (r *credentialRow) retreat() {
+	r.validation.Set(credentialValidation{})
 	if r.stage.Get() == credStageMenu {
 		r.stage.Set(credStageClosed)
 		return
@@ -158,6 +177,7 @@ func (r *credentialRow) reset() {
 	r.envName.Set("")
 	r.filePath.Set("")
 	r.secret.Set("")
+	r.validation.Set(credentialValidation{})
 }
 
 func (r *credentialRow) openEnv() {
@@ -354,7 +374,7 @@ func PasteSecretInput(r *credentialRow) *ui.EditableRow {
 }
 
 templ (r *credentialRow) Render() {
-	<div class="flex-col w-full" deps={r.localError}>
+	<div class="flex-col w-full" deps={r.validation}>
 		@CredentialControlWithAutoFocus(r)
 		if r.stage.Get() != credStageClosed {
 			<div class="pl-3 flex-col w-full">
@@ -367,7 +387,7 @@ templ (r *credentialRow) Render() {
 				} else if r.stage.Get() == credStageFile { @FileCredentialInput(r)
 				} else if r.stage.Get() == credStagePaste { @PasteSecretInput(r) }
 			</div>
-			if strings.TrimSpace(r.localError.Get()) != "" { @CredentialInputError(r.localError.Get()) }
+			if r.validationMessage() != "" { @CredentialInputError(r.validationMessage()) }
 		}
 	</div>
 }
@@ -384,7 +404,7 @@ func CredentialChooser(r *credentialRow) *credentialChooserBody { return &creden
 // Render exposes the shared source chooser without its generic credential
 // header so provider-owned fields can embed the same mechanism.
 templ (b *credentialChooserBody) Render() {
-	<div class="flex-col w-full" deps={b.row.localError}>
+	<div class="flex-col w-full" deps={b.row.validation}>
 		if b.row.stage.Get() == credStageMenu {
 			@CredentialEnvOption(b.row)
 			@CredentialFileOption(b.row)
@@ -392,6 +412,6 @@ templ (b *credentialChooserBody) Render() {
 		} else if b.row.stage.Get() == credStageEnv { @EnvCredentialInput(b.row)
 		} else if b.row.stage.Get() == credStageFile { @FileCredentialInput(b.row)
 		} else if b.row.stage.Get() == credStagePaste { @PasteSecretInput(b.row) }
-		if strings.TrimSpace(b.row.localError.Get()) != "" { @CredentialInputError(b.row.localError.Get()) }
+		if b.row.validationMessage() != "" { @CredentialInputError(b.row.validationMessage()) }
 	</div>
 }
