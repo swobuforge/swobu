@@ -10,8 +10,8 @@ import (
 )
 
 // ModelReloader owns the refresh policy after workspace mutations. It loads
-// fresh cockpit state from the daemon, reconciles it with the mutation that
-// triggered the refresh, and produces a notice when the load is stale.
+// fresh cockpit state from the daemon and reports reconciliation facts without
+// choosing their presentation scope.
 //
 // The component layer (Cockpit) renders and routes events; the reloader owns
 // the policy of what to load, when to fall back, and what notice to show.
@@ -19,6 +19,15 @@ type ModelReloader struct {
 	ctx     context.Context
 	query   ports.WorkspaceQueries
 	timeout time.Duration
+}
+
+// Reconciliation reports the resulting projection and whether the root
+// Cockpit model was freshly loaded. A later workspace-detail failure remains
+// local to that workspace and does not make the root projection stale.
+type Reconciliation struct {
+	Model     readmodel.CockpitReadModel
+	Err       error
+	RootFresh bool
 }
 
 // NewModelReloader builds a reloader with the given query surface and context.
@@ -35,42 +44,39 @@ func NewModelReloader(ctx context.Context, query ports.WorkspaceQueries, timeout
 // authoritative first-target response. Local draft naming also uses the local
 // projection path but never queries or mutates the daemon. When the daemon is
 // unreachable for persisted renames, it patches the current model and reports
-// a stale notice so the UI does not silently hide the mutation.
-func (r *ModelReloader) RefreshAfterSave(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) (readmodel.CockpitReadModel, readmodel.Notice) {
+// the refresh error without claiming authoritative reconciliation.
+func (r *ModelReloader) RefreshAfterSave(current readmodel.CockpitReadModel, saved readmodel.WorkspaceReadModel) Reconciliation {
 	if r.query == nil || current.SelectedWorkspace.IsOnboarding() {
-		return r.localSaveProjection(current, saved), readmodel.Notice{}
+		return Reconciliation{Model: r.localSaveProjection(current, saved)}
 	}
 	ctx, cancel := r.refreshContext()
 	defer cancel()
 	fresh, err := r.query.LoadCockpit(ctx)
 	if err != nil {
-		return r.localSaveProjection(current, saved),
-			staleRefreshNotice("refresh stale: saved workspace shown; " + err.Error())
+		return Reconciliation{Model: r.localSaveProjection(current, saved), Err: err}
 	}
 	workspace, workspaceErr := r.query.LoadWorkspace(ctx, saved.ID)
 	if workspaceErr != nil {
 		workspace = mergeWorkspaceProjection(current.SelectedWorkspace, saved)
-		return selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID),
-			staleRefreshNotice("refresh stale: saved workspace shown; " + workspaceErr.Error())
+		return Reconciliation{Model: selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID), Err: workspaceErr, RootFresh: true}
 	}
-	return selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID), readmodel.Notice{}
+	return Reconciliation{Model: selectWorkspace(updateWorkspaceInModel(fresh, workspace), workspace.ID), RootFresh: true}
 }
 
 // RefreshAfterDelete loads a fresh cockpit projection after a workspace
-// deletion. It returns the reconciled model and a notice. When the daemon
-// is unreachable, it patches the current model in place.
-func (r *ModelReloader) RefreshAfterDelete(current readmodel.CockpitReadModel, deleted readmodel.WorkspaceID) (readmodel.CockpitReadModel, readmodel.Notice) {
+// deletion. When the daemon is unreachable, it patches the current model in
+// place without claiming authoritative reconciliation.
+func (r *ModelReloader) RefreshAfterDelete(current readmodel.CockpitReadModel, deleted readmodel.WorkspaceID) Reconciliation {
 	if r.query == nil {
-		return removeWorkspaceFromModel(current, deleted), readmodel.Notice{}
+		return Reconciliation{Model: removeWorkspaceFromModel(current, deleted)}
 	}
 	ctx, cancel := r.refreshContext()
 	defer cancel()
 	fresh, err := r.query.LoadCockpit(ctx)
 	if err != nil {
-		return removeWorkspaceFromModel(current, deleted),
-			staleRefreshNotice("refresh stale: deleted workspace hidden; " + err.Error())
+		return Reconciliation{Model: removeWorkspaceFromModel(current, deleted), Err: err}
 	}
-	return removeWorkspaceFromModel(fresh, deleted), readmodel.Notice{}
+	return Reconciliation{Model: removeWorkspaceFromModel(fresh, deleted), RootFresh: true}
 }
 
 func (r *ModelReloader) refreshContext() (context.Context, context.CancelFunc) {

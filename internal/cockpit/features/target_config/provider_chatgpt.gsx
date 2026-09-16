@@ -15,6 +15,11 @@ type chatGPTAuthModeMenu struct {
 	replaceSession bool
 }
 
+type authCodeCopyFeedback struct {
+	Message string
+	Tone    ui.Tone
+}
+
 func ChatGPTProviderForm(w *TargetConfig) tui.Component { return &chatGPTProviderForm{target: w} }
 
 func ChatGPTAuthControl(w *TargetConfig) *ui.Select {
@@ -86,7 +91,8 @@ func chatGPTAuthURL(w *TargetConfig) string {
 func ChatGPTAuthOpenBrowser(w *TargetConfig) *ui.SelectableRow {
 	url := chatGPTAuthURL(w)
 	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-open"), "login URL", "", "open ↵", func() {
-		_ = ui.OpenURL(url)
+		if err := ui.OpenURL(url); err != nil { w.AuthBrowserError.Set("browser could not open"); return }
+		w.AuthBrowserError.Set("")
 	})
 }
 
@@ -115,25 +121,29 @@ func ChatGPTAuthFailed(w *TargetConfig) *ui.SelectableRow {
 
 func ChatGPTAuthUserCode(w *TargetConfig) *ui.SelectableRow {
 	code := strings.TrimSpace(w.AuthSession.Get().UserCode)
-	return ui.CopyPasteRowComponent(TargetAddMountKey(w, "auth-code"), "code", code, "copy ↵", func() ui.CopyResult {
+	feedback := w.AuthCodeCopy.Get()
+	action := "copy ↵"
+	if feedback.Tone == ui.ToneAccent { action = "copied" }
+	if feedback.Tone == ui.ToneWarning || feedback.Tone == ui.ToneFailure { action = "retry ↵" }
+	row := ui.CopyPasteRowComponent(TargetAddMountKey(w, "auth-code"), "code", code, action, func() ui.ClipboardResult {
 		return ui.CopyToClipboard(code)
-	}, func(result ui.CopyResult) {
-		if msg := result.ErrorForDisplay(); msg != "" { w.Error.Set(msg); return }
-		w.Error.Set("")
-	})
+	}, w.setAuthCodeCopyResult)
+	return row
 }
 
 templ (f *chatGPTProviderForm) Render() {
 	<div class="flex-col w-full" deps={f.target.Draft, f.target.BaseURL, f.target.ChatGPTAuthMode}>
 		if targetAuthPending(f.target) {
-			<div deps={f.target.AuthSession, f.target.Error}>
+			<div deps={f.target.AuthSession, f.target.Error, f.target.AuthBrowserError, f.target.AuthCodeCopy}>
 				@ChatGPTPendingAuthControl(f.target)
 				@ChatGPTAuthOpenBrowser(f.target)
+				if f.target.AuthBrowserError.Get() != "" { <div class="pl-3 w-full" textStyle={ui.ToneStyle(ui.ToneFailure)}>@FlowText(f.target.AuthBrowserError.Get())</div> }
 				<div class="pl-3 w-full">
 					@ChatGPTAuthURLText(f.target)
 				</div>
 				if strings.TrimSpace(f.target.AuthSession.Get().UserCode) != "" {
 					@ChatGPTAuthUserCode(f.target)
+					if feedback := f.target.AuthCodeCopy.Get(); feedback.Tone == ui.ToneWarning || feedback.Tone == ui.ToneFailure { <div class="pl-3 w-full" textStyle={ui.ToneStyle(feedback.Tone)}>@FlowText(feedback.Message)</div> }
 				}
 				@ChatGPTAuthStatus(f.target)
 				@ChatGPTAuthCancel(f.target)

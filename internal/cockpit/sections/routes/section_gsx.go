@@ -78,88 +78,100 @@ func (s *SectionView) Render(app *tui.App) *tui.Element {
 					})
 					__tui_12.AddChild(__tui_13)
 					__tui_7.AddChild(__tui_12)
-					if route.Share != nil {
+					if feedback := s.State.ShareFeedback.Get(); feedback.RouteID == route.ID && feedback.Message != "" {
 						__tui_14 := tui.New(
 							tui.WithWidthPercent(100.00),
+							tui.WithPaddingTRBL(0, 0, 0, 3),
+							tui.WithTextStyle(ui.ToneStyle(feedback.Tone)),
 						)
-						__tui_15 := app.Mount(s, tui.MountKey(5, s.shareRevokeRowKey(route)), func() tui.Component {
-							return ShareRevokeRowComponent(s, route)
+						__tui_15 := app.Mount(s, tui.MountKey(5, __idx_0), func() tui.Component {
+							return ui.FlowText(feedback.Message)
 						})
 						__tui_14.AddChild(__tui_15)
 						__tui_7.AddChild(__tui_14)
+					}
+					if route.Share != nil {
+						__tui_16 := tui.New(
+							tui.WithWidthPercent(100.00),
+						)
+						__tui_17 := app.Mount(s, tui.MountKey(6, s.shareRevokeRowKey(route)), func() tui.Component {
+							return ShareRevokeRowComponent(s, route)
+						})
+						__tui_16.AddChild(__tui_17)
+						__tui_7.AddChild(__tui_16)
 					}
 					for tierIdx, tierTargets := range groupedTargets(route) {
 						_ = tierIdx
 						for targetIdx, target := range tierTargets {
 							_ = targetIdx
-							__tui_16 := tui.New()
-							__tui_17 := app.Mount(s, tui.MountKey(6, __idx_0, tierIdx, targetMountKey(route, target)), func() tui.Component {
+							__tui_18 := tui.New()
+							__tui_19 := app.Mount(s, tui.MountKey(7, __idx_0, tierIdx, targetMountKey(route, target)), func() tui.Component {
 								return TargetControlComponent(s, route, target, tierIdx, targetIdx)
 							})
-							__tui_16.AddChild(__tui_17)
-							__tui_7.AddChild(__tui_16)
+							__tui_18.AddChild(__tui_19)
+							__tui_7.AddChild(__tui_18)
 						}
 					}
-					__tui_18 := tui.New(
+					__tui_20 := tui.New(
 						tui.WithWidthPercent(100.00),
 						tui.WithMarginTRBL(1, 0, 0, 0),
 					)
-					__tui_19 := app.Mount(s, tui.MountKey(7, addTargetMountKey(route)), func() tui.Component {
+					__tui_21 := app.Mount(s, tui.MountKey(8, addTargetMountKey(route)), func() tui.Component {
 						return AddTargetControlComponent(s, route)
 					})
-					__tui_18.AddChild(__tui_19)
-					__tui_7.AddChild(__tui_18)
+					__tui_20.AddChild(__tui_21)
+					__tui_7.AddChild(__tui_20)
 					if s.State.AddTargetRoute.Get() != route.ID {
-						__tui_20 := tui.New(
+						__tui_22 := tui.New(
 							tui.WithWidthPercent(100.00),
 						)
-						__tui_21 := app.Mount(s, tui.MountKey(8, s.routeDeleteRowKey(route)), func() tui.Component {
+						__tui_23 := app.Mount(s, tui.MountKey(9, s.routeDeleteRowKey(route)), func() tui.Component {
 							return RouteDeleteRowComponent(s, route)
 						})
-						__tui_20.AddChild(__tui_21)
-						__tui_7.AddChild(__tui_20)
+						__tui_22.AddChild(__tui_23)
+						__tui_7.AddChild(__tui_22)
 					}
 					__tui_3.AddChild(__tui_7)
 				}
 			}
 		}
-		__tui_22 := tui.New(
+		__tui_24 := tui.New(
 			tui.WithWidthPercent(100.00),
 			tui.WithMarginTRBL(1, 0, 0, 0),
 		)
-		__tui_3.AddChild(__tui_22)
+		__tui_3.AddChild(__tui_24)
 		if s.DraftRoute != nil && s.DraftRoute.IsExpanded() {
-			__tui_23 := tui.New(
+			__tui_25 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_24 := app.Mount(s, tui.MountKey(9, "draft-route"), func() tui.Component {
+			__tui_26 := app.Mount(s, tui.MountKey(10, "draft-route"), func() tui.Component {
 				return DraftParentRowComponent(s)
 			})
-			__tui_23.AddChild(__tui_24)
-			__tui_3.AddChild(__tui_23)
-			__tui_25 := tui.New(
+			__tui_25.AddChild(__tui_26)
+			__tui_3.AddChild(__tui_25)
+			__tui_27 := tui.New(
 				tui.WithWidthPercent(100.00),
 				tui.WithPaddingTRBL(0, 0, 0, 3),
 			)
-			__tui_26 := tui.New(
-				tui.WithWidthPercent(100.00),
-			)
-			__tui_27 := app.Mount(s, tui.MountKey(10, "draft-name"), func() tui.Component {
-				return DraftNameRowComponent(s)
-			})
-			__tui_26.AddChild(__tui_27)
-			__tui_25.AddChild(__tui_26)
-			__tui_3.AddChild(__tui_25)
-		}
-		if s.DraftRoute == nil {
 			__tui_28 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_29 := app.Mount(s, tui.MountKey(11, addRouteMountKey()), func() tui.Component {
-				return AddRouteRowComponent(s)
+			__tui_29 := app.Mount(s, tui.MountKey(11, "draft-name"), func() tui.Component {
+				return DraftNameRowComponent(s)
 			})
 			__tui_28.AddChild(__tui_29)
-			__tui_3.AddChild(__tui_28)
+			__tui_27.AddChild(__tui_28)
+			__tui_3.AddChild(__tui_27)
+		}
+		if s.DraftRoute == nil {
+			__tui_30 := tui.New(
+				tui.WithWidthPercent(100.00),
+			)
+			__tui_31 := app.Mount(s, tui.MountKey(12, addRouteMountKey()), func() tui.Component {
+				return AddRouteRowComponent(s)
+			})
+			__tui_30.AddChild(__tui_31)
+			__tui_3.AddChild(__tui_30)
 		}
 		__tui_0.AddChild(__tui_3)
 	}

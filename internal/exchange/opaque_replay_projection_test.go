@@ -689,7 +689,7 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn1ClientJSON)),
 		ClientHandler:   "codex-tui/0.147.0",
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingNone,
 		ExchangeID:      "turn1_exchange",
 	}
@@ -758,7 +758,7 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn2ClientJSON)),
 		ClientHandler:   "codex-tui/0.147.0",
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingNone,
 		ExchangeID:      "turn2_exchange",
 	}

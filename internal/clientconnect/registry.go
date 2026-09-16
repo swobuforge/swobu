@@ -2,14 +2,24 @@ package clientconnect
 
 import (
 	"context"
+	"fmt"
 	"os"
 )
 
 type adapter struct {
-	id          ClientID
-	name        string
-	present     func(*Service) (bool, error)
-	planCurrent func(context.Context, *Service, Target) (plannedMutation, error)
+	id             ClientID
+	name           string
+	targetOptional bool
+	present        func(*Service) (bool, error)
+	planCurrent    func(context.Context, *Service, Target) (plannedMutation, error)
+}
+
+func ClientRequiresTarget(id ClientID) (bool, error) {
+	adapter, ok := adapterFor(id)
+	if !ok {
+		return false, fmt.Errorf("unsupported client")
+	}
+	return !adapter.targetOptional, nil
 }
 
 var adapters = []adapter{
@@ -21,6 +31,7 @@ var adapters = []adapter{
 	museAdapter,
 	openClawAdapter,
 	hermesAdapter,
+	antigravityAdapter,
 }
 
 func adapterFor(id ClientID) (adapter, bool) {

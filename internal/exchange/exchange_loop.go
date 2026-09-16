@@ -137,6 +137,9 @@ func logProviderAttemptCommandResult(state exchangeState, call callProviderComma
 		var backendErr canonical.BackendError
 		if errors.As(failed.failure.Cause(), &backendErr) {
 			attrs = appendBackendErrorMetadata(attrs, backendErr)
+			if attempt, ok := findProviderCallAttempt(state, call.attemptID); ok {
+				logStructuredProviderErrorDetail(state, call.attemptID, attempt, backendErr)
+			}
 		}
 		if level == slog.LevelDebug {
 			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt canceled", anyAttrs(attrs)...)
@@ -279,7 +282,7 @@ func logStructuredProviderErrorDetail(state exchangeState, attemptID providerCal
 		"component", "exchange", "event", "provider_error_detail",
 		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
 		"backend_error_type", detail.Type, "backend_error_code", detail.Code,
-		"backend_error_message", detail.Message, "backend_error_param", detail.Param,
+		"backend_error_param", detail.Param,
 		"backend_request_id", detail.RequestID, "source_protocol", backendErr.SourceProtocol.String(),
 	}
 	slog.LogAttrs(context.Background(), slog.LevelDebug, "structured provider error detail", anyAttrs(attrs)...)

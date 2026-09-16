@@ -158,7 +158,7 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadEndpoint("endpoint name is invalid"))))
 		return
 	}
-	transportHeaders, connectionThreadID, err := ingressTransportRequest(http.MethodPost, string(normalizedPath), parsedWorkspace.String(), r.Header, nil)
+	transportHeaders, connectionThreadID, err := ingressTransportRequest(http.MethodPost, string(normalizedPath), parsedWorkspace.String(), canonical.ClientFamilyResponses, r.Header, nil)
 	if err != nil {
 		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		return
@@ -249,7 +249,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		Workspace:         workspace,
 		Request:           newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
 		ClientHandler:     trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
-		ClientFamily:      canonical.ClientFamilyResponses,
+		Operation:         canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming:   delivery.FramingWebSocket,
 		Timing:            &timing,
 		ExecutionAffinity: executionAffinity,

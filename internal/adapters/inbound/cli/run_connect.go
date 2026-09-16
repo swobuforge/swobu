@@ -66,42 +66,49 @@ func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.
 	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
-	startup, err := platformconfig.ResolveStartupConfig(*addr)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	configPath := platformconfig.ResolveConfigPath(runner.ConfigPath)
-	attach := runner.ConnectAttach
-	if attach == nil {
-		attach = defaultAttachOrStart
-	}
-	if err := attach(ctx, stdout, stderr, httpClient, startup.Addr, configPath); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	lister := runner.ConnectWorkspaces
-	if lister == nil {
-		lister = operatorclient.New(httpClient, platformconfig.BaseURL(startup.Addr))
-	}
-	summaries, err := lister.ListWorkspaces(ctx)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	slug, err := resolveConnectWorkspace(summaries, *workspace)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	target, err := clientconnect.NewTarget(slug, platformconfig.BaseURL(startup.Addr)+"/c/"+slug)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
 	ops := runner.ConnectOperations
 	if ops == nil {
 		ops = clientconnect.NewService()
+	}
+	var target clientconnect.Target
+	requiresTarget, err := clientconnect.ClientRequiresTarget(clientID)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err.Error())
+		return ExitDown
+	}
+	if requiresTarget {
+		startup, err := platformconfig.ResolveStartupConfig(*addr)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return ExitDown
+		}
+		attach := runner.ConnectAttach
+		if attach == nil {
+			attach = defaultAttachOrStart
+		}
+		if err := attach(ctx, stdout, stderr, httpClient, startup.Addr, platformconfig.ResolveConfigPath(runner.ConfigPath)); err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return ExitDown
+		}
+		lister := runner.ConnectWorkspaces
+		if lister == nil {
+			lister = operatorclient.New(httpClient, platformconfig.BaseURL(startup.Addr))
+		}
+		summaries, err := lister.ListWorkspaces(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return ExitDown
+		}
+		slug, err := resolveConnectWorkspace(summaries, *workspace)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return ExitDown
+		}
+		target, err = clientconnect.NewTarget(slug, platformconfig.BaseURL(startup.Addr)+"/c/"+slug)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err.Error())
+			return ExitDown
+		}
 	}
 	plan, err := ops.Plan(ctx, clientID, target)
 	if err != nil {
@@ -160,11 +167,17 @@ func resolveConnectWorkspace(summaries []workspaceapi.WorkspaceSummary, explicit
 }
 
 func renderConnectPlan(out io.Writer, plan clientconnect.Plan, target clientconnect.Target) {
-	if plan.AlreadyConfigured() {
+	if plan.ClientID == clientconnect.ClientAntigravity {
+		_, _ = fmt.Fprintln(out, "Antigravity CLI — global Gemini mode prerequisite")
+		if plan.AlreadyConfigured() {
+			return
+		}
+	} else if plan.AlreadyConfigured() {
 		_, _ = fmt.Fprintf(out, "%s → %s\n", plan.ClientName, target.WorkspaceSlug())
 		return
+	} else {
+		_, _ = fmt.Fprintln(out, plan.ClientName)
 	}
-	_, _ = fmt.Fprintln(out, plan.ClientName)
 	for _, change := range plan.Changes {
 		if !change.BeforeExists {
 			_, _ = fmt.Fprintf(out, "  %-9s → %s\n", change.Field, shortConnectValue(target, change.After))

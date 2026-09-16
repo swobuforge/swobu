@@ -1,9 +1,11 @@
 package clipboard
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -61,7 +63,7 @@ func TestTryWriteText_CompletesPromptly(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = TryWriteText("swobu-test-clipboard-content")
+		_ = TryWriteText("swobu-test-clipboard-content")
 	}()
 
 	select {
@@ -69,5 +71,20 @@ func TestTryWriteText_CompletesPromptly(t *testing.T) {
 		// success: completed without hanging
 	case <-time.After(1 * time.Second):
 		t.Fatal("TryWriteText hung / did not return promptly")
+	}
+}
+
+func TestTryWriteTextInitializationFailureIsUnavailable(t *testing.T) {
+	previousResult := initResult
+	initOnce = sync.Once{}
+	initOnce.Do(func() { initResult = errors.New("no display") })
+	t.Cleanup(func() {
+		initOnce = sync.Once{}
+		initResult = previousResult
+	})
+
+	result := TryWriteText("payload")
+	if result.Status != WriteUnavailable || result.Err == nil {
+		t.Fatalf("result = %#v, want unavailable with cause", result)
 	}
 }

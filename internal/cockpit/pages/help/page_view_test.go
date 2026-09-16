@@ -1,12 +1,16 @@
 package help
 
 import (
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 func TestHelpPageDoesNotImportPlatformEffects(t *testing.T) {
@@ -34,6 +38,40 @@ func TestHelpPageDoesNotImportPlatformEffects(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestHelpBrowserFailureStaysWithOriginatingLink(t *testing.T) {
+	v := View(readmodel.HelpReadModel{})
+	cleanup := ui.RegisterEffectHooks(func(string) error { return errors.New("browser unavailable") }, nil, nil)
+	defer cleanup()
+
+	CommunityRowComponent(v).Activate()
+	if v.CommunityError.Get() == "" || v.IssueError.Get() != "" {
+		t.Fatalf("community failure crossed links: community=%q issue=%q", v.CommunityError.Get(), v.IssueError.Get())
+	}
+	IssueRowComponent(v).Activate()
+	if v.CommunityError.Get() == "" || v.IssueError.Get() == "" {
+		t.Fatalf("issue failure cleared community: community=%q issue=%q", v.CommunityError.Get(), v.IssueError.Get())
+	}
+}
+
+func TestDiagnosticsFallbackStoresActualPathAndKeepsCopyActionTruthful(t *testing.T) {
+	v := View(readmodel.HelpReadModel{Version: "test"})
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult { return ui.ClipboardResult{Status: ui.CopyUnavailable} }, func(_, prefix, _ string) (string, error) {
+		if prefix != "swobu-diagnostics-" {
+			t.Fatalf("prefix = %q", prefix)
+		}
+		return "/tmp/swobu-diagnostics-real.txt", nil
+	})
+	defer cleanup()
+
+	v.onDiagnosticsCopied(ui.CopyToClipboard(v.diagnosticsPayloadText()))
+	if got := v.diagnosticsValue(); !strings.Contains(got, "/tmp/swobu-diagnostics-real.txt") {
+		t.Fatalf("value = %q", got)
+	}
+	if got := v.diagnosticsAction(); got != "copy ↵" {
+		t.Fatalf("action = %q", got)
 	}
 }
 

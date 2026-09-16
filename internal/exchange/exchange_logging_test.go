@@ -136,6 +136,61 @@ func TestProviderAttemptLoggingRecordsSafeTerminalFailures(t *testing.T) {
 	}
 }
 
+func TestProviderAttemptTransportFailureExposesStructuredResponsesDetail(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	target := provider.TargetSnapshot{TargetID: "target-bedrock", ProviderSpec: "bedrock", Model: "xai.grok-4.3"}
+	attempt := providerCallAttempt{target: target}
+	state := exchangeState{
+		input:                exchangeInput{exchangeID: "request-responses-400"},
+		providerCallAttempts: []providerCallAttempt{attempt},
+	}
+	call := callProviderCommand{attemptID: 1, backend: provider.Backend{Target: target}}
+	err := canonical.NewStructuredBackendError("target-bedrock", protocolkind.Responses, 400, canonical.BackendErrorDetail{
+		Type:      "invalid_request_error",
+		Code:      "unsupported_value",
+		Message:   "raw-body-secret private prompt credential-secret",
+		Param:     "reasoning.context",
+		RequestID: "req_bedrock",
+	}, "")
+	failure := provider.AttemptRejectedBeforeExecution(provider.InvalidRequest(err))
+
+	logProviderAttemptCommandResult(state, call, providerCallFailed{attemptID: 1, failure: failure}, time.Millisecond)
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 2 {
+		t.Fatalf("entries = %#v, want stable failure and debug detail", entries)
+	}
+	var stable, detail map[string]any
+	for _, entry := range entries {
+		if entry["event"] == "provider_error_detail" {
+			detail = entry
+		} else {
+			stable = entry
+		}
+	}
+	assertLogField(t, stable, "backend_error_type", "invalid_request_error")
+	assertLogField(t, stable, "backend_error_code", "unsupported_value")
+	assertLogField(t, stable, "backend_request_id", "req_bedrock")
+	assertLogField(t, stable, "source_protocol", "responses")
+	assertLogField(t, detail, "backend_error_type", "invalid_request_error")
+	assertLogField(t, detail, "backend_error_code", "unsupported_value")
+	assertLogField(t, detail, "backend_error_param", "reasoning.context")
+	assertLogField(t, detail, "backend_request_id", "req_bedrock")
+	assertLogField(t, detail, "source_protocol", "responses")
+	if _, exists := detail["backend_error_message"]; exists {
+		t.Fatalf("detail exposed provider-controlled message: %#v", detail)
+	}
+	for _, secret := range []string{"raw-body-secret", "private prompt", "credential-secret"} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatalf("logs exposed %q: %s", secret, logs.String())
+		}
+	}
+}
+
 func TestProviderAttemptLoggingDoesNotInventUnstagedFailureOwnership(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -260,7 +315,7 @@ func TestProviderAttemptLoggingWarnsForTypedBackendRejectionBeforeHandoff(t *tes
 	}
 }
 
-func TestProviderAttemptLoggingPreservesOnlyStructuredProviderDiagnostics(t *testing.T) {
+func TestProviderAttemptLoggingPreservesOnlyNonProseStructuredProviderDiagnostics(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -292,7 +347,9 @@ func TestProviderAttemptLoggingPreservesOnlyStructuredProviderDiagnostics(t *tes
 		t.Fatalf("stable failure exposed provider message: %#v", stable)
 	}
 	assertLogField(t, detail, "event", "provider_error_detail")
-	assertLogField(t, detail, "backend_error_message", "limit reached")
+	if _, exists := detail["backend_error_message"]; exists || strings.Contains(logs.String(), "limit reached") {
+		t.Fatalf("detail exposed provider-controlled message: %#v", detail)
+	}
 }
 
 func TestProviderAttemptLoggingEmitsPrivateDecoderCauseOnlyAtDebug(t *testing.T) {

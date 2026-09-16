@@ -125,8 +125,8 @@ func TestCatalog_MetaModelAPIIsDerivedStreamingResponses(t *testing.T) {
 
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 42 {
-		t.Fatalf("provider profile count = %d, want 42", len(profiles))
+	if len(profiles) != 43 {
+		t.Fatalf("provider profile count = %d, want 43", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -148,7 +148,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		ProviderSpecTogether, ProviderSpecDeepInfra, ProviderSpecScaleway,
 		ProviderSpecSambaNova, ProviderSpecStepFun, ProviderSpecNebius,
 		ProviderSpecGMI, ProviderSpecGroq, ProviderSpecFireworks,
-		ProviderSpecOpenRouter, ProviderSpecZAI, ProviderSpecBedrock,
+		ProviderSpecOpenRouter, ProviderSpecVercel, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
 		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope, ProviderSpecCompactifAI,
 		ProviderSpecOpenCodeZen, ProviderSpecNous, ProviderSpecCommandCode, ProviderSpecVenice,
@@ -159,7 +159,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 39,
+		routing.ConnectionShapeStandard: 40,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -167,6 +167,29 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		if got := shapes[shape]; got != want {
 			t.Fatalf("connection shape %d count = %d, want %d", shape, got, want)
 		}
+	}
+}
+
+func TestVercelProfileDeclaresExactSetupAndProtocols(t *testing.T) {
+	provider, ok := ProfileForSpec(string(ProviderSpecVercel))
+	if !ok {
+		t.Fatal("Vercel AI Gateway profile is missing")
+	}
+	if provider.ProviderDisplayName != "Vercel AI Gateway" || provider.SetupHint != "AI Gateway API key" || provider.ConnectionShape != routing.ConnectionShapeStandard || provider.ModelDiscovery != ModelDiscoveryModeAdvisory || !provider.VisibleInOperatorUI {
+		t.Fatalf("Vercel profile = %#v", provider)
+	}
+	if provider.Locator.Kind != LocatorFixed || provider.Locator.Default != "https://ai-gateway.vercel.sh/v1" {
+		t.Fatalf("Vercel locator = %#v", provider.Locator)
+	}
+	if provider.Credential.Requirement != CredentialRequired || provider.Credential.Authoring != CredentialAuthoringReference || provider.Credential.SuggestedEnvVar != "AI_GATEWAY_API_KEY" {
+		t.Fatalf("Vercel credential = %#v", provider.Credential)
+	}
+	if !slices.Equal(provider.SetupKeywords, []string{"Vercel", "AI Gateway", "API key", "Codex", "Claude Code"}) {
+		t.Fatalf("Vercel setup keywords = %#v", provider.SetupKeywords)
+	}
+	wantProtocols := []string{"responses", "responses_stream", "chat_completions", "chat_completions_stream", "messages", "messages_stream"}
+	if got := ConcreteProviderProtocolsForSpec(string(ProviderSpecVercel)); !slices.Equal(got, wantProtocols) {
+		t.Fatalf("Vercel protocols = %#v, want %#v", got, wantProtocols)
 	}
 }
 
@@ -596,6 +619,7 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		"gemini":      {LocatorSpec{Kind: LocatorFixed, Default: "https://generativelanguage.googleapis.com/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "GEMINI_API_KEY", AmbientLabel: "Google identity (ADC)", ReferenceLabel: "Gemini API key"}, "model"},
 		"anthropic":   {LocatorSpec{Kind: LocatorFixed, Default: "https://api.anthropic.com/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "ANTHROPIC_API_KEY"}, "model"},
 		"openrouter":  {LocatorSpec{Kind: LocatorFixed, Default: "https://openrouter.ai/api/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OPENROUTER_API_KEY"}, "model"},
+		"vercel":      {LocatorSpec{Kind: LocatorFixed, Default: "https://ai-gateway.vercel.sh/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AI_GATEWAY_API_KEY"}, "model"},
 		"bedrock":     {LocatorSpec{Kind: LocatorAWSRegion, Label: "region"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringAmbientOrReference, SuggestedEnvVar: "AWS_BEARER_TOKEN_BEDROCK", AmbientLabel: "AWS identity", ReferenceLabel: "Bedrock API key"}, "model"},
 		"azure":       {LocatorSpec{Kind: LocatorAzureProject, Label: "project"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AZURE_OPENAI_API_KEY"}, "deployment"},
 		"custom":      {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback, Authoring: CredentialAuthoringReference}, "model"},

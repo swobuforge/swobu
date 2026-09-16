@@ -16,6 +16,7 @@ type RouteSectionState struct {
 	FocusRoute        *tui.State[readmodel.RouteID]
 	SharePendingRoute *tui.State[readmodel.RouteID]
 	ShareCopiedRoute  *tui.State[readmodel.RouteID]
+	ShareFeedback     *tui.State[routeShareFeedback]
 }
 
 func NewRouteSectionState(routes []readmodel.RouteReadModel) *RouteSectionState {
@@ -27,5 +28,6 @@ func NewRouteSectionState(routes []readmodel.RouteReadModel) *RouteSectionState 
 		FocusRoute:        tui.NewState(readmodel.RouteID("")),
 		SharePendingRoute: tui.NewState(readmodel.RouteID("")),
 		ShareCopiedRoute:  tui.NewState(readmodel.RouteID("")),
+		ShareFeedback:     tui.NewState(routeShareFeedback{}),
 	}
 }

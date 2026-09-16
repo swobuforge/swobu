@@ -42,8 +42,8 @@ func PlanActionRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRo
 	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLoci(obs.Plan.ConfigPaths), action, func() { d.applyPlan(obs.Client.ID) }))
 }
 
-func ManualCopyRow(d *Disclosure, key, label, displayValue, copyValue string) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:manual:"+key, label, displayValue, d.copyAction(key), func() { d.copyItem(key, copyValue) }))
+func ManualCopyRow(d *Disclosure, key, label, displayValue, copyValue string, allowFileFallback bool) *cockpitui.SelectableRow {
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:manual:"+key, label, displayValue, d.copyAction(key), func() { d.copyItem(key, copyValue, allowFileFallback) }))
 }
 
 func ClientPicker(d *Disclosure) *cockpitui.SearchPicker {
@@ -665,47 +665,50 @@ func (d *Disclosure) Render(app *tui.App) *tui.Element {
 			__tui_20 := InertRow("API", "OpenAI · Anthropic")
 			__tui_19.AddChild(__tui_20.Root)
 			__tui_21 := app.Mount(d, 5, func() tui.Component {
-				return ManualCopyRow(d, "base-url", "Base URL", d.Target.WorkspaceURL(), d.Target.WorkspaceURL())
+				return ManualCopyRow(d, "base-url", "Base URL", d.Target.WorkspaceURL(), d.Target.WorkspaceURL(), true)
 			})
 			__tui_19.AddChild(__tui_21)
-			if d.Feedback.Get().key == "base-url" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-				__tui_22 := DetailRow(d.Feedback.Get().result.Path)
+			if d.Feedback.Get().key == "base-url" && d.Feedback.Get().savedPath != "" {
+				__tui_22 := DetailRow("saved " + d.Feedback.Get().savedPath)
 				__tui_19.AddChild(__tui_22.Root)
 			}
 			__tui_23 := app.Mount(d, 6, func() tui.Component {
-				return ManualCopyRow(d, "model", "Model", "default", "default")
+				return ManualCopyRow(d, "model", "Model", "default", "default", true)
 			})
 			__tui_19.AddChild(__tui_23)
-			if d.Feedback.Get().key == "model" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-				__tui_24 := DetailRow(d.Feedback.Get().result.Path)
+			if d.Feedback.Get().key == "model" && d.Feedback.Get().savedPath != "" {
+				__tui_24 := DetailRow("saved " + d.Feedback.Get().savedPath)
 				__tui_19.AddChild(__tui_24.Root)
 			}
 			__tui_25 := app.Mount(d, 7, func() tui.Component {
-				return ManualCopyRow(d, "models-url", "Models URL", d.Target.WorkspaceURL()+"/models", d.Target.WorkspaceURL()+"/models")
+				return ManualCopyRow(d, "models-url", "Models URL", d.Target.WorkspaceURL()+"/models", d.Target.WorkspaceURL()+"/models", true)
 			})
 			__tui_19.AddChild(__tui_25)
-			if d.Feedback.Get().key == "models-url" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-				__tui_26 := DetailRow(d.Feedback.Get().result.Path)
+			if d.Feedback.Get().key == "models-url" && d.Feedback.Get().savedPath != "" {
+				__tui_26 := DetailRow("saved " + d.Feedback.Get().savedPath)
 				__tui_19.AddChild(__tui_26.Root)
 			}
 			__tui_27 := app.Mount(d, 8, func() tui.Component {
-				return ManualCopyRow(d, "api-key", "API key", "swobu · placeholder", "swobu")
+				return ManualCopyRow(d, "api-key", "API key", "swobu · placeholder", "swobu", false)
 			})
 			__tui_19.AddChild(__tui_27)
-			if d.Feedback.Get().key == "api-key" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-				__tui_28 := DetailRow(d.Feedback.Get().result.Path)
+			if d.Feedback.Get().saveErr != nil {
+				__tui_28 := DangerDetailRow("copy failed · " + d.Feedback.Get().saveErr.Error())
 				__tui_19.AddChild(__tui_28.Root)
-			}
-			if d.Feedback.Get().result.Status == cockpitui.CopyFailed {
+			} else if d.Feedback.Get().clipboard.Status == cockpitui.CopyFailed && d.Feedback.Get().savedPath == "" {
 				__tui_29 := DangerDetailRow("copy failed · run swobu doctor --copy")
 				__tui_19.AddChild(__tui_29.Root)
 			}
+			if d.Feedback.Get().clipboard.Status == cockpitui.CopyUnavailable && d.Feedback.Get().savedPath == "" {
+				__tui_30 := DetailRow("clipboard unavailable")
+				__tui_19.AddChild(__tui_30.Root)
+			}
 			__tui_6.AddChild(__tui_19)
 		} else if d.Child.Get().kind == childNone {
-			__tui_30 := app.Mount(d, 9, func() tui.Component {
+			__tui_31 := app.Mount(d, 9, func() tui.Component {
 				return OtherClientsRow(d)
 			})
-			__tui_6.AddChild(__tui_30)
+			__tui_6.AddChild(__tui_31)
 		}
 		__tui_0.AddChild(__tui_6)
 	}

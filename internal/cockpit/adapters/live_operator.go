@@ -53,8 +53,23 @@ func NewLiveOperatorAdapter(httpClient *http.Client, addr string) *LiveOperatorA
 		httpClient = http.DefaultClient
 	}
 	a := &LiveOperatorAdapter{client: operatorclient.New(httpClient, config.BaseURL(addr)), addr: addr}
-	ui.RegisterEffectHooks(browser.Open, clipboard.TryWriteText, clipboard.WriteTempFileFallback)
+	ui.RegisterEffectHooks(browser.Open, cockpitClipboardWrite, clipboard.WriteTempFileFallback)
 	return a
+}
+
+func cockpitClipboardWrite(text string) ui.ClipboardResult {
+	return cockpitClipboardResult(clipboard.TryWriteText(text))
+}
+
+func cockpitClipboardResult(result clipboard.WriteResult) ui.ClipboardResult {
+	switch result.Status {
+	case clipboard.WriteOK:
+		return ui.ClipboardResult{Status: ui.CopyOK}
+	case clipboard.WriteUnavailable:
+		return ui.ClipboardResult{Status: ui.CopyUnavailable}
+	default:
+		return ui.ClipboardResult{Status: ui.CopyFailed, Err: result.Err}
+	}
 }
 
 func (a *LiveOperatorAdapter) IssueShare(ctx context.Context, route string, expiry sharestate.Expiry) (shares.Result, error) {

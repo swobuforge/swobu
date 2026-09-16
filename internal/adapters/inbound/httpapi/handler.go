@@ -67,12 +67,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	normalizedPath, err := canonical.NormalizePath(operationPath)
-	if err != nil {
-		writeExchangeError(writer, "", err)
-		return
-	}
 	if websocketUpgrade(r) {
+		normalizedPath, err := canonical.NormalizePath(operationPath)
+		if err != nil {
+			writeExchangeError(writer, "", err)
+			return
+		}
 		if normalizedPath == canonical.NormalizedPathResponses {
 			h.serveResponsesWebsocket(writer, r, endpointName, normalizedPath)
 			return
@@ -80,21 +80,23 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeExchangeError(writer, "", canonical.UnsupportedEndpoint("websocket client transport is supported only on protocol /responses routes"))
 		return
 	}
-	if normalizedPath == canonical.NormalizedPathModels {
+	if normalizedPath, normalizeErr := canonical.NormalizePath(operationPath); normalizeErr == nil && normalizedPath == canonical.NormalizedPathModels {
 		h.serveModelsEndpoint(writer, r, workspace)
-		return
-	}
-	if err := canonical.ValidateClientTransport(r.Method, normalizedPath, false); err != nil {
-		writeExchangeError(writer, "", err)
 		return
 	}
 
 	hasMessagesProtocolMarker := strings.TrimSpace(r.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
-	family, err := canonical.InferClientFamily(r.Method, normalizedPath, hasMessagesProtocolMarker)
+	clientOperationPath := operationPath
+	if r.URL.RawQuery != "" {
+		clientOperationPath += "?" + r.URL.RawQuery
+	}
+	operation, err := canonical.ParseClientOperation(r.Method, clientOperationPath, hasMessagesProtocolMarker, false)
 	if err != nil {
-		writeExchangeError(writer, "", err)
+		writeExchangeError(writer, operation.Family, err)
 		return
 	}
+	family := operation.Family
+	normalizedPath := operation.NormalizedPath
 
 	requestBody, err := decodeRequestBody(w, r)
 	if err != nil {
@@ -114,7 +116,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transportRequest, executionAffinity, err := ingressTransportRequest(r.Method, operationPath, workspace.String(), r.Header, requestBody)
+	transportRequest, executionAffinity, err := ingressTransportRequest(r.Method, operationPath, workspace.String(), family, r.Header, requestBody)
 	if err != nil {
 		writeExchangeError(writer, family, err)
 		return
@@ -123,7 +125,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Workspace:         workspace,
 		Request:           transportRequest,
 		ClientHandler:     clientHandler,
-		ClientFamily:      family,
+		Operation:         operation,
 		ResponseFraming:   delivery.FramingSSE,
 		Timing:            &timing,
 		ExecutionAffinity: executionAffinity,
@@ -271,8 +273,11 @@ func newTransportRequest(method string, url string, header http.Header, body []b
 
 const openCodeSessionHeader = "X-Opencode-Session"
 
-func ingressTransportRequest(method, url, workspace string, header http.Header, body []byte) (carrier.TransportRequest, executionaffinity.Key, error) {
+func ingressTransportRequest(method, url, workspace string, family canonical.ClientFamily, header http.Header, body []byte) (carrier.TransportRequest, executionaffinity.Key, error) {
 	request := newTransportRequest(method, url, header, body)
+	if family == canonical.ClientFamilyGenerateContent {
+		request.Header.Del("X-Goog-Api-Key")
+	}
 	var selected string
 	for _, value := range request.Header.Values(openCodeSessionHeader) {
 		if strings.TrimSpace(value) != "" {
@@ -448,6 +453,16 @@ func writeExchangeError(w http.ResponseWriter, family canonical.ClientFamily, er
 }
 
 func projectBackendError(family canonical.ClientFamily, statusCode int, backendErr canonical.BackendError) []byte {
+	if family == canonical.ClientFamilyGenerateContent {
+		message := strings.TrimSpace(backendErr.Message)
+		if backendErr.ProviderError != nil && strings.TrimSpace(backendErr.ProviderError.Message) != "" {
+			message = strings.TrimSpace(backendErr.ProviderError.Message)
+		}
+		if message == "" {
+			message = http.StatusText(statusCode)
+		}
+		return generateContentError(statusCode, message)
+	}
 	if backendErr.ProviderError != nil && backendErr.SourceProtocol == family && json.Valid([]byte(backendErr.Message)) {
 		return []byte(backendErr.Message)
 	}
@@ -494,6 +509,12 @@ func projectBackendError(family canonical.ClientFamily, statusCode int, backendE
 }
 
 func writeProtocolError(w http.ResponseWriter, family canonical.ClientFamily, status int, errorType, code, message, param, requestID string) {
+	if family == canonical.ClientFamilyGenerateContent {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(generateContentError(status, message))
+		return
+	}
 	if family == canonical.ClientFamilyMessages {
 		body := struct {
 			Type  string `json:"type"`
@@ -514,6 +535,27 @@ func writeProtocolError(w http.ResponseWriter, family canonical.ClientFamily, st
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(projectBackendError(family, status, backend))
+}
+
+func generateContentError(status int, message string) []byte {
+	googleStatus := map[int]string{
+		400: "INVALID_ARGUMENT", 401: "UNAUTHENTICATED", 403: "PERMISSION_DENIED", 404: "NOT_FOUND",
+		409: "ABORTED", 429: "RESOURCE_EXHAUSTED", 500: "INTERNAL", 501: "UNIMPLEMENTED",
+		503: "UNAVAILABLE", 504: "DEADLINE_EXCEEDED",
+	}[status]
+	if googleStatus == "" {
+		googleStatus = "INTERNAL"
+	}
+	body := struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}{}
+	body.Error.Code, body.Error.Message, body.Error.Status = status, message, googleStatus
+	raw, _ := json.Marshal(body)
+	return raw
 }
 
 func messagesErrorTypeForStatus(status int) string {

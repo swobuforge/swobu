@@ -23,7 +23,7 @@ const cockpitRefreshTimeout = 5 * time.Second
 type Cockpit struct {
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
-	Notice         *tui.State[readmodel.Notice]
+	RefreshWarning *tui.State[string]
 	BodyViewport   *ui.Viewport
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
@@ -47,7 +47,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 	cockpit := &Cockpit{
 		Model:           model,
 		ActiveTabIndex:  tui.NewState(activeTab),
-		Notice:          tui.NewState(readmodel.Notice{}),
+		RefreshWarning:  tui.NewState(""),
 		BodyViewport:    &ui.Viewport{Ref: tui.NewRef(), ScrollY: tui.NewState(0), FollowFocused: true, MarginRows: 2},
 		Reloader:        NewModelReloader(ctx, query, cockpitRefreshTimeout),
 		HelpPage:        help_page.View(model.Help),
@@ -171,9 +171,14 @@ func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
 	active := c.activeModel()
 	wasOnboarding := active.SelectedWorkspace.IsOnboarding()
-	model, notice := c.Reloader.RefreshAfterSave(active, saved)
-	c.Notice.Set(notice)
-	c.replaceModel(model, !wasOnboarding)
+	refresh := c.Reloader.RefreshAfterSave(active, saved)
+	if refresh.RootFresh { c.RefreshWarning.Set("") }
+	c.replaceModel(refresh.Model, !wasOnboarding)
+	if page := c.activeWorkspacePage(c.activeModel()); page != nil {
+		message := ""
+		if refresh.Err != nil { message = "refresh unavailable · saved workspace shown; " + refresh.Err.Error() }
+		page.SetWorkspaceWarning(message)
+	}
 }
 
 func (c *Cockpit) refreshWorkspaceProjection(workspace readmodel.WorkspaceReadModel) {
@@ -183,13 +188,13 @@ func (c *Cockpit) refreshWorkspaceProjection(workspace readmodel.WorkspaceReadMo
 }
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
-	model, notice := c.Reloader.RefreshAfterDelete(c.activeModel(), deleted)
-	c.Notice.Set(notice)
-	c.replaceModel(model, true)
-}
-
-func (c *Cockpit) publishNotice(notice readmodel.Notice) {
-	c.Notice.Set(notice)
+	refresh := c.Reloader.RefreshAfterDelete(c.activeModel(), deleted)
+	if refresh.Err != nil {
+		c.RefreshWarning.Set("workspace deleted · refresh unavailable; local view reconciled")
+	} else if refresh.RootFresh {
+		c.RefreshWarning.Set("")
+	}
+	c.replaceModel(refresh.Model, true)
 }
 
 // discardWorkspaceDraft resets the selected [+] onboarding draft without
@@ -273,10 +278,10 @@ func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
 }
 
 templ (c *Cockpit) Render() {
-	<div class="flex-col h-full w-full" deps={c.ActiveTabIndex, c.Notice}>
+	<div class="flex-col h-full w-full" deps={c.ActiveTabIndex, c.RefreshWarning}>
 		@ShellHeader(c.activeModel())
-		if c.Notice.Get().Visible() {
-			@ShellNotice(c.Notice.Get())
+		if c.RefreshWarning.Get() != "" {
+			@RootRefreshWarning(c.RefreshWarning.Get())
 		}
 		<hr />
 		@CockpitBodyViewport(c)
@@ -285,19 +290,15 @@ templ (c *Cockpit) Render() {
 	</div>
 }
 
-func staleRefreshNotice(message string) readmodel.Notice {
-	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
-}
-
 type FlowTextView = ui.FlowTextView
 
 func FlowText(text string) *FlowTextView {
 	return ui.FlowText(text)
 }
 
-templ ShellNotice(notice readmodel.Notice) {
-	<div class="w-full">
-		@FlowText(notice.Message)
+templ RootRefreshWarning(message string) {
+	<div class="w-full" textStyle={ui.ToneStyle(ui.ToneWarning)}>
+		@FlowText(message)
 	</div>
 }
 
@@ -378,7 +379,6 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 	page.OnWorkspaceCommitted = c.refreshWorkspaceProjection
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
 	page.OnWorkspaceDiscarded = c.discardWorkspaceDraft
-	page.OnNotice = c.publishNotice
 	return page
 }
 

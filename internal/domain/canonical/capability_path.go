@@ -1,8 +1,9 @@
 package canonical
 
-// CapabilityPath names one stable semantic path through a canonical request or
-// response. It never names a provider, route, wire field, delivery carrier, or
-// collection occurrence.
+// CapabilityPath names one stable boundary semantic in a canonical request or
+// response projection, including admitted input semantics that are explicitly
+// omitted before canonical execution. It never names a provider, route, wire
+// field, delivery carrier, or collection occurrence.
 type CapabilityPath string
 
 func (p CapabilityPath) String() string { return string(p) }
@@ -49,6 +50,7 @@ const (
 	RequestOutputSchemaConformance          CapabilityPath = "request.output_format.schema.conformance"
 	RequestControlsMaxOutputTokens          CapabilityPath = "request.controls.max_output_tokens"
 	RequestControlsTemperature              CapabilityPath = "request.controls.temperature"
+	RequestControlsTopK                     CapabilityPath = "request.controls.top_k"
 	RequestControlsTopP                     CapabilityPath = "request.controls.top_p"
 	RequestControlsStopSequences            CapabilityPath = "request.controls.stop_sequences"
 	RequestControlsEffort                   CapabilityPath = "request.controls.effort"

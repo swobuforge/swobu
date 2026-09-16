@@ -20,6 +20,9 @@ type PageView struct {
 	Version           string
 	DaemonVersion     string
 	DiagnosticsStatus readmodel.DiagnosticsStatus
+	DiagnosticsPath   string
+	CommunityError    *tui.State[string]
+	IssueError        *tui.State[string]
 }
 
 func View(model readmodel.HelpReadModel) *PageView {
@@ -31,6 +34,8 @@ func View(model readmodel.HelpReadModel) *PageView {
 		Version:           model.Version,
 		DaemonVersion:     model.DaemonVersion,
 		DiagnosticsStatus: ds,
+		CommunityError:    tui.NewState(""),
+		IssueError:        tui.NewState(""),
 	}
 }
 
@@ -63,7 +68,7 @@ func (v *PageView) diagnosticsValue() string {
 	case readmodel.DiagnosticsCopied:
 		return "copied · paste into issue/Discord"
 	case readmodel.DiagnosticsSaved:
-		return "saved to /tmp/swobu-diagnostics.txt"
+		return "saved to " + v.DiagnosticsPath
 	case readmodel.DiagnosticsFailed:
 		return "failed · run swobu doctor --copy"
 	default:
@@ -71,12 +76,7 @@ func (v *PageView) diagnosticsValue() string {
 	}
 }
 
-func (v *PageView) diagnosticsAction() string {
-	if v.DiagnosticsStatus == readmodel.DiagnosticsSaved {
-		return "open \u21b5"
-	}
-	return "copy \u21b5"
-}
+func (v *PageView) diagnosticsAction() string { return "copy \u21b5" }
 
 func (v *PageView) diagnosticsPayloadText() string {
 	payload := readmodel.DiagnosticsPayload{Version: v.Version}
@@ -86,14 +86,18 @@ func (v *PageView) diagnosticsPayloadText() string {
 	return payload.Text()
 }
 
-func (v *PageView) onDiagnosticsCopied(result ui.CopyResult) {
+func (v *PageView) onDiagnosticsCopied(result ui.ClipboardResult) {
 	switch result.Status {
 	case ui.CopyOK:
 		v.DiagnosticsStatus = readmodel.DiagnosticsCopied
-	case ui.CopySavedFile:
-		v.DiagnosticsStatus = readmodel.DiagnosticsSaved
 	default:
-		v.DiagnosticsStatus = readmodel.DiagnosticsFailed
+		path, err := ui.SaveTextFile("swobu-diagnostics-", v.diagnosticsPayloadText())
+		if err != nil {
+			v.DiagnosticsStatus = readmodel.DiagnosticsFailed
+			return
+		}
+		v.DiagnosticsStatus = readmodel.DiagnosticsSaved
+		v.DiagnosticsPath = path
 	}
 }
 
@@ -101,12 +105,19 @@ func VersionRowComponent(v *PageView) *ui.SelectableRow {
 	return ui.NewSelectableRow("help:version", "version", v.versionValue(), "", nil)
 }
 
+func linkFailure(err error, url string) string {
+	if err != nil {
+		return "browser could not open · " + url
+	}
+	return ""
+}
+
 func CommunityRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.LinkRowComponent("help:community", "community", "Discord", communityURL)
+	return ui.LinkRowComponent("help:community", "community", "Discord", communityURL, func(err error) { v.CommunityError.Set(linkFailure(err, communityURL)) })
 }
 
 func IssueRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.LinkRowComponent("help:issue", "issue", "GitHub issue", issueURL)
+	return ui.LinkRowComponent("help:issue", "issue", "GitHub issue", issueURL, func(err error) { v.IssueError.Set(linkFailure(err, issueURL)) })
 }
 
 func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
@@ -115,7 +126,7 @@ func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
 		"diagnostics",
 		v.diagnosticsValue(),
 		v.diagnosticsAction(),
-		func() ui.CopyResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
+		func() ui.ClipboardResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
 		v.onDiagnosticsCopied,
 	)
 	return row
@@ -154,20 +165,44 @@ func (v *PageView) Render(app *tui.App) *tui.Element {
 		return CommunityRowComponent(v)
 	})
 	__tui_4.AddChild(__tui_6)
-	__tui_7 := app.Mount(v, 2, func() tui.Component {
+	if v.CommunityError.Get() != "" {
+		__tui_7 := tui.New(
+			tui.WithWidthPercent(100.00),
+			tui.WithPaddingTRBL(0, 0, 0, 3),
+			tui.WithTextStyle(ui.ToneStyle(ui.ToneFailure)),
+		)
+		__tui_8 := app.Mount(v, 2, func() tui.Component {
+			return ui.FlowText(v.CommunityError.Get())
+		})
+		__tui_7.AddChild(__tui_8)
+		__tui_4.AddChild(__tui_7)
+	}
+	__tui_9 := app.Mount(v, 3, func() tui.Component {
 		return IssueRowComponent(v)
 	})
-	__tui_4.AddChild(__tui_7)
-	__tui_8 := app.Mount(v, 3, func() tui.Component {
+	__tui_4.AddChild(__tui_9)
+	if v.IssueError.Get() != "" {
+		__tui_10 := tui.New(
+			tui.WithWidthPercent(100.00),
+			tui.WithPaddingTRBL(0, 0, 0, 3),
+			tui.WithTextStyle(ui.ToneStyle(ui.ToneFailure)),
+		)
+		__tui_11 := app.Mount(v, 4, func() tui.Component {
+			return ui.FlowText(v.IssueError.Get())
+		})
+		__tui_10.AddChild(__tui_11)
+		__tui_4.AddChild(__tui_10)
+	}
+	__tui_12 := app.Mount(v, 5, func() tui.Component {
 		return DiagnosticsRowComponent(v)
 	})
-	__tui_4.AddChild(__tui_8)
+	__tui_4.AddChild(__tui_12)
 	__tui_0.AddChild(__tui_4)
-	__tui_9 := tui.New(
+	__tui_13 := tui.New(
 		tui.WithWidth(0),
 		tui.WithHeight(1),
 	)
-	__tui_0.AddChild(__tui_9)
+	__tui_0.AddChild(__tui_13)
 
 	return __tui_0
 }
@@ -183,6 +218,7 @@ func (v *PageView) updatePropsFields(fresh tui.Component) {
 	v.Version = f.Version
 	v.DaemonVersion = f.DaemonVersion
 	v.DiagnosticsStatus = f.DiagnosticsStatus
+	v.DiagnosticsPath = f.DiagnosticsPath
 }
 
 func (v *PageView) UpdateProps(fresh tui.Component) {
@@ -190,6 +226,24 @@ func (v *PageView) UpdateProps(fresh tui.Component) {
 }
 
 var _ tui.PropsUpdater = (*PageView)(nil)
+
+// bindAppFields is generated. It wires the component's *tui.App,
+// State, Events, and TextArea fields to app. When you override BindApp,
+// call this helper instead of hand-maintaining the delegation list.
+func (v *PageView) bindAppFields(app *tui.App) {
+	if v.CommunityError != nil {
+		v.CommunityError.BindApp(app)
+	}
+	if v.IssueError != nil {
+		v.IssueError.BindApp(app)
+	}
+}
+
+func (v *PageView) BindApp(app *tui.App) {
+	v.bindAppFields(app)
+}
+
+var _ tui.AppBinder = (*PageView)(nil)
 
 // Compile-time interface satisfaction checks.
 var (

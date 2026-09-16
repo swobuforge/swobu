@@ -106,7 +106,7 @@ func decodeResponsesReasoningInclude(raw json.RawMessage, changeLog *[]compat.Ch
 	return includeEncrypted, nil
 }
 
-func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], acceptsEffortMax, acceptsDisabled func() bool, defaultDisabled bool, changeLog *[]compat.Change) error {
+func encodeResponsesReasoning(payload map[string]any, reasoning canonical.ReasoningControls, effortField canonical.Specified[canonical.InferenceEffort], acceptsEffortMax, acceptsDisabled, acceptsContextAllTurns func() bool, defaultDisabled bool, changeLog *[]compat.Change) error {
 	wireReasoning := map[string]any{}
 	if defaultDisabled && !reasoning.ComputeField().IsSpecified() && !reasoning.DisclosureField().IsSpecified() && !reasoning.ResponsesContextField().IsSpecified() && !effortField.IsSpecified() {
 		wireReasoning["effort"] = "none"
@@ -144,7 +144,11 @@ func encodeResponsesReasoning(payload map[string]any, reasoning canonical.Reason
 		wireReasoning["summary"] = "auto"
 	}
 	if contextValue, ok := reasoning.ResponsesContextField().Get(); ok {
-		wireReasoning["context"] = contextValue
+		if contextValue != canonical.ResponsesReasoningContextAllTurns || acceptsContextAllTurns == nil || acceptsContextAllTurns() {
+			wireReasoning["context"] = contextValue
+		} else if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewOmission(canonical.RequestReasoningContextResponses, canonical.Occurrence{}))
+		}
 	}
 	if len(wireReasoning) > 0 {
 		payload["reasoning"] = wireReasoning

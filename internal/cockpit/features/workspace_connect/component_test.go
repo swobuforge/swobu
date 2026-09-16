@@ -396,9 +396,9 @@ func TestDisclosureOtherClientsManualSetupChildScope(t *testing.T) {
 	d.toggleEndpoint()
 
 	var copied []string
-	cleanup := cockpitui.RegisterEffectHooks(nil, func(value string) (bool, error) {
+	cleanup := cockpitui.RegisterEffectHooks(nil, func(value string) cockpitui.ClipboardResult {
 		copied = append(copied, value)
-		return true, nil
+		return cockpitui.ClipboardResult{Status: cockpitui.CopyOK}
 	}, nil)
 	defer cleanup()
 
@@ -429,7 +429,7 @@ func TestDisclosureOtherClientsManualSetupChildScope(t *testing.T) {
 	}
 
 	// 1. Copy Base URL
-	d.copyItem("base-url", d.Target.WorkspaceURL())
+	d.copyItem("base-url", d.Target.WorkspaceURL(), true)
 	if len(copied) != 1 || copied[0] != "http://127.0.0.1:7926/c/work" {
 		t.Fatalf("copied base-url = %#v", copied)
 	}
@@ -443,7 +443,7 @@ func TestDisclosureOtherClientsManualSetupChildScope(t *testing.T) {
 	}
 
 	// 2. Copy Model
-	d.copyItem("model", "default")
+	d.copyItem("model", "default", true)
 	if len(copied) != 2 || copied[1] != "default" {
 		t.Fatalf("copied model = %#v", copied)
 	}
@@ -454,13 +454,13 @@ func TestDisclosureOtherClientsManualSetupChildScope(t *testing.T) {
 	}
 
 	// 3. Copy Models URL
-	d.copyItem("models-url", d.Target.WorkspaceURL()+"/models")
+	d.copyItem("models-url", d.Target.WorkspaceURL()+"/models", true)
 	if len(copied) != 3 || copied[2] != "http://127.0.0.1:7926/c/work/models" {
 		t.Fatalf("copied models-url = %#v", copied)
 	}
 
 	// 4. Copy API key (copies "swobu")
-	d.copyItem("api-key", "swobu")
+	d.copyItem("api-key", "swobu", false)
 	if len(copied) != 4 || copied[3] != "swobu" {
 		t.Fatalf("copied api-key = %#v", copied)
 	}
@@ -480,29 +480,60 @@ func TestDisclosureManualSetupFallbackSavedFileAndError(t *testing.T) {
 	// 1. Fallback temp file copy
 	cleanup := cockpitui.RegisterEffectHooks(
 		nil,
-		func(string) (bool, error) { return false, errors.New("no clipboard") },
+		func(string) cockpitui.ClipboardResult {
+			return cockpitui.ClipboardResult{Status: cockpitui.CopyFailed, Err: errors.New("no clipboard")}
+		},
 		func(dir, prefix, text string) (string, error) { return "/tmp/swobu-fallback-456.txt", nil },
 	)
 	defer cleanup()
 
-	d.copyItem("base-url", d.Target.WorkspaceURL())
+	d.copyItem("base-url", d.Target.WorkspaceURL(), true)
 	frame := testkit.RenderMountedTrimmed(t, d, 100, 24)
 	if !strings.Contains(frame, "saved") || !strings.Contains(frame, "/tmp/swobu-fallback-456.txt") {
 		t.Fatalf("fallback file frame:\n%s", frame)
+	}
+	if strings.Contains(frame, "clipboard unavailable · saved") {
+		t.Fatalf("successful fallback misstated clipboard cause:\n%s", frame)
+	}
+	if !strings.Contains(frame, "Base URL") || !strings.Contains(frame, "copy ↵") || strings.Contains(frame, "Base URL          http://127.0.0.1:7926/c/work                                retry ↵") {
+		t.Fatalf("successful fallback advertised an untruthful retry:\n%s", frame)
 	}
 
 	// 2. Hard failure
 	cleanup2 := cockpitui.RegisterEffectHooks(
 		nil,
-		func(string) (bool, error) { return false, errors.New("no clipboard") },
+		func(string) cockpitui.ClipboardResult {
+			return cockpitui.ClipboardResult{Status: cockpitui.CopyFailed, Err: errors.New("no clipboard")}
+		},
 		func(dir, prefix, text string) (string, error) { return "", errors.New("disk full") },
 	)
 	defer cleanup2()
 
-	d.copyItem("model", "default")
+	d.copyItem("model", "default", true)
 	frameErr := testkit.RenderMountedTrimmed(t, d, 100, 24)
-	if !strings.Contains(frameErr, "copy failed") || !strings.Contains(frameErr, "swobu doctor --copy") {
+	if !strings.Contains(frameErr, "copy failed") || !strings.Contains(frameErr, "disk full") {
 		t.Fatalf("copy failure frame:\n%s", frameErr)
+	}
+}
+
+func TestDisclosureFileFallbackRequiresExplicitCallsiteOptIn(t *testing.T) {
+	d, _ := connectFixture(t)
+	tempCalls := 0
+	cleanup := cockpitui.RegisterEffectHooks(nil, func(string) cockpitui.ClipboardResult {
+		return cockpitui.ClipboardResult{Status: cockpitui.CopyUnavailable}
+	}, func(string, string, string) (string, error) {
+		tempCalls++
+		return "/tmp/secret.txt", nil
+	})
+	defer cleanup()
+
+	d.copyItem("future-secret", "bearer-secret", false)
+
+	if tempCalls != 0 {
+		t.Fatalf("non-opted-in copy persisted secret %d times", tempCalls)
+	}
+	if got := d.Feedback.Get(); got.savedPath != "" || got.clipboard.Status != cockpitui.CopyUnavailable {
+		t.Fatalf("feedback = %#v", got)
 	}
 }
 
@@ -583,9 +614,9 @@ func TestDisclosureAppLoopEnterDisclosesEndpoint(t *testing.T) {
 func TestDisclosureAppLoopOtherClientsManualSetupFlow(t *testing.T) {
 	d, _ := connectFixture(t)
 	var copied []string
-	cleanup := cockpitui.RegisterEffectHooks(nil, func(value string) (bool, error) {
+	cleanup := cockpitui.RegisterEffectHooks(nil, func(value string) cockpitui.ClipboardResult {
 		copied = append(copied, value)
-		return true, nil
+		return cockpitui.ClipboardResult{Status: cockpitui.CopyOK}
 	}, nil)
 	defer cleanup()
 
@@ -818,8 +849,8 @@ func TestFullFrameMultiWidthFixtures(t *testing.T) {
 			}
 
 			// 6. Manual Setup with local copied result
-			cleanup := cockpitui.RegisterEffectHooks(nil, func(string) (bool, error) { return true, nil }, nil)
-			d.copyItem("base-url", d.Target.WorkspaceURL())
+			cleanup := cockpitui.RegisterEffectHooks(nil, func(string) cockpitui.ClipboardResult { return cockpitui.ClipboardResult{Status: cockpitui.CopyOK} }, nil)
+			d.copyItem("base-url", d.Target.WorkspaceURL(), true)
 			copiedFrame := testkit.RenderMountedTrimmed(t, d, w, 20)
 			if !strings.Contains(copiedFrame, "copied") {
 				t.Fatalf("copied fixture missing 'copied' at width %d:\n%s", w, copiedFrame)
@@ -829,10 +860,12 @@ func TestFullFrameMultiWidthFixtures(t *testing.T) {
 			// 7. Manual Setup with fallback file saved
 			cleanupFallback := cockpitui.RegisterEffectHooks(
 				nil,
-				func(string) (bool, error) { return false, errors.New("fail") },
+				func(string) cockpitui.ClipboardResult {
+					return cockpitui.ClipboardResult{Status: cockpitui.CopyFailed, Err: errors.New("fail")}
+				},
 				func(dir, prefix, text string) (string, error) { return "/tmp/saved-url.txt", nil },
 			)
-			d.copyItem("base-url", d.Target.WorkspaceURL())
+			d.copyItem("base-url", d.Target.WorkspaceURL(), true)
 			savedFrame := testkit.RenderMountedTrimmed(t, d, w, 20)
 			if !strings.Contains(savedFrame, "saved") || !strings.Contains(savedFrame, "/tmp/saved-url.txt") {
 				t.Fatalf("saved fixture missing 'saved' or path at width %d:\n%s", w, savedFrame)

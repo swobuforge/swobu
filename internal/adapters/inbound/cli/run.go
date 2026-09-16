@@ -54,6 +54,7 @@ type Runner struct {
 	ConnectWorkspaces   connectWorkspaceLister
 	UpdateExecutable    func() (string, error)
 	RunInstaller        func(context.Context, *http.Client, string, io.Writer, io.Writer) error
+	RunAntigravity      func(context.Context, []string, []string, io.Reader, io.Writer, io.Writer) error
 }
 
 // Run dispatches explicit CLI commands or starts the interactive Cockpit.
@@ -61,17 +62,14 @@ type Runner struct {
 // argument-free path attaches to or starts the daemon before handing the same
 // process streams to Cockpit.
 func (r Runner) Run(ctx context.Context, args []string) ExitCode {
-	stdin := r.Stdin
-	if stdin == nil {
-		stdin = os.Stdin
+	if r.Stdin == nil {
+		r.Stdin = os.Stdin
 	}
-	stdout := r.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
+	if r.Stdout == nil {
+		r.Stdout = os.Stdout
 	}
-	stderr := r.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
+	if r.Stderr == nil {
+		r.Stderr = os.Stderr
 	}
 	client := r.HTTPClient
 	if client == nil {
@@ -82,11 +80,11 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 		start = bootstrap.Start
 	}
 	if len(args) != 0 {
-		return dispatchSubcommand(ctx, args, start, client, stdout, stderr, r)
+		return dispatchSubcommand(ctx, args, start, client, r.Stdout, r.Stderr, r)
 	}
 	startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
+		_, _ = fmt.Fprintln(r.Stderr, err.Error())
 		return ExitDown
 	}
 	configPath := platformconfig.ResolveConfigPath(r.ConfigPath)
@@ -117,9 +115,9 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 
 	return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
-		stdin:               stdin,
-		stdout:              stdout,
-		stderr:              stderr,
+		stdin:               r.Stdin,
+		stdout:              r.Stdout,
+		stderr:              r.Stderr,
 		client:              client,
 		addr:                startupConfig.Addr,
 		configPath:          configPath,
@@ -227,6 +225,8 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		return runUpdate(ctx, stdout, stderr, args[1:], runner)
 	case "connect":
 		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
+	case "launch":
+		return runLaunch(ctx, client, stdout, stderr, args[1:], runner)
 	case "share":
 		return runShare(ctx, client, stdout, stderr, args[1:])
 	default:

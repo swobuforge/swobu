@@ -10,7 +10,7 @@ func TestRegisterEffectHooksCleanupRestoresPreviousHooks(t *testing.T) {
 	secondErr := errors.New("second")
 	cleanupFirst := RegisterEffectHooks(
 		func(string) error { return firstErr },
-		func(string) (bool, error) { return true, nil },
+		func(string) ClipboardResult { return ClipboardResult{Status: CopyOK} },
 		nil,
 	)
 	defer cleanupFirst()
@@ -21,15 +21,18 @@ func TestRegisterEffectHooksCleanupRestoresPreviousHooks(t *testing.T) {
 
 	cleanupSecond := RegisterEffectHooks(
 		func(string) error { return secondErr },
-		func(string) (bool, error) { return false, nil },
+		func(string) ClipboardResult { return ClipboardResult{Status: CopyUnavailable} },
 		func(dir, prefix, text string) (string, error) { return "/tmp/fallback.txt", nil },
 	)
 
 	if err := OpenURL("https://example.test"); !errors.Is(err, secondErr) {
 		t.Fatalf("OpenURL second err = %v, want second hook", err)
 	}
-	if got := CopyToClipboard("payload"); got.Status != CopySavedFile || got.Path != "/tmp/fallback.txt" {
-		t.Fatalf("CopyToClipboard second result = %+v, want fallback file", got)
+	if got := CopyToClipboard("payload"); got.Status != CopyUnavailable {
+		t.Fatalf("CopyToClipboard second result = %+v, want unavailable", got)
+	}
+	if path, err := SaveTextFile("swobu-copy-", "payload"); err != nil || path != "/tmp/fallback.txt" {
+		t.Fatalf("SaveTextFile second result = %q, %v, want fallback file", path, err)
 	}
 
 	cleanupSecond()

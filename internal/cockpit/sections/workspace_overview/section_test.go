@@ -2,6 +2,7 @@ package workspace_overview
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -39,6 +40,7 @@ type workspaceShareCommandsStub struct {
 	issueCalls  int
 	revealCalls int
 	issueFunc   func() (shares.Result, error)
+	revealErr   error
 }
 
 func (s *workspaceShareCommandsStub) IssueShare(_ context.Context, ref string, expiry sharestate.Expiry) (shares.Result, error) {
@@ -49,9 +51,20 @@ func (s *workspaceShareCommandsStub) IssueShare(_ context.Context, ref string, e
 	}
 	return s.result, nil
 }
+
+func TestSection_WorkspaceShareOperationFailureStaysLocal(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = &workspaceShareCommandsStub{revealErr: errors.New("share reveal unavailable")}
+	section.Model.Share = &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}
+	section.copyShare()
+	frame := testkit.RenderMountedTrimmed(t, section, 100, 16)
+	if !strings.Contains(frame, "share reveal unavailable") || !strings.Contains(frame, "retry ↵") {
+		t.Fatalf("Share operation failure was not local:\n%s", frame)
+	}
+}
 func (s *workspaceShareCommandsStub) RevealShare(context.Context, string) (shares.Result, error) {
 	s.revealCalls++
-	return s.result, nil
+	return s.result, s.revealErr
 }
 
 func TestSection_WorkspaceShareEscapeReturnsSelectionWithoutIssuing(t *testing.T) {
@@ -81,7 +94,7 @@ func TestSection_ActiveWorkspaceShareCopiesAndUsesBoundedExpiryPresentation(t *t
 	section.ShareCommands = commands
 	section.Model.Share = &readmodel.ShareReadModel{Hostname: "d-q7mk3abcdefghijkl.share.swobu.com", Never: true}
 	var copied string
-	cleanup := ui.RegisterEffectHooks(nil, func(value string) (bool, error) { copied = value; return true, nil }, nil)
+	cleanup := ui.RegisterEffectHooks(nil, func(value string) ui.ClipboardResult { copied = value; return ui.ClipboardResult{Status: ui.CopyOK} }, nil)
 	defer cleanup()
 	h := makeHarness(t, &workspaceSurfaceRoot{SectionView: section})
 	defer h.Close()
@@ -95,6 +108,80 @@ func TestSection_ActiveWorkspaceShareCopiesAndUsesBoundedExpiryPresentation(t *t
 	h.DispatchKey(tui.KeyEvent{Key: tui.KeyEnter})
 	if commands.revealCalls != 1 || copied != commands.result.ShareURL {
 		t.Fatalf("active Share copy calls=%d value=%q", commands.revealCalls, copied)
+	}
+}
+
+func TestSection_OnlyLatestWorkspaceShareCopyCanExpireAcknowledgement(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	section.ShareCopied.Set(true)
+	section.shareCopyGeneration = 2
+
+	section.clearShareCopied(1)
+	if !section.ShareCopied.Get() {
+		t.Fatal("stale copy completion cleared latest acknowledgement")
+	}
+	section.clearShareCopied(2)
+	if section.ShareCopied.Get() {
+		t.Fatal("latest copy completion did not clear acknowledgement")
+	}
+}
+
+func TestSection_PropsRefreshCannotRecycleShareCopyGeneration(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	section.ShareCopied.Set(true)
+	section.shareCopyGeneration = 1
+
+	fresh := Section(workspaceSectionModel())
+	section.UpdateProps(fresh)
+	section.shareCopyGeneration++
+	section.ShareCopied.Set(true)
+
+	section.clearShareCopied(1)
+	if !section.ShareCopied.Get() {
+		t.Fatal("pre-refresh timer cleared post-refresh acknowledgement")
+	}
+	section.clearShareCopied(2)
+	if section.ShareCopied.Get() {
+		t.Fatal("latest timer did not clear acknowledgement")
+	}
+}
+
+func TestSection_WorkspaceShareClipboardFailureStaysLocalAndNeverPersistsSecret(t *testing.T) {
+	commands := &workspaceShareCommandsStub{result: shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET"}}
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = commands
+	section.Model.Share = &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}
+	tempCalls := 0
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult { return ui.ClipboardResult{Status: ui.CopyUnavailable} }, func(string, string, string) (string, error) {
+		tempCalls++
+		return "/tmp/secret.txt", nil
+	})
+	defer cleanup()
+
+	section.copyShare()
+	frame := testkit.RenderMountedTrimmed(t, section, 100, 16)
+	if tempCalls != 0 {
+		t.Fatalf("Share clipboard failure persisted secret %d times", tempCalls)
+	}
+	if !strings.Contains(frame, "clipboard unavailable") || !strings.Contains(frame, "retry ↵") {
+		t.Fatalf("Share failure was not adjacent to source:\n%s", frame)
+	}
+	if got := section.ShareFeedback.Get(); got.Tone != ui.ToneWarning {
+		t.Fatalf("unavailable tone = %v", got.Tone)
+	}
+}
+
+func TestSection_WorkspaceShareCopyFailureUsesFailureTone(t *testing.T) {
+	section := Section(workspaceSectionModel())
+	section.ShareCommands = &workspaceShareCommandsStub{result: shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET"}}
+	section.Model.Share = &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult {
+		return ui.ClipboardResult{Status: ui.CopyFailed, Err: errors.New("transport failed")}
+	}, nil)
+	defer cleanup()
+	section.copyShare()
+	if got := section.ShareFeedback.Get(); got.Message != "copy failed" || got.Tone != ui.ToneFailure {
+		t.Fatalf("copy failure = %#v", got)
 	}
 }
 

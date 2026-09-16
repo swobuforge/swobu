@@ -3,12 +3,14 @@ package target_config
 import (
 	"context"
 	"strings"
+	"time"
 
 	"fmt"
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
 )
 
 func targetConfigTitle(w *TargetConfig) string {
@@ -88,14 +90,15 @@ type TargetConfig struct {
 	// All disclosure regions are gone: model + placement + provider are fresh
 	// ui.Selects / reset-to-empty, and the credential drill-down lives on the
 	// local component state (no disclosure control structs remain).
-	app                  *tui.App
-	catalogProbeSeq      int64
-	catalogProbeInFlight bool
-	authObserverSeq      int64
-	cancelAuthObserver   context.CancelFunc
-	operationContext     context.Context
-	cancelOperations     context.CancelFunc
-	credentialSlot       string
+	app                    *tui.App
+	catalogProbeSeq        int64
+	catalogProbeInFlight   bool
+	authObserverSeq        int64
+	authCodeCopyGeneration uint64
+	cancelAuthObserver     context.CancelFunc
+	operationContext       context.Context
+	cancelOperations       context.CancelFunc
+	credentialSlot         string
 }
 
 func (w *TargetConfig) actionContext() context.Context {
@@ -322,5 +325,31 @@ func (w *TargetConfig) hasLiveApp() bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func (w *TargetConfig) setAuthCodeCopyResult(result ui.ClipboardResult) {
+	w.authCodeCopyGeneration++
+	generation := w.authCodeCopyGeneration
+	switch result.Status {
+	case ui.CopyOK:
+		w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "copied", Tone: ui.ToneAccent})
+		if w.app != nil {
+			app := w.app
+			go func() {
+				time.Sleep(1200 * time.Millisecond)
+				app.QueueUpdate(func() { w.clearAuthCodeCopy(generation) })
+			}()
+		}
+	case ui.CopyUnavailable:
+		w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning})
+	default:
+		w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "copy failed", Tone: ui.ToneFailure})
+	}
+}
+
+func (w *TargetConfig) clearAuthCodeCopy(generation uint64) {
+	if w.authCodeCopyGeneration == generation {
+		w.AuthCodeCopy.Set(authCodeCopyFeedback{})
 	}
 }

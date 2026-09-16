@@ -1,15 +1,99 @@
 package routes
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/cockpit/mountedrender"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/sharestate"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
+
+type routeShareCommandsStub struct {
+	result    shares.Result
+	revealErr error
+}
+
+func (s routeShareCommandsStub) IssueShare(context.Context, string, sharestate.Expiry) (shares.Result, error) {
+	return s.result, nil
+}
+
+func TestRouteShareOperationFailureStaysWithKnownRoute(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Share: &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}}
+	model := readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{route}}
+	section := Section(model, nil)
+	section.ShareCommands = routeShareCommandsStub{revealErr: errors.New("share reveal unavailable")}
+	section.State.ExpandedRoute.Set(route.ID)
+	section.copyShare(route)
+	frame := testkit.RenderMountedTrimmed(t, section, 100, 20)
+	if !strings.Contains(frame, "share reveal unavailable") || !strings.Contains(frame, "retry ↵") {
+		t.Fatalf("route Share operation failure was not local:\n%s", frame)
+	}
+}
+func (s routeShareCommandsStub) RevealShare(context.Context, string) (shares.Result, error) {
+	return s.result, s.revealErr
+}
+func (s routeShareCommandsStub) RevokeShare(context.Context, string) error { return nil }
+
+func TestRouteShareClipboardFailureStaysWithKnownRouteAndNeverPersistsSecret(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Share: &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}}
+	model := readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{route}}
+	section := Section(model, nil)
+	section.ShareCommands = routeShareCommandsStub{result: shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET"}}
+	section.State.ExpandedRoute.Set(route.ID)
+	tempCalls := 0
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult { return ui.ClipboardResult{Status: ui.CopyUnavailable} }, func(string, string, string) (string, error) { tempCalls++; return "/tmp/secret.txt", nil })
+	defer cleanup()
+
+	section.copyShare(route)
+	frame := testkit.RenderMountedTrimmed(t, section, 100, 20)
+	if tempCalls != 0 {
+		t.Fatalf("route Share persisted secret %d times", tempCalls)
+	}
+	if !strings.Contains(frame, "clipboard unavailable") || !strings.Contains(frame, "retry ↵") {
+		t.Fatalf("route Share failure was not local:\n%s", frame)
+	}
+	if got := section.State.ShareFeedback.Get(); got.Tone != ui.ToneWarning {
+		t.Fatalf("unavailable tone = %v", got.Tone)
+	}
+}
+
+func TestRouteShareCopyFailureUsesFailureTone(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "chat", ModelName: "chat", Share: &readmodel.ShareReadModel{Hostname: "d-example.share.swobu.com", Never: true}}
+	section := Section(readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{route}}, nil)
+	section.ShareCommands = routeShareCommandsStub{result: shares.Result{ShareURL: "https://d-example.share.swobu.com/#swsh_SECRET"}}
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult {
+		return ui.ClipboardResult{Status: ui.CopyFailed, Err: errors.New("transport failed")}
+	}, nil)
+	defer cleanup()
+	section.copyShare(route)
+	if got := section.State.ShareFeedback.Get(); got.Message != "copy failed" || got.Tone != ui.ToneFailure {
+		t.Fatalf("copy failure = %#v", got)
+	}
+}
+
+func TestOnlyLatestRouteShareCopyCanExpireAcknowledgement(t *testing.T) {
+	routeID := readmodel.RouteID("chat")
+	section := Section(readmodel.WorkspaceReadModel{ID: "dev", Routes: []readmodel.RouteReadModel{{ID: routeID}}}, nil)
+	section.State.ShareCopiedRoute.Set(routeID)
+	section.shareCopyGeneration = 2
+
+	section.clearShareCopied(routeID, 1)
+	if got := section.State.ShareCopiedRoute.Get(); got != routeID {
+		t.Fatalf("stale copy completion cleared latest acknowledgement: %q", got)
+	}
+	section.clearShareCopied(routeID, 2)
+	if got := section.State.ShareCopiedRoute.Get(); got != "" {
+		t.Fatalf("latest copy completion retained acknowledgement: %q", got)
+	}
+}
 
 func TestRouteSectionRendersPrimaryAndFallbackTierAtCanonicalWidths(t *testing.T) {
 	model := readmodel.WorkspaceReadModel{ID: "dev", Slug: "dev", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "chat", ModelName: "chat", Default: true, Enabled: true, Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{{ID: "a", Provider: "openai", Model: "gpt"}, {ID: "b", Provider: "anthropic", Model: "claude"}}}, {Targets: []readmodel.TargetReadModel{{ID: "c", Provider: "ollama", Model: "llama"}}}}}}}

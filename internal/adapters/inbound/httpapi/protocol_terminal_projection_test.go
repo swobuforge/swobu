@@ -50,11 +50,14 @@ func TestMessagesClientReceivesImmediateStructuredResponsesError(t *testing.T) {
 	}
 	for _, want := range []string{
 		"failure_class=unavailable", "status_code=429", "backend_error_type=usage_limit_reached",
-		"event=provider_error_detail", `backend_error_message="The usage limit has been reached"`,
+		"event=provider_error_detail",
 	} {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("logs missing %q:\n%s", want, logs.String())
 		}
+	}
+	if strings.Contains(logs.String(), "The usage limit has been reached") {
+		t.Fatalf("logs exposed provider-controlled message:\n%s", logs.String())
 	}
 }
 

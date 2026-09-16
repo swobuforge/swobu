@@ -16,45 +16,34 @@ func OpenURL(url string) error {
 	return open(url)
 }
 
-// CopyToClipboard attempts to write text to the system clipboard. On failure
-// it falls back to a temp file copy and returns the resulting status.
-func CopyToClipboard(text string) CopyResult {
-	_, write, writeTemp := currentEffectHooks()
-	if ok, _ := write(text); ok {
-		return CopyResult{Status: CopyOK}
-	}
-	path, err := writeTemp("", "swobu-diagnostics-", text)
-	if err != nil {
-		return CopyResult{Status: CopyFailed}
-	}
-	return CopyResult{Status: CopySavedFile, Path: path}
+// CopyToClipboard attempts only clipboard transport. Callers that may persist
+// their payload must opt into SaveTextFile separately.
+func CopyToClipboard(text string) ClipboardResult {
+	_, write, _ := currentEffectHooks()
+	return write(text)
 }
 
-// CopyResult describes the outcome of a clipboard copy attempt.
-type CopyResult struct {
+// SaveTextFile explicitly persists text to a temporary file. The caller owns
+// the payload policy and supplies a truthful semantic filename prefix.
+func SaveTextFile(prefix, text string) (string, error) {
+	_, _, writeTemp := currentEffectHooks()
+	return writeTemp("", prefix, text)
+}
+
+// ClipboardResult describes only the outcome of a clipboard transfer.
+type ClipboardResult struct {
 	Status CopyStatus
-	Path   string // valid when Status == CopySavedFile
+	Err    error // valid when Status == CopyFailed
 }
 
 // CopyStatus indicates which path the copy operation took.
 type CopyStatus int
 
 const (
-	CopyOK        CopyStatus = iota // written to system clipboard
-	CopySavedFile                   // wrote to fallback temp file at Path
-	CopyFailed                      // both paths failed
+	CopyOK          CopyStatus = iota // written to system clipboard
+	CopyUnavailable                   // clipboard integration is unavailable
+	CopyFailed                        // clipboard transport failed
 )
-
-func (r CopyResult) ErrorForDisplay() string {
-	switch r.Status {
-	case CopySavedFile:
-		return fmt.Sprintf("saved to %s", r.Path)
-	case CopyFailed:
-		return "failed · run swobu doctor --copy"
-	default:
-		return ""
-	}
-}
 
 // browserOpen and clipboardWrite are platform effect stubs overridden at link
 // time by build tags or init-time wiring. Default no-op keeps packages that
@@ -70,8 +59,8 @@ func defaultBrowserOpen(string) error {
 	return fmt.Errorf("browser open not wired")
 }
 
-func defaultClipboardWrite(string) (bool, error) {
-	return false, fmt.Errorf("clipboard write not wired")
+func defaultClipboardWrite(string) ClipboardResult {
+	return ClipboardResult{Status: CopyFailed, Err: fmt.Errorf("clipboard write not wired")}
 }
 
 func defaultClipboardWriteTemp(dir, prefix, text string) (string, error) {
@@ -88,7 +77,7 @@ func defaultClipboardWriteTemp(dir, prefix, text string) (string, error) {
 
 func currentEffectHooks() (
 	func(string) error,
-	func(string) (bool, error),
+	func(string) ClipboardResult,
 	func(dir, prefix, text string) (string, error),
 ) {
 	effectHooksMu.RLock()
@@ -99,7 +88,7 @@ func currentEffectHooks() (
 // RegisterEffectHooks wires platform-specific implementations for the package.
 // The adapter calls this once at process startup. Tests may defer the returned
 // cleanup to restore the previous hooks and avoid order-dependent global state.
-func RegisterEffectHooks(open func(string) error, write func(string) (bool, error), writeTemp func(dir, prefix, text string) (string, error)) func() {
+func RegisterEffectHooks(open func(string) error, write func(string) ClipboardResult, writeTemp func(dir, prefix, text string) (string, error)) func() {
 	effectHooksMu.Lock()
 	prevOpen, prevWrite, prevWriteTemp := browserOpen, clipboardWrite, clipboardWriteTemp
 	if open != nil {
@@ -125,15 +114,18 @@ func RegisterEffectHooks(open func(string) error, write func(string) (bool, erro
 // LinkRowComponent is a reusable selectable row that opens a URL in the
 // system browser when activated. displayValue is shown to the operator; url
 // is what the browser will receive when the row is activated.
-func LinkRowComponent(id, label, displayValue, url string) *SelectableRow {
+func LinkRowComponent(id, label, displayValue, url string, onDone func(error)) *SelectableRow {
 	return NewSelectableRow(id, label, displayValue, "open \u21b5", func() {
-		_ = OpenURL(url)
+		err := OpenURL(url)
+		if onDone != nil {
+			onDone(err)
+		}
 	})
 }
 
 // CopyPasteRowComponent is a reusable selectable row that copies text to the
 // clipboard when activated and shows status in the value column.
-func CopyPasteRowComponent(id, label, value, action string, doCopy func() CopyResult, onDone func(CopyResult)) *SelectableRow {
+func CopyPasteRowComponent(id, label, value, action string, doCopy func() ClipboardResult, onDone func(ClipboardResult)) *SelectableRow {
 	return NewSelectableRow(id, label, value, action, func() {
 		if onDone != nil {
 			onDone(doCopy())

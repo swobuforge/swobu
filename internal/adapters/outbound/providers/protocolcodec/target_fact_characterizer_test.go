@@ -3,9 +3,11 @@ package protocolcodec
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,6 +30,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 		{name: "max completion tokens", fact: provider.AcceptsMaxCompletionTokens, protocol: protocolkind.ChatCompletions, codec: Codec{ChatDialect: ChatDialect{UseMaxCompletionTokens: true}}},
 		{name: "reasoning effort max", fact: provider.AcceptsReasoningEffortMax, protocol: protocolkind.Responses},
 		{name: "reasoning disabled", fact: provider.AcceptsReasoningDisabled, protocol: protocolkind.Responses},
+		{name: "reasoning context all turns", fact: provider.AcceptsResponsesReasoningContextAllTurns, protocol: protocolkind.Responses},
 		{name: "function call output array", fact: provider.AcceptsFunctionCallOutputArray, protocol: protocolkind.Responses},
 		{name: "chat stream include usage", fact: provider.AcceptsChatStreamIncludeUsage, protocol: protocolkind.ChatCompletions},
 	}
@@ -51,6 +54,7 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 			if bytes.Equal(preferred, control) {
 				t.Fatal("preferred and control fixtures do not differ")
 			}
+			assertTargetFactFixtureDiffersOnlyAtOwnedOccurrence(t, test.fact, preferred, control)
 
 			t.Run("preferred completion resolves true", func(t *testing.T) {
 				calls := 0
@@ -63,16 +67,34 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 				}
 			})
 
-			t.Run("preferred rejection and control completion resolves false", func(t *testing.T) {
+			t.Run("preferred rejection control completion and matching preferred rejection resolve false", func(t *testing.T) {
 				calls := 0
 				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
 					calls++
-					if calls == 1 {
-						return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "rejected", "")))
+					if calls != 2 {
+						return nil, targetFactStructuredRejection("reasoning.context")
 					}
 					return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
 				}))
-				if !resolution.Conclusive || resolution.Value || calls != 2 {
+				if !resolution.Conclusive || resolution.Value || calls != 3 {
+					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
+				}
+			})
+
+			t.Run("changed restored rejection is inconclusive", func(t *testing.T) {
+				calls := 0
+				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+					calls++
+					switch calls {
+					case 1:
+						return nil, targetFactStructuredRejection("reasoning.context")
+					case 2:
+						return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
+					default:
+						return nil, targetFactStructuredRejection("different.param")
+					}
+				}))
+				if resolution.Conclusive || calls != 3 {
 					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
 				}
 			})
@@ -92,9 +114,58 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 				calls := 0
 				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
 					calls++
-					return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "rejected", "")))
+					return nil, targetFactStructuredRejection("reasoning.context")
 				}))
 				if resolution.Conclusive || calls != 2 {
+					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
+				}
+			})
+
+			t.Run("matching status-only rejection resolves false", func(t *testing.T) {
+				calls := 0
+				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+					calls++
+					if calls == 2 {
+						return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
+					}
+					return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "opaque rejection", "")))
+				}))
+				if !resolution.Conclusive || resolution.Value || calls != 3 {
+					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
+				}
+			})
+
+			t.Run("matching message-only structured rejection resolves false", func(t *testing.T) {
+				calls := 0
+				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+					calls++
+					if calls == 2 {
+						return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
+					}
+					backendErr := canonical.NewStructuredBackendError("target", test.protocol, http.StatusBadRequest, canonical.BackendErrorDetail{
+						Message: "provider prose only",
+					}, "")
+					return nil, provider.AttemptMayHaveExecuted(provider.Rejected(backendErr))
+				}))
+				if !resolution.Conclusive || resolution.Value || calls != 3 {
+					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
+				}
+			})
+
+			t.Run("changed restored status is inconclusive", func(t *testing.T) {
+				calls := 0
+				resolution := codec.CharacterizeTargetFact(context.Background(), target, test.fact, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+					calls++
+					if calls == 2 {
+						return completedTargetFactIngress(test.protocol, targetFactFixtureDelivery(test.fact)), nil
+					}
+					status := http.StatusBadRequest
+					if calls == 3 {
+						status = http.StatusUnprocessableEntity
+					}
+					return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", status, "opaque rejection", "")))
+				}))
+				if resolution.Conclusive || calls != 3 {
 					t.Fatalf("resolution = %#v calls=%d", resolution, calls)
 				}
 			})
@@ -115,16 +186,75 @@ func TestCharacterizeTargetFactReusesOneSyntheticThreadIdentity(t *testing.T) {
 	calls := 0
 	resolution := codec.CharacterizeTargetFact(context.Background(), target, provider.AcceptsParallelToolCallsFalse, provider.TransportFunc(func(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
 		calls++
-		if calls == 1 {
-			return nil, provider.AttemptMayHaveExecuted(provider.Rejected(canonical.NewBackendError("target", 400, "rejected", "")))
+		if calls != 2 {
+			return nil, targetFactStructuredRejection("parallel_tool_calls")
 		}
 		return completedTargetFactIngress(protocolkind.ChatCompletions, delivery.BufferedDelivery()), nil
 	}))
 	if !resolution.Conclusive || resolution.Value {
 		t.Fatalf("resolution = %#v, want conclusive false", resolution)
 	}
-	if len(projected) != 2 || projected[0].IsZero() || projected[0] != projected[1] {
-		t.Fatal("preferred and control characterization did not share one synthetic execution affinity")
+	if len(projected) != 3 || projected[0].IsZero() || projected[0] != projected[1] || projected[1] != projected[2] {
+		t.Fatal("preferred, control, and restored characterization did not share one synthetic execution affinity")
+	}
+}
+
+func targetFactStructuredRejection(param string) error {
+	backendErr := canonical.NewStructuredBackendError("target", protocolkind.Responses, http.StatusBadRequest, canonical.BackendErrorDetail{
+		Type: "invalid_request_error", Code: "unsupported_value", Param: param,
+	}, "")
+	return provider.AttemptMayHaveExecuted(provider.Rejected(backendErr))
+}
+
+func assertTargetFactFixtureDiffersOnlyAtOwnedOccurrence(t *testing.T, fact provider.TargetFact, preferred, control []byte) {
+	t.Helper()
+	decode := func(raw []byte) map[string]any {
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	normalize := func(payload map[string]any) {
+		switch fact {
+		case provider.AcceptsParallelToolCallsFalse:
+			delete(payload, "parallel_tool_calls")
+		case provider.AcceptsMaxCompletionTokens:
+			delete(payload, "max_completion_tokens")
+			delete(payload, "max_tokens")
+		case provider.AcceptsReasoningEffortMax, provider.AcceptsReasoningDisabled:
+			if reasoning, ok := payload["reasoning"].(map[string]any); ok {
+				delete(reasoning, "effort")
+				if len(reasoning) == 0 {
+					delete(payload, "reasoning")
+				}
+			}
+		case provider.AcceptsResponsesReasoningContextAllTurns:
+			if reasoning, ok := payload["reasoning"].(map[string]any); ok {
+				delete(reasoning, "context")
+				if len(reasoning) == 0 {
+					delete(payload, "reasoning")
+				}
+			}
+		case provider.AcceptsFunctionCallOutputArray:
+			if input, ok := payload["input"].([]any); ok {
+				for _, rawItem := range input {
+					if item, ok := rawItem.(map[string]any); ok && item["type"] == "function_call_output" {
+						delete(item, "output")
+					}
+				}
+			}
+		case provider.AcceptsChatStreamIncludeUsage:
+			delete(payload, "stream_options")
+		default:
+			t.Fatalf("missing fixture-delta normalizer for fact %v", fact)
+		}
+	}
+	preferredPayload, controlPayload := decode(preferred), decode(control)
+	normalize(preferredPayload)
+	normalize(controlPayload)
+	if !reflect.DeepEqual(preferredPayload, controlPayload) {
+		t.Fatalf("fixture differs outside fact %v:\npreferred=%#v\ncontrol=%#v", fact, preferredPayload, controlPayload)
 	}
 }
 

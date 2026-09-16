@@ -40,6 +40,13 @@ func TestTargetSnapshotAcceptsSemanticInteractionsProtocol(t *testing.T) {
 	}
 }
 
+func TestTargetSnapshotRejectsGenerateContentAsProviderProtocol(t *testing.T) {
+	target := NewTargetSnapshot("target", "custom-provider", "https://example.test", "cred", protocolkind.GenerateContent, "generate_content", delivery.BufferedDelivery())
+	if err := target.ValidateExecutionProtocol(); err == nil {
+		t.Fatal("GenerateContent was accepted as an outbound provider protocol")
+	}
+}
+
 func TestTargetSnapshotConstructorsExposeExactlyOneProviderOptionsArm(t *testing.T) {
 	custom := NewCustomTargetSnapshot("custom", "https://example.test", "cred", protocolkind.Responses, "responses", "X-API-Key", delivery.BufferedDelivery())
 	if custom.AuthHeader() != "X-API-Key" {

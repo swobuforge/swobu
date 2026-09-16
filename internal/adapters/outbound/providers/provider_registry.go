@@ -37,6 +37,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/siliconflow"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/together"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/venice"
+	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/vercel"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/workersai"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/zai"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -88,6 +89,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		bedrock.NewRuntime(profile.ProviderSpecBedrock, client, credentials),
 		azure.NewRuntime(client, credentials),
 		openrouter.NewRuntime(client, credentials),
+		vercel.NewRuntime(client, credentials),
 		runpod.NewRuntime(client, credentials),
 		zai.NewRuntime(client, credentials),
 		ollama.NewRuntime(client, credentials),

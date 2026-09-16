@@ -156,9 +156,9 @@ func TestOpenCodeTargetCharacterizationRecordReplayProjectsStableThread(t *testi
 		calls++
 		sessions = append(sessions, request.Header.Get("X-Opencode-Session"))
 		w.Header().Set("Content-Type", "application/json")
-		if calls == 1 {
+		if calls != 2 {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":{"message":"parallel_tool_calls rejected"}}`)
+			_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","code":"unsupported_value","message":"parallel_tool_calls rejected","param":"parallel_tool_calls"}}`)
 			return
 		}
 		_, _ = io.WriteString(w, `{"id":"response","model":"model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
@@ -175,7 +175,7 @@ func TestOpenCodeTargetCharacterizationRecordReplayProjectsStableThread(t *testi
 	if !resolution.Conclusive || resolution.Value {
 		t.Fatalf("resolution = %#v, want conclusive false", resolution)
 	}
-	if len(sessions) != 2 || sessions[0] == "" || sessions[0] != sessions[1] {
+	if len(sessions) != 3 || sessions[0] == "" || sessions[0] != sessions[1] || sessions[1] != sessions[2] {
 		t.Fatalf("characterization sessions = %#v", sessions)
 	}
 }

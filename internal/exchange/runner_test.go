@@ -608,7 +608,7 @@ type testClientCodec struct {
 	}
 }
 
-func (c testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+func (c testClientCodec) DecodeClientRequest(doc carrier.Document, _ canonical.ClientOperation) (wire.ClientDecodeResult, error) {
 	return c.req.DecodeClientRequest(doc)
 }
 

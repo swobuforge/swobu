@@ -4,63 +4,26 @@
 
 **Pool LLM capacity you already have.**
 
-A Swobu route looks like a model name to the agent; behind it can be your provider accounts, cloud regions, hosted endpoints, and local servers. Swobu handles routing, runtime fallback, and protocol translation across the paths you configure. It does not preflight compatibility: the real request reaches each configured target, and a failed attempt can advance to the next configured target.
+Put provider accounts, cloud regions, hosted endpoints, and local GPUs behind stable model names. Your agents keep one endpoint; Swobu handles routing, runtime fallback, and protocol translation underneath.
 
-[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code extension](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
+[Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
 
 <p align="center">
   <img src="./assets/readme/swobu-demo.gif" alt="Sharing an HTTPS endpoint, switching its backend without changing the remote client, and revoking access with Swobu" width="960">
 </p>
 
----
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="./assets/readme/ecosystem-mobile.png">
+    <img src="./assets/readme/ecosystem.png" alt="Claude Code, Codex, Antigravity and other clients route through Swobu to provider capacity including OpenAI, Anthropic, Gemini, Bedrock, Azure AI, Mistral, DeepSeek and Ollama" width="960">
+  </picture>
+</p>
 
-## Your agent chooses a model. Swobu chooses where it runs.
-
-A Swobu **route looks like a model** to your agent.
-
-Behind that name can be one endpoint, the same model available from several places, or a cross-provider pool.
-
-The diagrams illustrate configurations. Choose models available from your providers.
-
-```text
-claude-opus-5
-    │
-    ├─ Anthropic / claude-opus-5
-    ├─ AWS Bedrock / account A / claude-opus-5
-    └─ AWS Bedrock / account B / claude-opus-5
-```
-
-Keep using `claude-opus-5`. Swobu can balance capacity and fail over underneath it.
-
-Or make the model name describe a job:
-
-```text
-codex-auto-review
-    │
-    ├─ Deepseek / Deepseek V4 Flash
-    ├─ Google / Gemini 3.7 Flash
-    └─ another review model
-```
-
-Or build a pool that deliberately crosses models and providers:
-
-```text
-free
-    │
-    ├─ Cerebras / Gemma 4 31B
-    ├─ Groq / gpt-oss-20b
-    ├─ LLM7 / default
-    ├─ OpenRouter / free
-    ├─ Mistral / Ministral 3B
-    ├─ NVIDIA NIM / Nemotron Mini 4B
-    └─ Ollama / Qwen 3.8 27b
-```
-
-The model field your agent already understands becomes a programmable routing boundary.
+<p align="center"><sub>Compatibility shown, not partnership. Support varies by provider and runtime.</sub></p>
 
 ---
 
-## Start routing in one command
+## Install
 
 macOS, Linux, or WSL:
 
@@ -74,215 +37,62 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-The installer opens **Cockpit**, where you can add a provider, create a route,
-and connect your first agent. It verifies the download, preserves an existing
-standalone installation if setup fails, and leaves your shell profile and Swobu
-data alone.
-
-Already using a standalone installation? Update it with:
-
-```text
-swobu update
-```
-
-Source, package-manager, and custom-directory installations remain owned by
-the method that installed them.
-
-[Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
-
-### Connect an agent
-
-Cockpit can configure supported clients for you.
-
-Or use the CLI:
+Cockpit opens after install. Add a provider, create a route, then connect an agent.
 
 ```bash
 swobu connect claude
 swobu connect codex
-swobu connect muse
-swobu connect openclaw
-swobu connect pi
-swobu connect kilo
-swobu connect opencode
-swobu connect hermes
 ```
 
-After that, your agent talks to Swobu. Provider configuration and routing stay behind the gateway.
+Muse, Pi, Kilo, and Hermes are also supported. Antigravity CLI 1.2.3 and newer connects through `swobu launch antigravity`; release qualification uses the exact certified 1.2.3 binary.
+
+[Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
 
 ---
 
-## What changes when the model name becomes a route?
+## Route once. Change the capacity underneath.
 
-### Pool capacity
-
-A target is not just a model.
-
-It can represent a particular:
-
-- provider
-- account
-- cloud region
-- hosted endpoint
-- local server
-- model
-
-Put several targets in the same tier to balance across them.
-
-Add fallback tiers to define what happens when preferred capacity is unavailable.
+A Swobu **route is the model name your agent already sends**.
 
 ```text
-route: gpt-5.6-sol
-
-primary
-├─ Azure / westcentralus / gpt-5.6-sol
-└─ Azure / westus2 / gpt-5.6-sol
-
-fallback
-└─ OpenAI / gpt-5.6-sol
+agent: model = coding
+          │
+          ▼
+        Swobu
+          │
+          ├─ Azure AI / region A
+          ├─ Azure AI / region B
+          ├─ AWS Bedrock
+          └─ Ollama
 ```
 
-The agent still asks for `gpt-5.6-sol`.
+Routes can pool provider accounts, regions, hosted endpoints, local servers, and models. Peer target order changes across attempts; fallback tiers define what happens after a real attempt fails. Swobu does not inspect live quota, price, health, or latency.
+
+**Runtime fallback, not preflight.** Swobu sends the real request to the configured target. A failed attempt can advance to the next target in the route.
+
+**Protocol translation at one boundary.** Current protocol families include OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Gemini Interactions. Translation occurs where the requested semantics are representable.
+
+[How routing works →](https://swobu.com/docs/) · [Capability matrix →](https://swobu.com/docs/)
 
 ---
 
-### Route across providers
-
-Routes don't have to preserve model identity.
-
-A name such as `review`, `cheap`, `free`, or `codex-auto-review` can represent whatever capacity makes sense for that workload.
+## Share a route without sharing provider credentials
 
 ```text
-review
-├─ Z.AI / GLM-5.3
-├─ Kimi / Kimi-2.8
-└─ Ollama / Qwen3-Coder
+swobu share dev/coding
 ```
 
-This lets different agents share routing policy without hard-coding provider configuration into each one.
+A Share gives the remote client an HTTPS endpoint and bearer. Provider keys remain on the machine running Swobu. You can change what backs the route without changing the remote configuration, then revoke access when you are done.
 
----
+Application TLS terminates on the owner machine running Swobu; the relay forwards encrypted application traffic and does not terminate that TLS.
 
-### Fail over without reconfiguring the agent
-
-Quota exhausted. Region unavailable. Endpoint fails. Account hits a limit.
-
-If an attempt fails, Swobu can try the next configured target in the route.
-
-```text
-agent
-  │
-  │ model: gpt-5.6-sol
-  ▼
-Swobu
-  │
-  ├─ Azure ────── unavailable
-  │
-  └─ OpenAI ──────── ✓
-```
-
-The route name does not change.
-
----
-
-## One boundary, multiple protocols
-
-```text
-Claude Code ─┐
-Codex ───────┤
-Muse Code ───┤
-OpenClaw ────┤
-Pi ──────────┤
-Kilo ────────┤
-OpenCode ────┼──── Swobu ────┬─ OpenAI
-Hermes ──────┤                ├─ Anthropic
-Other agents ┘                ├─ Gemini
-                              ├─ AWS Bedrock
-                              ├─ Azure AI
-                              ├─ Cerebras
-                              ├─ Cloudflare
-                              ├─ Ollama
-                              ├─ LM Studio
-                              ├─ vLLM
-                              └─ ...
-```
-
-Swobu currently supports provider integrations across protocols including:
-
-- OpenAI Responses
-- OpenAI Chat Completions
-- Anthropic Messages
-- Gemini Interactions
-
-Exact protocol and capability support varies by provider.
-
-Routes control provider differences. They do not erase them.
-
-[Capability matrix →](https://swobu.com/docs/)
-
----
-
-## Providers
-
-Swobu supports local inference, frontier APIs, hyperscalers, specialized inference platforms, and aggregators.
-
-[Find providers and setup instructions in the documentation.](https://swobu.com/docs/)
-
----
-
-## Examples
-
-### Share a live AI gateway
-
-Give a remote agent one HTTPS endpoint and bearer without copying Swobu or
-provider credentials to the recipient:
-
-```text
-workspace dev
-  coding → Bedrock → Anthropic fallback
-  cheap  → OpenRouter
-  local  → Ollama
-
-swobu share dev
-```
-
-The recipient can use `coding`, `cheap`, and `local`. If you change the targets
-behind `coding`, their endpoint, bearer, and model name stay the same. Share one
-route instead with `swobu share dev/coding`.
-
-Shares default to one day. `7d`, `30d`, and `never` are free during preview.
-The Owner Swobu process must be running: application TLS terminates there,
-certificates renew automatically without changing the Share URL, and
-`swobu share revoke dev` closes that workspace access.
-
-[Workspace and Route Share details →](https://swobu.com/docs/concepts/sharing/)
-
-### Same model, multiple providers
-
-Keep the model name the agent already uses while adding redundant capacity underneath it.
-
-### Cross-provider free pool
-
-Combine recurring free capacity behind one model name.
-
-### Local first, cloud when needed
-
-Prefer Ollama, LM Studio, or vLLM and fall through to hosted capacity according to policy.
-
-### Agent-specific routes
-
-Expose names such as `codex-auto-review` or `claude-plan` while changing the providers and models behind them independently.
+[Workspace and Route Share →](https://swobu.com/docs/concepts/sharing/)
 
 ---
 
 ## Local-first
 
-Swobu runs locally and exposes the endpoint your agents connect to.
-
-Your provider credentials stay at the gateway rather than being copied into every client.
-
-No Swobu account is required for local use.
-
-Operational telemetry is deliberately limited, and can be disabled.
+Swobu runs locally and exposes the endpoint your agents use. Provider credentials stay at that boundary. Requests leave your machine when a hosted target is selected. No Swobu account is required for local use. Operational telemetry is deliberately limited and can be disabled.
 
 [Security & privacy →](https://swobu.com/docs/)
 
@@ -290,7 +100,7 @@ Operational telemetry is deliberately limited, and can be disabled.
 
 ## Releases
 
-Swobu publishes versioned binaries for Linux, macOS, and Windows, with SHA-256 checksums.
+Swobu publishes versioned Linux, macOS, and Windows binaries with SHA-256 checksums.
 
 [Latest release →](https://github.com/swobuforge/swobu/releases/latest)
 
@@ -302,17 +112,3 @@ cd swobu
 make build
 ./.out/swobu --version
 ```
-
----
-
-<p align="center">
-  <strong>One model name. Any capacity underneath.</strong>
-</p>
-
-<p align="center">
-  <a href="https://swobu.com/docs/start/first-route/">Get started</a>
-  ·
-  <a href="https://swobu.com/docs/">Docs</a>
-  ·
-  <a href="https://github.com/swobuforge/swobu/releases">Releases</a>
-</p>

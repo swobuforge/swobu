@@ -682,3 +682,130 @@ func TestAzureCatalogOperationRowsUseDeploymentNoun(t *testing.T) {
 		t.Fatalf("Azure failure copy is not deployment-specific:\n%s", failed)
 	}
 }
+
+func TestChatGPTAuthCodeClipboardFailureNeverPersistsSecret(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{SessionID: "login-1", State: "pending", UserCode: "SECRET-CODE"})
+	tempCalls := 0
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult { return ui.ClipboardResult{Status: ui.CopyUnavailable} }, func(string, string, string) (string, error) {
+		tempCalls++
+		return "/tmp/auth-code.txt", nil
+	})
+	defer cleanup()
+
+	row := ChatGPTAuthUserCode(w)
+	row.Activate()
+	if tempCalls != 0 {
+		t.Fatalf("auth code clipboard failure persisted secret %d times", tempCalls)
+	}
+	if got := w.AuthCodeCopy.Get(); got.Message != "clipboard unavailable" || got.Tone != ui.ToneWarning {
+		t.Fatalf("auth code feedback = %#v", got)
+	}
+	retry := ChatGPTAuthUserCode(w)
+	if retry.Action != "retry ↵" || retry.ValueTone != ui.ToneNeutral {
+		t.Fatalf("retry row = action %q tone %v", retry.Action, retry.ValueTone)
+	}
+}
+
+func TestChatGPTEffectFeedbackResetsWithAuthSession(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{SessionID: "login-1", State: "pending", AuthorizeURL: "https://auth.example/old", UserCode: "OLD-CODE"})
+	w.AuthBrowserError.Set("browser could not open")
+	w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning})
+
+	w.CancelAuthSession()
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{SessionID: "login-2", State: "pending", AuthorizeURL: "https://auth.example/new", UserCode: "NEW-CODE"})
+
+	if got := w.AuthBrowserError.Get(); got != "" {
+		t.Fatalf("new auth session inherited browser feedback %q", got)
+	}
+	if got := w.AuthCodeCopy.Get(); got != (authCodeCopyFeedback{}) {
+		t.Fatalf("new auth session inherited code feedback %#v", got)
+	}
+}
+
+func TestChatGPTAuthCodeCopyFeedbackIsAdjacentAndValueStaysNeutral(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{SessionID: "login-1", State: "pending", UserCode: "ABCD-EFGH"})
+	copyFails := true
+	cleanup := ui.RegisterEffectHooks(nil, func(string) ui.ClipboardResult {
+		if copyFails {
+			return ui.ClipboardResult{Status: ui.CopyFailed, Err: errors.New("transport failed")}
+		}
+		return ui.ClipboardResult{Status: ui.CopyOK}
+	}, nil)
+	defer cleanup()
+
+	ChatGPTAuthUserCode(w).Activate()
+	if row := ChatGPTAuthUserCode(w); row.ValueTone != ui.ToneNeutral || row.Action != "retry ↵" {
+		t.Fatalf("failed copy changed code semantics: tone=%v action=%q", row.ValueTone, row.Action)
+	}
+	copyFails = false
+	ChatGPTAuthUserCode(w).Activate()
+	if got := w.AuthCodeCopy.Get(); got.Message != "copied" || got.Tone != ui.ToneAccent {
+		t.Fatalf("successful copy feedback = %#v", got)
+	}
+	if row := ChatGPTAuthUserCode(w); row.ValueTone != ui.ToneNeutral || row.Action != "copied" {
+		t.Fatalf("successful copy changed code semantics: tone=%v action=%q", row.ValueTone, row.Action)
+	}
+	frame := testkit.RenderMountedTrimmed(t, ChatGPTProviderForm(w), 100, 12)
+	if got := strings.Count(frame, "copied"); got != 1 {
+		t.Fatalf("successful copy rendered %d acknowledgements, want action-lane only:\n%s", got, frame)
+	}
+}
+
+func TestOnlyLatestChatGPTCodeCopyCanExpireAcknowledgement(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "copied", Tone: ui.ToneAccent})
+	w.authCodeCopyGeneration = 2
+
+	w.clearAuthCodeCopy(1)
+	if got := w.AuthCodeCopy.Get().Message; got != "copied" {
+		t.Fatalf("stale copy completion cleared latest acknowledgement: %q", got)
+	}
+	w.clearAuthCodeCopy(2)
+	if got := w.AuthCodeCopy.Get().Message; got != "" {
+		t.Fatalf("latest copy completion retained acknowledgement: %q", got)
+	}
+}
+
+func TestChatGPTBrowserAndCodeFeedbackHaveIndependentOwners(t *testing.T) {
+	w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+	w.AuthSession.Set(readmodel.AuthSessionReadModel{SessionID: "login-1", State: "pending", AuthorizeURL: "https://auth.example/login", UserCode: "SECRET-CODE"})
+	browserFails := true
+	clipboardFails := true
+	cleanup := ui.RegisterEffectHooks(func(string) error {
+		if browserFails {
+			return errors.New("browser unavailable")
+		}
+		return nil
+	}, func(string) ui.ClipboardResult {
+		if clipboardFails {
+			return ui.ClipboardResult{Status: ui.CopyUnavailable}
+		}
+		return ui.ClipboardResult{Status: ui.CopyOK}
+	}, nil)
+	defer cleanup()
+
+	ChatGPTAuthOpenBrowser(w).Activate()
+	if w.AuthBrowserError.Get() == "" || w.AuthCodeCopy.Get().Message != "" {
+		t.Fatalf("browser failure crossed controls: browser=%q code=%#v", w.AuthBrowserError.Get(), w.AuthCodeCopy.Get())
+	}
+	ChatGPTAuthUserCode(w).Activate()
+	if w.AuthBrowserError.Get() == "" || w.AuthCodeCopy.Get().Message != "clipboard unavailable" {
+		t.Fatalf("code failure crossed controls: browser=%q code=%#v", w.AuthBrowserError.Get(), w.AuthCodeCopy.Get())
+	}
+
+	clipboardFails = false
+	ChatGPTAuthUserCode(w).Activate()
+	if w.AuthBrowserError.Get() == "" || w.AuthCodeCopy.Get().Message != "copied" {
+		t.Fatalf("code success cleared browser failure: browser=%q code=%#v", w.AuthBrowserError.Get(), w.AuthCodeCopy.Get())
+	}
+
+	w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning})
+	browserFails = false
+	ChatGPTAuthOpenBrowser(w).Activate()
+	if w.AuthBrowserError.Get() != "" || w.AuthCodeCopy.Get().Message != "clipboard unavailable" {
+		t.Fatalf("browser success cleared code failure: browser=%q code=%#v", w.AuthBrowserError.Get(), w.AuthCodeCopy.Get())
+	}
+}

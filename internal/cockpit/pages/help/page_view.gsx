@@ -18,6 +18,9 @@ type PageView struct {
 	Version           string
 	DaemonVersion     string
 	DiagnosticsStatus readmodel.DiagnosticsStatus
+	DiagnosticsPath   string
+	CommunityError    *tui.State[string]
+	IssueError        *tui.State[string]
 }
 
 // View builds the help page from a loaded readmodel.
@@ -30,6 +33,8 @@ func View(model readmodel.HelpReadModel) *PageView {
 		Version:           model.Version,
 		DaemonVersion:     model.DaemonVersion,
 		DiagnosticsStatus: ds,
+		CommunityError:    tui.NewState(""),
+		IssueError:        tui.NewState(""),
 	}
 }
 
@@ -62,7 +67,7 @@ func (v *PageView) diagnosticsValue() string {
 	case readmodel.DiagnosticsCopied:
 		return "copied · paste into issue/Discord"
 	case readmodel.DiagnosticsSaved:
-		return "saved to /tmp/swobu-diagnostics.txt"
+		return "saved to " + v.DiagnosticsPath
 	case readmodel.DiagnosticsFailed:
 		return "failed · run swobu doctor --copy"
 	default:
@@ -70,12 +75,7 @@ func (v *PageView) diagnosticsValue() string {
 	}
 }
 
-func (v *PageView) diagnosticsAction() string {
-	if v.DiagnosticsStatus == readmodel.DiagnosticsSaved {
-		return "open \u21b5"
-	}
-	return "copy \u21b5"
-}
+func (v *PageView) diagnosticsAction() string { return "copy \u21b5" }
 
 func (v *PageView) diagnosticsPayloadText() string {
 	payload := readmodel.DiagnosticsPayload{Version: v.Version}
@@ -85,14 +85,15 @@ func (v *PageView) diagnosticsPayloadText() string {
 	return payload.Text()
 }
 
-func (v *PageView) onDiagnosticsCopied(result ui.CopyResult) {
+func (v *PageView) onDiagnosticsCopied(result ui.ClipboardResult) {
 	switch result.Status {
 	case ui.CopyOK:
 		v.DiagnosticsStatus = readmodel.DiagnosticsCopied
-	case ui.CopySavedFile:
-		v.DiagnosticsStatus = readmodel.DiagnosticsSaved
 	default:
-		v.DiagnosticsStatus = readmodel.DiagnosticsFailed
+		path, err := ui.SaveTextFile("swobu-diagnostics-", v.diagnosticsPayloadText())
+		if err != nil { v.DiagnosticsStatus = readmodel.DiagnosticsFailed; return }
+		v.DiagnosticsStatus = readmodel.DiagnosticsSaved
+		v.DiagnosticsPath = path
 	}
 }
 
@@ -102,13 +103,18 @@ func VersionRowComponent(v *PageView) *ui.SelectableRow {
 }
 
 // CommunityRow opens the community Discord.
+func linkFailure(err error, url string) string {
+	if err != nil { return "browser could not open · " + url }
+	return ""
+}
+
 func CommunityRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.LinkRowComponent("help:community", "community", "Discord", communityURL)
+	return ui.LinkRowComponent("help:community", "community", "Discord", communityURL, func(err error) { v.CommunityError.Set(linkFailure(err, communityURL)) })
 }
 
 // IssueRow opens the GitHub issue tracker.
 func IssueRowComponent(v *PageView) *ui.SelectableRow {
-	return ui.LinkRowComponent("help:issue", "issue", "GitHub issue", issueURL)
+	return ui.LinkRowComponent("help:issue", "issue", "GitHub issue", issueURL, func(err error) { v.IssueError.Set(linkFailure(err, issueURL)) })
 }
 
 // DiagnosticsRow copies or saves diagnostics.
@@ -118,14 +124,14 @@ func DiagnosticsRowComponent(v *PageView) *ui.SelectableRow {
 		"diagnostics",
 		v.diagnosticsValue(),
 		v.diagnosticsAction(),
-		func() ui.CopyResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
+		func() ui.ClipboardResult { return ui.CopyToClipboard(v.diagnosticsPayloadText()) },
 		v.onDiagnosticsCopied,
 	)
 	return row
 }
 
 templ (v *PageView) Render() {
-	<div class="flex-col w-full pl-2">
+	<div class="flex-col w-full pl-2" deps={v.CommunityError, v.IssueError}>
 		<div class="flex-row w-full">
 			<span textStyle={ui.HeadingStyle()}>  help</span>
 		</div>
@@ -133,7 +139,9 @@ templ (v *PageView) Render() {
 		<div class="flex-col w-full">
 			@VersionRowComponent(v)
 			@CommunityRowComponent(v)
+			if v.CommunityError.Get() != "" { <div class="pl-3 w-full" textStyle={ui.ToneStyle(ui.ToneFailure)}>@ui.FlowText(v.CommunityError.Get())</div> }
 			@IssueRowComponent(v)
+			if v.IssueError.Get() != "" { <div class="pl-3 w-full" textStyle={ui.ToneStyle(ui.ToneFailure)}>@ui.FlowText(v.IssueError.Get())</div> }
 			@DiagnosticsRowComponent(v)
 		</div>
 		<br />

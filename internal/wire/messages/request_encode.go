@@ -260,7 +260,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning()); err != nil {
+	if err := encodeMessagesGenerationControls(payload, req.Controls(), req.Reasoning(), changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if err := lowering.Reasoning(payload, req.Reasoning(), changeLog); err != nil {

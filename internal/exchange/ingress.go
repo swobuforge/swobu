@@ -115,7 +115,7 @@ type RequestInput struct {
 	Workspace         routing.WorkspaceSlug
 	Request           carrier.TransportRequest
 	ClientHandler     trafficevidence.ClientHandler
-	ClientFamily      canonical.ClientFamily
+	Operation         canonical.ClientOperation
 	ResponseFraming   delivery.Framing
 	Timing            *trafficevidence.Timing
 	ExecutionAffinity executionaffinity.Key
@@ -177,17 +177,15 @@ func (h RequestIngress) HandleRequestWithWorkspace(ctx context.Context, workspac
 }
 
 func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
-	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
-	if err != nil {
-		return RequestOutput{}, err
+	operation := in.Operation
+	if operation.Family == "" {
+		return RequestOutput{}, canonical.InternalError("client operation is not configured")
 	}
-	if err := canonical.ValidateClientTransport(in.Request.Method, normalizedPath, false); err != nil {
-		return RequestOutput{}, err
-	}
+	normalizedPath := operation.NormalizedPath
 	if h.runner.Runtime == nil {
 		return RequestOutput{}, canonical.InternalError("exchange runtime resolver is not configured")
 	}
-	clientFamily := in.ClientFamily
+	clientFamily := operation.Family
 	if clientFamily == "" {
 		return RequestOutput{}, canonical.InternalError("client family is not configured")
 	}
@@ -218,7 +216,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	if err != nil {
 		return RequestOutput{}, err
 	}
-	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc)
+	decodeResult, err := clientCodec.DecodeClientRequest(requestDoc, operation)
 	if err != nil {
 		return RequestOutput{}, err
 	}

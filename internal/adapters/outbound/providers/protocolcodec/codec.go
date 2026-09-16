@@ -163,10 +163,11 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 			OmitParallelToolCallsFalse: func() bool {
 				return !req.TargetFacts.UseParallelToolCallsFalse()
 			},
-			AcceptsReasoningEffortMax:  req.TargetFacts.UseReasoningEffortMax,
-			AcceptsReasoningDisabled:   req.TargetFacts.UseReasoningDisabled,
-			DefaultReasoningDisabled:   dialect.DefaultReasoningDisabled,
-			AcceptsFunctionOutputArray: req.TargetFacts.UseFunctionCallOutputArray,
+			AcceptsReasoningEffortMax:       req.TargetFacts.UseReasoningEffortMax,
+			AcceptsReasoningDisabled:        req.TargetFacts.UseReasoningDisabled,
+			AcceptsReasoningContextAllTurns: req.TargetFacts.UseResponsesReasoningContextAllTurns,
+			DefaultReasoningDisabled:        dialect.DefaultReasoningDisabled,
+			AcceptsFunctionOutputArray:      req.TargetFacts.UseFunctionCallOutputArray,
 		},
 	)
 	return document, changes, err
@@ -188,6 +189,7 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 		chatcompletions.CompileOptions{
 			Lowering:               chatcompletions.ProtocolLowering().Overlay(dialect.Lowering),
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
+			MaxStopSequences:       dialect.MaxStopSequences,
 			AcceptsMaxCompletionTokens: func() bool {
 				return req.TargetFacts.UseMaxCompletionTokens()
 			},

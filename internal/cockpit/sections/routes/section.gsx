@@ -1,5 +1,7 @@
 package routes
 
+import "github.com/swobuforge/swobu/internal/cockpit/ui"
+
 // ---------------------------------------------------------------------------
 // Section render
 // ---------------------------------------------------------------------------
@@ -35,6 +37,9 @@ templ (s *SectionView) Render() {
 								<div key={s.shareRowKey(route)} class="w-full">
 									@ShareRowComponent(s, route)
 								</div>
+								if feedback := s.State.ShareFeedback.Get(); feedback.RouteID == route.ID && feedback.Message != "" {
+									<div class="pl-3 w-full" textStyle={ui.ToneStyle(feedback.Tone)}>@ui.FlowText(feedback.Message)</div>
+								}
 								if route.Share != nil {
 									<div key={s.shareRevokeRowKey(route)} class="w-full">
 										@ShareRevokeRowComponent(s, route)

@@ -40,7 +40,7 @@ func decodeMessagesGenerationControls(dto messagesRequestDTO) (canonical.Generat
 	})
 }
 
-func encodeMessagesGenerationControls(payload map[string]any, controls canonical.GenerationControls, reasoning canonical.ReasoningControls) error {
+func encodeMessagesGenerationControls(payload map[string]any, controls canonical.GenerationControls, reasoning canonical.ReasoningControls, changeLog *[]compat.Change) error {
 	maxTokens := defaultMessagesMaxTokens
 	value, explicitMax := controls.Limits.MaxOutputTokens.Value()
 	if explicitMax {

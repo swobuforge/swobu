@@ -31,7 +31,7 @@ var requiredProviderAuthoringVisualNames = []string{
 	"bedrock_aws_identity", "bedrock_environment_api_key", "bedrock_target_api_key", "bedrock_auth_failure", "bedrock_credential_menu",
 	"azure_project_required", "azure_credential_required", "azure_protocol_required", "azure_ready",
 	"ollama_default_url", "ollama_editing_url",
-	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_signed_in", "chatgpt_catalog_failed", "chatgpt_failed",
+	"chatgpt_signed_out", "chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending", "chatgpt_open_failed", "chatgpt_code_copy_unavailable", "chatgpt_signed_in", "chatgpt_catalog_failed", "chatgpt_failed",
 	"provider_picker_codex", "chatgpt_catalog_loading",
 	"model_picker", "deployment_picker", "protocol_picker", "routing_picker", "ready_to_create",
 }
@@ -109,7 +109,7 @@ func providerAuthoringVisualWidths(name string) []int {
 	switch name {
 	case "bedrock_aws_identity", "credential_file_input", "model_picker", "protocol_picker", "routing_picker",
 		"chatgpt_auth_mode_picker", "chatgpt_pending", "chatgpt_pending_auth_mode_picker", "chatgpt_device_pending",
-		"chatgpt_open_failed", "provider_picker_codex", "chatgpt_signed_out", "chatgpt_catalog_loading", "chatgpt_signed_in", "chatgpt_catalog_failed":
+		"chatgpt_open_failed", "chatgpt_code_copy_unavailable", "provider_picker_codex", "chatgpt_signed_out", "chatgpt_catalog_loading", "chatgpt_signed_in", "chatgpt_catalog_failed":
 		return []int{80, 100, 120}
 	default:
 		return []int{100}
@@ -236,6 +236,12 @@ func providerAuthoringVisualCases() []providerAuthoringVisualCase {
 		{name: "chatgpt_pending_auth_mode_picker", render: renderChatGPTPendingAuthModePicker},
 		{name: "chatgpt_device_pending", render: renderChatGPTDevicePending},
 		{name: "chatgpt_open_failed", render: renderChatGPTOpenFailure},
+		{name: "chatgpt_code_copy_unavailable", build: func(t *testing.T) tui.Component {
+			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "")
+			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), SessionID: "login-1", State: "pending", AuthorizeURL: chatGPTVisualLoginURL, UserCode: "ABCD-EFGH"})
+			w.AuthCodeCopy.Set(authCodeCopyFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning})
+			return w
+		}},
 		{name: "chatgpt_signed_in", build: func(t *testing.T) tui.Component {
 			w := authoringConfig(t, profile.ProviderSpecChatGPT, "", "secret:chatgpt/session")
 			w.AuthSession.Set(readmodel.AuthSessionReadModel{ProviderSpec: string(profile.ProviderSpecChatGPT), State: "succeeded", CredentialRef: "secret:chatgpt/session"})
@@ -514,6 +520,9 @@ func renderChatGPTOpenFailure(t *testing.T, width int) testscreen.Screen {
 	}
 	if got := w.Error.Get(); got != "" {
 		t.Fatalf("open failure mutated form error = %q", got)
+	}
+	if got := w.AuthBrowserError.Get(); got != "browser could not open" {
+		t.Fatalf("open failure local feedback = %q", got)
 	}
 	screen := harness.Screen(t)
 	if !strings.Contains(compactVisualLines(screen.String()), chatGPTVisualLoginURL) {

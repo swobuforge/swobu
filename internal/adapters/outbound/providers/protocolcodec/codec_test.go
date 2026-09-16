@@ -351,6 +351,82 @@ func TestOrdinalReasoningFactsSelectOnlyExecutedProjection(t *testing.T) {
 	}
 }
 
+func TestResponsesReasoningContextAllTurnsFactIsValueSpecific(t *testing.T) {
+	encode := func(t *testing.T, contextValue canonical.ResponsesReasoningContext, lookup provider.TargetFactLookup) (map[string]any, []compat.Change, map[provider.TargetFact]bool) {
+		t.Helper()
+		reasoning, err := canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+			ResponsesContext: canonical.Specify(contextValue),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts := provider.NewTargetFacts(lookup)
+		request := canonical.NewCanonicalRequest(canonical.RequestParams{
+			Model: canonical.Specify("model"), Reasoning: reasoning,
+			Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		})
+		document, changes, err := (Codec{Protocol: protocolkind.Responses}).Encode(provider.Request{
+			Canonical: request, Delivery: delivery.BufferedDelivery(), TargetFacts: facts,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(document.RawBytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload, changes, facts.Reads()
+	}
+
+	for _, test := range []struct {
+		name   string
+		lookup provider.TargetFactLookup
+	}{
+		{name: "unknown"},
+		{name: "known true", lookup: func(fact provider.TargetFact) (bool, bool) {
+			if fact != provider.AcceptsResponsesReasoningContextAllTurns {
+				t.Fatalf("unexpected fact read: %v", fact)
+			}
+			return true, true
+		}},
+	} {
+		t.Run(test.name+" preserves preferred representation", func(t *testing.T) {
+			payload, changes, reads := encode(t, canonical.ResponsesReasoningContextAllTurns, test.lookup)
+			reasoning, _ := payload["reasoning"].(map[string]any)
+			if reasoning["context"] != "all_turns" || len(changes) != 0 || len(reads) != 1 || !reads[provider.AcceptsResponsesReasoningContextAllTurns] {
+				t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+			}
+		})
+	}
+
+	t.Run("known false omits only all turns", func(t *testing.T) {
+		payload, changes, reads := encode(t, canonical.ResponsesReasoningContextAllTurns, func(fact provider.TargetFact) (bool, bool) {
+			return false, fact == provider.AcceptsResponsesReasoningContextAllTurns
+		})
+		reasoning, present := payload["reasoning"].(map[string]any)
+		if present {
+			if _, contextPresent := reasoning["context"]; contextPresent {
+				t.Fatalf("rejected context retained: %#v", payload)
+			}
+		}
+		want := compat.NewOmission(canonical.RequestReasoningContextResponses, canonical.Occurrence{})
+		if len(changes) != 1 || changes[0] != want || len(reads) != 1 || reads[provider.AcceptsResponsesReasoningContextAllTurns] {
+			t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+		}
+	})
+
+	t.Run("other values remain exact without reading fact", func(t *testing.T) {
+		payload, changes, reads := encode(t, canonical.ResponsesReasoningContextCurrentTurn, func(fact provider.TargetFact) (bool, bool) {
+			t.Fatalf("current_turn read unrelated fact: %v", fact)
+			return false, true
+		})
+		reasoning, _ := payload["reasoning"].(map[string]any)
+		if reasoning["context"] != "current_turn" || len(changes) != 0 || len(reads) != 0 {
+			t.Fatalf("payload=%#v changes=%#v reads=%#v", payload, changes, reads)
+		}
+	})
+}
+
 func TestResponsesFunctionOutputArrayFactSelectsExactStringOrImageRehome(t *testing.T) {
 	encode := func(t *testing.T, parts []canonical.ToolResultPart) (map[string]any, []compat.Change, map[provider.TargetFact]bool) {
 		t.Helper()

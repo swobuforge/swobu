@@ -326,9 +326,11 @@ func (m chatGPTAuthMode) label() string {
 // state field means adding it here once — the constructor, resetFlowState, and
 // BindApp all derive from this list.
 type appState struct {
-	Lifecycle   *tui.State[Lifecycle]
-	DeleteArmed *tui.State[bool]
-	Error       *tui.State[string]
+	Lifecycle        *tui.State[Lifecycle]
+	DeleteArmed      *tui.State[bool]
+	Error            *tui.State[string]
+	AuthBrowserError *tui.State[string]
+	AuthCodeCopy     *tui.State[authCodeCopyFeedback]
 
 	// Draft is the durable value under edit — the object we persist. Single
 	// source of truth for the target; create starts from a zero draft, edit from
@@ -355,6 +357,8 @@ func (s appState) bindApp(app *tui.App) {
 	s.Lifecycle.BindApp(app)
 	s.DeleteArmed.BindApp(app)
 	s.Error.BindApp(app)
+	s.AuthBrowserError.BindApp(app)
+	s.AuthCodeCopy.BindApp(app)
 	s.Draft.BindApp(app)
 	s.BaseURL.BindApp(app)
 	s.CredentialHeaderEdited.BindApp(app)
@@ -370,11 +374,13 @@ func (s appState) bindApp(app *tui.App) {
 // caller (route/target-derived) to set.
 func newStates() appState {
 	return appState{
-		Lifecycle:   tui.NewState(LifecycleClosed),
-		DeleteArmed: tui.NewState(false),
-		Error:       tui.NewState(""),
-		Draft:       tui.NewState(readmodel.TargetDraft{}),
-		BaseURL:     tui.NewState(""),
+		Lifecycle:        tui.NewState(LifecycleClosed),
+		DeleteArmed:      tui.NewState(false),
+		Error:            tui.NewState(""),
+		AuthBrowserError: tui.NewState(""),
+		AuthCodeCopy:     tui.NewState(authCodeCopyFeedback{}),
+		Draft:            tui.NewState(readmodel.TargetDraft{}),
+		BaseURL:          tui.NewState(""),
 
 		CredentialHeaderEdited: tui.NewState(false),
 		ChatGPTAuthMode:        tui.NewState(chatGPTAuthBrowser),
@@ -410,6 +416,9 @@ func (w *TargetConfig) resetSetupState() {
 	w.CredentialHeaderEdited.Set(false)
 	w.ChatGPTAuthMode.Set(chatGPTAuthBrowser)
 	w.AuthSession.Set(readmodel.AuthSessionReadModel{})
+	w.AuthBrowserError.Set("")
+	w.authCodeCopyGeneration++
+	w.AuthCodeCopy.Set(authCodeCopyFeedback{})
 	w.Catalog.Set(catalogOperationState{})
 	w.SaveOperation.Set(createOperationState{})
 	w.SelectedModel.Set(readmodel.ModelAuthoringOptionReadModel{})

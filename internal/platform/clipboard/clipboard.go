@@ -29,24 +29,39 @@ func initialized() bool {
 	return initResult == nil
 }
 
-// TryWriteText attempts to copy text to the system clipboard.
-// On success it returns true and a nil error.
-// On failure it returns false and the error (caller may fall back).
-func TryWriteText(text string) (ok bool, err error) {
+// WriteStatus distinguishes expected environmental absence from an anomalous
+// clipboard write failure without interpreting backend error text.
+type WriteStatus uint8
+
+const (
+	WriteOK WriteStatus = iota
+	WriteUnavailable
+	WriteFailed
+)
+
+// WriteResult reports the typed outcome of a clipboard transfer.
+type WriteResult struct {
+	Status WriteStatus
+	Err    error
+}
+
+// TryWriteText attempts to copy text to the system clipboard. Initialization
+// failure means the environment has no usable clipboard; panics and impossible
+// write results remain failures.
+func TryWriteText(text string) (result WriteResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			ok = false
-			err = fmt.Errorf("clipboard write panicked: %v", r)
+			result = WriteResult{Status: WriteFailed, Err: fmt.Errorf("clipboard write panicked: %v", r)}
 		}
 	}()
 	if !initialized() {
-		return false, fmt.Errorf("clipboard write: init failed: %w", initResult)
+		return WriteResult{Status: WriteUnavailable, Err: initResult}
 	}
 	ch := gclip.Write(gclip.FmtText, []byte(text))
 	if ch == nil {
-		return false, fmt.Errorf("clipboard write: write returned nil channel")
+		return WriteResult{Status: WriteFailed, Err: fmt.Errorf("clipboard write: write returned nil channel")}
 	}
-	return true, nil
+	return WriteResult{Status: WriteOK}
 }
 
 // WriteTempFileFallback writes text to a temporary file and returns its path.

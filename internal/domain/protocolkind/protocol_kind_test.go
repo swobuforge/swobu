@@ -16,8 +16,12 @@ func TestInteractionsIsAClosedProtocolKind(t *testing.T) {
 	}
 }
 
-func TestProtocolKindRejectsUnknownWireIdentity(t *testing.T) {
-	if _, err := ParseProtocolKind("generate_content"); err == nil {
-		t.Fatal("unknown provider wire identity was accepted")
+func TestGenerateContentIsAClosedClientIngressProtocolKind(t *testing.T) {
+	parsed, err := ParseProtocolKind("generate_content")
+	if err != nil {
+		t.Fatalf("ParseProtocolKind(generate_content): %v", err)
+	}
+	if parsed != GenerateContent {
+		t.Fatalf("parsed = %q, want %q", parsed, GenerateContent)
 	}
 }

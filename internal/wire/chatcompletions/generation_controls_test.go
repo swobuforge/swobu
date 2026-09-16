@@ -57,6 +57,35 @@ func TestEncode_PreservesGenerationControls(t *testing.T) {
 	}
 }
 
+func TestEncode_ApproximatesStopSequencesAtTargetLimit(t *testing.T) {
+	controls, err := canonical.NewGenerationControls(canonical.GenerationControlsParams{
+		StopSequences: []string{"one", "two", "three", "four", "five"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Items:    []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "hi")},
+		Controls: controls,
+	})
+	var changes []compat.Change
+	document, err := CompileProviderRequestDocument(request, nil, delivery.BufferedDelivery(), &changes, "exchange", CompileOptions{
+		Lowering:         DefaultLowering(),
+		MaxStopSequences: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, ok := document.Payload["stop"].([]string)
+	if !ok || len(stop) != 4 || stop[3] != "four" {
+		t.Fatalf("stop = %#v, want first four sequences", document.Payload["stop"])
+	}
+	want := compat.NewApproximation(canonical.RequestControlsStopSequences, canonical.Occurrence{})
+	if len(changes) != 1 || changes[0] != want {
+		t.Fatalf("changes = %#v, want %#v", changes, []compat.Change{want})
+	}
+}
+
 func TestEncode_OmitsMaxCompletionTokensWhenMaxOutputTokensUnset(t *testing.T) {
 	t.Parallel()
 

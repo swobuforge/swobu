@@ -20,7 +20,7 @@ const cockpitRefreshTimeout = 5 * time.Second
 type Cockpit struct {
 	Model          readmodel.CockpitReadModel
 	ActiveTabIndex *tui.State[int]
-	Notice         *tui.State[readmodel.Notice]
+	RefreshWarning *tui.State[string]
 	BodyViewport   *ui.Viewport
 	Reloader       *ModelReloader
 	WorkspacePages map[readmodel.WorkspaceID]*workspace_page.PageView
@@ -45,7 +45,7 @@ func NewCockpitWithContext(model readmodel.CockpitReadModel, ctx context.Context
 	cockpit := &Cockpit{
 		Model:          model,
 		ActiveTabIndex: tui.NewState(activeTab),
-		Notice:         tui.NewState(readmodel.Notice{}),
+		RefreshWarning: tui.NewState(""),
 		BodyViewport:   &ui.Viewport{Ref: tui.NewRef(), ScrollY: tui.NewState(0), FollowFocused: true, MarginRows: 2},
 		Reloader:       NewModelReloader(ctx, query, cockpitRefreshTimeout),
 		HelpPage:       help_page.View(model.Help),
@@ -169,9 +169,18 @@ func activityQueryPort(query ports.WorkspaceQueries) ports.ActivityQueries {
 func (c *Cockpit) refreshAfterWorkspaceSave(saved readmodel.WorkspaceReadModel) {
 	active := c.activeModel()
 	wasOnboarding := active.SelectedWorkspace.IsOnboarding()
-	model, notice := c.Reloader.RefreshAfterSave(active, saved)
-	c.Notice.Set(notice)
-	c.replaceModel(model, !wasOnboarding)
+	refresh := c.Reloader.RefreshAfterSave(active, saved)
+	if refresh.RootFresh {
+		c.RefreshWarning.Set("")
+	}
+	c.replaceModel(refresh.Model, !wasOnboarding)
+	if page := c.activeWorkspacePage(c.activeModel()); page != nil {
+		message := ""
+		if refresh.Err != nil {
+			message = "refresh unavailable · saved workspace shown; " + refresh.Err.Error()
+		}
+		page.SetWorkspaceWarning(message)
+	}
 }
 
 func (c *Cockpit) refreshWorkspaceProjection(workspace readmodel.WorkspaceReadModel) {
@@ -181,13 +190,13 @@ func (c *Cockpit) refreshWorkspaceProjection(workspace readmodel.WorkspaceReadMo
 }
 
 func (c *Cockpit) refreshAfterWorkspaceDelete(deleted readmodel.WorkspaceID) {
-	model, notice := c.Reloader.RefreshAfterDelete(c.activeModel(), deleted)
-	c.Notice.Set(notice)
-	c.replaceModel(model, true)
-}
-
-func (c *Cockpit) publishNotice(notice readmodel.Notice) {
-	c.Notice.Set(notice)
+	refresh := c.Reloader.RefreshAfterDelete(c.activeModel(), deleted)
+	if refresh.Err != nil {
+		c.RefreshWarning.Set("workspace deleted · refresh unavailable; local view reconciled")
+	} else if refresh.RootFresh {
+		c.RefreshWarning.Set("")
+	}
+	c.replaceModel(refresh.Model, true)
 }
 
 func (c *Cockpit) discardWorkspaceDraft() {
@@ -258,10 +267,6 @@ func activeWorkspaceMountKey(model readmodel.CockpitReadModel) string {
 	return key
 }
 
-func staleRefreshNotice(message string) readmodel.Notice {
-	return readmodel.Notice{Kind: readmodel.NoticeStale, Message: message}
-}
-
 func FlowText(text string) *FlowTextView {
 	return ui.FlowText(text)
 }
@@ -311,7 +316,6 @@ func (c *Cockpit) workspacePage(workspace readmodel.WorkspaceReadModel) *workspa
 	page.OnWorkspaceCommitted = c.refreshWorkspaceProjection
 	page.OnWorkspaceDeleted = c.refreshAfterWorkspaceDelete
 	page.OnWorkspaceDiscarded = c.discardWorkspaceDraft
-	page.OnNotice = c.publishNotice
 	return page
 }
 
@@ -353,8 +357,8 @@ func (c *Cockpit) Render(app *tui.App) *tui.Element {
 	)
 	__tui_1 := ShellHeader(c.activeModel())
 	__tui_0.AddChild(__tui_1.Root)
-	if c.Notice.Get().Visible() {
-		__tui_2 := ShellNotice(c.Notice.Get())
+	if c.RefreshWarning.Get() != "" {
+		__tui_2 := RootRefreshWarning(c.RefreshWarning.Get())
 		__tui_0.AddChild(__tui_2.Root)
 	}
 	__tui_3 := tui.New(
@@ -406,38 +410,38 @@ func (c *Cockpit) bindAppFields(app *tui.App) {
 	if c.ActiveTabIndex != nil {
 		c.ActiveTabIndex.BindApp(app)
 	}
-	if c.Notice != nil {
-		c.Notice.BindApp(app)
+	if c.RefreshWarning != nil {
+		c.RefreshWarning.BindApp(app)
 	}
 }
 
-type ShellNoticeView struct {
+type RootRefreshWarningView struct {
 	Root      *tui.Element
 	watchers  []tui.Watcher
 	bindApp   func(*tui.App)
 	unbindApp func()
 }
 
-func (v *ShellNoticeView) UnbindApp() {
+func (v *RootRefreshWarningView) UnbindApp() {
 	if v.unbindApp != nil {
 		v.unbindApp()
 	}
 }
 
-func (v *ShellNoticeView) GetRoot() *tui.Element { return v.Root }
+func (v *RootRefreshWarningView) GetRoot() *tui.Element { return v.Root }
 
-func (v *ShellNoticeView) GetWatchers() []tui.Watcher { return v.watchers }
+func (v *RootRefreshWarningView) GetWatchers() []tui.Watcher { return v.watchers }
 
-func (v *ShellNoticeView) Render(app *tui.App) *tui.Element { return v.Root }
+func (v *RootRefreshWarningView) Render(app *tui.App) *tui.Element { return v.Root }
 
-func (v *ShellNoticeView) BindApp(app *tui.App) {
+func (v *RootRefreshWarningView) BindApp(app *tui.App) {
 	if v.bindApp != nil {
 		v.bindApp(app)
 	}
 }
 
-func (v *ShellNoticeView) UpdateProps(fresh tui.Component) {
-	f, ok := fresh.(*ShellNoticeView)
+func (v *RootRefreshWarningView) UpdateProps(fresh tui.Component) {
+	f, ok := fresh.(*RootRefreshWarningView)
 	if !ok {
 		return
 	}
@@ -447,20 +451,21 @@ func (v *ShellNoticeView) UpdateProps(fresh tui.Component) {
 	v.unbindApp = f.unbindApp
 }
 
-var _ tui.AppBinder = (*ShellNoticeView)(nil)
+var _ tui.AppBinder = (*RootRefreshWarningView)(nil)
 
-var _ tui.AppUnbinder = (*ShellNoticeView)(nil)
+var _ tui.AppUnbinder = (*RootRefreshWarningView)(nil)
 
-var _ tui.PropsUpdater = (*ShellNoticeView)(nil)
+var _ tui.PropsUpdater = (*RootRefreshWarningView)(nil)
 
-func ShellNotice(notice readmodel.Notice) *ShellNoticeView {
-	var view ShellNoticeView
+func RootRefreshWarning(message string) *RootRefreshWarningView {
+	var view RootRefreshWarningView
 	var watchers []tui.Watcher
 
 	__tui_0 := tui.New(
 		tui.WithWidthPercent(100.00),
+		tui.WithTextStyle(ui.ToneStyle(ui.ToneWarning)),
 	)
-	__tui_1 := FlowText(notice.Message)
+	__tui_1 := FlowText(message)
 	__tui_0.AddChild(__tui_1.Root)
 
 	watchers = append(watchers, __tui_1.GetWatchers()...)
@@ -477,7 +482,7 @@ func ShellNotice(notice readmodel.Notice) *ShellNoticeView {
 		}
 	}
 
-	view = ShellNoticeView{
+	view = RootRefreshWarningView{
 		Root:      __tui_0,
 		watchers:  watchers,
 		bindApp:   __bindApp,

@@ -95,3 +95,45 @@ func TestProviderRoutePolicy_DecodeBuffered_UsesMandatoryProfileContract(t *test
 		}
 	}
 }
+
+func TestBearerWithMessagesVersionPolicyAddsOnlyTheMessagesVersionHeader(t *testing.T) {
+	policy := BearerWithMessagesVersionPolicy(profile.ProviderSpecVercel)
+	if policy.ProviderID() != profile.ProviderSpecVercel || policy.AuthStrategy() != BearerAuthStrategy() {
+		t.Fatalf("Vercel policy = %#v", policy)
+	}
+	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
+		t.Run(string(kind), func(t *testing.T) {
+			headers := http.Header{}
+			policy.ApplyProtocolHeaders(kind, "token", headers)
+			wantVersion := ""
+			if kind == protocolkind.Messages {
+				wantVersion = "2023-06-01"
+			}
+			if got := headers.Get("anthropic-version"); got != wantVersion {
+				t.Fatalf("anthropic-version = %q, want %q", got, wantVersion)
+			}
+			if got := headers.Get("X-API-Key"); got != "" {
+				t.Fatalf("X-API-Key = %q, want absent", got)
+			}
+		})
+	}
+}
+
+func TestBearerWithMessagesAPIKeyPolicyRetainsBothMessagesHeaders(t *testing.T) {
+	policy := BearerWithMessagesAPIKeyPolicy(profile.ProviderSpecGMI)
+	for _, kind := range []protocolkind.ProtocolKind{protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages} {
+		t.Run(string(kind), func(t *testing.T) {
+			headers := http.Header{}
+			policy.ApplyProtocolHeaders(kind, "token", headers)
+			if kind == protocolkind.Messages {
+				if headers.Get("anthropic-version") != "2023-06-01" || headers.Get("X-API-Key") != "token" {
+					t.Fatalf("Messages headers = %#v", headers)
+				}
+				return
+			}
+			if !reflect.DeepEqual(headers, http.Header{}) {
+				t.Fatalf("%s headers = %#v, want none", kind, headers)
+			}
+		})
+	}
+}

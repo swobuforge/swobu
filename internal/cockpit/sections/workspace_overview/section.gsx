@@ -26,11 +26,13 @@ type SectionView struct {
 	OnWorkspaceSaved         func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted       func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded     func()
-	OnNotice                 func(readmodel.Notice)
 	ShareCommands            ports.ShareCommands
 	SharePending             *tui.State[bool]
 	ShareCopied              *tui.State[bool]
+	ShareFeedback            *tui.State[shareFeedback]
+	WorkspaceWarning         *tui.State[string]
 	app                      *tui.App
+	shareCopyGeneration      uint64
 	// PendingDeleteWorkspaceID seeds the delete confirmation child while the
 	// delete row is armed. The parent keeps the request here so Back() can clear
 	// it without holding a persistent child reference.
@@ -45,6 +47,8 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 		SharePending:             tui.NewState(false),
 		ShareCopied:              tui.NewState(false),
+		ShareFeedback:            tui.NewState(shareFeedback{}),
+		WorkspaceWarning:         tui.NewState(""),
 		headerRef:                tui.NewRef(),
 	}
 	if len(commands) > 0 && commands[0] != nil {
@@ -87,6 +91,7 @@ func (s *SectionView) resetTransientState() {
 	s.PendingDeleteWorkspaceID.Set("")
 	s.SharePending.Set(false)
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 }
 
 // ---------------------------------------------------------------------------
@@ -154,15 +159,16 @@ func (s *SectionView) issueShare(expiry sharestate.Expiry) {
 	if s.ShareCommands == nil || s.SharePending.Get() { return }
 	s.SharePending.Set(true)
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 	complete := func(result shares.Result, err error) {
 		s.SharePending.Set(false)
-		if err != nil { s.publishShareError(err.Error()); return }
+		if err != nil { s.setShareFailure(err.Error()); return }
 		parsed, parseErr := url.Parse(result.ShareURL)
-		if parseErr != nil || parsed.Hostname() == "" { s.publishShareError("share response is invalid"); return }
+		if parseErr != nil || parsed.Hostname() == "" { s.setShareFailure("share response is invalid"); return }
 		share := &readmodel.ShareReadModel{Hostname: parsed.Hostname(), Never: result.ExpiresAt == "never"}
 		if !share.Never {
 			share.ExpiresAt, parseErr = time.Parse(time.RFC3339, result.ExpiresAt)
-			if parseErr != nil { s.publishShareError("share expiry is invalid"); return }
+			if parseErr != nil { s.setShareFailure("share expiry is invalid"); return }
 		}
 		s.Model.Share = share
 	}
@@ -172,10 +178,27 @@ func (s *SectionView) issueShare(expiry sharestate.Expiry) {
 
 func (s *SectionView) copyShare() {
 	if s.ShareCommands == nil { return }
+	s.shareCopyGeneration++
+	generation := s.shareCopyGeneration
 	result, err := s.ShareCommands.RevealShare(context.Background(), s.Model.Slug)
-	if err != nil { s.publishShareError(err.Error()); return }
-	if displayErr := ui.CopyToClipboard(result.ShareURL).ErrorForDisplay(); displayErr != "" { s.ShareCopied.Set(false); s.publishShareError(displayErr); return }
-	s.ShareCopied.Set(true)
+	if err != nil { s.setShareFailure(err.Error()); return }
+	copyResult := ui.CopyToClipboard(result.ShareURL)
+	s.ShareCopied.Set(copyResult.Status == ui.CopyOK)
+	s.ShareFeedback.Set(shareClipboardFeedback(copyResult))
+	if copyResult.Status == ui.CopyOK { s.expireShareCopied(generation) }
+}
+
+func (s *SectionView) expireShareCopied(generation uint64) {
+	if s.app == nil { return }
+	app := s.app
+	go func() {
+		time.Sleep(1200 * time.Millisecond)
+		app.QueueUpdate(func() { s.clearShareCopied(generation) })
+	}()
+}
+
+func (s *SectionView) clearShareCopied(generation uint64) {
+	if s.shareCopyGeneration == generation { s.ShareCopied.Set(false) }
 }
 
 func (s *SectionView) revokeShare() error {
@@ -183,11 +206,29 @@ func (s *SectionView) revokeShare() error {
 	if err := s.ShareCommands.RevokeShare(context.Background(), s.Model.Slug); err != nil { return err }
 	s.Model.Share = nil
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 	return nil
 }
 
-func (s *SectionView) publishShareError(message string) {
-	if s.OnNotice != nil { s.OnNotice(readmodel.Notice{Kind: readmodel.NoticeError, Message: message}) }
+type shareFeedback struct {
+	Message string
+	Tone    ui.Tone
+}
+
+func (s *SectionView) setShareFailure(message string) {
+	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{Message: message, Tone: ui.ToneFailure})
+}
+
+func shareClipboardFeedback(result ui.ClipboardResult) shareFeedback {
+	switch result.Status {
+	case ui.CopyUnavailable:
+		return shareFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning}
+	case ui.CopyFailed:
+		return shareFeedback{Message: "copy failed", Tone: ui.ToneFailure}
+	default:
+		return shareFeedback{}
+	}
 }
 
 func WorkspaceShareRowComponent(s *SectionView) tui.Component {
@@ -202,6 +243,7 @@ func WorkspaceShareRowComponent(s *SectionView) tui.Component {
 		if s.ShareCopied.Get() { value = "copied" }
 		props.Value = value
 		props.Action = "copy ↵"
+		if s.ShareFeedback.Get().Message != "" { props.Action = "retry ↵" }
 		props.OnActivate = s.copyShare
 		return ui.NewSelect(props)
 	}
@@ -254,8 +296,10 @@ func (s *SectionView) BackRef() *tui.Ref { return s.headerRef }
 
 func (s *SectionView) UpdateProps(fresh tui.Component) {
 	headerRef := s.headerRef
+	shareCopyGeneration := s.shareCopyGeneration
 	s.updatePropsFields(fresh)
 	s.headerRef = headerRef
+	s.shareCopyGeneration = shareCopyGeneration
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +317,9 @@ templ (s *SectionView) Render() {
 		}
 		if s.Expanded.Get() {
 			<div class="pl-3 w-full">
+			if s.WorkspaceWarning.Get() != "" {
+				<div class="w-full" textStyle={ui.ToneStyle(ui.ToneWarning)}>@ui.FlowText(s.WorkspaceWarning.Get())</div>
+			}
 			if s.Model.IsDraft() {
 				<div key={workspaceEditKey(s)} class="w-full">
 					@WorkspaceEdit(s)
@@ -296,6 +343,9 @@ templ (s *SectionView) Render() {
 					<div key={workspaceShareKey(s)} class="w-full">
 						@WorkspaceShareRowComponent(s)
 					</div>
+					if s.ShareFeedback.Get().Message != "" {
+						<div class="pl-3 w-full" textStyle={ui.ToneStyle(s.ShareFeedback.Get().Tone)}>@ui.FlowText(s.ShareFeedback.Get().Message)</div>
+					}
 					if s.Model.Share != nil {
 						<div class="pl-3 w-full">
 							<div key={workspaceShareKey(s)+":revoke"} class="w-full">

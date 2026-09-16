@@ -218,6 +218,7 @@ type CompileOptions struct {
 	Lowering                   Lowering
 	UseMaxCompletionTokens     bool
 	AcceptsMaxCompletionTokens func() bool
+	MaxStopSequences           int
 	OmitParallelToolCallsFalse func() bool
 	ReasoningTarget            ReasoningTargetDialect
 	AcceptsStreamIncludeUsage  func() bool
@@ -353,7 +354,7 @@ func CompileProviderRequestDocument(req canonical.CanonicalRequest, names wire.T
 	if err := encodeChatCompletionsToolCallBatch(payload, req.ToolCallBatch(), toolProjection.lowered.TotalFragments() > 0, options.OmitParallelToolCallsFalse, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
-	if err := encodeChatCompletionsGenerationControls(payload, req.Controls()); err != nil {
+	if err := encodeChatCompletionsGenerationControls(payload, req.Controls(), options.MaxStopSequences, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	var maxTokens *int

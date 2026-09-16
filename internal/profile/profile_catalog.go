@@ -84,6 +84,7 @@ const (
 	ProviderSpecGroq        ProviderID = "groq"
 	ProviderSpecFireworks   ProviderID = "fireworks"
 	ProviderSpecOpenRouter  ProviderID = "openrouter"
+	ProviderSpecVercel      ProviderID = "vercel"
 	ProviderSpecZAI         ProviderID = "zai"
 	ProviderSpecBedrock     ProviderID = "bedrock"
 	ProviderSpecAzure       ProviderID = "azure"

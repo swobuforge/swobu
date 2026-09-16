@@ -18,6 +18,11 @@ type chatGPTAuthModeMenu struct {
 	replaceSession bool
 }
 
+type authCodeCopyFeedback struct {
+	Message string
+	Tone    ui.Tone
+}
+
 func ChatGPTProviderForm(w *TargetConfig) tui.Component { return &chatGPTProviderForm{target: w} }
 
 func ChatGPTAuthControl(w *TargetConfig) *ui.Select {
@@ -95,7 +100,11 @@ func chatGPTAuthURL(w *TargetConfig) string {
 func ChatGPTAuthOpenBrowser(w *TargetConfig) *ui.SelectableRow {
 	url := chatGPTAuthURL(w)
 	return ui.NewSelectableRow(TargetAddMountKey(w, "auth-open"), "login URL", "", "open ↵", func() {
-		_ = ui.OpenURL(url)
+		if err := ui.OpenURL(url); err != nil {
+			w.AuthBrowserError.Set("browser could not open")
+			return
+		}
+		w.AuthBrowserError.Set("")
 	})
 }
 
@@ -124,15 +133,18 @@ func ChatGPTAuthFailed(w *TargetConfig) *ui.SelectableRow {
 
 func ChatGPTAuthUserCode(w *TargetConfig) *ui.SelectableRow {
 	code := strings.TrimSpace(w.AuthSession.Get().UserCode)
-	return ui.CopyPasteRowComponent(TargetAddMountKey(w, "auth-code"), "code", code, "copy ↵", func() ui.CopyResult {
+	feedback := w.AuthCodeCopy.Get()
+	action := "copy ↵"
+	if feedback.Tone == ui.ToneAccent {
+		action = "copied"
+	}
+	if feedback.Tone == ui.ToneWarning || feedback.Tone == ui.ToneFailure {
+		action = "retry ↵"
+	}
+	row := ui.CopyPasteRowComponent(TargetAddMountKey(w, "auth-code"), "code", code, action, func() ui.ClipboardResult {
 		return ui.CopyToClipboard(code)
-	}, func(result ui.CopyResult) {
-		if msg := result.ErrorForDisplay(); msg != "" {
-			w.Error.Set(msg)
-			return
-		}
-		w.Error.Set("")
-	})
+	}, w.setAuthCodeCopyResult)
+	return row
 }
 
 func (f *chatGPTProviderForm) Render(app *tui.App) *tui.Element {
@@ -150,43 +162,67 @@ func (f *chatGPTProviderForm) Render(app *tui.App) *tui.Element {
 			return ChatGPTAuthOpenBrowser(f.target)
 		})
 		__tui_1.AddChild(__tui_3)
-		__tui_4 := tui.New(
+		if f.target.AuthBrowserError.Get() != "" {
+			__tui_4 := tui.New(
+				tui.WithWidthPercent(100.00),
+				tui.WithPaddingTRBL(0, 0, 0, 3),
+				tui.WithTextStyle(ui.ToneStyle(ui.ToneFailure)),
+			)
+			__tui_5 := app.Mount(f, 2, func() tui.Component {
+				return FlowText(f.target.AuthBrowserError.Get())
+			})
+			__tui_4.AddChild(__tui_5)
+			__tui_1.AddChild(__tui_4)
+		}
+		__tui_6 := tui.New(
 			tui.WithWidthPercent(100.00),
 			tui.WithPaddingTRBL(0, 0, 0, 3),
 		)
-		__tui_5 := ChatGPTAuthURLText(f.target)
-		__tui_4.AddChild(__tui_5.Root)
-		__tui_1.AddChild(__tui_4)
+		__tui_7 := ChatGPTAuthURLText(f.target)
+		__tui_6.AddChild(__tui_7.Root)
+		__tui_1.AddChild(__tui_6)
 		if strings.TrimSpace(f.target.AuthSession.Get().UserCode) != "" {
-			__tui_6 := app.Mount(f, 2, func() tui.Component {
+			__tui_8 := app.Mount(f, 3, func() tui.Component {
 				return ChatGPTAuthUserCode(f.target)
 			})
-			__tui_1.AddChild(__tui_6)
+			__tui_1.AddChild(__tui_8)
+			if feedback := f.target.AuthCodeCopy.Get(); feedback.Tone == ui.ToneWarning || feedback.Tone == ui.ToneFailure {
+				__tui_9 := tui.New(
+					tui.WithWidthPercent(100.00),
+					tui.WithPaddingTRBL(0, 0, 0, 3),
+					tui.WithTextStyle(ui.ToneStyle(feedback.Tone)),
+				)
+				__tui_10 := app.Mount(f, 4, func() tui.Component {
+					return FlowText(feedback.Message)
+				})
+				__tui_9.AddChild(__tui_10)
+				__tui_1.AddChild(__tui_9)
+			}
 		}
-		__tui_7 := app.Mount(f, 3, func() tui.Component {
+		__tui_11 := app.Mount(f, 5, func() tui.Component {
 			return ChatGPTAuthStatus(f.target)
 		})
-		__tui_1.AddChild(__tui_7)
-		__tui_8 := app.Mount(f, 4, func() tui.Component {
+		__tui_1.AddChild(__tui_11)
+		__tui_12 := app.Mount(f, 6, func() tui.Component {
 			return ChatGPTAuthCancel(f.target)
 		})
-		__tui_1.AddChild(__tui_8)
+		__tui_1.AddChild(__tui_12)
 		__tui_0.AddChild(__tui_1)
 	} else if targetAuthFailed(f.target) {
-		__tui_9 := app.Mount(f, 5, func() tui.Component {
+		__tui_13 := app.Mount(f, 7, func() tui.Component {
 			return ChatGPTAuthFailed(f.target)
 		})
-		__tui_0.AddChild(__tui_9)
+		__tui_0.AddChild(__tui_13)
 	} else if targetUsesInteractiveAuth(f.target) && strings.TrimSpace(f.target.Draft.Get().CredentialRef) == "" {
-		__tui_10 := app.Mount(f, 6, func() tui.Component {
+		__tui_14 := app.Mount(f, 8, func() tui.Component {
 			return ChatGPTAuthControl(f.target)
 		})
-		__tui_0.AddChild(__tui_10)
+		__tui_0.AddChild(__tui_14)
 	} else if strings.TrimSpace(f.target.Draft.Get().CredentialRef) != "" {
-		__tui_11 := app.Mount(f, 7, func() tui.Component {
+		__tui_15 := app.Mount(f, 9, func() tui.Component {
 			return ChatGPTAuthSignedIn(f.target)
 		})
-		__tui_0.AddChild(__tui_11)
+		__tui_0.AddChild(__tui_15)
 	}
 
 	return __tui_0

@@ -19,7 +19,10 @@ type PageView struct {
 	OnWorkspaceCommitted   func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted     func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded   func()
-	OnNotice               func(readmodel.Notice)
+}
+
+func (v *PageView) SetWorkspaceWarning(message string) {
+	v.OverviewSection.WorkspaceWarning.Set(message)
 }
 
 // Page composes one workspace surface from explicit ports.
@@ -53,16 +56,8 @@ func Page(workspace readmodel.WorkspaceReadModel, commands ports.WorkspaceComman
 	page.RoutesSection.OnWorkspaceCommitted = page.workspaceCommitted
 	page.OverviewSection.OnWorkspaceDeleted = page.workspaceDeleted
 	page.OverviewSection.OnWorkspaceDiscarded = page.workspaceDiscarded
-	page.OverviewSection.OnNotice = page.publishNotice
-	page.RoutesSection.OnNotice = page.publishNotice
 	page.RoutesSection.OnWorkspacePersisted = page.workspacePersisted
 	return page
-}
-
-func (v *PageView) publishNotice(notice readmodel.Notice) {
-	if v.OnNotice != nil {
-		v.OnNotice(notice)
-	}
 }
 
 func routeCommandPort(commands ports.WorkspaceCommands) ports.RouteCommands {

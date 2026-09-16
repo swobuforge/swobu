@@ -3,10 +3,12 @@ package canonical
 type NormalizedPath string
 
 const (
-	NormalizedPathChatCompletions NormalizedPath = "/chat/completions"
-	NormalizedPathResponses       NormalizedPath = "/responses"
-	NormalizedPathMessages        NormalizedPath = "/messages"
-	NormalizedPathModels          NormalizedPath = "/models"
+	NormalizedPathChatCompletions       NormalizedPath = "/chat/completions"
+	NormalizedPathResponses             NormalizedPath = "/responses"
+	NormalizedPathMessages              NormalizedPath = "/messages"
+	NormalizedPathModels                NormalizedPath = "/models"
+	NormalizedPathGenerateContent       NormalizedPath = "/models/{model}:generateContent"
+	NormalizedPathStreamGenerateContent NormalizedPath = "/models/{model}:streamGenerateContent"
 )
 
 // ValidNormalizedPath reports whether p is one of the canonical normalized
@@ -15,7 +17,7 @@ const (
 // typed-but-non-canonical value at the source rather than carry it to the report.
 func ValidNormalizedPath(p NormalizedPath) bool {
 	switch p {
-	case NormalizedPathChatCompletions, NormalizedPathResponses, NormalizedPathMessages, NormalizedPathModels:
+	case NormalizedPathChatCompletions, NormalizedPathResponses, NormalizedPathMessages, NormalizedPathModels, NormalizedPathGenerateContent, NormalizedPathStreamGenerateContent:
 		return true
 	}
 	return false

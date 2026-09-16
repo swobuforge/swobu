@@ -465,7 +465,7 @@ func bindTestProviderTransport(target provider.TargetSnapshot, transport testPro
 
 type testClientCodec struct{}
 
-func (testClientCodec) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
+func (testClientCodec) DecodeClientRequest(doc carrier.Document, _ canonical.ClientOperation) (wire.ClientDecodeResult, error) {
 	model := "m"
 	var previousResponse *canonical.ResponseRef
 	var items []canonical.CanonicalItem

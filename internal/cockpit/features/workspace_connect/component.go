@@ -55,8 +55,10 @@ func (c childScope) isClient(id clientconnect.ClientID) bool {
 }
 
 type copyFeedback struct {
-	key    string
-	result cockpitui.CopyResult
+	key       string
+	clipboard cockpitui.ClipboardResult
+	savedPath string
+	saveErr   error
 }
 
 type Disclosure struct {
@@ -470,9 +472,13 @@ func storeApplyResult(observation *clientObservation, verified clientconnect.Pla
 	}
 }
 
-func (d *Disclosure) copyItem(key, value string) {
+func (d *Disclosure) copyItem(key, value string, allowFileFallback bool) {
 	result := cockpitui.CopyToClipboard(value)
-	d.Feedback.Set(copyFeedback{key: key, result: result})
+	feedback := copyFeedback{key: key, clipboard: result}
+	if result.Status != cockpitui.CopyOK && allowFileFallback {
+		feedback.savedPath, feedback.saveErr = cockpitui.SaveTextFile("swobu-copy-", value)
+	}
+	d.Feedback.Set(feedback)
 }
 
 func (d *Disclosure) copyAction(key string) string {
@@ -480,13 +486,16 @@ func (d *Disclosure) copyAction(key string) string {
 	if fb.key != key {
 		return "copy ↵"
 	}
-	switch fb.result.Status {
+	if fb.savedPath != "" {
+		return "copy ↵"
+	}
+	switch fb.clipboard.Status {
 	case cockpitui.CopyOK:
 		return "copied"
-	case cockpitui.CopySavedFile:
-		return "saved"
+	case cockpitui.CopyUnavailable:
+		return "retry ↵"
 	default:
-		return "copy failed"
+		return "retry ↵"
 	}
 }
 

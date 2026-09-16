@@ -208,10 +208,16 @@ func TestNVIDIAHostedResponsesAndMessagesIngressLowerToSharedStreamingChat(t *te
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			normalizedPath := canonical.NormalizedPathChatCompletions
+			if tc.family == canonical.ClientFamilyResponses {
+				normalizedPath = canonical.NormalizedPathResponses
+			} else if tc.family == canonical.ClientFamilyMessages {
+				normalizedPath = canonical.NormalizedPathMessages
+			}
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 				ExchangeID:      "nvidia-" + tc.name,
 				Request:         exchange.NewTransportRequest(http.MethodPost, tc.path, nil, []byte(tc.body)),
-				ClientFamily:    tc.family,
+				Operation:       canonical.ClientOperation{Family: tc.family, NormalizedPath: normalizedPath},
 				ResponseFraming: delivery.FramingSSE,
 			})
 			if err != nil {
@@ -265,7 +271,7 @@ func TestNVIDIAHostedClientIdentityDoesNotChangeProviderRequest(t *testing.T) {
 		out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 			ExchangeID:      "nvidia-client-" + userAgent,
 			Request:         exchange.NewTransportRequest(http.MethodPost, "/chat/completions", header, []byte(`{"model":"nvidia-route","messages":[{"role":"user","content":"hello"}],"stream":true}`)),
-			ClientFamily:    canonical.ClientFamilyChatCompletions,
+			Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyChatCompletions, NormalizedPath: canonical.NormalizedPathChatCompletions},
 			ResponseFraming: delivery.FramingSSE,
 		})
 		if err != nil {

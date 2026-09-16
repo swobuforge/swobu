@@ -39,8 +39,8 @@ func PlanActionRow(d *Disclosure, obs clientObservation) *cockpitui.SelectableRo
 	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:apply:"+string(obs.Client.ID), "config", shortLoci(obs.Plan.ConfigPaths), action, func() { d.applyPlan(obs.Client.ID) }))
 }
 
-func ManualCopyRow(d *Disclosure, key, label, displayValue, copyValue string) *cockpitui.SelectableRow {
-	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:manual:"+key, label, displayValue, d.copyAction(key), func() { d.copyItem(key, copyValue) }))
+func ManualCopyRow(d *Disclosure, key, label, displayValue, copyValue string, allowFileFallback bool) *cockpitui.SelectableRow {
+	return d.rowEscape(cockpitui.NewSelectableRow("workspace-connect:manual:"+key, label, displayValue, d.copyAction(key), func() { d.copyItem(key, copyValue, allowFileFallback) }))
 }
 
 func ClientPicker(d *Disclosure) *cockpitui.SearchPicker {
@@ -143,24 +143,26 @@ templ (d *Disclosure) Render() {
 					@OtherClientsHeaderRow(d)
 					<div class="pl-3 flex-col w-full">
 						@InertRow("API", "OpenAI · Anthropic")
-						@ManualCopyRow(d, "base-url", "Base URL", d.Target.WorkspaceURL(), d.Target.WorkspaceURL())
-						if d.Feedback.Get().key == "base-url" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-							@DetailRow(d.Feedback.Get().result.Path)
+						@ManualCopyRow(d, "base-url", "Base URL", d.Target.WorkspaceURL(), d.Target.WorkspaceURL(), true)
+						if d.Feedback.Get().key == "base-url" && d.Feedback.Get().savedPath != "" {
+							@DetailRow("saved "+d.Feedback.Get().savedPath)
 						}
-						@ManualCopyRow(d, "model", "Model", "default", "default")
-						if d.Feedback.Get().key == "model" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-							@DetailRow(d.Feedback.Get().result.Path)
+						@ManualCopyRow(d, "model", "Model", "default", "default", true)
+						if d.Feedback.Get().key == "model" && d.Feedback.Get().savedPath != "" {
+							@DetailRow("saved "+d.Feedback.Get().savedPath)
 						}
-						@ManualCopyRow(d, "models-url", "Models URL", d.Target.WorkspaceURL()+"/models", d.Target.WorkspaceURL()+"/models")
-						if d.Feedback.Get().key == "models-url" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-							@DetailRow(d.Feedback.Get().result.Path)
+						@ManualCopyRow(d, "models-url", "Models URL", d.Target.WorkspaceURL()+"/models", d.Target.WorkspaceURL()+"/models", true)
+						if d.Feedback.Get().key == "models-url" && d.Feedback.Get().savedPath != "" {
+							@DetailRow("saved "+d.Feedback.Get().savedPath)
 						}
-						@ManualCopyRow(d, "api-key", "API key", "swobu · placeholder", "swobu")
-						if d.Feedback.Get().key == "api-key" && d.Feedback.Get().result.Status == cockpitui.CopySavedFile && d.Feedback.Get().result.Path != "" {
-							@DetailRow(d.Feedback.Get().result.Path)
-						}
-						if d.Feedback.Get().result.Status == cockpitui.CopyFailed {
+						@ManualCopyRow(d, "api-key", "API key", "swobu · placeholder", "swobu", false)
+						if d.Feedback.Get().saveErr != nil {
+							@DangerDetailRow("copy failed · "+d.Feedback.Get().saveErr.Error())
+						} else if d.Feedback.Get().clipboard.Status == cockpitui.CopyFailed && d.Feedback.Get().savedPath == "" {
 							@DangerDetailRow("copy failed · run swobu doctor --copy")
+						}
+						if d.Feedback.Get().clipboard.Status == cockpitui.CopyUnavailable && d.Feedback.Get().savedPath == "" {
+							@DetailRow("clipboard unavailable")
 						}
 					</div>
 				} else if d.Child.Get().kind == childNone {

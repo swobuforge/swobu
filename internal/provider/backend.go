@@ -78,7 +78,7 @@ type TargetFactCharacterizer interface {
 }
 
 // TargetFactResolution is conclusive only when the preferred fixture succeeds
-// or its typed rejection is distinguished by a successful control fixture.
+// or matching structured preferred rejections surround a successful control.
 type TargetFactResolution struct {
 	Value      bool
 	Conclusive bool

@@ -47,20 +47,20 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name   string
-		family canonical.ClientFamily
-		path   string
-		body   string
-		want   string
+		name      string
+		operation canonical.ClientOperation
+		path      string
+		body      string
+		want      string
 	}{
-		{name: "chat", family: canonical.ClientFamilyChatCompletions, path: "/chat/completions", body: `{"model":"gemini-route","stream":true,"messages":[{"role":"user","content":"hello"}]}`, want: "hello from Gemini"},
-		{name: "responses", family: canonical.ClientFamilyResponses, path: "/responses", body: `{"model":"gemini-route","stream":true,"input":"hello"}`, want: "hello from Gemini"},
-		{name: "messages", family: canonical.ClientFamilyMessages, path: "/messages", body: `{"model":"gemini-route","stream":true,"messages":[{"role":"user","content":"hello"}]}`, want: "hello from Gemini"},
+		{name: "chat", operation: canonical.ClientOperation{Family: canonical.ClientFamilyChatCompletions, NormalizedPath: canonical.NormalizedPathChatCompletions}, path: "/chat/completions", body: `{"model":"gemini-route","stream":true,"messages":[{"role":"user","content":"hello"}]}`, want: "hello from Gemini"},
+		{name: "responses", operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, path: "/responses", body: `{"model":"gemini-route","stream":true,"input":"hello"}`, want: "hello from Gemini"},
+		{name: "messages", operation: canonical.ClientOperation{Family: canonical.ClientFamilyMessages, NormalizedPath: canonical.NormalizedPathMessages}, path: "/messages", body: `{"model":"gemini-route","stream":true,"messages":[{"role":"user","content":"hello"}]}`, want: "hello from Gemini"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
 				ExchangeID: "gemini-" + tc.name, Request: NewTransportRequest(http.MethodPost, tc.path, http.Header{"Content-Type": {"application/json"}}, []byte(tc.body)),
-				ClientFamily: tc.family, ResponseFraming: delivery.FramingSSE,
+				Operation: tc.operation, ResponseFraming: delivery.FramingSSE,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -125,7 +125,7 @@ func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t 
 			http.Header{"Content-Type": {"application/json"}},
 			body,
 		),
-		ClientFamily: canonical.ClientFamilyResponses,
+		Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *
 			http.Header{"Content-Type": {"application/json"}},
 			body,
 		),
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {

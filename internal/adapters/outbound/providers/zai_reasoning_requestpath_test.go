@@ -55,7 +55,7 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		ExchangeID:      "zai-reasoning-budget",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/messages", nil, raw),
-		ClientFamily:    canonical.ClientFamilyMessages,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyMessages, NormalizedPath: canonical.NormalizedPathMessages},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func TestResponsesExplicitEffortCompletesThroughZAIExactly(t *testing.T) {
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), zaiReasoningWorkspace(t), exchange.RequestInput{
 		ExchangeID:      "zai-responses-explicit-effort",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, raw),
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 	firstOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		ExchangeID:      "zai-responses-function-call",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, first),
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
@@ -236,7 +236,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 	secondOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		ExchangeID:      "zai-responses-function-result",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, second),
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {

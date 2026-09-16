@@ -36,8 +36,8 @@ type SectionView struct {
 	SaveRoute            SaveRouteFunc
 	DeleteRoute          DeleteRouteFunc
 	ShareCommands        ports.ShareCommands
-	OnNotice             func(readmodel.Notice)
 	app                  *tui.App
+	shareCopyGeneration  uint64
 	headerRef            *tui.Ref
 	ApplyRouteDraft      func(context.Context, ports.ApplyRouteDraftRequest) (ports.RouteMutationResult, error)
 	OnWorkspacePersisted func(readmodel.WorkspaceReadModel)
@@ -85,6 +85,7 @@ func (s *SectionView) BindApp(app *tui.App) {
 	s.State.FocusRoute.BindApp(app)
 	s.State.SharePendingRoute.BindApp(app)
 	s.State.ShareCopiedRoute.BindApp(app)
+	s.State.ShareFeedback.BindApp(app)
 	s.app = app
 }
 
@@ -97,7 +98,6 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	s.SaveRoute = f.SaveRoute
 	s.DeleteRoute = f.DeleteRoute
 	s.ShareCommands = f.ShareCommands
-	s.OnNotice = f.OnNotice
 	s.ApplyRouteDraft = f.ApplyRouteDraft
 	s.OnWorkspacePersisted = f.OnWorkspacePersisted
 	s.OnWorkspaceCommitted = f.OnWorkspaceCommitted
@@ -117,6 +117,9 @@ func (s *SectionView) UpdateProps(fresh tui.Component) {
 	}
 	if s.State != nil && s.State.ShareCopiedRoute == nil {
 		s.State.ShareCopiedRoute = tui.NewState(readmodel.RouteID(""))
+	}
+	if s.State != nil && s.State.ShareFeedback == nil {
+		s.State.ShareFeedback = tui.NewState(routeShareFeedback{})
 	}
 	if s.Expanded == nil {
 		s.Expanded = f.Expanded
@@ -147,23 +150,24 @@ func (s *SectionView) issueShare(route readmodel.RouteReadModel, expiry sharesta
 		return
 	}
 	s.State.ShareCopiedRoute.Set("")
+	s.clearShareFeedback()
 	s.State.SharePendingRoute.Set(route.ID)
 	complete := func(result shares.Result, err error) {
 		s.State.SharePendingRoute.Set("")
 		if err != nil {
-			s.publishErrorNotice(err.Error())
+			s.setShareFailure(route.ID, err.Error())
 			return
 		}
 		parsed, parseErr := url.Parse(result.ShareURL)
 		if parseErr != nil || parsed.Hostname() == "" {
-			s.publishErrorNotice("share response is invalid")
+			s.setShareFailure(route.ID, "share response is invalid")
 			return
 		}
 		share := &readmodel.ShareReadModel{Hostname: parsed.Hostname(), Never: result.ExpiresAt == "never"}
 		if !share.Never {
 			share.ExpiresAt, parseErr = time.Parse(time.RFC3339, result.ExpiresAt)
 			if parseErr != nil {
-				s.publishErrorNotice("share expiry is invalid")
+				s.setShareFailure(route.ID, "share expiry is invalid")
 				return
 			}
 		}
@@ -188,23 +192,66 @@ func (s *SectionView) copyShare(route readmodel.RouteReadModel) {
 	if s.ShareCommands == nil {
 		return
 	}
+	s.shareCopyGeneration++
+	generation := s.shareCopyGeneration
 	result, err := s.ShareCommands.RevealShare(context.Background(), s.shareRouteRef(route))
 	if err != nil {
-		s.publishErrorNotice(err.Error())
+		s.setShareFailure(route.ID, err.Error())
 		return
 	}
 	copyResult := ui.CopyToClipboard(result.ShareURL)
-	if displayErr := copyResult.ErrorForDisplay(); displayErr != "" {
-		s.State.ShareCopiedRoute.Set("")
-		s.publishErrorNotice(displayErr)
-		return
+	s.State.ShareCopiedRoute.Set("")
+	s.setShareFeedback(route.ID, routeClipboardFeedback(copyResult))
+	if copyResult.Status == ui.CopyOK {
+		s.State.ShareCopiedRoute.Set(route.ID)
+		s.expireShareCopied(route.ID, generation)
 	}
-	s.State.ShareCopiedRoute.Set(route.ID)
 }
 
-func (s *SectionView) publishErrorNotice(message string) {
-	if s.OnNotice != nil {
-		s.OnNotice(readmodel.Notice{Kind: readmodel.NoticeError, Message: message})
+func (s *SectionView) expireShareCopied(routeID readmodel.RouteID, generation uint64) {
+	if s.app == nil {
+		return
+	}
+	app := s.app
+	go func() {
+		time.Sleep(1200 * time.Millisecond)
+		app.QueueUpdate(func() {
+			s.clearShareCopied(routeID, generation)
+		})
+	}()
+}
+
+func (s *SectionView) clearShareCopied(routeID readmodel.RouteID, generation uint64) {
+	if s.shareCopyGeneration == generation && s.State.ShareCopiedRoute.Get() == routeID {
+		s.State.ShareCopiedRoute.Set("")
+	}
+}
+
+type routeShareFeedback struct {
+	RouteID readmodel.RouteID
+	Message string
+	Tone    ui.Tone
+}
+
+func (s *SectionView) clearShareFeedback() { s.State.ShareFeedback.Set(routeShareFeedback{}) }
+
+func (s *SectionView) setShareFailure(routeID readmodel.RouteID, message string) {
+	s.setShareFeedback(routeID, routeShareFeedback{Message: message, Tone: ui.ToneFailure})
+}
+
+func (s *SectionView) setShareFeedback(routeID readmodel.RouteID, feedback routeShareFeedback) {
+	feedback.RouteID = routeID
+	s.State.ShareFeedback.Set(feedback)
+}
+
+func routeClipboardFeedback(result ui.ClipboardResult) routeShareFeedback {
+	switch result.Status {
+	case ui.CopyUnavailable:
+		return routeShareFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning}
+	case ui.CopyFailed:
+		return routeShareFeedback{Message: "copy failed", Tone: ui.ToneFailure}
+	default:
+		return routeShareFeedback{}
 	}
 }
 
@@ -216,6 +263,7 @@ func (s *SectionView) revokeShare(route readmodel.RouteReadModel) error {
 		return err
 	}
 	s.State.ShareCopiedRoute.Set("")
+	s.clearShareFeedback()
 	for i := range s.State.Routes {
 		if s.State.Routes[i].ID == route.ID {
 			s.State.Routes[i].Share = nil
@@ -741,6 +789,9 @@ func ShareRowComponent(s *SectionView, route readmodel.RouteReadModel) tui.Compo
 		}
 		props.Value = value
 		props.Action = "copy ↵"
+		if feedback := s.State.ShareFeedback.Get(); feedback.RouteID == route.ID && feedback.Message != "" {
+			props.Action = "retry ↵"
+		}
 		props.OnActivate = func() { s.copyShare(route) }
 		return ui.NewSelect(props)
 	}

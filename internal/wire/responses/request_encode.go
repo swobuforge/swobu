@@ -22,20 +22,21 @@ type EncodeOptions struct {
 // CompileOptions contains the occurrence-local target rules used while the
 // shared Responses compiler still owns traversal and dependent policy order.
 type CompileOptions struct {
-	ToolLowering               ToolLowering
-	OutputFormatLowering       OutputFormatTransformer
-	HistoryMessageRole         HistoryMessageRoleTransformer
-	PrependInstructionsToInput bool
-	OmitInclude                bool
-	OmitMaxOutputTokens        bool
-	OmitStoreFalse             bool
-	ForceArrayInput            bool
-	DefaultStore               *bool
-	OmitParallelToolCallsFalse func() bool
-	AcceptsReasoningEffortMax  func() bool
-	AcceptsReasoningDisabled   func() bool
-	DefaultReasoningDisabled   bool
-	AcceptsFunctionOutputArray func() bool
+	ToolLowering                    ToolLowering
+	OutputFormatLowering            OutputFormatTransformer
+	HistoryMessageRole              HistoryMessageRoleTransformer
+	PrependInstructionsToInput      bool
+	OmitInclude                     bool
+	OmitMaxOutputTokens             bool
+	OmitStoreFalse                  bool
+	ForceArrayInput                 bool
+	DefaultStore                    *bool
+	OmitParallelToolCallsFalse      func() bool
+	AcceptsReasoningEffortMax       func() bool
+	AcceptsReasoningDisabled        func() bool
+	AcceptsReasoningContextAllTurns func() bool
+	DefaultReasoningDisabled        bool
+	AcceptsFunctionOutputArray      func() bool
 }
 
 // HistoryMessageRoleTransformer lowers one history message role at its exact
@@ -216,7 +217,7 @@ func CompileProviderRequestDocument(input EncodeInput, d delivery.Delivery, chan
 		payload["parallel_tool_calls"] = true
 	}
 	encodeResponsesGenerationControls(payload, req.Controls(), compile.OmitMaxOutputTokens, changeLog)
-	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, compile.DefaultReasoningDisabled, changeLog); err != nil {
+	if err := encodeResponsesReasoning(payload, req.Reasoning(), req.Controls().Effort, compile.AcceptsReasoningEffortMax, compile.AcceptsReasoningDisabled, compile.AcceptsReasoningContextAllTurns, compile.DefaultReasoningDisabled, changeLog); err != nil {
 		return ProviderRequestDocument{}, err
 	}
 	if !compile.OmitInclude {

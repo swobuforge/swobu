@@ -50,6 +50,7 @@ workspaces:
               - {id: hyperbolic, model: exact-model, connection: {hyperbolic: {credential: env:HYPERBOLIC_API_KEY}}}
               - {id: siliconflow, model: Pro/model, protocol: messages_stream, connection: {siliconflow: {credential: env:SILICONFLOW_API_KEY}}}
               - {id: openrouter, model: openai/gpt-5, protocol: chat_completions, connection: {openrouter: {credential: secret:openrouter/default}}}
+              - {id: vercel, model: creator/model, protocol: messages_stream, connection: {vercel: {credential: env:AI_GATEWAY_API_KEY}}}
               - {id: zai, model: manual-model, connection: {zai: {access: coding_plan, credential: env:ZAI_API_KEY}}}
               - {id: chatgpt, model: gpt-5, connection: {chatgpt: {credential: secretfile:cockpit/auth/chatgpt/default}}}
               - {id: ollama, model: llama, protocol: chat_completions, connection: {ollama: {}}}

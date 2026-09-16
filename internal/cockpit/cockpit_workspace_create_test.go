@@ -7,9 +7,13 @@ import (
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
+	routessection "github.com/swobuforge/swobu/internal/cockpit/sections/routes"
 	overviewsection "github.com/swobuforge/swobu/internal/cockpit/sections/workspace_overview"
+	"github.com/swobuforge/swobu/internal/cockpit/ui"
+	"github.com/swobuforge/swobu/internal/sharestate"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
@@ -17,7 +21,21 @@ type workspaceCreateCommands struct {
 	saved       ports.RenameWorkspaceRequest
 	saveCalls   int
 	deleteCalls int
+	revealShare func(string) (shares.Result, error)
 }
+
+func (c *workspaceCreateCommands) IssueShare(context.Context, string, sharestate.Expiry) (shares.Result, error) {
+	return shares.Result{}, nil
+}
+
+func (c *workspaceCreateCommands) RevealShare(_ context.Context, ref string) (shares.Result, error) {
+	if c.revealShare != nil {
+		return c.revealShare(ref)
+	}
+	return shares.Result{}, nil
+}
+
+func (c *workspaceCreateCommands) RevokeShare(context.Context, string) error { return nil }
 
 func TestCockpit_PersistedWorkspaceSwitchUsesRegistryProjection(t *testing.T) {
 	workspaceA := readmodel.WorkspaceReadModel{ID: "a", Slug: "a", State: readmodel.WorkspaceExisting, Routes: []readmodel.RouteReadModel{{ID: "route-a", ModelName: "route-a"}}}
@@ -82,15 +100,108 @@ type workspaceCreateQueries struct {
 	loadCockpitCalls   int
 	loadWorkspaceCalls int
 	activityCalls      int
+	loadErr            error
+	loadModel          readmodel.CockpitReadModel
+	loadWorkspace      readmodel.WorkspaceReadModel
 }
 
 func (q *workspaceCreateQueries) LoadCockpit(context.Context) (readmodel.CockpitReadModel, error) {
 	q.loadCockpitCalls++
+	if q.loadErr != nil {
+		return readmodel.CockpitReadModel{}, q.loadErr
+	}
+	if len(q.loadModel.Tabs) > 0 {
+		return q.loadModel, nil
+	}
 	return readmodel.CockpitReadModel{}, errors.New("draft workspace is not persisted yet")
+}
+
+func TestCockpit_SaveRefreshFailureIsWorkspaceLocal(t *testing.T) {
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "personal", SelectedWorkspace: readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting}, ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	root := NewCockpitWithContext(model, context.Background(), &workspaceCreateQueries{loadErr: errors.New("daemon unavailable")}, &workspaceCreateCommands{})
+	root.refreshAfterWorkspaceSave(readmodel.WorkspaceReadModel{ID: "personal", Slug: "renamed", State: readmodel.WorkspaceExisting})
+	if root.RefreshWarning.Get() != "" {
+		t.Fatalf("save refresh escaped to root: %q", root.RefreshWarning.Get())
+	}
+	if got := root.currentWorkspacePage().OverviewSection.WorkspaceWarning.Get(); !strings.Contains(got, "saved workspace shown") {
+		t.Fatalf("workspace warning = %q", got)
+	}
+}
+
+func TestCockpit_DeleteRefreshFailureUsesRootRefreshWarning(t *testing.T) {
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "personal", SelectedWorkspace: readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting}, ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	root := NewCockpitWithContext(model, context.Background(), &workspaceCreateQueries{loadErr: errors.New("daemon unavailable")}, &workspaceCreateCommands{})
+	root.refreshAfterWorkspaceDelete("personal")
+	if got := root.RefreshWarning.Get(); got != "workspace deleted · refresh unavailable; local view reconciled" {
+		t.Fatalf("root refresh warning = %q", got)
+	}
+	frame := testkit.RenderMountedTrimmed(t, root, 100, 24)
+	if !strings.Contains(frame, "workspace deleted · refresh unavailable; local view reconciled") {
+		t.Fatalf("root refresh warning not rendered:\n%s", frame)
+	}
+}
+
+func TestCockpit_SuccessfulRootRefreshClearsRootWarning(t *testing.T) {
+	workspace := readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting}
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "personal", SelectedWorkspace: workspace, ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	queries := &workspaceCreateQueries{loadModel: model, loadWorkspace: workspace}
+	root := NewCockpitWithContext(model, context.Background(), queries, &workspaceCreateCommands{})
+	root.RefreshWarning.Set("workspace deleted · refresh unavailable; local view reconciled")
+
+	root.refreshAfterWorkspaceSave(workspace)
+
+	if got := root.RefreshWarning.Get(); got != "" {
+		t.Fatalf("authoritative save refresh retained root warning %q", got)
+	}
+}
+
+func TestCockpit_FreshRootWithWorkspaceDetailFailureClearsRootWarning(t *testing.T) {
+	workspace := readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting}
+	model := readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "personal", SelectedWorkspace: workspace, ActivePage: readmodel.CockpitWorkspacePage,
+	}
+	queries := &workspaceCreateQueries{loadModel: model}
+	root := NewCockpitWithContext(model, context.Background(), queries, &workspaceCreateCommands{})
+	root.RefreshWarning.Set("workspace deleted · refresh unavailable; local view reconciled")
+
+	root.refreshAfterWorkspaceSave(workspace)
+
+	if got := root.RefreshWarning.Get(); got != "" {
+		t.Fatalf("fresh root retained stale warning %q", got)
+	}
+	if got := root.currentWorkspacePage().OverviewSection.WorkspaceWarning.Get(); !strings.Contains(got, "saved workspace shown") {
+		t.Fatalf("workspace detail failure was not local: %q", got)
+	}
+}
+
+func TestCockpit_LocalSaveProjectionDoesNotClearRootWarning(t *testing.T) {
+	workspace := readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting}
+	model := readmodel.CockpitReadModel{Tabs: []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}}, SelectedWorkspaceID: "personal", SelectedWorkspace: workspace}
+	root := NewCockpitWithContext(model, context.Background(), nil, &workspaceCreateCommands{})
+	root.RefreshWarning.Set("workspace deleted · refresh unavailable; local view reconciled")
+
+	root.refreshAfterWorkspaceSave(workspace)
+
+	if got := root.RefreshWarning.Get(); got == "" {
+		t.Fatal("local save projection cleared root freshness warning")
+	}
 }
 
 func (q *workspaceCreateQueries) LoadWorkspace(context.Context, readmodel.WorkspaceID) (readmodel.WorkspaceReadModel, error) {
 	q.loadWorkspaceCalls++
+	if q.loadWorkspace.ID != "" {
+		return q.loadWorkspace, nil
+	}
 	return readmodel.WorkspaceReadModel{}, errors.New("draft workspace is not persisted yet")
 }
 
@@ -291,8 +402,8 @@ func TestCockpit_DraftWorkspaceNameEnterContinuesLocalOnboarding(t *testing.T) {
 	if len(active.SelectedWorkspace.Routes) != 0 {
 		t.Fatalf("named draft inherited prior routes: %#v", active.SelectedWorkspace.Routes)
 	}
-	if notice := root.Notice.Get(); strings.TrimSpace(notice.Message) != "" {
-		t.Fatalf("draft promotion showed stale refresh notice: %#v", notice)
+	if warning := root.RefreshWarning.Get(); strings.TrimSpace(warning) != "" {
+		t.Fatalf("draft promotion showed stale refresh warning: %q", warning)
 	}
 	frame := h.FrameTrimmed()
 	if !strings.Contains(frame, "model routes") || !strings.Contains(frame, "discard") {
@@ -349,7 +460,7 @@ func TestCockpit_NamingDraftPreservesExistingWorkspaceRoutes(t *testing.T) {
 	}
 }
 
-func TestCockpit_WorkspaceNoticeReachesShellUnchanged(t *testing.T) {
+func TestCockpit_WorkspaceFeatureCannotPublishRootRefreshWarning(t *testing.T) {
 	model := readmodel.CockpitReadModel{
 		Tabs: []readmodel.WorkspaceTabReadModel{
 			{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true},
@@ -364,17 +475,71 @@ func TestCockpit_WorkspaceNoticeReachesShellUnchanged(t *testing.T) {
 		ActivePage: readmodel.CockpitWorkspacePage,
 	}
 	root := NewCockpitWithContext(model, context.Background(), &workspaceCreateQueries{}, &workspaceCreateCommands{})
-	want := readmodel.Notice{
-		Kind:    readmodel.NoticeWarning,
-		Message: "OpenAI URL saved to /tmp/swobu-diagnostics-123.txt.",
+	page := root.currentWorkspacePage()
+	before := testkit.RenderMountedTrimmed(t, root, 100, 24)
+	page.OverviewSection.WorkspaceWarning.Set("refresh unavailable")
+	after := testkit.RenderMountedTrimmed(t, root, 100, 24)
+
+	if got := root.RefreshWarning.Get(); got != "" {
+		t.Fatalf("local workspace feedback escaped into root: %q", got)
+	}
+	if strings.Split(before, "\n")[0] != strings.Split(after, "\n")[0] {
+		t.Fatalf("local feedback changed shell header:\nbefore: %q\nafter:  %q", strings.Split(before, "\n")[0], strings.Split(after, "\n")[0])
+	}
+}
+
+func TestCockpit_WorkspaceAndRouteShareFeedbackRemainSourceLocal(t *testing.T) {
+	route := readmodel.RouteReadModel{ID: "coding", ModelName: "coding", Enabled: true, Share: &readmodel.ShareReadModel{Hostname: "d-route.share.swobu.com", Never: true}}
+	workspace := readmodel.WorkspaceReadModel{ID: "personal", Slug: "personal", State: readmodel.WorkspaceExisting, Share: &readmodel.ShareReadModel{Hostname: "d-workspace.share.swobu.com", Never: true}, Routes: []readmodel.RouteReadModel{route}}
+	commands := &workspaceCreateCommands{revealShare: func(ref string) (shares.Result, error) {
+		if ref == "personal/coding" {
+			return shares.Result{}, errors.New("route share unavailable")
+		}
+		return shares.Result{}, errors.New("workspace share unavailable")
+	}}
+	root := NewCockpitWithContext(readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "personal", Slug: "personal", Kind: readmodel.WorkspaceTabExisting, Selected: true}},
+		SelectedWorkspaceID: "personal", SelectedWorkspace: workspace, ActivePage: readmodel.CockpitWorkspacePage,
+	}, context.Background(), &workspaceCreateQueries{}, commands)
+	page := root.currentWorkspacePage()
+	page.RoutesSection.State.ExpandedRoute.Set(route.ID)
+	headerBefore := strings.Split(testkit.RenderMountedTrimmed(t, root, 100, 24), "\n")[0]
+
+	workspaceShare := overviewsection.WorkspaceShareRowComponent(page.OverviewSection).(*ui.Select)
+	ui.SelectHeaderComponent(workspaceShare).Activate()
+	workspaceFrame := testkit.RenderMountedTrimmed(t, root, 100, 24)
+	if !strings.Contains(workspaceFrame, "workspace share unavailable") || strings.Contains(workspaceFrame, "route share unavailable") {
+		t.Fatalf("workspace Share feedback crossed sources:\n%s", workspaceFrame)
 	}
 
-	// Workspace features publish typed notices through their section and page;
-	// the shell must preserve concrete effect evidence such as fallback paths.
-	root.currentWorkspacePage().OverviewSection.OnNotice(want)
+	routeShare := routessection.ShareRowComponent(page.RoutesSection, route).(*ui.Select)
+	ui.SelectHeaderComponent(routeShare).Activate()
+	routeFrame := testkit.RenderMountedTrimmed(t, root, 100, 24)
+	if !strings.Contains(routeFrame, "workspace share unavailable") || !strings.Contains(routeFrame, "route share unavailable") {
+		t.Fatalf("route Share feedback replaced workspace feedback:\n%s", routeFrame)
+	}
+	if got := root.RefreshWarning.Get(); got != "" {
+		t.Fatalf("Share feedback escaped to root: %q", got)
+	}
+	if headerAfter := strings.Split(routeFrame, "\n")[0]; headerAfter != headerBefore {
+		t.Fatalf("Share feedback changed shell header:\nbefore: %q\nafter:  %q", headerBefore, headerAfter)
+	}
+}
 
-	if got := root.Notice.Get(); got != want {
-		t.Fatalf("shell notice = %#v, want %#v", got, want)
+func TestCockpit_TabSwitchDoesNotCarryLocalWorkspaceFeedback(t *testing.T) {
+	workspaceA := readmodel.WorkspaceReadModel{ID: "a", Slug: "a", State: readmodel.WorkspaceExisting}
+	workspaceB := readmodel.WorkspaceReadModel{ID: "b", Slug: "b", State: readmodel.WorkspaceExisting}
+	root := NewCockpit(readmodel.CockpitReadModel{
+		Tabs:                []readmodel.WorkspaceTabReadModel{{ID: "a", Slug: "a", Kind: readmodel.WorkspaceTabExisting, Selected: true}, {ID: "b", Slug: "b", Kind: readmodel.WorkspaceTabExisting}, {ID: "?", Kind: readmodel.WorkspaceTabHelp}},
+		SelectedWorkspaceID: "a", SelectedWorkspace: workspaceA, Workspaces: map[readmodel.WorkspaceID]readmodel.WorkspaceReadModel{"a": workspaceA, "b": workspaceB}, ActivePage: readmodel.CockpitWorkspacePage,
+	})
+	root.currentWorkspacePage().OverviewSection.WorkspaceWarning.Set("refresh unavailable")
+	root.activateTab(1)
+	if got := root.currentWorkspacePage().OverviewSection.WorkspaceWarning.Get(); got != "" {
+		t.Fatalf("workspace A feedback leaked into workspace B: %q", got)
+	}
+	if root.RefreshWarning.Get() != "" {
+		t.Fatalf("local feedback leaked into root: %q", root.RefreshWarning.Get())
 	}
 }
 

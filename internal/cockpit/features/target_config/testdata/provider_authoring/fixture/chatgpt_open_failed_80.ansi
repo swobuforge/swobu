@@ -2,6 +2,7 @@
      provider          OpenAI · ChatGPT subscription              [90mchange ↵[0m
      authentication    browser login                              [90mchange ↵[0m
    [1;38;2;70;167;88m>[0m [1mlogin URL[0m                                                    [1;38;2;70;167;88mopen ↵[0m
+      [1;38;2;229;72;77mbrowser could not open[0m
         https://auth.openai.com/oauth/authorize?client_id=app_test&redirect_uri=
         http%3A%2F%2F127.0.0.1%3A7926%2Fcallback&response_type=code&scope=openid
         %20profile%20email&state=fixture-state

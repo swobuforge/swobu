@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/wire"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
+	generatecontent "github.com/swobuforge/swobu/internal/wire/generatecontent"
 	messages "github.com/swobuforge/swobu/internal/wire/messages"
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
@@ -29,6 +30,7 @@ type RuntimeCodecResolver struct {
 	chatCompletionsClient wire.ClientCodec
 	responsesClient       wire.ClientCodec
 	messagesClient        wire.ClientCodec
+	generateContentClient wire.ClientCodec
 }
 
 // NewRuntimeCodecResolver returns a fully wired codec resolver.
@@ -37,19 +39,30 @@ func NewRuntimeCodecResolver() RuntimeCodecResolver {
 	imageLimits := shared.ImageDecodeLimitPolicy{MaxInlineBytes: int(resources.MaxImageBytes), MaxImages: resources.MaxImages, MaxTotalImageBytes: int(resources.MaxTotalImageBytes)}
 	return RuntimeCodecResolver{
 		chatCompletionsClient: clientCodecBundle{
-			request:  chatcompletions.ClientRequestDecoder{ImageLimits: imageLimits},
+			decode: func(doc carrier.Document, _ canonical.ClientOperation) (wire.ClientDecodeResult, error) {
+				return (chatcompletions.ClientRequestDecoder{ImageLimits: imageLimits}).DecodeClientRequest(doc)
+			},
 			document: chatcompletions.ResponseDocumentEncoder{},
 			stream:   chatcompletions.ResponseStreamEncoder{},
 		},
 		responsesClient: clientCodecBundle{
-			request:  responses.ClientRequestDecoder{ImageLimits: imageLimits},
+			decode: func(doc carrier.Document, _ canonical.ClientOperation) (wire.ClientDecodeResult, error) {
+				return (responses.ClientRequestDecoder{ImageLimits: imageLimits}).DecodeClientRequest(doc)
+			},
 			document: responses.ResponseDocumentEncoder{},
 			stream:   responses.ResponseStreamEncoder{},
 		},
 		messagesClient: clientCodecBundle{
-			request:  messages.ClientRequestDecoder{ImageLimits: imageLimits},
+			decode: func(doc carrier.Document, _ canonical.ClientOperation) (wire.ClientDecodeResult, error) {
+				return (messages.ClientRequestDecoder{ImageLimits: imageLimits}).DecodeClientRequest(doc)
+			},
 			document: messages.ResponseDocumentEncoder{},
 			stream:   messages.ResponseStreamEncoder{},
+		},
+		generateContentClient: clientCodecBundle{
+			decode: func(doc carrier.Document, operation canonical.ClientOperation) (wire.ClientDecodeResult, error) {
+				return (generatecontent.ClientRequestDecoder{ImageLimits: imageLimits}).DecodeClientRequest(doc, operation)
+			}, document: generatecontent.ResponseDocumentEncoder{}, stream: generatecontent.ResponseStreamEncoder{},
 		},
 	}
 }
@@ -63,6 +76,8 @@ func (r RuntimeCodecResolver) ClientCodec(f canonical.ClientFamily) wire.ClientC
 		return r.responsesClient
 	case canonical.ClientFamilyMessages:
 		return r.messagesClient
+	case canonical.ClientFamilyGenerateContent:
+		return r.generateContentClient
 	default:
 		return nil
 	}
@@ -71,9 +86,7 @@ func (r RuntimeCodecResolver) ClientCodec(f canonical.ClientFamily) wire.ClientC
 // clientCodecBundle bridges three separate decoder/encoder types into one
 // wire.ClientCodec. It is a composition convenience, not a semantic type.
 type clientCodecBundle struct {
-	request interface {
-		DecodeClientRequest(carrier.Document) (wire.ClientDecodeResult, error)
-	}
+	decode   func(carrier.Document, canonical.ClientOperation) (wire.ClientDecodeResult, error)
 	document interface {
 		EncodeResponseDocument(canonical.CanonicalRequest, canonical.CanonicalResponse) (wire.ClientDocumentResult, error)
 	}
@@ -83,8 +96,8 @@ type clientCodecBundle struct {
 	}
 }
 
-func (b clientCodecBundle) DecodeClientRequest(doc carrier.Document) (wire.ClientDecodeResult, error) {
-	return b.request.DecodeClientRequest(doc)
+func (b clientCodecBundle) DecodeClientRequest(doc carrier.Document, operation canonical.ClientOperation) (wire.ClientDecodeResult, error) {
+	return b.decode(doc, operation)
 }
 
 func (b clientCodecBundle) EncodeResponseDocument(request canonical.CanonicalRequest, output canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {

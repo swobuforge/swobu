@@ -634,6 +634,18 @@ func catalog() []Profile {
 			ProviderProtocols:   slices.Clone(providerProtocolsOpenAIFamily),
 		},
 		{
+			ProviderID:          ProviderSpecVercel,
+			ConnectionShape:     routing.ConnectionShapeStandard,
+			ModelDiscovery:      ModelDiscoveryModeAdvisory,
+			ProviderDisplayName: "Vercel AI Gateway",
+			SetupHint:           "AI Gateway API key",
+			SetupKeywords:       []string{"Vercel", "AI Gateway", "API key", "Codex", "Claude Code"},
+			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://ai-gateway.vercel.sh/v1"},
+			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "AI_GATEWAY_API_KEY"},
+			VisibleInOperatorUI: true,
+			ProviderProtocols:   slices.Clone(providerProtocolsAllStandard),
+		},
+		{
 			ProviderID:          ProviderSpecZAI,
 			ModelDiscovery:      ModelDiscoveryModeNone,
 			ProviderDisplayName: "Z.AI",

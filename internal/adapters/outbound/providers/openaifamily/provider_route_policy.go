@@ -189,17 +189,31 @@ func GMIPolicy() ProviderRoutePolicy {
 	return BearerWithMessagesAPIKeyPolicy(profile.ProviderSpecGMI)
 }
 
+// BearerWithMessagesVersionPolicy retains Bearer authentication for standard
+// OpenAI routes and adds the Anthropic version header only to Messages.
+func BearerWithMessagesVersionPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
+	policy := StandardBearerPolicy(providerID)
+	policy.applyProtocolHeaders = func(kind protocolkind.ProtocolKind, _ string, headers HeaderSetter) {
+		if kind != protocolkind.Messages || headers == nil {
+			return
+		}
+		headers.Set("anthropic-version", "2023-06-01")
+	}
+	return policy
+}
+
 // BearerWithMessagesAPIKeyPolicy retains Bearer authentication for standard
 // OpenAI routes and adds the Anthropic-native headers required by a provider's
 // Messages compatibility endpoint.
 func BearerWithMessagesAPIKeyPolicy(providerID profile.ProviderID) ProviderRoutePolicy {
-	policy := StandardBearerPolicy(providerID)
+	policy := BearerWithMessagesVersionPolicy(providerID)
+	applyVersionHeader := policy.applyProtocolHeaders
 	policy.applyProtocolHeaders = func(kind protocolkind.ProtocolKind, token string, headers HeaderSetter) {
+		applyVersionHeader(kind, token, headers)
 		if kind != protocolkind.Messages || headers == nil {
 			return
 		}
 		headers.Set("X-API-Key", token)
-		headers.Set("anthropic-version", "2023-06-01")
 	}
 	return policy
 }

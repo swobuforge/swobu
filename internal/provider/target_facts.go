@@ -14,6 +14,10 @@ const (
 	// AcceptsChatStreamIncludeUsage selects whether a streaming Chat request may
 	// carry the standard stream_options.include_usage capture opt-in.
 	AcceptsChatStreamIncludeUsage
+	// AcceptsResponsesReasoningContextAllTurns selects whether the standard
+	// Responses reasoning.context value "all_turns" may be emitted unchanged.
+	// It makes no claim about any other context value.
+	AcceptsResponsesReasoningContextAllTurns
 )
 
 // TargetFactLookup reads process-scoped knowledge for one target generation.
@@ -54,6 +58,9 @@ func (f *TargetFacts) UseParallelToolCallsFalse() bool {
 func (f *TargetFacts) UseMaxCompletionTokens() bool { return f.read(AcceptsMaxCompletionTokens) }
 func (f *TargetFacts) UseReasoningEffortMax() bool  { return f.read(AcceptsReasoningEffortMax) }
 func (f *TargetFacts) UseReasoningDisabled() bool   { return f.read(AcceptsReasoningDisabled) }
+func (f *TargetFacts) UseResponsesReasoningContextAllTurns() bool {
+	return f.read(AcceptsResponsesReasoningContextAllTurns)
+}
 func (f *TargetFacts) UseFunctionCallOutputArray() bool {
 	return f.read(AcceptsFunctionCallOutputArray)
 }

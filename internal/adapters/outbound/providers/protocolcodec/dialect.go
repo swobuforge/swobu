@@ -49,6 +49,7 @@ var MessagesOmitAdaptiveReasoning MessagesReasoningTransformer = messages.OmitAd
 type ChatDialect struct {
 	Lowering               chatcompletions.Lowering
 	UseMaxCompletionTokens bool
+	MaxStopSequences       int
 	ResponseReasoning      func() ChatReasoningExtractor
 	DecorateAttempt        AttemptDecorator
 }

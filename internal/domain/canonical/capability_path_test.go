@@ -24,7 +24,7 @@ func TestCapabilityPathsUseCanonicalGrammar(t *testing.T) {
 		RequestToolsName, RequestToolsDescription, RequestToolsSchema, RequestToolsVisibility,
 		RequestToolsSchemaConformance, RequestToolPolicy, RequestToolCallBatch,
 		RequestOutputFormat, RequestOutputFormatSchema, RequestOutputSchemaConformance, RequestControlsMaxOutputTokens,
-		RequestControlsTemperature, RequestControlsTopP, RequestControlsStopSequences,
+		RequestControlsTemperature, RequestControlsTopK, RequestControlsTopP, RequestControlsStopSequences,
 		RequestControlsEffort, RequestReasoning, RequestReasoningContext,
 		RequestReasoningContextResponses, ResponseID, ResponseIDResponses,
 		ResponseItemsKind, ResponseItemsMessageRole, ResponseItemsMessageText,

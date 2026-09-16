@@ -95,6 +95,16 @@ func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	}
 }
 
+func TestHandlerErasesGenerateContentDummyAPIKeyHeader(t *testing.T) {
+	request, _, err := ingressTransportRequest(http.MethodPost, "/v1beta/models/gemini:generateContent", "alpha", canonical.ClientFamilyGenerateContent, http.Header{"X-Goog-Api-Key": []string{"dummy-secret"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := request.Header.Get("X-Goog-Api-Key"); got != "" {
+		t.Fatalf("GenerateContent dummy key reached exchange: %q", got)
+	}
+}
+
 func TestHandler_ThreadsTimingLifecycleThroughResponseCommit(t *testing.T) {
 	ingress := &timingCaptureIngress{}
 	handler := newTestHandler(ingress)
@@ -1444,17 +1454,9 @@ func decodeCapturedRequest(in exchange.RequestInput) (canonical.CanonicalRequest
 }
 
 func buildRequestDocumentForTest(in exchange.RequestInput) (carrier.Document, error) {
-	normalizedPath, err := canonical.NormalizePath(in.Request.URL)
-	if err != nil {
-		return carrier.Document{}, err
-	}
-	family := in.ClientFamily
+	family := in.Operation.Family
 	if family == "" {
-		hasMessagesProtocolMarker := strings.TrimSpace(in.Request.Header.Get("anthropic-version")) != "" // swobu:io-string source=boundary
-		family, err = canonical.InferClientFamily(in.Request.Method, normalizedPath, hasMessagesProtocolMarker)
-		if err != nil {
-			return carrier.Document{}, err
-		}
+		return carrier.Document{}, errors.New("test request operation is missing")
 	}
 	return carrier.NewDocument(family, "application/json", in.Request.Header, in.Request.Body, carrier.Meta{}), nil
 }
@@ -1467,7 +1469,7 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 			Workspace:       in.Workspace,
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, in.Request.Body),
 			ClientHandler:   in.ClientHandler,
-			ClientFamily:    in.ClientFamily,
+			Operation:       in.Operation,
 			ResponseFraming: in.ResponseFraming,
 			ExchangeID:      in.ExchangeID,
 		})

@@ -36,7 +36,7 @@ import (
 // ClientCodec translates client-family wire documents into canonical requests
 // and canonical outputs back into client-facing wire documents or byte streams.
 type ClientCodec interface {
-	DecodeClientRequest(doc carrier.Document) (ClientDecodeResult, error)
+	DecodeClientRequest(doc carrier.Document, operation canonical.ClientOperation) (ClientDecodeResult, error)
 	EncodeResponseDocument(canonical.CanonicalRequest, canonical.CanonicalResponse) (ClientDocumentResult, error)
 	EncodeResponseStream(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (ClientByteStreamResult, error)
 	EncodeResponseMessages(context.Context, canonical.CanonicalRequest, canonical.ResponseStream, delivery.Delivery) (ClientMessageResult, error)

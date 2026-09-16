@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 )
 
@@ -13,7 +14,7 @@ func TestIngressTransportRequestConsumesFirstNonblankOpenCodeSession(t *testing.
 		"X-Request-Marker":    []string{"preserved"},
 	}
 
-	request, got, err := ingressTransportRequest(http.MethodPost, "/responses", "alpha", header, []byte(`{}`))
+	request, got, err := ingressTransportRequest(http.MethodPost, "/responses", "alpha", canonical.ClientFamilyResponses, header, []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func TestIngressTransportRequestConsumesFirstNonblankOpenCodeSession(t *testing.
 }
 
 func TestIngressTransportRequestLeavesBlankOpenCodeSessionUnknown(t *testing.T) {
-	request, got, err := ingressTransportRequest(http.MethodPost, "/responses", "alpha", http.Header{
+	request, got, err := ingressTransportRequest(http.MethodPost, "/responses", "alpha", canonical.ClientFamilyResponses, http.Header{
 		openCodeSessionHeader: []string{"", " \t "},
 	}, nil)
 	if err != nil {

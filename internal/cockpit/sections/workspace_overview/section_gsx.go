@@ -26,16 +26,23 @@ type SectionView struct {
 	OnWorkspaceSaved     func(readmodel.WorkspaceReadModel)
 	OnWorkspaceDeleted   func(readmodel.WorkspaceID)
 	OnWorkspaceDiscarded func()
-	OnNotice             func(readmodel.Notice)
 	ShareCommands        ports.ShareCommands
 	SharePending         *tui.State[bool]
 	ShareCopied          *tui.State[bool]
+	ShareFeedback        *tui.State[shareFeedback]
+	WorkspaceWarning     *tui.State[string]
 	app                  *tui.App
+	shareCopyGeneration  uint64
 	// PendingDeleteWorkspaceID seeds the delete confirmation child while the
 	// delete row is armed. The parent keeps the request here so Back() can clear
 	// it without holding a persistent child reference.
 	PendingDeleteWorkspaceID *tui.State[readmodel.WorkspaceID]
 	headerRef                *tui.Ref
+}
+
+type shareFeedback struct {
+	Message string
+	Tone    ui.Tone
 }
 
 func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceCommands) *SectionView {
@@ -45,6 +52,8 @@ func Section(model readmodel.WorkspaceReadModel, commands ...ports.WorkspaceComm
 		PendingDeleteWorkspaceID: tui.NewState(readmodel.WorkspaceID("")),
 		SharePending:             tui.NewState(false),
 		ShareCopied:              tui.NewState(false),
+		ShareFeedback:            tui.NewState(shareFeedback{}),
+		WorkspaceWarning:         tui.NewState(""),
 		headerRef:                tui.NewRef(),
 	}
 	if len(commands) > 0 && commands[0] != nil {
@@ -83,6 +92,7 @@ func (s *SectionView) resetTransientState() {
 	s.PendingDeleteWorkspaceID.Set("")
 	s.SharePending.Set(false)
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 }
 
 func (s *SectionView) Back() bool {
@@ -145,22 +155,23 @@ func (s *SectionView) issueShare(expiry sharestate.Expiry) {
 	}
 	s.SharePending.Set(true)
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 	complete := func(result shares.Result, err error) {
 		s.SharePending.Set(false)
 		if err != nil {
-			s.publishShareError(err.Error())
+			s.setShareFailure(err.Error())
 			return
 		}
 		parsed, parseErr := url.Parse(result.ShareURL)
 		if parseErr != nil || parsed.Hostname() == "" {
-			s.publishShareError("share response is invalid")
+			s.setShareFailure("share response is invalid")
 			return
 		}
 		share := &readmodel.ShareReadModel{Hostname: parsed.Hostname(), Never: result.ExpiresAt == "never"}
 		if !share.Never {
 			share.ExpiresAt, parseErr = time.Parse(time.RFC3339, result.ExpiresAt)
 			if parseErr != nil {
-				s.publishShareError("share expiry is invalid")
+				s.setShareFailure("share expiry is invalid")
 				return
 			}
 		}
@@ -181,17 +192,36 @@ func (s *SectionView) copyShare() {
 	if s.ShareCommands == nil {
 		return
 	}
+	s.shareCopyGeneration++
+	generation := s.shareCopyGeneration
 	result, err := s.ShareCommands.RevealShare(context.Background(), s.Model.Slug)
 	if err != nil {
-		s.publishShareError(err.Error())
+		s.setShareFailure(err.Error())
 		return
 	}
-	if displayErr := ui.CopyToClipboard(result.ShareURL).ErrorForDisplay(); displayErr != "" {
+	copyResult := ui.CopyToClipboard(result.ShareURL)
+	s.ShareCopied.Set(copyResult.Status == ui.CopyOK)
+	s.ShareFeedback.Set(shareClipboardFeedback(copyResult))
+	if copyResult.Status == ui.CopyOK {
+		s.expireShareCopied(generation)
+	}
+}
+
+func (s *SectionView) expireShareCopied(generation uint64) {
+	if s.app == nil {
+		return
+	}
+	app := s.app
+	go func() {
+		time.Sleep(1200 * time.Millisecond)
+		app.QueueUpdate(func() { s.clearShareCopied(generation) })
+	}()
+}
+
+func (s *SectionView) clearShareCopied(generation uint64) {
+	if s.shareCopyGeneration == generation {
 		s.ShareCopied.Set(false)
-		s.publishShareError(displayErr)
-		return
 	}
-	s.ShareCopied.Set(true)
 }
 
 func (s *SectionView) revokeShare() error {
@@ -203,12 +233,23 @@ func (s *SectionView) revokeShare() error {
 	}
 	s.Model.Share = nil
 	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{})
 	return nil
 }
 
-func (s *SectionView) publishShareError(message string) {
-	if s.OnNotice != nil {
-		s.OnNotice(readmodel.Notice{Kind: readmodel.NoticeError, Message: message})
+func (s *SectionView) setShareFailure(message string) {
+	s.ShareCopied.Set(false)
+	s.ShareFeedback.Set(shareFeedback{Message: message, Tone: ui.ToneFailure})
+}
+
+func shareClipboardFeedback(result ui.ClipboardResult) shareFeedback {
+	switch result.Status {
+	case ui.CopyUnavailable:
+		return shareFeedback{Message: "clipboard unavailable", Tone: ui.ToneWarning}
+	case ui.CopyFailed:
+		return shareFeedback{Message: "copy failed", Tone: ui.ToneFailure}
+	default:
+		return shareFeedback{}
 	}
 }
 
@@ -226,6 +267,9 @@ func WorkspaceShareRowComponent(s *SectionView) tui.Component {
 		}
 		props.Value = value
 		props.Action = "copy ↵"
+		if s.ShareFeedback.Get().Message != "" {
+			props.Action = "retry ↵"
+		}
 		props.OnActivate = s.copyShare
 		return ui.NewSelect(props)
 	}
@@ -274,8 +318,10 @@ func (s *SectionView) BackRef() *tui.Ref { return s.headerRef }
 
 func (s *SectionView) UpdateProps(fresh tui.Component) {
 	headerRef := s.headerRef
+	shareCopyGeneration := s.shareCopyGeneration
 	s.updatePropsFields(fresh)
 	s.headerRef = headerRef
+	s.shareCopyGeneration = shareCopyGeneration
 }
 
 func (s *SectionView) Render(app *tui.App) *tui.Element {
@@ -301,82 +347,105 @@ func (s *SectionView) Render(app *tui.App) *tui.Element {
 			tui.WithWidthPercent(100.00),
 			tui.WithPaddingTRBL(0, 0, 0, 3),
 		)
-		if s.Model.IsDraft() {
+		if s.WorkspaceWarning.Get() != "" {
 			__tui_5 := tui.New(
 				tui.WithWidthPercent(100.00),
+				tui.WithTextStyle(ui.ToneStyle(ui.ToneWarning)),
 			)
-			__tui_6 := app.Mount(s, tui.MountKey(1, workspaceEditKey(s)), func() tui.Component {
-				return WorkspaceEdit(s)
+			__tui_6 := app.Mount(s, 1, func() tui.Component {
+				return ui.FlowText(s.WorkspaceWarning.Get())
 			})
 			__tui_5.AddChild(__tui_6)
 			__tui_4.AddChild(__tui_5)
-			if s.Model.Slug != "" {
-				__tui_7 := tui.New(
-					tui.WithWidthPercent(100.00),
-				)
-				__tui_8 := app.Mount(s, tui.MountKey(2, "workspace-discard:+"), func() tui.Component {
-					return DraftDiscardComponent(s)
-				})
-				__tui_7.AddChild(__tui_8)
-				__tui_4.AddChild(__tui_7)
-			}
-		} else if s.Model.IsBootstrap() {
-			__tui_9 := tui.New(
+		}
+		if s.Model.IsDraft() {
+			__tui_7 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_10 := app.Mount(s, tui.MountKey(3, endpointRowKey(s)), func() tui.Component {
-				return EndpointRowComponent(s)
+			__tui_8 := app.Mount(s, tui.MountKey(2, workspaceEditKey(s)), func() tui.Component {
+				return WorkspaceEdit(s)
 			})
-			__tui_9.AddChild(__tui_10)
-			__tui_4.AddChild(__tui_9)
-		} else {
+			__tui_7.AddChild(__tui_8)
+			__tui_4.AddChild(__tui_7)
+			if s.Model.Slug != "" {
+				__tui_9 := tui.New(
+					tui.WithWidthPercent(100.00),
+				)
+				__tui_10 := app.Mount(s, tui.MountKey(3, "workspace-discard:+"), func() tui.Component {
+					return DraftDiscardComponent(s)
+				})
+				__tui_9.AddChild(__tui_10)
+				__tui_4.AddChild(__tui_9)
+			}
+		} else if s.Model.IsBootstrap() {
 			__tui_11 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_12 := app.Mount(s, tui.MountKey(4, workspaceEditKey(s)), func() tui.Component {
-				return WorkspaceEdit(s)
+			__tui_12 := app.Mount(s, tui.MountKey(4, endpointRowKey(s)), func() tui.Component {
+				return EndpointRowComponent(s)
 			})
 			__tui_11.AddChild(__tui_12)
 			__tui_4.AddChild(__tui_11)
+		} else {
 			__tui_13 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_14 := app.Mount(s, tui.MountKey(5, endpointRowKey(s)), func() tui.Component {
-				return EndpointRowComponent(s)
+			__tui_14 := app.Mount(s, tui.MountKey(5, workspaceEditKey(s)), func() tui.Component {
+				return WorkspaceEdit(s)
 			})
 			__tui_13.AddChild(__tui_14)
 			__tui_4.AddChild(__tui_13)
 			__tui_15 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_16 := app.Mount(s, tui.MountKey(6, workspaceShareKey(s)), func() tui.Component {
-				return WorkspaceShareRowComponent(s)
+			__tui_16 := app.Mount(s, tui.MountKey(6, endpointRowKey(s)), func() tui.Component {
+				return EndpointRowComponent(s)
 			})
 			__tui_15.AddChild(__tui_16)
 			__tui_4.AddChild(__tui_15)
+			__tui_17 := tui.New(
+				tui.WithWidthPercent(100.00),
+			)
+			__tui_18 := app.Mount(s, tui.MountKey(7, workspaceShareKey(s)), func() tui.Component {
+				return WorkspaceShareRowComponent(s)
+			})
+			__tui_17.AddChild(__tui_18)
+			__tui_4.AddChild(__tui_17)
+			if s.ShareFeedback.Get().Message != "" {
+				__tui_19 := tui.New(
+					tui.WithWidthPercent(100.00),
+					tui.WithPaddingTRBL(0, 0, 0, 3),
+					tui.WithTextStyle(ui.ToneStyle(s.ShareFeedback.Get().Tone)),
+				)
+				__tui_20 := app.Mount(s, 8, func() tui.Component {
+					return ui.FlowText(s.ShareFeedback.Get().Message)
+				})
+				__tui_19.AddChild(__tui_20)
+				__tui_4.AddChild(__tui_19)
+			}
 			if s.Model.Share != nil {
-				__tui_17 := tui.New(
+				__tui_21 := tui.New(
 					tui.WithWidthPercent(100.00),
 					tui.WithPaddingTRBL(0, 0, 0, 3),
 				)
-				__tui_18 := tui.New(
+				__tui_22 := tui.New(
 					tui.WithWidthPercent(100.00),
 				)
-				__tui_19 := app.Mount(s, tui.MountKey(7, workspaceShareKey(s)+":revoke"), func() tui.Component {
+				__tui_23 := app.Mount(s, tui.MountKey(9, workspaceShareKey(s)+":revoke"), func() tui.Component {
 					return WorkspaceShareRevokeComponent(s)
 				})
-				__tui_18.AddChild(__tui_19)
-				__tui_17.AddChild(__tui_18)
-				__tui_4.AddChild(__tui_17)
+				__tui_22.AddChild(__tui_23)
+				__tui_21.AddChild(__tui_22)
+				__tui_4.AddChild(__tui_21)
 			}
-			__tui_20 := tui.New(
+			__tui_24 := tui.New(
 				tui.WithWidthPercent(100.00),
 			)
-			__tui_21 := app.Mount(s, tui.MountKey(8, workspaceDeleteKey(s)), func() tui.Component {
+			__tui_25 := app.Mount(s, tui.MountKey(10, workspaceDeleteKey(s)), func() tui.Component {
 				return DeleteConfirmation(s)
 			})
-			__tui_20.AddChild(__tui_21)
-			__tui_4.AddChild(__tui_20)
+			__tui_24.AddChild(__tui_25)
+			__tui_4.AddChild(__tui_24)
 		}
 		__tui_0.AddChild(__tui_4)
 	}
@@ -397,6 +466,7 @@ func (s *SectionView) updatePropsFields(fresh tui.Component) {
 	s.DeleteWorkspace = f.DeleteWorkspace
 	s.ShareCommands = f.ShareCommands
 	s.app = f.app
+	s.shareCopyGeneration = f.shareCopyGeneration
 }
 
 var _ tui.PropsUpdater = (*SectionView)(nil)
@@ -414,6 +484,12 @@ func (s *SectionView) bindAppFields(app *tui.App) {
 	}
 	if s.ShareCopied != nil {
 		s.ShareCopied.BindApp(app)
+	}
+	if s.ShareFeedback != nil {
+		s.ShareFeedback.BindApp(app)
+	}
+	if s.WorkspaceWarning != nil {
+		s.WorkspaceWarning.BindApp(app)
 	}
 	if s.PendingDeleteWorkspaceID != nil {
 		s.PendingDeleteWorkspaceID.BindApp(app)

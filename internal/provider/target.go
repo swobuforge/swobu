@@ -92,6 +92,13 @@ func (t TargetSnapshot) ValidateExecutionProtocol() error {
 	if providerProtocol == "" || t.ProtocolKind == "" {
 		return fmt.Errorf("provider execution protocol is incomplete")
 	}
+	switch t.ProtocolKind {
+	case protocolkind.ChatCompletions, protocolkind.Responses, protocolkind.Messages, protocolkind.Interactions:
+	case protocolkind.GenerateContent:
+		return fmt.Errorf("generate_content is a client-ingress-only protocol")
+	default:
+		return fmt.Errorf("provider protocol kind %q is unsupported", t.ProtocolKind)
+	}
 	if err := t.ProviderDelivery.Validate(); err != nil {
 		return fmt.Errorf("provider delivery is invalid: %w", err)
 	}

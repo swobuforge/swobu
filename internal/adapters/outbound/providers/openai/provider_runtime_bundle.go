@@ -39,6 +39,7 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 			Protocol: protocolkind.ChatCompletions,
 			ChatDialect: protocolcodec.ChatDialect{
 				UseMaxCompletionTokens: true,
+				MaxStopSequences:       4,
 				DecorateAttempt:        decorateOpenAIAttempt,
 			},
 		}

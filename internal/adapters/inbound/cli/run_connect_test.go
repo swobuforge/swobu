@@ -148,6 +148,33 @@ func TestConnectUsesCanonicalPlanAndSemanticReplaceGate(t *testing.T) {
 	}
 }
 
+func TestConnectAntigravityDoesNotStartDaemonOrResolveWorkspace(t *testing.T) {
+	plan := clientconnect.Plan{
+		ClientID: clientconnect.ClientAntigravity, ClientName: "Antigravity CLI", ConfigPaths: []string{"/tmp/settings.json"},
+		Changes: []clientconnect.Change{{Field: "modelProvider", After: "gemini"}},
+	}
+	ops := &connectOperationsStub{plan: plan}
+	attachCalled := false
+	var stdout, stderr bytes.Buffer
+	runner := Runner{
+		Stdout: &stdout, Stderr: &stderr, HTTPClient: http.DefaultClient, ConnectOperations: ops,
+		ConnectWorkspaces: connectWorkspacesStub{summaries: []workspaceapi.WorkspaceSummary{{Slug: "work"}, {Slug: "personal"}}},
+		ConnectAttach: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
+			attachCalled = true
+			return errors.New("must not attach")
+		},
+	}
+	if got := runner.Run(context.Background(), []string{"connect", "antigravity"}); got != ExitHealthy {
+		t.Fatalf("code=%v stderr=%s", got, stderr.String())
+	}
+	if attachCalled {
+		t.Fatal("global Antigravity configuration started or attached the daemon")
+	}
+	if ops.plannedID != clientconnect.ClientAntigravity || ops.plannedURL != "" || !ops.applied {
+		t.Fatalf("plan/apply=%q %q %t", ops.plannedID, ops.plannedURL, ops.applied)
+	}
+}
+
 func TestConnectUsageAndClientAuthority(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	runner := Runner{Stdout: &stdout, Stderr: &stderr}

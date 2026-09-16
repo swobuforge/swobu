@@ -94,7 +94,7 @@ func decodeChatCompletionsMaxOutputTokens(dto chatCompletionsRequestDTO) (*int, 
 	return openaiwire.DecodeOptionalInt(dto.MaxTokens, "chat completions request max_tokens is invalid")
 }
 
-func encodeChatCompletionsGenerationControls(payload map[string]any, controls canonical.GenerationControls) error {
+func encodeChatCompletionsGenerationControls(payload map[string]any, controls canonical.GenerationControls, maxStopSequences int, changeLog *[]compat.Change) error {
 	if value, ok := controls.Limits.MaxOutputTokens.Value(); ok {
 		payload["max_tokens"] = value
 	}
@@ -104,6 +104,13 @@ func encodeChatCompletionsGenerationControls(payload map[string]any, controls ca
 	if value, ok := controls.Sampling.TopP.Value(); ok {
 		payload["top_p"] = value
 	}
-	openaiwire.SetStopSequence(payload, "stop", controls.Limits.StopSequences)
+	stopSequences := controls.Limits.StopSequences
+	if maxStopSequences > 0 && len(stopSequences) > maxStopSequences {
+		stopSequences = stopSequences[:maxStopSequences]
+		if changeLog != nil {
+			*changeLog = compat.AppendUnique(*changeLog, compat.NewApproximation(canonical.RequestControlsStopSequences, canonical.Occurrence{}))
+		}
+	}
+	openaiwire.SetStopSequence(payload, "stop", stopSequences)
 	return nil
 }

@@ -103,7 +103,7 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "route-a", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "route-a", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestRequestPathProjectedRouteCannotEscapeOneRouteWorkspace(t *testing.T) {
 	_, err = ingress.HandleRequestWithWorkspace(context.Background(), projected, RequestInput{
 		ExchangeID:      "shared-route",
 		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)),
-		ClientFamily:    canonical.ClientFamilyResponses,
+		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
 	})
 	if err != nil {
@@ -153,7 +153,7 @@ func TestRequestPathFixedClientModelUsesConfiguredDefaultRoute(t *testing.T) {
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "fixed-model", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-owned-model","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "fixed-model", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-owned-model","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestRequestPathPublicDefaultModelAttemptsConfiguredDefaultRoute(t *testing.
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "default", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"default","input":"hi"}`)), ClientFamily: canonical.ClientFamilyResponses, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{ExchangeID: "default", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"default","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}

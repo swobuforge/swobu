@@ -26,13 +26,18 @@ func (c Codec) CharacterizeTargetFact(ctx context.Context, target provider.Targe
 		return provider.TargetFactResolution{}
 	}
 	preferred := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, executionAffinity, fact, true, transport)
-	if preferred == targetFactFixtureSucceeded {
+	if preferred.outcome == targetFactFixtureSucceeded {
 		return provider.TargetFactResolution{Value: true, Conclusive: true}
 	}
-	if preferred != targetFactFixtureRejected {
+	if preferred.outcome != targetFactFixtureRejected {
 		return provider.TargetFactResolution{}
 	}
-	if c.runTargetFactFixture(ctx, target, request, fixtureDelivery, executionAffinity, fact, false, transport) == targetFactFixtureSucceeded {
+	control := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, executionAffinity, fact, false, transport)
+	if control.outcome != targetFactFixtureSucceeded {
+		return provider.TargetFactResolution{}
+	}
+	restored := c.runTargetFactFixture(ctx, target, request, fixtureDelivery, executionAffinity, fact, true, transport)
+	if restored.outcome == targetFactFixtureRejected && restored.rejection == preferred.rejection {
 		return provider.TargetFactResolution{Value: false, Conclusive: true}
 	}
 	return provider.TargetFactResolution{}
@@ -46,7 +51,19 @@ const (
 	targetFactFixtureRejected
 )
 
-func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, executionAffinity executionaffinity.Key, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureOutcome {
+type targetFactRejection struct {
+	status int
+	typeID string
+	code   string
+	param  string
+}
+
+type targetFactFixtureResult struct {
+	outcome   targetFactFixtureOutcome
+	rejection targetFactRejection
+}
+
+func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, executionAffinity executionaffinity.Key, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureResult {
 	facts := provider.NewTargetFacts(func(read provider.TargetFact) (bool, bool) {
 		if read != fact {
 			return true, false
@@ -55,7 +72,7 @@ func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetS
 	})
 	names, _, err := provider.BuildAttemptToolNames(request)
 	if err != nil {
-		return targetFactFixtureInconclusive
+		return targetFactFixtureResult{}
 	}
 	providerRequest := provider.Request{
 		Canonical: request, TargetFacts: facts, ToolNames: names,
@@ -65,29 +82,39 @@ func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetS
 	document, _, err := c.Encode(providerRequest)
 	reads := facts.Reads()
 	if err != nil || len(reads) != 1 || reads[fact] != value {
-		return targetFactFixtureInconclusive
+		return targetFactFixtureResult{}
 	}
 	ingress, err := transport.Send(ctx, document)
 	if err != nil {
 		failure, issued := provider.AsAttemptFailure(err)
 		var rejected provider.RejectedError
 		if issued && errors.As(failure.Cause(), &rejected) {
-			return targetFactFixtureRejected
+			var backendErr canonical.BackendError
+			if !errors.As(failure.Cause(), &backendErr) || backendErr.StatusCode == 0 {
+				return targetFactFixtureResult{}
+			}
+			signature := targetFactRejection{status: backendErr.StatusCode}
+			if backendErr.ProviderError != nil {
+				signature.typeID = backendErr.ProviderError.Type
+				signature.code = backendErr.ProviderError.Code
+				signature.param = backendErr.ProviderError.Param
+			}
+			return targetFactFixtureResult{outcome: targetFactFixtureRejected, rejection: signature}
 		}
-		return targetFactFixtureInconclusive
+		return targetFactFixtureResult{}
 	}
 	decoded, err := c.Decode(ctx, providerRequest, ingress)
 	if err != nil {
-		return targetFactFixtureInconclusive
+		return targetFactFixtureResult{}
 	}
 	defer decoded.Stream.Close(ctx)
 	for {
 		_, err = decoded.Stream.Next(ctx)
 		if errors.Is(err, io.EOF) {
-			return targetFactFixtureSucceeded
+			return targetFactFixtureResult{outcome: targetFactFixtureSucceeded}
 		}
 		if err != nil {
-			return targetFactFixtureInconclusive
+			return targetFactFixtureResult{}
 		}
 	}
 }
@@ -131,6 +158,10 @@ func targetFactFixture(model string, fact provider.TargetFact) (canonical.Canoni
 		params.Controls, err = canonical.NewGenerationControls(canonical.GenerationControlsParams{Effort: &effort})
 	case provider.AcceptsReasoningDisabled:
 		params.Reasoning, err = canonical.NewReasoningControls(canonical.ReasoningControlsParams{Compute: canonical.Specify(canonical.NewDisabledReasoningCompute())})
+	case provider.AcceptsResponsesReasoningContextAllTurns:
+		params.Reasoning, err = canonical.NewReasoningControls(canonical.ReasoningControlsParams{
+			ResponsesContext: canonical.Specify(canonical.ResponsesReasoningContextAllTurns),
+		})
 	case provider.AcceptsFunctionCallOutputArray:
 		key, keyErr := canonical.NewRequestToolKey(canonical.ToolKindFunction, "swobu_fact_fixture")
 		if keyErr != nil {

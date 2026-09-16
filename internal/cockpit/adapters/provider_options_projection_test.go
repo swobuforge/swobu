@@ -40,3 +40,15 @@ func TestOperatorProviderOptionsKeepOpenAIChoicesAdjacent(t *testing.T) {
 	}
 	t.Fatal("openai provider option missing")
 }
+
+func TestOperatorProviderOptionsIncludeQualifiedVercel(t *testing.T) {
+	for _, option := range operatorProviderOptions() {
+		if option.ProviderSpec == "vercel" {
+			if option.DisplayName != "Vercel AI Gateway" {
+				t.Fatalf("Vercel option = %#v", option)
+			}
+			return
+		}
+	}
+	t.Fatal("qualified Vercel option missing")
+}
