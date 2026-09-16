@@ -52,7 +52,8 @@ Muse, Pi, Kilo, and Hermes are also supported. Antigravity CLI 1.2.3 and newer c
 
 ## Route once. Change the capacity underneath.
 
-A Swobu **route is the model name your agent already sends**.
+A Swobu **route looks like a model name** to your agent. It is the stable name
+the agent already sends while Swobu owns the configured capacity behind it.
 
 ```text
 agent: model = coding
@@ -68,7 +69,9 @@ agent: model = coding
 
 Routes can pool provider accounts, regions, hosted endpoints, local servers, and models. Peer target order changes across attempts; fallback tiers define what happens after a real attempt fails. Swobu does not inspect live quota, price, health, or latency.
 
-**Runtime fallback, not preflight.** Swobu sends the real request to the configured target. A failed attempt can advance to the next target in the route.
+**Runtime fallback, not preflight.** Swobu does not preflight compatibility. It
+sends the real request to the configured target, and a failed attempt can
+advance to the next target in the route.
 
 **Protocol translation at one boundary.** Current protocol families include OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Gemini Interactions. Translation occurs where the requested semantics are representable.
 
