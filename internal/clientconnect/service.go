@@ -106,12 +106,8 @@ func (s *Service) Plan(ctx context.Context, client ClientID, target Target) (Pla
 	if !ok {
 		return Plan{}, fmt.Errorf("unsupported client")
 	}
-	if !adapter.targetOptional {
-		if err := target.validateLocal(); err != nil {
-			return Plan{}, err
-		}
-	} else {
-		target = Target{}
+	if err := target.validateLocal(); err != nil {
+		return Plan{}, err
 	}
 	current, err := adapter.planCurrent(ctx, s, target)
 	if err != nil {
@@ -133,12 +129,8 @@ func (s *Service) Apply(ctx context.Context, reviewed Plan) (Plan, error) {
 	if !ok {
 		return Plan{}, fmt.Errorf("unsupported client")
 	}
-	if !adapter.targetOptional {
-		if err := reviewed.Target.validateLocal(); err != nil {
-			return Plan{}, err
-		}
-	} else if reviewed.Target != (Target{}) {
-		return Plan{}, fmt.Errorf("client configuration does not accept a workspace target")
+	if err := reviewed.Target.validateLocal(); err != nil {
+		return Plan{}, err
 	}
 	current, err := adapter.planCurrent(ctx, s, reviewed.Target)
 	if err != nil {

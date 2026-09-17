@@ -107,7 +107,6 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		DisableFlagParsing: true,
 		RunE:               delegate("connect"),
 	}
-	launchCmd := &cobra.Command{Use: "launch antigravity [args]", Short: "Launch Antigravity through Swobu", DisableFlagParsing: true, RunE: delegate("launch")}
 	shareCmd := &cobra.Command{Use: "share <workspace>/<route> [args]", Short: "Share one route", DisableFlagParsing: true, RunE: delegate("share")}
 	downCmd := &cobra.Command{
 		Use:                "down [args]",
@@ -152,7 +151,7 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		RunE:  delegate("update"),
 	}
 
-	root.AddCommand(connectCmd, daemonCmd, launchCmd, shareCmd, statusCmd, telemetryCmd, updateCmd, versionCmd)
+	root.AddCommand(connectCmd, daemonCmd, shareCmd, statusCmd, telemetryCmd, updateCmd, versionCmd)
 	return root
 }
 

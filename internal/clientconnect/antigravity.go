@@ -10,7 +10,12 @@ const ClientAntigravity ClientID = "antigravity"
 
 var antigravityProviderPath = keyPath{"modelProvider"}
 
-var antigravityAdapter = adapter{id: ClientAntigravity, name: "Antigravity CLI", targetOptional: true, present: antigravityPresent, planCurrent: planAntigravityCurrent}
+const (
+	antigravityProfileStart = "# >>> swobu antigravity >>>"
+	antigravityProfileEnd   = "# <<< swobu antigravity <<<"
+)
+
+var antigravityAdapter = adapter{id: ClientAntigravity, name: "Antigravity CLI", present: antigravityPresent, planCurrent: planAntigravityCurrent}
 
 func (s *Service) antigravityPath() (string, error) {
 	home, err := s.homeDir()
@@ -32,10 +37,14 @@ func planAntigravityCurrent(_ context.Context, s *Service, target Target) (plann
 	if err != nil {
 		return plannedMutation{}, err
 	}
-	return planAntigravity(path, target)
+	environment, err := inspectAntigravityEnvironment(s, target)
+	if err != nil {
+		return plannedMutation{}, antigravityProblem(err)
+	}
+	return planAntigravity(path, target, environment)
 }
 
-func planAntigravity(path string, target Target) (plannedMutation, error) {
+func planAntigravity(path string, target Target, environment antigravityEnvironmentPlan) (plannedMutation, error) {
 	file, err := inspectForeignFile(path, []byte("{}\n"))
 	if err != nil {
 		return plannedMutation{}, antigravityProblem(err)
@@ -45,15 +54,49 @@ func planAntigravity(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, antigravityProblem(err)
 	}
-	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: semanticChange("model provider", provider, exists, "gemini")}
+	providerChanges := semanticChange("model provider", provider, exists, "gemini")
+	changes := append([]Change(nil), environment.changes...)
+	changes = append(changes, providerChanges...)
+	paths := append([]string(nil), environment.configPaths...)
+	paths = append(paths, file.logical)
+	plan := Plan{ConfigPaths: paths, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
-	next, err := setJSONStrings(editor, file.raw, jsonStringChange{path: antigravityProviderPath, value: "gemini"})
-	if err != nil {
-		return plannedMutation{}, antigravityProblem(err)
+	var replaceSettings func() error
+	if len(providerChanges) != 0 {
+		next, err := setJSONStrings(editor, file.raw, jsonStringChange{path: antigravityProviderPath, value: "gemini"})
+		if err != nil {
+			return plannedMutation{}, antigravityProblem(err)
+		}
+		replaceSettings = func() error { return file.replace(next) }
 	}
-	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
+	return plannedMutation{plan: plan, apply: func(ctx context.Context) error {
+		// Persist the environment first. Every committed prefix remains usable:
+		// Antigravity enters Gemini mode only after its required environment exists.
+		if environment.apply != nil {
+			if err := environment.apply(ctx); err != nil {
+				return err
+			}
+		}
+		if replaceSettings != nil {
+			return replaceSettings()
+		}
+		return nil
+	}}, nil
+}
+
+type antigravityEnvironmentPlan struct {
+	configPaths []string
+	changes     []Change
+	apply       func(context.Context) error
+}
+
+func antigravityProfileBlock(endpoint string) []byte {
+	return []byte(antigravityProfileStart + "\n" +
+		`export GEMINI_API_KEY="${GEMINI_API_KEY:-swobu-local}"` + "\n" +
+		"export GOOGLE_GEMINI_BASE_URL='" + endpoint + "'\n" +
+		antigravityProfileEnd + "\n")
 }
 
 func antigravityProblem(err error) error { return fmt.Errorf("Antigravity CLI: %w", err) }

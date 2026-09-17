@@ -54,7 +54,6 @@ type Runner struct {
 	ConnectWorkspaces   connectWorkspaceLister
 	UpdateExecutable    func() (string, error)
 	RunInstaller        func(context.Context, *http.Client, string, io.Writer, io.Writer) error
-	RunAntigravity      func(context.Context, []string, []string, io.Reader, io.Writer, io.Writer) error
 }
 
 // Run dispatches explicit CLI commands or starts the interactive Cockpit.
@@ -225,8 +224,6 @@ func dispatchSubcommand(ctx context.Context, args []string, start func(context.C
 		return runUpdate(ctx, stdout, stderr, args[1:], runner)
 	case "connect":
 		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
-	case "launch":
-		return runLaunch(ctx, client, stdout, stderr, args[1:], runner)
 	case "share":
 		return runShare(ctx, client, stdout, stderr, args[1:])
 	default:

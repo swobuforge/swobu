@@ -44,7 +44,7 @@ swobu connect claude
 swobu connect codex
 ```
 
-Muse, Pi, Kilo, and Hermes are also supported. Antigravity CLI 1.2.3 and newer connects through `swobu launch antigravity`; release qualification uses the exact certified 1.2.3 binary.
+Muse, pi, Kilo, and Hermes are also supported. Certified with Antigravity CLI 1.2.3: run `swobu connect antigravity --workspace <name>`, open a new terminal, then run ordinary `agy`.
 
 [Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
 

@@ -2,24 +2,14 @@ package clientconnect
 
 import (
 	"context"
-	"fmt"
 	"os"
 )
 
 type adapter struct {
-	id             ClientID
-	name           string
-	targetOptional bool
-	present        func(*Service) (bool, error)
-	planCurrent    func(context.Context, *Service, Target) (plannedMutation, error)
-}
-
-func ClientRequiresTarget(id ClientID) (bool, error) {
-	adapter, ok := adapterFor(id)
-	if !ok {
-		return false, fmt.Errorf("unsupported client")
-	}
-	return !adapter.targetOptional, nil
+	id          ClientID
+	name        string
+	present     func(*Service) (bool, error)
+	planCurrent func(context.Context, *Service, Target) (plannedMutation, error)
 }
 
 var adapters = []adapter{

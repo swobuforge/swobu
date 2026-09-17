@@ -69,6 +69,7 @@ type Disclosure struct {
 	EndpointOpen       *tui.State[bool]
 	Child              *tui.State[childScope]
 	Feedback           *tui.State[copyFeedback]
+	ApplyFeedback      *tui.State[string]
 	app                *tui.App
 	endpointGeneration uint64
 	endpointContext    context.Context
@@ -87,6 +88,7 @@ func New(target clientconnect.Target, ops connectOperations) *Disclosure {
 		EndpointOpen:     tui.NewState(false),
 		Child:            tui.NewState(childScope{}),
 		Feedback:         tui.NewState(copyFeedback{}),
+		ApplyFeedback:    tui.NewState(""),
 	}
 }
 
@@ -106,6 +108,9 @@ func (d *Disclosure) BindApp(app *tui.App) {
 	}
 	if d.Feedback != nil {
 		d.Feedback.BindApp(app)
+	}
+	if d.ApplyFeedback != nil {
+		d.ApplyFeedback.BindApp(app)
 	}
 }
 
@@ -178,6 +183,7 @@ func (d *Disclosure) hasLiveApp() bool {
 
 func (d *Disclosure) toggleEndpoint() {
 	opening := !d.EndpointOpen.Get()
+	d.ApplyFeedback.Set("")
 	if opening {
 		d.cancelEndpoint()
 		d.endpointContext, d.endpointCancel = context.WithCancel(context.Background())
@@ -413,6 +419,7 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 	nextObsList[targetIdx].Applying = true
 	nextObsList[targetIdx].Err = ""
 	d.Observations.Set(nextObsList)
+	d.ApplyFeedback.Set("")
 
 	if !d.hasLiveApp() {
 		verified, err := ops.Apply(ctx, plan)
@@ -424,6 +431,9 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 			}
 		}
 		d.Observations.Set(updated)
+		if err == nil && verified.AlreadyConfigured() && clientID == clientconnect.ClientAntigravity {
+			d.ApplyFeedback.Set("Configured. Open a new terminal before running agy.")
+		}
 		if err == nil && verified.AlreadyConfigured() && d.Child.Get().isClient(clientID) {
 			d.closeChildScope()
 		}
@@ -445,6 +455,9 @@ func (d *Disclosure) applyPlan(clientID clientconnect.ClientID) {
 				}
 			}
 			d.Observations.Set(updated)
+			if err == nil && verified.AlreadyConfigured() && clientID == clientconnect.ClientAntigravity {
+				d.ApplyFeedback.Set("Configured. Open a new terminal before running agy.")
+			}
 			if err == nil && verified.AlreadyConfigured() && d.Child.Get().isClient(clientID) {
 				d.closeChildScope()
 			}

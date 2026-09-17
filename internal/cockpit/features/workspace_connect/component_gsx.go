@@ -608,107 +608,111 @@ func (d *Disclosure) Render(app *tui.App) *tui.Element {
 				return ClientPicker(d)
 			})
 			__tui_6.AddChild(__tui_8)
+			if d.ApplyFeedback.Get() != "" {
+				__tui_9 := DetailRow(d.ApplyFeedback.Get())
+				__tui_6.AddChild(__tui_9.Root)
+			}
 		}
 		for __idx_0, obs := range d.Observations.Get() {
 			_ = __idx_0
 			if d.Child.Get().isClient(obs.Client.ID) {
-				__tui_9 := app.Mount(d, tui.MountKey(2, __idx_0), func() tui.Component {
+				__tui_10 := app.Mount(d, tui.MountKey(2, __idx_0), func() tui.Component {
 					return ClientHeaderRow(d, obs.Client.ID, obs.Client.Name)
 				})
-				__tui_6.AddChild(__tui_9)
-				__tui_10 := tui.New(
+				__tui_6.AddChild(__tui_10)
+				__tui_11 := tui.New(
 					tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 					tui.WithWidthPercent(100.00),
 					tui.WithPaddingTRBL(0, 0, 0, 3),
 				)
 				if obs.Kind == observationChecking {
-					__tui_11 := CheckingConfigRow()
-					__tui_10.AddChild(__tui_11.Root)
+					__tui_12 := CheckingConfigRow()
+					__tui_11.AddChild(__tui_12.Root)
 				} else if obs.Kind == observationMatch {
-					__tui_12 := InertRow("status", "current")
-					__tui_10.AddChild(__tui_12.Root)
+					__tui_13 := InertRow("status", "current")
+					__tui_11.AddChild(__tui_13.Root)
 					if obs.Err != "" {
-						__tui_13 := DetailRow(obs.Err)
-						__tui_10.AddChild(__tui_13.Root)
+						__tui_14 := DetailRow(obs.Err)
+						__tui_11.AddChild(__tui_14.Root)
 					}
 				} else if obs.Kind == observationFailed {
-					__tui_14 := DangerDetailRow(obs.Err)
-					__tui_10.AddChild(__tui_14.Root)
+					__tui_15 := DangerDetailRow(obs.Err)
+					__tui_11.AddChild(__tui_15.Root)
 				} else if obs.Kind == observationNeedsChange {
 					for __idx_1, change := range obs.Plan.Changes {
 						_ = __idx_1
-						__tui_15 := PlanChangeRow(change.Field, displayChange(d.Target, change))
-						__tui_10.AddChild(__tui_15.Root)
+						__tui_16 := PlanChangeRow(change.Field, displayChange(d.Target, change))
+						__tui_11.AddChild(__tui_16.Root)
 					}
-					__tui_16 := app.Mount(d, tui.MountKey(3, __idx_0), func() tui.Component {
+					__tui_17 := app.Mount(d, tui.MountKey(3, __idx_0), func() tui.Component {
 						return PlanActionRow(d, obs)
 					})
-					__tui_10.AddChild(__tui_16)
+					__tui_11.AddChild(__tui_17)
 					if obs.Err != "" {
-						__tui_17 := DetailRow(obs.Err)
-						__tui_10.AddChild(__tui_17.Root)
+						__tui_18 := DetailRow(obs.Err)
+						__tui_11.AddChild(__tui_18.Root)
 					}
 				}
-				__tui_6.AddChild(__tui_10)
+				__tui_6.AddChild(__tui_11)
 			}
 		}
 		if d.Child.Get().isManual() {
-			__tui_18 := app.Mount(d, 4, func() tui.Component {
+			__tui_19 := app.Mount(d, 4, func() tui.Component {
 				return OtherClientsHeaderRow(d)
 			})
-			__tui_6.AddChild(__tui_18)
-			__tui_19 := tui.New(
+			__tui_6.AddChild(__tui_19)
+			__tui_20 := tui.New(
 				tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Column),
 				tui.WithWidthPercent(100.00),
 				tui.WithPaddingTRBL(0, 0, 0, 3),
 			)
-			__tui_20 := InertRow("API", "OpenAI · Anthropic")
-			__tui_19.AddChild(__tui_20.Root)
-			__tui_21 := app.Mount(d, 5, func() tui.Component {
+			__tui_21 := InertRow("API", "OpenAI · Anthropic")
+			__tui_20.AddChild(__tui_21.Root)
+			__tui_22 := app.Mount(d, 5, func() tui.Component {
 				return ManualCopyRow(d, "base-url", "Base URL", d.Target.WorkspaceURL(), d.Target.WorkspaceURL(), true)
 			})
-			__tui_19.AddChild(__tui_21)
+			__tui_20.AddChild(__tui_22)
 			if d.Feedback.Get().key == "base-url" && d.Feedback.Get().savedPath != "" {
-				__tui_22 := DetailRow("saved " + d.Feedback.Get().savedPath)
-				__tui_19.AddChild(__tui_22.Root)
+				__tui_23 := DetailRow("saved " + d.Feedback.Get().savedPath)
+				__tui_20.AddChild(__tui_23.Root)
 			}
-			__tui_23 := app.Mount(d, 6, func() tui.Component {
+			__tui_24 := app.Mount(d, 6, func() tui.Component {
 				return ManualCopyRow(d, "model", "Model", "default", "default", true)
 			})
-			__tui_19.AddChild(__tui_23)
+			__tui_20.AddChild(__tui_24)
 			if d.Feedback.Get().key == "model" && d.Feedback.Get().savedPath != "" {
-				__tui_24 := DetailRow("saved " + d.Feedback.Get().savedPath)
-				__tui_19.AddChild(__tui_24.Root)
+				__tui_25 := DetailRow("saved " + d.Feedback.Get().savedPath)
+				__tui_20.AddChild(__tui_25.Root)
 			}
-			__tui_25 := app.Mount(d, 7, func() tui.Component {
+			__tui_26 := app.Mount(d, 7, func() tui.Component {
 				return ManualCopyRow(d, "models-url", "Models URL", d.Target.WorkspaceURL()+"/models", d.Target.WorkspaceURL()+"/models", true)
 			})
-			__tui_19.AddChild(__tui_25)
+			__tui_20.AddChild(__tui_26)
 			if d.Feedback.Get().key == "models-url" && d.Feedback.Get().savedPath != "" {
-				__tui_26 := DetailRow("saved " + d.Feedback.Get().savedPath)
-				__tui_19.AddChild(__tui_26.Root)
+				__tui_27 := DetailRow("saved " + d.Feedback.Get().savedPath)
+				__tui_20.AddChild(__tui_27.Root)
 			}
-			__tui_27 := app.Mount(d, 8, func() tui.Component {
+			__tui_28 := app.Mount(d, 8, func() tui.Component {
 				return ManualCopyRow(d, "api-key", "API key", "swobu · placeholder", "swobu", false)
 			})
-			__tui_19.AddChild(__tui_27)
+			__tui_20.AddChild(__tui_28)
 			if d.Feedback.Get().saveErr != nil {
-				__tui_28 := DangerDetailRow("copy failed · " + d.Feedback.Get().saveErr.Error())
-				__tui_19.AddChild(__tui_28.Root)
+				__tui_29 := DangerDetailRow("copy failed · " + d.Feedback.Get().saveErr.Error())
+				__tui_20.AddChild(__tui_29.Root)
 			} else if d.Feedback.Get().clipboard.Status == cockpitui.CopyFailed && d.Feedback.Get().savedPath == "" {
-				__tui_29 := DangerDetailRow("copy failed · run swobu doctor --copy")
-				__tui_19.AddChild(__tui_29.Root)
+				__tui_30 := DangerDetailRow("copy failed · run swobu doctor --copy")
+				__tui_20.AddChild(__tui_30.Root)
 			}
 			if d.Feedback.Get().clipboard.Status == cockpitui.CopyUnavailable && d.Feedback.Get().savedPath == "" {
-				__tui_30 := DetailRow("clipboard unavailable")
-				__tui_19.AddChild(__tui_30.Root)
+				__tui_31 := DetailRow("clipboard unavailable")
+				__tui_20.AddChild(__tui_31.Root)
 			}
-			__tui_6.AddChild(__tui_19)
+			__tui_6.AddChild(__tui_20)
 		} else if d.Child.Get().kind == childNone {
-			__tui_31 := app.Mount(d, 9, func() tui.Component {
+			__tui_32 := app.Mount(d, 9, func() tui.Component {
 				return OtherClientsRow(d)
 			})
-			__tui_6.AddChild(__tui_31)
+			__tui_6.AddChild(__tui_32)
 		}
 		__tui_0.AddChild(__tui_6)
 	}

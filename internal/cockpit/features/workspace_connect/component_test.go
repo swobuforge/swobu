@@ -303,6 +303,26 @@ func TestDisclosurePlanChildScopeAndApplyConfiguresClientWithoutToast(t *testing
 	}
 }
 
+func TestDisclosureAntigravityApplyExplainsFreshShell(t *testing.T) {
+	target := connectTarget(t)
+	ops := &fakeOperations{
+		clients: []clientconnect.Client{{ID: clientconnect.ClientAntigravity, Name: "Antigravity CLI"}},
+		plans: map[clientconnect.ClientID]clientconnect.Plan{clientconnect.ClientAntigravity: {
+			ClientID: clientconnect.ClientAntigravity, ClientName: "Antigravity CLI", Target: target,
+			ConfigPaths: []string{"/tmp/.zshrc", "/tmp/settings.json"},
+			Changes:     []clientconnect.Change{{Field: "endpoint", After: target.WorkspaceURL()}},
+		}},
+	}
+	d := New(target, ops)
+	d.toggleEndpoint()
+	d.chooseClient(clientconnect.ClientAntigravity)
+	d.applyPlan(clientconnect.ClientAntigravity)
+	frame := testkit.RenderMountedTrimmed(t, d, 100, 20)
+	if !strings.Contains(frame, "Antigravity CLI") || !strings.Contains(frame, "configured ↵") || !strings.Contains(frame, "Configured. Open a new terminal before running agy.") {
+		t.Fatalf("Antigravity success frame:\n%s", frame)
+	}
+}
+
 func TestPlanActionGrammarDistinguishesInsertFromOverwrite(t *testing.T) {
 	d, _ := connectFixture(t)
 	for _, tc := range []struct {
@@ -1911,7 +1931,7 @@ func TestConfiguredClientRemainsActionable(t *testing.T) {
 		t.Fatalf("expected 1 initial planCall, got %d", got)
 	}
 
-	// Pi is rendered as configured ↵ in resting browse
+	// pi is rendered as configured ↵ in resting browse
 	frame := h.Frame()
 	if !strings.Contains(frame, "pi") || !strings.Contains(frame, "configured ↵") {
 		t.Fatalf("expected configured ↵:\n%s", frame)
@@ -2130,7 +2150,7 @@ func TestRealPiConfigurationCreatesMissingGlobalFiles(t *testing.T) {
 	})
 	observation := observationFor(t, d.Observations.Get(), clientconnect.ClientPi)
 	if observation.Kind != observationNeedsChange {
-		t.Fatalf("Pi observation = %#v\n%s", observation, h.Frame())
+		t.Fatalf("pi observation = %#v\n%s", observation, h.Frame())
 	}
 	d.chooseClient(clientconnect.ClientPi)
 	waitFor(t, func() bool {

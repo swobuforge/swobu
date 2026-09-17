@@ -148,10 +148,14 @@ func TestConnectUsesCanonicalPlanAndSemanticReplaceGate(t *testing.T) {
 	}
 }
 
-func TestConnectAntigravityDoesNotStartDaemonOrResolveWorkspace(t *testing.T) {
+func TestConnectAntigravityProviderOnlyRepairStillExplainsFreshShell(t *testing.T) {
+	target, err := clientconnect.NewTarget("work", "http://127.0.0.1:7926/c/work")
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan := clientconnect.Plan{
 		ClientID: clientconnect.ClientAntigravity, ClientName: "Antigravity CLI", ConfigPaths: []string{"/tmp/settings.json"},
-		Changes: []clientconnect.Change{{Field: "modelProvider", After: "gemini"}},
+		Target: target, Changes: []clientconnect.Change{{Field: "model provider", After: "gemini"}},
 	}
 	ops := &connectOperationsStub{plan: plan}
 	attachCalled := false
@@ -161,17 +165,40 @@ func TestConnectAntigravityDoesNotStartDaemonOrResolveWorkspace(t *testing.T) {
 		ConnectWorkspaces: connectWorkspacesStub{summaries: []workspaceapi.WorkspaceSummary{{Slug: "work"}, {Slug: "personal"}}},
 		ConnectAttach: func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error {
 			attachCalled = true
-			return errors.New("must not attach")
+			return nil
 		},
 	}
-	if got := runner.Run(context.Background(), []string{"connect", "antigravity"}); got != ExitHealthy {
+	if got := runner.Run(context.Background(), []string{"connect", "antigravity", "--workspace", "work"}); got != ExitHealthy {
 		t.Fatalf("code=%v stderr=%s", got, stderr.String())
 	}
-	if attachCalled {
-		t.Fatal("global Antigravity configuration started or attached the daemon")
+	if !attachCalled {
+		t.Fatal("Antigravity configuration did not attach to resolve its workspace")
 	}
-	if ops.plannedID != clientconnect.ClientAntigravity || ops.plannedURL != "" || !ops.applied {
+	if ops.plannedID != clientconnect.ClientAntigravity || ops.plannedURL != target.WorkspaceURL() || !ops.applied {
 		t.Fatalf("plan/apply=%q %q %t", ops.plannedID, ops.plannedURL, ops.applied)
+	}
+	if !strings.Contains(stdout.String(), "If this shell predates configuration, open a new terminal before running agy.") {
+		t.Fatalf("stdout missing fresh-shell instruction:\n%s", stdout.String())
+	}
+}
+
+func TestConnectAntigravityAlreadyConfiguredDoesNotRequestAnotherTerminal(t *testing.T) {
+	target, err := clientconnect.NewTarget("work", "http://127.0.0.1:7926/c/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &connectOperationsStub{plan: clientconnect.Plan{ClientID: clientconnect.ClientAntigravity, ClientName: "Antigravity CLI", Target: target}}
+	var stdout bytes.Buffer
+	runner := Runner{
+		Stdout: &stdout, Stderr: io.Discard, HTTPClient: http.DefaultClient, ConnectOperations: ops,
+		ConnectWorkspaces: connectWorkspacesStub{summaries: []workspaceapi.WorkspaceSummary{{Slug: "work"}}},
+		ConnectAttach:     func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error { return nil },
+	}
+	if got := runner.Run(context.Background(), []string{"connect", "antigravity"}); got != ExitHealthy {
+		t.Fatalf("code = %v", got)
+	}
+	if strings.Contains(stdout.String(), "Open a new terminal") {
+		t.Fatalf("no-op Connect requested another terminal:\n%s", stdout.String())
 	}
 }
 

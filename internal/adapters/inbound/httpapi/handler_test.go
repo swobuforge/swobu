@@ -95,13 +95,21 @@ func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	}
 }
 
-func TestHandlerErasesGenerateContentDummyAPIKeyHeader(t *testing.T) {
-	request, _, err := ingressTransportRequest(http.MethodPost, "/v1beta/models/gemini:generateContent", "alpha", canonical.ClientFamilyGenerateContent, http.Header{"X-Goog-Api-Key": []string{"dummy-secret"}}, nil)
-	if err != nil {
-		t.Fatal(err)
+func TestHandlerErasesGenerateContentAuthenticationBeforeExchange(t *testing.T) {
+	const secret = "real-looking-gemini-secret"
+	capturing := &capturingRequestIngress{}
+	handler := newTestHandler(capturing)
+	req := httptest.NewRequest(http.MethodPost, "/c/alpha/v1beta/models/gemini:generateContent?key="+secret, bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+	req.Header.Set("X-Goog-Api-Key", secret)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got := capturing.got.Request.Header.Get("X-Goog-Api-Key"); got != "" {
+		t.Fatalf("GenerateContent key header reached exchange: %q", got)
 	}
-	if got := request.Header.Get("X-Goog-Api-Key"); got != "" {
-		t.Fatalf("GenerateContent dummy key reached exchange: %q", got)
+	if strings.Contains(capturing.got.Request.URL, secret) || strings.Contains(string(capturing.got.Request.Body), secret) {
+		t.Fatalf("GenerateContent query key reached exchange: URL=%q body=%s", capturing.got.Request.URL, capturing.got.Request.Body)
 	}
 }
 

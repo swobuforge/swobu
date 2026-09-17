@@ -105,7 +105,7 @@ templ DangerDetailRow(value string) {
 }
 
 templ (d *Disclosure) Render() {
-	<div class="flex-col w-full" deps={d.EndpointOpen, d.DiscoveryPending, d.Observations, d.Child, d.Feedback}>
+	<div class="flex-col w-full" deps={d.EndpointOpen, d.DiscoveryPending, d.Observations, d.Child, d.Feedback, d.ApplyFeedback}>
 		@EndpointRow(d)
 		if !d.EndpointOpen.Get() {
 			<div class="flex-row w-full">
@@ -119,6 +119,7 @@ templ (d *Disclosure) Render() {
 				}
 				if d.Child.Get().kind == childNone && !d.DiscoveryPending.Get() {
 					@ClientPicker(d)
+					if d.ApplyFeedback.Get() != "" { @DetailRow(d.ApplyFeedback.Get()) }
 				}
 				for _, obs := range d.Observations.Get() {
 					if d.Child.Get().isClient(obs.Client.ID) {
