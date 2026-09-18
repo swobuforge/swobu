@@ -1,6 +1,8 @@
 package opencodezen
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +11,8 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/openaifamily"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -36,7 +40,35 @@ func (r openCodeBackendResolver) ResolveBackend(target provider.TargetSnapshot) 
 	}
 	codec.ProjectRequestHeaders = projectOpenCodeRequestHeaders
 	backend.Codec = codec
+	backend.Transport = zenTargetHealthTransport{base: backend.Transport}
 	return backend, backend.Validate()
+}
+
+type zenTargetHealthTransport struct{ base provider.Transport }
+
+func (t zenTargetHealthTransport) Send(ctx context.Context, document carrier.Document) (provider.Ingress, error) {
+	ingress, err := t.base.Send(ctx, document)
+	if err == nil {
+		return ingress, nil
+	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok {
+		return ingress, err
+	}
+	var backend canonical.BackendError
+	if errors.As(failure.Cause(), &backend) && backend.StatusCode == http.StatusForbidden && zenFreeTierError(backend.Message) {
+		return ingress, provider.AttemptRejectedBeforeExecution(provider.Rejected(provider.TargetIncompatible(backend)))
+	}
+	return ingress, err
+}
+
+func zenFreeTierError(raw string) bool {
+	var envelope struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	return json.Unmarshal([]byte(raw), &envelope) == nil && envelope.Error.Type == "FreeTierError"
 }
 
 func projectOpenCodeRequestHeaders(attempt provider.AttemptContext, header http.Header) error {

@@ -150,6 +150,9 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
 		backendErr = protocolcodec.ParseBackendError(backendErr, target.ProtocolKind, resp.Header.Get("x-request-id"))
 		classifiedErr := classifyBackendError(backendErr)
+		if e.profile.targetUnavailableStatus(backendErr.StatusCode) {
+			classifiedErr = provider.TargetUnavailable(classifiedErr)
+		}
 		if canonical.IsBackendErrorClass(classifiedErr, canonical.BackendErrorClassToolChoiceUnsupported) {
 			return nil, provider.AttemptRejectedBeforeExecution(provider.Rejected(classifiedErr))
 		}

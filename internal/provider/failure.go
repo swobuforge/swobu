@@ -116,6 +116,24 @@ func (e RejectedError) Error() string {
 func (e RejectedError) Unwrap() error  { return e.Cause }
 func (RejectedError) providerFailure() {}
 
+// TargetUnavailableError is positive provider-edge evidence that the exact
+// target generation is not currently addressable independently of this request.
+type TargetUnavailableError struct{ Cause error }
+
+func (e TargetUnavailableError) Error() string {
+	return failureMessage("provider target is unavailable", e.Cause)
+}
+func (e TargetUnavailableError) Unwrap() error { return e.Cause }
+
+// TargetIncompatibleError is positive provider-edge evidence that the exact
+// authored target cannot serve requests through its configured access path.
+type TargetIncompatibleError struct{ Cause error }
+
+func (e TargetIncompatibleError) Error() string {
+	return failureMessage("provider target is incompatible", e.Cause)
+}
+func (e TargetIncompatibleError) Unwrap() error { return e.Cause }
+
 // InvalidRequestError means provider execution could not begin because the
 // selected request or backend configuration is invalid.
 type InvalidRequestError struct{ Cause error }
@@ -157,6 +175,18 @@ func TimedOut(err error) error {
 }
 func Rejected(err error) error {
 	return wrapFailure(err, func(cause error) error { return RejectedError{Cause: cause} })
+}
+func TargetUnavailable(err error) error {
+	if err == nil {
+		return nil
+	}
+	return TargetUnavailableError{Cause: err}
+}
+func TargetIncompatible(err error) error {
+	if err == nil {
+		return nil
+	}
+	return TargetIncompatibleError{Cause: err}
 }
 func InvalidRequest(err error) error {
 	return wrapFailure(err, func(cause error) error { return InvalidRequestError{Cause: cause} })

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
@@ -86,15 +87,16 @@ func decorateOpenRouterAttempt(ctx provider.AttemptContext) (protocolcodec.Attem
 }
 
 type openRouterReasoningExtractor struct {
-	detailsRaw  []byte
-	detailItems []json.RawMessage
-	seenDetails map[string]struct{}
-	flat        strings.Builder
+	detailsRaw     []byte
+	detailItems    []json.RawMessage
+	detailsPresent bool
+	detailRunOpen  bool
+	flat           strings.Builder
 }
 
 func (e *openRouterReasoningExtractor) ExtractBufferedChatReasoning(message map[string]json.RawMessage) (string, error) {
 	if raw, ok := message["reasoning_details"]; ok {
-		if _, err := e.captureDetails(raw); err != nil {
+		if _, err := e.captureDetails(raw, false); err != nil {
 			return "", err
 		}
 		delete(message, "reasoning_details")
@@ -110,12 +112,15 @@ func (e *openRouterReasoningExtractor) ExtractBufferedChatReasoning(message map[
 func (e *openRouterReasoningExtractor) ExtractStreamedChatReasoning(delta map[string]json.RawMessage) (protocolcodec.ChatReasoningFragment, error) {
 	observed := false
 	if raw, ok := delta["reasoning_details"]; ok {
-		added, err := e.captureDetails(raw)
+		_, err := e.captureDetails(raw, true)
 		if err != nil {
 			return protocolcodec.ChatReasoningFragment{}, err
 		}
 		delete(delta, "reasoning_details")
-		observed = added
+		// Opaque continuation metadata has an independent lifecycle from
+		// visible reasoning and may arrive after answer output has begun.
+	} else {
+		e.detailRunOpen = false
 	}
 	var text string
 	if raw, ok := delta["reasoning"]; ok {
@@ -129,36 +134,32 @@ func (e *openRouterReasoningExtractor) ExtractStreamedChatReasoning(delta map[st
 	return protocolcodec.ChatReasoningFragment{Text: text, Observed: observed}, nil
 }
 
-func (e *openRouterReasoningExtractor) captureDetails(raw json.RawMessage) (bool, error) {
+func (e *openRouterReasoningExtractor) captureDetails(raw json.RawMessage, streamed bool) (bool, error) {
 	if !json.Valid(raw) {
 		return false, canonical.InternalError("OpenRouter reasoning_details is invalid JSON")
+	}
+	if trimmed := strings.TrimSpace(string(raw)); len(trimmed) == 0 || trimmed[0] != '[' {
+		return false, canonical.InternalError("OpenRouter reasoning_details must be an array")
 	}
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return false, canonical.InternalError("OpenRouter reasoning_details must be an array")
 	}
-	added := false
-	if e.seenDetails == nil {
-		e.seenDetails = make(map[string]struct{})
-	}
+	e.detailsPresent = true
 	for _, item := range items {
 		if !json.Valid(item) {
 			return false, canonical.InternalError("OpenRouter reasoning_details contains invalid JSON")
 		}
-		key := string(item)
-		if _, seen := e.seenDetails[key]; seen {
+		cloned := append(json.RawMessage(nil), item...)
+		if streamed && e.detailRunOpen && e.mergeDetailDelta(cloned) {
 			continue
 		}
-		e.seenDetails[key] = struct{}{}
-		e.detailItems = append(e.detailItems, append(json.RawMessage(nil), item...))
-		added = true
+		e.detailItems = append(e.detailItems, cloned)
+		e.detailRunOpen = streamed
 	}
-	if len(e.detailsRaw) == 0 && added && len(e.detailItems) == len(items) {
+	if len(e.detailsRaw) == 0 && len(e.detailItems) == len(items) {
 		e.detailsRaw = append([]byte(nil), raw...)
 		return true, nil
-	}
-	if !added {
-		return false, nil
 	}
 	encoded, err := json.Marshal(e.detailItems)
 	if err != nil {
@@ -168,8 +169,62 @@ func (e *openRouterReasoningExtractor) captureDetails(raw json.RawMessage) (bool
 	return true, nil
 }
 
+// mergeDetailDelta reconstructs the two OpenRouter detail kinds whose text is
+// delivered as consecutive stream deltas. All other detail kinds remain
+// occurrence-preserving opaque replay units.
+func (e *openRouterReasoningExtractor) mergeDetailDelta(next json.RawMessage) bool {
+	if len(e.detailItems) == 0 {
+		return false
+	}
+	var previousFields, nextFields map[string]json.RawMessage
+	if json.Unmarshal(e.detailItems[len(e.detailItems)-1], &previousFields) != nil || json.Unmarshal(next, &nextFields) != nil {
+		return false
+	}
+	var previousType, nextType string
+	_ = json.Unmarshal(previousFields["type"], &previousType)
+	_ = json.Unmarshal(nextFields["type"], &nextType)
+	field := ""
+	switch {
+	case previousType == "reasoning.summary" && nextType == previousType:
+		field = "summary"
+	case previousType == "reasoning.text" && nextType == previousType:
+		field = "text"
+	default:
+		return false
+	}
+	var previousText, nextText string
+	if json.Unmarshal(previousFields[field], &previousText) != nil || json.Unmarshal(nextFields[field], &nextText) != nil {
+		return false
+	}
+	for key, value := range nextFields {
+		if key == field || key == "type" {
+			continue
+		}
+		if existing, ok := previousFields[key]; ok && !jsonEqual(existing, value) {
+			return false
+		}
+		previousFields[key] = value
+	}
+	merged, err := json.Marshal(previousText + nextText)
+	if err != nil {
+		return false
+	}
+	previousFields[field] = merged
+	encoded, err := json.Marshal(previousFields)
+	if err != nil {
+		return false
+	}
+	e.detailItems[len(e.detailItems)-1] = encoded
+	return true
+}
+
+func jsonEqual(left, right json.RawMessage) bool {
+	var leftValue, rightValue any
+	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
+}
+
 func (e *openRouterReasoningExtractor) NewChatReasoningItem(content string) (canonical.CanonicalItem, error) {
-	hasDetails := len(e.detailItems) > 0
+	hasDetails := e.detailsPresent
 	var details json.RawMessage
 	if hasDetails {
 		if len(e.detailsRaw) > 0 {
@@ -187,6 +242,24 @@ func (e *openRouterReasoningExtractor) NewChatReasoningItem(content string) (can
 		flat = e.flat.String()
 	}
 	return newOpenRouterReasoningItem(details, hasDetails, flat)
+}
+
+func (*openRouterReasoningExtractor) NewChatVisibleReasoningItem(content string) (canonical.CanonicalItem, error) {
+	return newOpenRouterReasoningItem(nil, false, content)
+}
+
+func (e *openRouterReasoningExtractor) FinalizeChatContinuation() (canonical.CanonicalItem, error) {
+	if !e.detailsPresent {
+		return canonical.CanonicalItem{}, nil
+	}
+	if !json.Valid(e.detailsRaw) {
+		return canonical.CanonicalItem{}, canonical.InternalError("OpenRouter reasoning_details are invalid")
+	}
+	opaque, err := canonical.NewProviderChatOpaqueThinking(ChatReplayScope, e.detailsRaw)
+	if err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	return canonical.NewReasoningItem(nil, opaque)
 }
 
 func newOpenRouterReasoningItem(details json.RawMessage, hasDetails bool, flat string) (canonical.CanonicalItem, error) {

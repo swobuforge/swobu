@@ -186,3 +186,40 @@ func (o CanonicalResponse) Clone() CanonicalResponse {
 func (o CanonicalResponse) WithUsage(usage TokenUsage) CanonicalResponse {
 	return newCanonicalResponse(o.response, o.model, o.items, o.completion, usage)
 }
+
+// WithReasoningPrelude replaces the live visible reasoning prelude, or inserts
+// an opaque-only prelude when the provider supplied continuation state only at
+// stream completion. This is checkpoint composition, not live item ordering.
+func (o CanonicalResponse) WithReasoningPrelude(item CanonicalItem) (CanonicalResponse, error) {
+	if _, ok := item.Reasoning(); !ok {
+		return CanonicalResponse{}, fmt.Errorf("checkpoint reasoning prelude is invalid")
+	}
+	items := o.Items()
+	if len(items) > 0 {
+		if visible, ok := items[0].Reasoning(); ok {
+			continuation, _ := item.Reasoning()
+			merged, err := NewReasoningItem(visible.Parts(), continuation.Opaque())
+			if err != nil {
+				return CanonicalResponse{}, err
+			}
+			items[0] = merged
+			return NewCanonicalResponse(o.Response(), o.Model(), items, o.Completion(), o.Usage())
+		}
+	}
+	items = append([]CanonicalItem{item}, items...)
+	return NewCanonicalResponse(o.Response(), o.Model(), items, o.Completion(), o.Usage())
+}
+
+// BindResponseOpaqueThinking binds checkpoint-only replay state to the exact
+// target generation that produced it.
+func BindResponseOpaqueThinking(response CanonicalResponse, targetID string, targetVersion uint64) (CanonicalResponse, error) {
+	items := response.Items()
+	for index, item := range items {
+		bound, err := item.withTargetOrigin(targetID, targetVersion)
+		if err != nil {
+			return CanonicalResponse{}, err
+		}
+		items[index] = bound
+	}
+	return NewCanonicalResponse(response.Response(), response.Model(), items, response.Completion(), response.Usage())
+}

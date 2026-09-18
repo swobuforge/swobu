@@ -109,6 +109,32 @@ func TestSendRealizesProviderHeadersBeforeTransportAndAuthOverrides(t *testing.T
 	}
 }
 
+func TestGenericOpenAIFamilyGoneIsNotTargetUnavailable(t *testing.T) {
+	client := &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusGone,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"expired request resource"}}`)),
+			Request:    request,
+		}, nil
+	})}
+	executor := NewExecutor(client, stubCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecCustom))
+	target := provider.NewCustomTargetSnapshot("backend", "https://example.test/v1", "env:TOKEN", protocolkind.ChatCompletions, "chat_completions", "Authorization", delivery.BufferedDelivery())
+	target.Model = "model"
+	_, err := executor.Send(context.Background(), target, carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{"model":"model","messages":[]}`), carrier.Meta{}))
+	if err == nil {
+		t.Fatal("generic 410 was accepted")
+	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok {
+		t.Fatalf("error = %T, want attempt failure", err)
+	}
+	var unavailable provider.TargetUnavailableError
+	if errors.As(failure.Cause(), &unavailable) {
+		t.Fatal("generic OpenAI-family 410 became target-wide unavailability")
+	}
+}
+
 func TestOpenAIFamilyTargetsRequireExactChatCompletionsWebSearchDialect(t *testing.T) {
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),

@@ -230,19 +230,7 @@ type FinishPayload struct {
 }
 
 type ErrorPayload struct {
-	Code            string
-	Message         string
-	Retryable       bool
-	diagnosticCause error
+	Code      string
+	Message   string
+	Retryable bool
 }
-
-// NewErrorPayloadWithDiagnostic constructs a public terminal error projection
-// while retaining its private response-processing cause for the delivery
-// owner. The cause never enters protocol encoding or stable error text.
-func NewErrorPayloadWithDiagnostic(code, message string, retryable bool, cause error) ErrorPayload {
-	return ErrorPayload{Code: code, Message: message, Retryable: retryable, diagnosticCause: cause}
-}
-
-// DiagnosticCause returns the private failure that required this terminal
-// projection. It is intentionally absent from public wire fields.
-func (p ErrorPayload) DiagnosticCause() error { return p.diagnosticCause }

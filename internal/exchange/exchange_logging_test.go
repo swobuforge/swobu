@@ -352,7 +352,7 @@ func TestProviderAttemptLoggingPreservesOnlyNonProseStructuredProviderDiagnostic
 	}
 }
 
-func TestProviderAttemptLoggingEmitsPrivateDecoderCauseOnlyAtDebug(t *testing.T) {
+func TestProviderAttemptLoggingEmitsOnlyStructuredDecoderDiagnosticAtDebug(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -369,7 +369,10 @@ func TestProviderAttemptLoggingEmitsPrivateDecoderCauseOnlyAtDebug(t *testing.T)
 	}
 	for _, entry := range entries {
 		if entry["event"] == "provider_decoder_diagnostic" {
-			assertLogField(t, entry, "diagnostic_error", "invalid character 'x'")
+			assertLogField(t, entry, "error_type", "*errors.errorString")
+			if _, exists := entry["diagnostic_error"]; exists || strings.Contains(logs.String(), "invalid character 'x'") {
+				t.Fatalf("decoder diagnostic exposed arbitrary error prose: %#v", entry)
+			}
 			continue
 		}
 		if _, exists := entry["diagnostic_error"]; exists {

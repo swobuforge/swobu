@@ -15,6 +15,92 @@ import (
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
+func TestChatReasoningCarrierForwardsAssistantRoleOnlyRepeatedTerminalChoice(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), testChatReasoningExtractor{})
+	encoded, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"role":"assistant"`) {
+		t.Fatalf("assistant-role-only terminal frame was not forwarded: %s", encoded)
+	}
+}
+
+func TestChatReasoningCarrierBoundsPostFinishTail(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		strings.Repeat("data: {\"choices\":[],\"usage\":{}}\n\n", maxChatReasoningTailFrames+1)
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), testChatReasoningExtractor{})
+	if _, err := io.ReadAll(body); err == nil || !strings.Contains(err.Error(), "tail exceeded") {
+		t.Fatalf("oversized terminal tail error = %v", err)
+	} else {
+		var backend canonical.BackendError
+		if !errors.As(err, &backend) {
+			t.Fatalf("oversized provider tail error type = %T, want backend origin", err)
+		}
+	}
+}
+
+func TestChatReasoningCarrierAcceptsBoundedMetadataUsageAndRepeatedFinish(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		"",
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		"",
+		`data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), testChatReasoningExtractor{})
+	encoded, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}`) || !strings.Contains(string(encoded), "data: [DONE]") {
+		t.Fatalf("accepted tail = %s", encoded)
+	}
+}
+
+func TestChatReasoningCarrierPreservesReaderFailureAfterHeldTerminal(t *testing.T) {
+	want := errors.New("transport broke")
+	body := NewChatReasoningSSEBody(&terminalErrorReader{Reader: strings.NewReader("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"), err: want}, testChatReasoningExtractor{})
+	_, err := io.ReadAll(body)
+	if !errors.Is(err, want) {
+		t.Fatalf("reader error = %v, want %v", err, want)
+	}
+}
+
+func TestChatReasoningCarrierForwardsMalformedPostFinishFrameToSharedDecoder(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: not-json\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), testChatReasoningExtractor{})
+	encoded, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "data: not-json") {
+		t.Fatalf("malformed terminal frame was not forwarded: %s", encoded)
+	}
+}
+
+type terminalErrorReader struct {
+	*strings.Reader
+	err error
+}
+
+func (r *terminalErrorReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if errors.Is(err, io.EOF) {
+		return n, r.err
+	}
+	return n, err
+}
+
+func (*terminalErrorReader) Close() error { return nil }
+
 func TestChatReasoningPreludeStreamInsertsBeforeOutputAndResequences(t *testing.T) {
 	reasoning := testChatReasoningItem(t, "reasoning")
 	start, err := canonical.NewMessageStart(canonical.MessageRoleAssistant)

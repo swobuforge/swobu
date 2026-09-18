@@ -75,7 +75,7 @@ func TestTerminalResponseStreamHidesUnderlyingPostStartFailure(t *testing.T) {
 	}
 }
 
-func TestTerminalResponseStreamLogsPrivatePostStartFailureAtItsOriginalStage(t *testing.T) {
+func TestTerminalResponseStreamLogsOnlyStructuredPostStartFailureDiagnostics(t *testing.T) {
 	underlying := errors.New("item.completed ordinal 2 is duplicated")
 	upstream := &failAfterEventsStream{
 		events: []canonical.Event{{
@@ -118,7 +118,9 @@ func TestTerminalResponseStreamLogsPrivatePostStartFailureAtItsOriginalStage(t *
 	}
 	assertLogField(t, diagnostic, "exchange_id", "exchange_1")
 	assertLogField(t, diagnostic, "failure_stage", "canonical_response_validation")
-	assertLogField(t, diagnostic, "diagnostic_error", underlying.Error())
+	if _, exists := diagnostic["diagnostic_error"]; exists || strings.Contains(logs.String(), underlying.Error()) {
+		t.Fatalf("diagnostic exposed arbitrary error prose: %#v", diagnostic)
+	}
 }
 
 func TestTerminalResponseStreamPreservesStructuredProviderFailure(t *testing.T) {

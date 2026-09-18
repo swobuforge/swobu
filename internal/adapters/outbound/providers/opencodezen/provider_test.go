@@ -2,6 +2,7 @@ package opencodezen
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
@@ -177,6 +179,53 @@ func TestOpenCodeTargetCharacterizationRecordReplayProjectsStableThread(t *testi
 	}
 	if len(sessions) != 3 || sessions[0] == "" || sessions[0] != sessions[1] || sessions[1] != sessions[2] {
 		t.Fatalf("characterization sessions = %#v", sessions)
+	}
+}
+
+func TestOpenCodeFreeTierErrorClassifiesExactTargetIncompatible(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"type":"FreeTierError","message":"not available on free tier"}}`)
+	}))
+	defer server.Close()
+	target := provider.NewTargetSnapshot("zen", string(profile.ProviderSpecOpenCodeZen), server.URL+"/v1", "env:ZEN_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := NewRuntime(server.Client(), credentialResolver{}).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = backend.Transport.Send(context.Background(), carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{}`), carrier.Meta{}))
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok {
+		t.Fatalf("failure = %T %v", err, err)
+	}
+	var incompatible provider.TargetIncompatibleError
+	if !errors.As(failure.Cause(), &incompatible) {
+		t.Fatalf("cause = %T, want TargetIncompatibleError", failure.Cause())
+	}
+}
+
+func TestOpenCodeGenericForbiddenRemainsRequestRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"type":"permission_error","message":"forbidden"}}`)
+	}))
+	defer server.Close()
+	target := provider.NewTargetSnapshot("zen", string(profile.ProviderSpecOpenCodeZen), server.URL+"/v1", "env:ZEN_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	target.Model = "model"
+	backend, err := NewRuntime(server.Client(), credentialResolver{}).BackendResolver.ResolveBackend(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = backend.Transport.Send(context.Background(), carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{}`), carrier.Meta{}))
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok {
+		t.Fatalf("failure = %T %v", err, err)
+	}
+	var incompatible provider.TargetIncompatibleError
+	if errors.As(failure.Cause(), &incompatible) {
+		t.Fatal("generic 403 became target incompatibility")
 	}
 }
 

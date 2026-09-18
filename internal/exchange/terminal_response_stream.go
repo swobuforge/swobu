@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -20,6 +21,7 @@ type terminalResponseStream struct {
 	terminated bool
 	pending    []canonical.Event
 	last       canonical.Event
+	failure    error
 }
 
 func newTerminalResponseStream(upstream canonical.ResponseStream) canonical.ResponseStream {
@@ -38,6 +40,7 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 	event, err := s.upstream.Next(ctx)
 	if err != nil {
 		if s.started && (errors.Is(err, io.EOF) || !errors.Is(err, context.Canceled)) {
+			s.failure = err
 			logPostStartStreamDiagnostic(s.last, err)
 			code, message := "provider_stream_decode_failed", "provider stream failed after response start"
 			if errors.Is(err, io.EOF) {
@@ -66,7 +69,7 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 				"last_event_kind", s.last.Kind,
 				"last_event_seq", s.last.Seq,
 			)
-			s.pending = terminalFailureEventsWithCause(s.last, code, message, err)
+			s.pending = terminalFailureEvents(s.last, code, message)
 			s.terminated = true
 			return s.Next(ctx)
 		}
@@ -102,9 +105,13 @@ func logPostStartStreamDiagnostic(last canonical.Event, err error) {
 		"event", "provider_stream_failure_diagnostic",
 		"exchange_id", last.ExchangeID,
 		"failure_stage", stage,
-		"diagnostic_error", wire.ResponseFailureCause(err),
+		"error_type", fmt.Sprintf("%T", wire.ResponseFailureCause(err)),
 	)
 }
+
+// TerminalFailureCause exposes delivery provenance only to the wire delivery
+// owner. It deliberately does not enter canonical ErrorPayload.
+func (s *terminalResponseStream) TerminalFailureCause() error { return s.failure }
 
 func (s *terminalResponseStream) Close(ctx context.Context) error {
 	if s.upstream == nil {
@@ -114,10 +121,6 @@ func (s *terminalResponseStream) Close(ctx context.Context) error {
 }
 
 func terminalFailureEvents(base canonical.Event, code, message string) []canonical.Event {
-	return terminalFailureEventsWithCause(base, code, message, nil)
-}
-
-func terminalFailureEventsWithCause(base canonical.Event, code, message string, cause error) []canonical.Event {
 	when := base.Time
 	if when.IsZero() {
 		when = time.Now().UTC()
@@ -126,7 +129,7 @@ func terminalFailureEventsWithCause(base canonical.Event, code, message string, 
 		{
 			ExchangeID: base.ExchangeID, Seq: base.Seq + 1, Time: when,
 			Kind: canonical.EventError, EnvID: base.EnvID, ParentID: base.ParentID,
-			Payload: canonical.NewErrorPayloadWithDiagnostic(code, message, false, cause),
+			Payload: canonical.ErrorPayload{Code: code, Message: message},
 		},
 		{
 			ExchangeID: base.ExchangeID, Seq: base.Seq + 2, Time: time.Now().UTC(),

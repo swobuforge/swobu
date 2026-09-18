@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
@@ -59,7 +60,7 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 	if phase.next < len(phase.calls) {
 		return beginMCPCall(s, phase)
 	}
-	next, replaceErr := s.prepared.ContinueAfterLocalResult(phase.response, phase.results)
+	next, replaceErr := continueAfterLocalResults(*s.prepared, phase.response, phase.results)
 	if replaceErr != nil {
 		s.phase = failedPhase{problem: canonical.InternalError("MCP tool loop produced invalid complete history: " + replaceErr.Error()), target: phase.target}
 		return reducerOutcome{nextState: s}, nil
@@ -72,4 +73,8 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 		return reducerOutcome{nextState: s}, nil
 	}
 	return beginProviderCallAttempt(s, phase.selection, call, requestChanges)
+}
+
+func continueAfterLocalResults(prepared continuity.ResolvedRequest, response completedProviderResponse, results []canonical.CanonicalItem) (continuity.ResolvedRequest, error) {
+	return prepared.ContinueAfterLocalResult(response.continuation, results)
 }

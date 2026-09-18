@@ -2,11 +2,61 @@ package exchange
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/mcp"
 )
+
+func TestLocalContinuationConsumesOpaqueProviderViewOnly(t *testing.T) {
+	message, err := canonical.NewMessageItem(canonical.MessageRoleUser, []canonical.MessagePart{canonical.NewTextMessagePart("use the tool")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := continuity.Begin(canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: []canonical.CanonicalItem{message}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID, _ := canonical.NewToolCallID("call_1")
+	tool, _ := canonical.NewRequestToolKey(canonical.ToolKindFunction, "lookup")
+	input, _ := canonical.ParseJSONObject([]byte(`{}`))
+	call, _ := canonical.NewToolCallItem(callID, tool, canonical.NewJSONObjectToolInput(input))
+	client, err := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: "resp_1"}, "model", []canonical.CanonicalItem{call}, canonical.Completed("tool_calls"), canonical.NewUnknownTokenUsage())
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := json.RawMessage(`[{"type":"reasoning.signature","signature":"opaque"}]`)
+	opaque, err := canonical.NewProviderChatOpaqueThinking("openrouter-chat", details)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := canonical.NewReasoningItem(nil, opaque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation, err := client.WithReasoningPrelude(reasoning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("done")}, false)
+
+	continued, err := continueAfterLocalResults(prepared, completedProviderResponse{client: client, continuation: continuation}, []canonical.CanonicalItem{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := continued.Request().Items()
+	if len(items) != 4 {
+		t.Fatalf("continued items = %d, want prompt + opaque reasoning + call + result", len(items))
+	}
+	if _, ok := client.Items()[0].Reasoning(); ok || len(client.Items()) != 1 {
+		t.Fatal("checkpoint-only reasoning leaked into client response")
+	}
+	if value, ok := items[1].Reasoning(); !ok || value.Opaque().IsZero() {
+		t.Fatal("local continuation dropped opaque provider reasoning")
+	}
+}
 
 func TestUnavailableOnlyMCPRuntimeDoesNotDelayClientHandoff(t *testing.T) {
 	t.Parallel()

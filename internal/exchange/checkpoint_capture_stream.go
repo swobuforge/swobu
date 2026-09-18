@@ -18,9 +18,10 @@ const (
 )
 
 type checkpointCaptureSnapshot struct {
-	state    checkpointCaptureState
-	response canonical.CanonicalResponse
-	err      error
+	state              checkpointCaptureState
+	clientResponse     canonical.CanonicalResponse
+	checkpointResponse canonical.CanonicalResponse
+	err                error
 }
 
 // checkpointCaptureResponseStream records the canonical response pulled toward
@@ -32,14 +33,19 @@ type checkpointCaptureSnapshot struct {
 // therefore scales with completed item count, not with streamed delta count.
 // The terminal snapshot is materialized once from the folded state.
 type checkpointCaptureResponseStream struct {
-	upstream  canonical.ResponseStream
-	binding   canonical.ResponseBinding
-	projector *canonical.ResponseProjector
-	result    checkpointCaptureSnapshot
+	upstream           canonical.ResponseStream
+	binding            canonical.ResponseBinding
+	projector          *canonical.ResponseProjector
+	checkpointResponse func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)
+	result             checkpointCaptureSnapshot
 }
 
-func newCheckpointCaptureResponseStream(upstream canonical.ResponseStream, binding canonical.ResponseBinding) *checkpointCaptureResponseStream {
-	return &checkpointCaptureResponseStream{upstream: upstream, binding: binding, projector: canonical.NewResponseProjector(binding)}
+func newCheckpointCaptureResponseStream(upstream canonical.ResponseStream, binding canonical.ResponseBinding, transforms ...func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)) *checkpointCaptureResponseStream {
+	var transform func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)
+	if len(transforms) > 0 {
+		transform = transforms[0]
+	}
+	return &checkpointCaptureResponseStream{upstream: upstream, binding: binding, projector: canonical.NewResponseProjector(binding), checkpointResponse: transform}
 }
 
 func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.Event, error) {
@@ -87,7 +93,26 @@ func (s *checkpointCaptureResponseStream) Next(ctx context.Context) (canonical.E
 			s.fail(fmt.Errorf("projecting checkpoint response: %w", projectionErr))
 			return event, nil
 		}
-		s.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: *response}
+		clientResponse := response.Clone()
+		checkpointResponse := clientResponse.Clone()
+		if s.checkpointResponse != nil {
+			transformed, transformErr := s.checkpointResponse(checkpointResponse)
+			if transformErr != nil {
+				s.fail(fmt.Errorf("finalizing checkpoint response: %w", transformErr))
+				return event, nil
+			}
+			bound, bindErr := canonical.BindResponseOpaqueThinking(transformed, s.binding.TargetID, s.binding.TargetVersion)
+			if bindErr != nil {
+				s.fail(fmt.Errorf("binding checkpoint response: %w", bindErr))
+				return event, nil
+			}
+			checkpointResponse = bound
+		}
+		s.result = checkpointCaptureSnapshot{
+			state:              checkpointCaptureCompleted,
+			clientResponse:     clientResponse,
+			checkpointResponse: checkpointResponse,
+		}
 	}
 	return event, nil
 }
@@ -97,6 +122,14 @@ func (s *checkpointCaptureResponseStream) Close(ctx context.Context) error {
 		return nil
 	}
 	return s.upstream.Close(ctx)
+}
+
+func (s *checkpointCaptureResponseStream) TerminalFailureCause() error {
+	type source interface{ TerminalFailureCause() error }
+	if upstream, ok := s.upstream.(source); ok {
+		return upstream.TerminalFailureCause()
+	}
+	return nil
 }
 
 func (s *checkpointCaptureResponseStream) snapshot() checkpointCaptureSnapshot {

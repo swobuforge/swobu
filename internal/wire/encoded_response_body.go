@@ -68,8 +68,13 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 		}
 		encoded, err := b.encode(event)
 		if err != nil {
-			if payload, ok := event.Payload.(canonical.ErrorPayload); ok && payload.DiagnosticCause() != nil {
-				err = payload.DiagnosticCause()
+			if IsTerminalProjectionUnrepresentable(err) {
+				type terminalFailureSource interface{ TerminalFailureCause() error }
+				if source, ok := b.events.(terminalFailureSource); ok && source.TerminalFailureCause() != nil {
+					err = source.TerminalFailureCause()
+				} else {
+					err = StageResponseFailure("client_stream_encode", err)
+				}
 			} else {
 				err = StageResponseFailure("client_stream_encode", err)
 			}

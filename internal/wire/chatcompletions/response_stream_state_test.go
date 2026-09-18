@@ -392,10 +392,53 @@ func TestChatStreamReturnsDecodeFailureWhenProviderEndsWithoutFinishReason(t *te
 			}
 			continue
 		}
-		if !strings.Contains(err.Error(), "ended before a finish reason") {
+		var backendErr canonical.BackendError
+		if !errors.As(err, &backendErr) || !strings.Contains(err.Error(), "ended before a finish reason") {
 			t.Fatalf("stream error = %v, want provider decode failure", err)
 		}
 		return
+	}
+}
+
+func TestChatStreamAcceptsRepeatedToolCallsFinishAfterUsage(t *testing.T) {
+	request := chatStreamFunctionRequest(t)
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\",\"id\":\"call_1\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5}}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	stream := decodeResponseStream(request, testAttemptToolNames(request), carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	var calls, terminals int
+	var arguments string
+	var usage canonical.TokenUsage
+	for {
+		event, err := stream.Next(context.Background())
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch event.Kind {
+		case canonical.EventItemCompleted:
+			completed := event.Payload.(canonical.ItemEvent).Payload.(canonical.ItemCompletedPayload)
+			if call, ok := completed.Item.ToolCall(); ok {
+				calls++
+				object, _ := call.Input().Object()
+				arguments = object.String()
+			}
+		case canonical.EventUsage:
+			usage = event.Payload.(canonical.UsagePayload).Usage
+		case canonical.EventEnvelopeEnd:
+			terminals++
+		}
+	}
+	if calls != 1 || arguments != `{"q":"x"}` || terminals != 1 {
+		t.Fatalf("calls=%d arguments=%q terminals=%d", calls, arguments, terminals)
+	}
+	input, inputKnown := usage.InputTokens()
+	output, outputKnown := usage.OutputTokens()
+	if input != 3 || !inputKnown || output != 5 || !outputKnown {
+		t.Fatalf("usage = %#v, want 3/5", usage)
 	}
 }
 

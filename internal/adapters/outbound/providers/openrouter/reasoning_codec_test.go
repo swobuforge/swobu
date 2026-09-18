@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -457,6 +458,9 @@ func TestOpenRouterStreamingBuffersOnlyReasoningArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := drainEvents(t, decoded.Stream)
+	if decoded.CheckpointResponse == nil {
+		t.Fatal("missing checkpoint continuation transform")
+	}
 	reasoningIndex, textIndex := -1, -1
 	for index, event := range events {
 		if event.Kind == canonical.EventItemCompleted {
@@ -470,8 +474,58 @@ func TestOpenRouterStreamingBuffersOnlyReasoningArtifact(t *testing.T) {
 			textIndex = index
 		}
 	}
-	if reasoningIndex < 0 || textIndex < 0 || reasoningIndex >= textIndex {
-		t.Fatalf("reasoning/text order = %d/%d; events=%#v", reasoningIndex, textIndex, events)
+	if reasoningIndex >= 0 || textIndex < 0 {
+		t.Fatalf("live opaque reasoning/text presence = %d/%d; events=%#v", reasoningIndex, textIndex, events)
+	}
+	textEvent := events[textIndex].Payload.(canonical.ItemEvent)
+	if textEvent.Position.Item != 0 {
+		t.Fatalf("answer ordinal = %d, want natural ordinal 0", textEvent.Position.Item)
+	}
+}
+
+func TestOpenRouterStreamingWithoutReasoningKeepsOrdinaryItemAtZeroAndCompletes(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	starts, completions, reasoning := 0, 0, 0
+	for _, event := range events {
+		itemEvent, ok := event.Payload.(canonical.ItemEvent)
+		if !ok {
+			continue
+		}
+		if itemEvent.Position.Item != 0 {
+			t.Fatalf("ordinary item ordinal = %d, want 0", itemEvent.Position.Item)
+		}
+		switch event.Kind {
+		case canonical.EventItemStart:
+			starts++
+		case canonical.EventItemCompleted:
+			completions++
+			if completed := itemEvent.Payload.(canonical.ItemCompletedPayload); completed.Item.Kind() == canonical.ItemKindReasoning {
+				reasoning++
+			}
+		}
+	}
+	if starts != 1 || completions != 1 || reasoning != 0 {
+		t.Fatalf("starts/completions/reasoning = %d/%d/%d", starts, completions, reasoning)
+	}
+	checkpoint, err := decoded.CheckpointResponse(responseFromOpenRouterEvents(t, events))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checkpoint.Items()) != 1 || checkpoint.Items()[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("checkpoint items = %#v", checkpoint.Items())
 	}
 }
 
@@ -498,17 +552,56 @@ func TestOpenRouterStreamingDoesNotFinalizeOnEmptyContentBeforeReasoning(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, event := range drainEvents(t, decoded.Stream) {
+	events := drainEvents(t, decoded.Stream)
+	for _, event := range events {
 		if event.Kind != canonical.EventItemCompleted {
 			continue
 		}
 		itemEvent := event.Payload.(canonical.ItemEvent)
 		completed := itemEvent.Payload.(canonical.ItemCompletedPayload)
 		if completed.Item.Kind() == canonical.ItemKindReasoning {
-			return
+			t.Fatal("checkpoint-only reasoning_details leaked into live response")
 		}
 	}
-	t.Fatal("stream dropped reasoning after an empty content delta")
+	response := responseFromOpenRouterEvents(t, events)
+	checkpoint, err := decoded.CheckpointResponse(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenRouterOpaqueDetails(t, checkpoint.Items(), `[{"type":"reasoning.summary","summary":"brief"}]`)
+	reasoning, ok := checkpoint.Items()[0].Reasoning()
+	if !ok || len(reasoning.Parts()) != 0 {
+		t.Fatalf("checkpoint-only reasoning acquired portable parts: %#v", checkpoint.Items()[0])
+	}
+}
+
+func TestOpenRouterRejectsNullReasoningDetails(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":null},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, nextErr := decoded.Stream.Next(context.Background())
+		if nextErr == nil {
+			continue
+		}
+		if errors.Is(nextErr, io.EOF) {
+			t.Fatal("reasoning_details:null was accepted as an array")
+		}
+		if !strings.Contains(nextErr.Error(), "must be an array") {
+			t.Fatalf("error = %v, want array validation", nextErr)
+		}
+		break
+	}
 }
 
 func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
@@ -536,7 +629,7 @@ func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
 	}
 }
 
-func TestOpenRouterStreamingIgnoresEmptyReasoningDetailsAfterAnswerOutput(t *testing.T) {
+func TestOpenRouterStreamingPreservesExplicitEmptyReasoningDetailsAfterAnswerOutput(t *testing.T) {
 	backend := openRouterBackend(t, "model")
 	raw := strings.Join([]string{
 		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
@@ -553,17 +646,15 @@ func TestOpenRouterStreamingIgnoresEmptyReasoningDetailsAfterAnswerOutput(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events := drainEvents(t, decoded.Stream); len(events) == 0 {
-		t.Fatal("empty reasoning_details terminal frame prevented response completion")
-	}
+	assertOpenRouterCheckpointDetails(t, decoded, `[]`)
 }
 
-func TestOpenRouterStreamingRejectsNonEmptyReasoningDetailsAfterAnswerOutput(t *testing.T) {
+func TestOpenRouterStreamingPreservesLateSignatureOnlyReasoningDetails(t *testing.T) {
 	backend := openRouterBackend(t, "model")
 	raw := strings.Join([]string{
 		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
 		"",
-		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"late trace"}]},"finish_reason":"stop"}]}`,
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.signature","signature":"opaque"}]},"finish_reason":"stop"}]}`,
 		"",
 		"data: [DONE]",
 		"",
@@ -575,19 +666,62 @@ func TestOpenRouterStreamingRejectsNonEmptyReasoningDetailsAfterAnswerOutput(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	for {
-		_, err := decoded.Stream.Next(context.Background())
-		if err == nil {
-			continue
-		}
-		if !strings.Contains(err.Error(), "reasoning arrived after answer output") {
-			t.Fatalf("stream error = %v, want late-reasoning rejection", err)
-		}
-		return
+	assertOpenRouterCheckpointDetails(t, decoded, `[{"type":"reasoning.signature","signature":"opaque"}]`)
+}
+
+func TestOpenRouterLateContinuationCheckpointReplaysOnNextRequest(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	const details = `[{"type":"reasoning.signature","signature":"opaque"}]`
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":` + details + `},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	checkpoint, err := decoded.CheckpointResponse(responseFromOpenRouterEvents(t, events))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err = canonical.BindResponseOpaqueThinking(checkpoint, "openrouter", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model"), Items: checkpoint.Items()})
+	document, _, err := backend.Codec.Encode(provider.Request{Canonical: request, Delivery: delivery.BufferedDelivery()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(document.RawBytes(), []byte(`"reasoning_details":`+details)) {
+		t.Fatalf("late checkpoint continuation was not replayed: %s", document.RawBytes())
 	}
 }
 
-func TestOpenRouterStreamingIgnoresRepeatedReasoningDetailAfterAnswerOutput(t *testing.T) {
+func TestOpenRouterContinuationAccumulatesMetadataAfterFinishReason(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	const details = `[{"type":"reasoning.signature","signature":"after-finish"}]`
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":` + details + `},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenRouterCheckpointDetails(t, decoded, details)
+}
+
+func TestOpenRouterStreamingPreservesRepeatedReasoningDetailMultiplicity(t *testing.T) {
 	backend := openRouterBackend(t, "model")
 	detail := `{"type":"reasoning.text","text":"trace"}`
 	raw := strings.Join([]string{
@@ -607,9 +741,133 @@ func TestOpenRouterStreamingIgnoresRepeatedReasoningDetailAfterAnswerOutput(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events := drainEvents(t, decoded.Stream); len(events) == 0 {
-		t.Fatal("repeated reasoning detail prevented response completion")
+	assertOpenRouterCheckpointDetails(t, decoded, `[`+detail+`,`+detail+`]`)
+}
+
+func TestOpenRouterStreamingReconstructsConsecutiveReasoningDetailDeltas(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":" reading","vendor":"kept"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":" it"}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"."}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"opaque"}]},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertOpenRouterCheckpointDetails(t, decoded, `[{"summary":" reading it.","type":"reasoning.summary","vendor":"kept"},{"type":"reasoning.encrypted","data":"opaque"}]`)
+}
+
+func TestOpenRouterStreamingPreservesOpaqueDetailsAfterVisibleReasoningClosed(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"visible"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.encrypted","data":"opaque"}]},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenRouterCheckpointDetails(t, decoded, `[{"type":"reasoning.encrypted","data":"opaque"}]`)
+}
+
+func TestOpenRouterStreamingRejectsVisibleReasoningAfterAnswerOutput(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"late visible"},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, nextErr := decoded.Stream.Next(context.Background())
+		if nextErr == nil {
+			continue
+		}
+		if errors.Is(nextErr, io.EOF) {
+			t.Fatal("late visible reasoning was accepted")
+		}
+		if !strings.Contains(nextErr.Error(), "reasoning arrived after answer output") {
+			t.Fatalf("error = %v, want late visible reasoning rejection", nextErr)
+		}
+		break
+	}
+}
+
+func assertOpenRouterCheckpointDetails(t *testing.T, decoded provider.DecodedResponse, want string) {
+	t.Helper()
+	events := drainEvents(t, decoded.Stream)
+	response := responseFromOpenRouterEvents(t, events)
+	if decoded.CheckpointResponse == nil {
+		t.Fatal("missing checkpoint continuation transform")
+	}
+	checkpoint, err := decoded.CheckpointResponse(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenRouterOpaqueDetails(t, checkpoint.Items(), want)
+}
+
+func responseFromOpenRouterEvents(t *testing.T, events []canonical.Event) canonical.CanonicalResponse {
+	t.Helper()
+	binding := canonical.ResponseBinding{SwobuID: "resp_test", TargetID: "openrouter", TargetVersion: 1}
+	bound := canonical.NewBoundResponseIdentityStream(canonical.NewSliceEventReader(events), binding)
+	projector := canonical.NewResponseProjector(binding)
+	for {
+		event, nextErr := bound.Next(context.Background())
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			t.Fatal(nextErr)
+		}
+		if err := projector.Apply(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := projector.Done()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *response
+}
+
+func assertOpenRouterOpaqueDetails(t *testing.T, items []canonical.CanonicalItem, want string) {
+	t.Helper()
+	for _, item := range items {
+		reasoning, ok := item.Reasoning()
+		if !ok {
+			continue
+		}
+		if raw, ok := reasoning.Opaque().ProviderChat(ChatReplayScope); ok {
+			if string(raw) != want {
+				t.Fatalf("opaque reasoning_details = %s, want %s", raw, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("opaque reasoning_details %s not found in items %#v", want, items)
 }
 
 func openRouterReasoningItem(t *testing.T, summary string) canonical.CanonicalItem {

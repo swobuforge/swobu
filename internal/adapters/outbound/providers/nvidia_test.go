@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -152,6 +154,33 @@ func TestNVIDIAHostedDoesNotPreflightHeterogeneousModelCapabilities(t *testing.T
 	}
 	if !dispatched {
 		t.Fatal("request never reached NVIDIA")
+	}
+}
+
+func TestNVIDIAHostedGoneClassifiesExactTargetUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = io.WriteString(w, `{"error":{"message":"model endpoint is gone"}}`)
+	}))
+	defer server.Close()
+
+	registry := mustProviderRegistry(t, server.Client(), testCredentialResolver{})
+	backend, err := registry.ResolveBackend(nvidiaTarget(server.URL, "publisher/model"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = backend.Transport.Send(context.Background(), carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`{"model":"publisher/model","messages":[]}`), carrier.Meta{}))
+	if err == nil {
+		t.Fatal("NVIDIA 410 was accepted")
+	}
+	failure, ok := provider.AsAttemptFailure(err)
+	if !ok {
+		t.Fatalf("error = %T, want attempt failure", err)
+	}
+	var unavailable provider.TargetUnavailableError
+	if !errors.As(failure.Cause(), &unavailable) {
+		t.Fatalf("cause = %T, want TargetUnavailableError", failure.Cause())
 	}
 }
 

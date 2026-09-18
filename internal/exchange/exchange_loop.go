@@ -229,7 +229,7 @@ func logPrivateDiagnosticCause(state exchangeState, attemptID providerCallAttemp
 	slog.Debug("provider decoder diagnostic",
 		"component", "exchange", "event", "provider_decoder_diagnostic",
 		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
-		"diagnostic_error", canonicalErr.DiagnosticCause,
+		"error_type", fmt.Sprintf("%T", canonicalErr.DiagnosticCause),
 	)
 }
 

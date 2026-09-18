@@ -16,6 +16,53 @@ func (documentFailureClientCodec) EncodeResponseDocument(canonical.CanonicalRequ
 	return wire.ClientDocumentResult{}, errors.New("forced optional fingerprint projection failure")
 }
 
+type responseRecordingClientCodec struct {
+	testClientCodec
+	encoded canonical.CanonicalResponse
+}
+
+func (c *responseRecordingClientCodec) EncodeResponseDocument(request canonical.CanonicalRequest, response canonical.CanonicalResponse) (wire.ClientDocumentResult, error) {
+	c.encoded = response.Clone()
+	return c.testClientCodec.EncodeResponseDocument(request, response)
+}
+
+func TestCheckpointTerminalGateFingerprintsClientVisibleResponseBeforeCheckpointRefinement(t *testing.T) {
+	live, err := canonical.NewCanonicalResponse(
+		canonical.ResponseRef{SwobuID: "swobu_live_fingerprint"},
+		"m",
+		[]canonical.CanonicalItem{testMessage(canonical.MessageRoleAssistant, "answer")},
+		canonical.Completed("completed"),
+		canonical.NewUnknownTokenUsage(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, _ := canonical.NewReasoningPart(canonical.ReasoningPartSummary, "checkpoint only")
+	reasoning, _ := canonical.NewReasoningItem([]canonical.ReasoningPart{summary}, canonical.OpaqueThinking{})
+	checkpoint, err := live.WithReasoningPrelude(reasoning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := canonical.SynthesizeResponseEnvelopeEvents("live_fingerprint", live.Response(), live.Model(), live.Items(), live.Completion(), live.Usage())
+	capture := newCheckpointCaptureResponseStream(canonical.NewSliceEventReader(events), canonical.ResponseBinding{SwobuID: live.Response().SwobuID}, func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error) {
+		return checkpoint, nil
+	})
+	codec := &responseRecordingClientCodec{}
+	stream := newCheckpointTerminalGate(capture, codec, testCanonicalRequest("m"), &checkpointCommitter{
+		exchangeID: "live_fingerprint", workspaceSlug: "alpha", store: continuity.NewMemoryStore(),
+		request: testCanonicalRequest("m"), executionAffinity: testExecutionAffinity("live-fingerprint"),
+	})
+	for len(codec.encoded.Items()) == 0 {
+		if _, err := stream.Next(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := codec.encoded.Items()
+	if len(items) != 1 || items[0].Kind() != canonical.ItemKindMessage {
+		t.Fatalf("fingerprinted response items = %#v, want client-visible message only", items)
+	}
+}
+
 func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFingerprint(t *testing.T) {
 	response, err := canonical.NewCanonicalResponse(
 		canonical.ResponseRef{SwobuID: "swobu_gate_order"},
@@ -38,7 +85,7 @@ func TestCheckpointTerminalGateCommitsBeforePublishingFinishWithoutOptionalFinge
 			Payload: canonical.EnvelopeEndPayload{Kind: canonical.EnvResponse, Status: canonical.EnvelopeStatusCompleted},
 		},
 	}), canonical.ResponseBinding{})
-	capture.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, response: response}
+	capture.result = checkpointCaptureSnapshot{state: checkpointCaptureCompleted, clientResponse: response, checkpointResponse: response}
 	store := continuity.NewMemoryStore()
 	committer := &checkpointCommitter{
 		exchangeID: "gate_order", workspaceSlug: "alpha", store: store,

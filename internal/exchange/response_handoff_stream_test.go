@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestResponseHandoffKeepsEnvelopeStartInsideExchangeOnUnavailableFailure(t *testing.T) {
@@ -108,6 +109,21 @@ func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("calls = %#v, fallback must remain closed after response identity", *calls)
+	}
+}
+
+func TestGenerateContentCommittedTerminalFailurePreservesProviderStageThroughCheckpointWrappers(t *testing.T) {
+	runner, workspace, _ := responseHandoffFallbackFixture(t, 2)
+	out, err := runExchange(context.Background(), runner, "generate_content_terminal", "unknown", canonical.ClientFamilyGenerateContent, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathStreamGenerateContent, executionaffinity.Key{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.ReadAll(ClientTransportForTest(out.Response).Body)
+	if readErr == nil {
+		t.Fatal("committed GenerateContent failure was not returned")
+	}
+	if stage, ok := wire.ResponseFailureStage(readErr); !ok || stage != "provider_stream_decode" {
+		t.Fatalf("failure stage = %q/%v, want provider_stream_decode: %v", stage, ok, readErr)
 	}
 }
 

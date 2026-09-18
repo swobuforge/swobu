@@ -356,6 +356,102 @@ func TestTargetBackoffReachabilityClearsHistory(t *testing.T) {
 	}
 }
 
+func TestTargetBackoffSuppressesTargetWideRejectionButNotRequestRejection(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cause error
+		want  bool
+	}{
+		{name: "target incompatible", cause: provider.TargetIncompatible(canonical.NewBackendError("a", 403, "free tier unavailable", "")), want: true},
+		{name: "target unavailable", cause: provider.TargetUnavailable(canonical.NewBackendError("a", 410, "gone", "")), want: true},
+		{name: "content filter forbidden", cause: canonical.NewBackendError("a", 403, "provider input was blocked by content filter", ""), want: false},
+		{name: "generic forbidden", cause: canonical.NewBackendError("a", 403, "forbidden", ""), want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ledger := newTargetBackoffLedger()
+			target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}
+			observeTarget(ledger, "dev", target, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+				test.cause,
+			))})
+			got := len(ledger.snapshot("dev")) == 1
+			if got != test.want {
+				t.Fatalf("suppression = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTargetBackoffRequestRejectionDoesNotEraseConcurrentTargetIncompatibility(t *testing.T) {
+	ledger := newTargetBackoffLedger()
+	target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}
+	targetWide := ledger.begin("dev", target)
+	requestLocal := ledger.begin("dev", target)
+
+	ledger.observe(targetWide, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		provider.TargetIncompatible(canonical.NewBackendError("a", http.StatusForbidden, "free tier unavailable", "")),
+	))})
+	ledger.observe(requestLocal, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		canonical.NewBackendError("a", http.StatusForbidden, "request rejected", ""),
+	))})
+
+	if len(ledger.snapshot("dev")) != 1 {
+		t.Fatal("request-local rejection erased independently established target incompatibility")
+	}
+}
+
+func TestTargetBackoffNewerBackendRejectionPreventsOlderTransportSuppression(t *testing.T) {
+	ledger := newTargetBackoffLedger()
+	target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}
+	transportFailure := ledger.begin("dev", target)
+	backendRejection := ledger.begin("dev", target)
+
+	ledger.observe(backendRejection, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		canonical.NewBackendError("a", http.StatusUnauthorized, "rejected", ""),
+	))})
+	ledger.observe(transportFailure, unavailableEvent("a", ""))
+
+	if len(ledger.snapshot("dev")) != 0 {
+		t.Fatal("older transport failure suppressed target after newer backend reachability evidence")
+	}
+}
+
+func TestTargetBackoffNewerRequestRejectionDoesNotDiscardOlderTargetIncompatibility(t *testing.T) {
+	ledger := newTargetBackoffLedger()
+	target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}
+	targetWide := ledger.begin("dev", target)
+	requestLocal := ledger.begin("dev", target)
+
+	ledger.observe(requestLocal, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		canonical.NewBackendError("a", http.StatusForbidden, "request rejected", ""),
+	))})
+	ledger.observe(targetWide, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		provider.TargetIncompatible(canonical.NewBackendError("a", http.StatusForbidden, "free tier unavailable", "")),
+	))})
+
+	if len(ledger.snapshot("dev")) != 1 {
+		t.Fatal("newer request-local rejection caused older target incompatibility evidence to be discarded")
+	}
+}
+
+func TestTargetBackoffOlderIncompatibilityStrengthensNewerUnavailability(t *testing.T) {
+	ledger := newTargetBackoffLedger()
+	target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}
+	olderIncompatible := ledger.begin("dev", target)
+	newerUnavailable := ledger.begin("dev", target)
+
+	ledger.observe(newerUnavailable, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		provider.TargetUnavailable(canonical.NewBackendError("a", http.StatusGone, "gone", "")),
+	))})
+	ledger.observe(olderIncompatible, providerCallFailed{failure: provider.AttemptRejectedBeforeExecution(provider.Rejected(
+		provider.TargetIncompatible(canonical.NewBackendError("a", http.StatusForbidden, "incompatible", "")),
+	))})
+
+	key := targetBackoffKey{workspace: "dev", targetID: "a", targetVersion: 1}
+	if record := ledger.records[key]; record.class != targetBackoffIncompatible {
+		t.Fatalf("merged target evidence class = %v, want incompatible", record.class)
+	}
+}
+
 func TestTargetBackoffConcurrentObservationAndSnapshot(t *testing.T) {
 	ledger := newTargetBackoffLedger()
 	target := provider.TargetSnapshot{TargetID: "a", TargetVersion: 1}

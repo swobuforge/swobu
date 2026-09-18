@@ -180,6 +180,14 @@ type providerCompatibility struct {
 	progressive func() []compat.Change
 }
 
+// completedProviderResponse keeps the client-visible history separate from
+// the provider-continuation history. Delayed local effects resume from the
+// latter without allowing opaque replay state to change client output.
+type completedProviderResponse struct {
+	client       canonical.CanonicalResponse
+	continuation canonical.CanonicalResponse
+}
+
 func (c providerCompatibility) completedChanges() []compat.Change {
 	changes := compat.CloneChanges(c.initial)
 	if c.progressive != nil {
@@ -188,7 +196,7 @@ func (c providerCompatibility) completedChanges() []compat.Change {
 	return changes
 }
 
-func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, *canonical.CanonicalResponse, providerCompatibility, error) {
+func completeProviderCall(ctx context.Context, call providerCall, ingress provider.Ingress, swobuResponseID canonical.SwobuResponseID, runner runtimeBundle) (ClientResponse, *completedProviderResponse, providerCompatibility, error) {
 	if err := provider.ValidateIngress(ingress); err != nil {
 		return nil, nil, providerCompatibility{}, responseFailure("provider_stream_decode", canonical.InternalError("provider ingress shape is invalid"))
 	}
@@ -217,10 +225,14 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 		if err != nil {
 			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
 		}
-		cloned := response.Clone()
+		clientResponse := response.Clone()
+		continuationResponse, err := finalizeContinuationResponse(clientResponse, binding, decoded.CheckpointResponse)
+		if err != nil {
+			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
+		}
 		compatibility.initial = compatibility.completedChanges()
 		compatibility.progressive = nil
-		return nil, &cloned, compatibility, nil
+		return nil, &completedProviderResponse{client: clientResponse, continuation: continuationResponse}, compatibility, nil
 	}
 	prefetched, err := prefetchResponseHandoff(ctx, events, call.clientDelivery.Mode == delivery.Streaming)
 	if err != nil {
@@ -229,24 +241,43 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	}
 	events = prefetched
 	events = newTerminalResponseStream(events)
-	response, err := handoffResponseStream(ctx, call, events, binding, incremental, runner)
+	response, err := handoffResponseStream(ctx, call, events, binding, incremental, runner, decoded.CheckpointResponse)
 	return response, nil, compatibility, responseFailure("client_stream_encode", err)
 }
 
-func handoffCompletedProviderResponse(ctx context.Context, call providerCall, response canonical.CanonicalResponse, runner runtimeBundle) (ClientResponse, error) {
-	events := canonical.SynthesizeResponseEnvelopeEvents(
-		call.exchangeID, response.Response(), response.Model(), response.Items(),
-		response.Completion(), response.Usage(),
-	)
-	binding := canonical.ResponseBinding{
-		SwobuID: response.Response().SwobuID, TargetID: call.backend.Target.TargetID,
-		TargetVersion: call.backend.Target.TargetVersion,
+func finalizeContinuationResponse(response canonical.CanonicalResponse, binding canonical.ResponseBinding, transform func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)) (canonical.CanonicalResponse, error) {
+	continuation := response.Clone()
+	if transform == nil {
+		return continuation, nil
 	}
-	return handoffResponseStream(ctx, call, canonical.NewSliceEventReader(events), binding, false, runner)
+	transformed, err := transform(continuation)
+	if err != nil {
+		return canonical.CanonicalResponse{}, fmt.Errorf("finalizing continuation response: %w", err)
+	}
+	bound, err := canonical.BindResponseOpaqueThinking(transformed, binding.TargetID, binding.TargetVersion)
+	if err != nil {
+		return canonical.CanonicalResponse{}, fmt.Errorf("binding continuation response: %w", err)
+	}
+	return bound, nil
 }
 
-func handoffResponseStream(ctx context.Context, call providerCall, stream canonical.ResponseStream, binding canonical.ResponseBinding, incremental bool, runner runtimeBundle) (ClientResponse, error) {
-	capture := newCheckpointCaptureResponseStream(stream, binding)
+func handoffCompletedProviderResponse(ctx context.Context, call providerCall, response completedProviderResponse, runner runtimeBundle) (ClientResponse, error) {
+	clientResponse := response.client
+	events := canonical.SynthesizeResponseEnvelopeEvents(
+		call.exchangeID, clientResponse.Response(), clientResponse.Model(), clientResponse.Items(),
+		clientResponse.Completion(), clientResponse.Usage(),
+	)
+	binding := canonical.ResponseBinding{
+		SwobuID: clientResponse.Response().SwobuID, TargetID: call.backend.Target.TargetID,
+		TargetVersion: call.backend.Target.TargetVersion,
+	}
+	return handoffResponseStream(ctx, call, canonical.NewSliceEventReader(events), binding, false, runner, func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error) {
+		return response.continuation.Clone(), nil
+	})
+}
+
+func handoffResponseStream(ctx context.Context, call providerCall, stream canonical.ResponseStream, binding canonical.ResponseBinding, incremental bool, runner runtimeBundle, transforms ...func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)) (ClientResponse, error) {
+	capture := newCheckpointCaptureResponseStream(stream, binding, transforms...)
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
 		store: runner.CheckpointStore, request: call.fullRequest.Clone(),

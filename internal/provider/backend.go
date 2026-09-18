@@ -17,10 +17,16 @@ type Codec interface {
 	Decode(context.Context, Request, Ingress) (DecodedResponse, error)
 }
 
-// DecodedResponse is one invocation-bound provider decode result. All durable
-// response semantics enter the canonical stream.
+// DecodedResponse is one invocation-bound provider decode result. Public
+// response semantics enter the canonical stream; exact-target continuation
+// state that completes too late for live ordering may refine only the durable
+// checkpoint projection.
 type DecodedResponse struct {
 	Stream canonical.ResponseStream
+	// CheckpointResponse adds provider-native continuation state that became
+	// complete only after live response items had already been emitted. It is
+	// applied only to the durable checkpoint projection, never client output.
+	CheckpointResponse func(canonical.CanonicalResponse) (canonical.CanonicalResponse, error)
 	// Changes contains facts known when decoding begins. ProgressiveChanges
 	// returns the immutable facts accumulated once Stream reaches terminal.
 	Changes            []compat.Change

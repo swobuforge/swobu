@@ -122,7 +122,7 @@ func (resolvingTargetFactsPhase) isPhase() {}
 type callingMCPPhase struct {
 	selection providerCallSelection
 	target    provider.TargetSnapshot
-	response  canonical.CanonicalResponse
+	response  completedProviderResponse
 	calls     []canonical.ToolCallItem
 	results   []canonical.CanonicalItem
 	next      int
@@ -507,7 +507,7 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if result.attemptID != phase.attemptID {
 			return reducerOutcome{}, fmt.Errorf("exchange invariant: provider call attempt %d returned while %d is active", result.attemptID, phase.attemptID)
 		}
-		response, canonicalResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
+		response, completedResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		changes := providerCompatibility.completedChanges()
 		if completionErr != nil {
 			logProviderAttemptFailedBeforeHandoff(s, phase.attemptID, attempt, completionErr)
@@ -524,11 +524,11 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if err != nil {
 			return reducerOutcome{}, err
 		}
-		if canonicalResponse != nil {
+		if completedResponse != nil {
 			s.effectiveChanges = append(s.effectiveChanges, attempt.requestChanges...)
 			s.effectiveChanges = append(s.effectiveChanges, changes...)
-			rounds := append(append([]canonical.TokenUsage(nil), s.providerUsage...), canonicalResponse.Usage())
-			calls, err := s.mcp.Calls(*canonicalResponse)
+			rounds := append(append([]canonical.TokenUsage(nil), s.providerUsage...), completedResponse.client.Usage())
+			calls, err := s.mcp.Calls(completedResponse.client)
 			if err != nil {
 				s.phase = failedPhase{problem: err, target: attempt.target}
 				return reducerOutcome{nextState: s}, nil
@@ -538,20 +538,21 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 				selection := providerCallSelection{candidateIndex: attempt.candidateIndex, requestChoice: providerRequestPreferred}
 				mcpPhase := callingMCPPhase{
 					selection: selection, target: attempt.target, calls: calls,
-					response: canonicalResponse.Clone(),
+					response: completedProviderResponse{client: completedResponse.client.Clone(), continuation: completedResponse.continuation.Clone()},
 				}
 				outcome, beginErr := beginMCPBatch(s, mcpPhase)
 				return outcome, beginErr
 			}
-			*canonicalResponse = canonicalResponse.WithUsage(canonical.SumTokenUsage(rounds...))
-			response, err = handoffCompletedProviderResponse(ctx, phase.call, *canonicalResponse, runner)
+			completedResponse.client = completedResponse.client.WithUsage(canonical.SumTokenUsage(rounds...))
+			completedResponse.continuation = completedResponse.continuation.WithUsage(canonical.SumTokenUsage(rounds...))
+			response, err = handoffCompletedProviderResponse(ctx, phase.call, *completedResponse, runner)
 			if err != nil {
 				s.phase = failedPhase{problem: err, target: attempt.target}
 				return reducerOutcome{nextState: s}, nil
 			}
 		}
 		effective := compat.CloneChanges(s.effectiveChanges)
-		if canonicalResponse == nil {
+		if completedResponse == nil {
 			effective = append(effective, attempt.requestChanges...)
 			effective = append(effective, providerCompatibility.initial...)
 		}

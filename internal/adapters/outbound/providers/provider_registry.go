@@ -97,7 +97,7 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecVLLM)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecCustom)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNebius)),
-		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNVIDIA)),
+		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecNVIDIA).WithTargetUnavailableStatuses(http.StatusGone)),
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecOVHCloud)),
 		// Baseten intentionally composes the shared standard runtime in P0; its
 		// managed and exact deployment bases do not require a provider codec.

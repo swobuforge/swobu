@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -31,6 +32,15 @@ type ChatReasoningExtractor interface {
 	ExtractBufferedChatReasoning(message map[string]json.RawMessage) (string, error)
 	ExtractStreamedChatReasoning(delta map[string]json.RawMessage) (ChatReasoningFragment, error)
 	NewChatReasoningItem(text string) (canonical.CanonicalItem, error)
+}
+
+// ChatContinuationReasoningExtractor separates visible reasoning, which must
+// precede answer output, from opaque continuation state, which remains
+// appendable until the provider stream ends.
+type ChatContinuationReasoningExtractor interface {
+	ChatReasoningExtractor
+	NewChatVisibleReasoningItem(text string) (canonical.CanonicalItem, error)
+	FinalizeChatContinuation() (canonical.CanonicalItem, error)
 }
 
 // ExtractChatReasoningDocument removes one provider-owned reasoning carrier
@@ -88,15 +98,27 @@ func ExtractChatReasoningDocument(document carrier.Document, extractor ChatReaso
 // Take exposes the one accumulated canonical item after visible output or
 // stream completion has made the reasoning prelude ready.
 type ChatReasoningSSEBody struct {
-	reader    *core.SSEReaderCloser
-	extractor ChatReasoningExtractor
-	buffer    bytes.Buffer
+	reader     *core.SSEReaderCloser
+	extractor  ChatReasoningExtractor
+	buffer     bytes.Buffer
+	held       bytes.Buffer
+	eof        bool
+	pendingErr error
+	tailFrames int
+	tailBytes  int
 
-	mu        sync.Mutex
-	reasoning bytes.Buffer
-	ready     canonical.CanonicalItem
-	done      bool
+	mu               sync.Mutex
+	reasoning        bytes.Buffer
+	ready            canonical.CanonicalItem
+	continuation     canonical.CanonicalItem
+	visibleDone      bool
+	continuationDone bool
 }
+
+const (
+	maxChatReasoningTailFrames = 64
+	maxChatReasoningTailBytes  = 256 << 10
+)
 
 // NewChatReasoningSSEBody constructs the Chat-only response transformation
 // used before shared Chat stream decoding. The returned body owns closing the
@@ -107,64 +129,101 @@ func NewChatReasoningSSEBody(body io.ReadCloser, extractor ChatReasoningExtracto
 
 func (b *ChatReasoningSSEBody) Read(output []byte) (int, error) {
 	for b.buffer.Len() == 0 {
+		if b.eof {
+			if b.pendingErr != nil {
+				err := b.pendingErr
+				b.pendingErr = nil
+				return 0, err
+			}
+			return 0, io.EOF
+		}
 		event, err := b.reader.Next(context.Background())
 		if err != nil {
-			if finishErr := b.complete(); finishErr != nil {
+			if finishErr := b.completeFinal(); finishErr != nil {
 				return 0, finishErr
 			}
-			return 0, err
+			_, _ = b.buffer.ReadFrom(&b.held)
+			b.eof = true
+			if !errors.Is(err, io.EOF) {
+				b.pendingErr = err
+			}
+			if b.buffer.Len() == 0 {
+				return 0, err
+			}
+			break
 		}
 		data := event.Data
+		terminal := false
 		if data != "[DONE]" {
 			var chunk map[string]json.RawMessage
-			if json.Unmarshal([]byte(data), &chunk) == nil {
-				if err := b.transform(chunk); err != nil {
-					return 0, err
+			if decodeErr := json.Unmarshal([]byte(data), &chunk); decodeErr == nil {
+				var transformErr error
+				terminal, transformErr = b.transform(chunk)
+				if transformErr != nil {
+					return 0, transformErr
 				}
 				encoded, _ := json.Marshal(chunk)
 				data = string(encoded)
 			}
-		} else if err := b.complete(); err != nil {
+		} else if err := b.completeFinal(); err != nil {
 			return 0, err
 		}
+		var frame bytes.Buffer
 		if event.Event != "" {
-			fmt.Fprintf(&b.buffer, "event: %s\n", event.Event)
+			fmt.Fprintf(&frame, "event: %s\n", event.Event)
 		}
-		fmt.Fprintf(&b.buffer, "data: %s\n\n", data)
+		fmt.Fprintf(&frame, "data: %s\n\n", data)
+		if terminal || (b.held.Len() > 0 && data != "[DONE]") {
+			b.tailFrames++
+			b.tailBytes += frame.Len()
+			if b.tailFrames > maxChatReasoningTailFrames || b.tailBytes > maxChatReasoningTailBytes {
+				return 0, canonical.NewBackendError("", 0, "Chat reasoning terminal tail exceeded its bound", "")
+			}
+			_, _ = b.held.ReadFrom(&frame)
+			continue
+		}
+		if data == "[DONE]" {
+			_, _ = b.buffer.ReadFrom(&b.held)
+		}
+		_, _ = b.buffer.ReadFrom(&frame)
 	}
 	return b.buffer.Read(output)
 }
 
-func (b *ChatReasoningSSEBody) transform(chunk map[string]json.RawMessage) error {
+func (b *ChatReasoningSSEBody) transform(chunk map[string]json.RawMessage) (bool, error) {
 	var choices []json.RawMessage
 	_ = json.Unmarshal(chunk["choices"], &choices)
+	terminal := false
 	for index, raw := range choices {
 		var choice, delta map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &choice)
 		_ = json.Unmarshal(choice["delta"], &delta)
 		fragment, err := b.extractor.ExtractStreamedChatReasoning(delta)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if fragment.Observed {
 			b.mu.Lock()
-			if b.done {
+			if b.visibleDone {
 				b.mu.Unlock()
-				return canonical.InternalError("Chat streamed reasoning arrived after answer output")
+				return false, canonical.InternalError("Chat streamed reasoning arrived after answer output")
 			}
 			b.reasoning.WriteString(fragment.Text)
 			b.mu.Unlock()
 		}
 		if chatOutputStarted(choice, delta) {
-			if err := b.complete(); err != nil {
-				return err
+			if err := b.completeVisible(); err != nil {
+				return false, err
 			}
+		}
+		if len(choice["finish_reason"]) > 0 && string(choice["finish_reason"]) != "null" {
+			terminal = true
 		}
 		choice["delta"], _ = json.Marshal(delta)
 		choices[index], _ = json.Marshal(choice)
 	}
 	chunk["choices"], _ = json.Marshal(choices)
-	return nil
+	return terminal, nil
 }
 
 func chatOutputStarted(choice, delta map[string]json.RawMessage) bool {
@@ -175,18 +234,45 @@ func chatOutputStarted(choice, delta map[string]json.RawMessage) bool {
 	return content != "" || len(calls) > 0 || (len(choice["finish_reason"]) > 0 && string(choice["finish_reason"]) != "null")
 }
 
-func (b *ChatReasoningSSEBody) complete() error {
+func (b *ChatReasoningSSEBody) completeVisible() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.done {
+	if b.visibleDone {
 		return nil
 	}
-	item, err := b.extractor.NewChatReasoningItem(b.reasoning.String())
+	continuation, split := b.extractor.(ChatContinuationReasoningExtractor)
+	var item canonical.CanonicalItem
+	var err error
+	if split {
+		item, err = continuation.NewChatVisibleReasoningItem(b.reasoning.String())
+	} else {
+		item, err = b.extractor.NewChatReasoningItem(b.reasoning.String())
+	}
 	if err != nil {
 		return err
 	}
 	b.ready = item
-	b.done = true
+	b.visibleDone = true
+	return nil
+}
+
+func (b *ChatReasoningSSEBody) completeFinal() error {
+	if err := b.completeVisible(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.continuationDone {
+		return nil
+	}
+	if continuation, ok := b.extractor.(ChatContinuationReasoningExtractor); ok {
+		item, err := continuation.FinalizeChatContinuation()
+		if err != nil {
+			return err
+		}
+		b.continuation = item
+	}
+	b.continuationDone = true
 	return nil
 }
 
@@ -201,6 +287,18 @@ func (b *ChatReasoningSSEBody) Take() (canonical.CanonicalItem, bool) {
 	item := b.ready
 	b.ready = canonical.CanonicalItem{}
 	return item, true
+}
+
+func (b *ChatReasoningSSEBody) checkpointResponse(response canonical.CanonicalResponse) (canonical.CanonicalResponse, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.continuationDone {
+		return canonical.CanonicalResponse{}, canonical.InternalError("Chat continuation was not finalized")
+	}
+	if b.continuation.Kind() == "" {
+		return response, nil
+	}
+	return response.WithReasoningPrelude(b.continuation)
 }
 
 // Close releases the raw SSE body held by this response transformation.
@@ -233,6 +331,9 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 			return decoded, err
 		}
 		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, canonical.CanonicalItem{}, body, request.Attempt.ExchangeID)
+		if _, ok := extractor.(ChatContinuationReasoningExtractor); ok {
+			decoded.CheckpointResponse = body.checkpointResponse
+		}
 		return decoded, nil
 	default:
 		return provider.DecodedResponse{}, fmt.Errorf("Chat reasoning carrier ingress %T is unsupported", ingress)
@@ -247,7 +348,7 @@ type chatReasoningPreludeStream struct {
 	upstream   canonical.ResponseStream
 	source     readyChatReasoningSource
 	ready      canonical.CanonicalItem
-	pending    *canonical.Event
+	pending    []canonical.Event
 	emitted    bool
 	seq        int64
 	exchangeID string
@@ -258,34 +359,36 @@ func newChatReasoningPreludeStream(upstream canonical.ResponseStream, item canon
 }
 
 func (s *chatReasoningPreludeStream) Next(ctx context.Context) (canonical.Event, error) {
-	if s.pending != nil {
-		event := shiftChatReasoningItem(*s.pending)
-		s.pending = nil
+	if len(s.pending) > 0 {
+		event := s.pending[0]
+		s.pending = s.pending[1:]
 		return s.finish(event), nil
 	}
-	event, err := s.upstream.Next(ctx)
-	if err != nil {
-		if err == io.EOF && !s.emitted && s.source != nil {
-			if item, ok := s.source.Take(); ok {
+	for {
+		event, err := s.upstream.Next(ctx)
+		if err != nil {
+			if err == io.EOF && !s.emitted && s.source != nil {
+				if item, ok := s.source.Take(); ok {
+					s.emitted = true
+					return s.finish(chatReasoningItemCompleted(item)), nil
+				}
+			}
+			return canonical.Event{}, err
+		}
+		if !s.emitted && opensChatReasoningPrelude(event) {
+			if item, ok := s.available(); ok {
+				// The reasoning checkpoint must precede its assistant/tool successor;
+				// that successor is shifted only after this prelude is emitted.
 				s.emitted = true
+				s.pending = append(s.pending, shiftChatReasoningItem(event))
 				return s.finish(chatReasoningItemCompleted(item)), nil
 			}
 		}
-		return canonical.Event{}, err
-	}
-	if !s.emitted && opensChatReasoningPrelude(event) {
-		if item, ok := s.available(); ok {
-			// The reasoning checkpoint must precede its assistant/tool successor;
-			// that successor is shifted only after this prelude is emitted.
-			s.emitted = true
-			s.pending = &event
-			return s.finish(chatReasoningItemCompleted(item)), nil
+		if s.emitted {
+			event = shiftChatReasoningItem(event)
 		}
+		return s.finish(event), nil
 	}
-	if s.emitted {
-		event = shiftChatReasoningItem(event)
-	}
-	return s.finish(event), nil
 }
 
 func (s *chatReasoningPreludeStream) available() (canonical.CanonicalItem, bool) {
@@ -313,10 +416,14 @@ func (s *chatReasoningPreludeStream) finish(event canonical.Event) canonical.Eve
 func (s *chatReasoningPreludeStream) Close(ctx context.Context) error { return s.upstream.Close(ctx) }
 
 func chatReasoningItemCompleted(item canonical.CanonicalItem) canonical.Event {
+	return chatReasoningItemCompletedAt(item, 0)
+}
+
+func chatReasoningItemCompletedAt(item canonical.CanonicalItem, ordinal uint32) canonical.Event {
 	return canonical.Event{
 		Kind: canonical.EventItemCompleted,
 		Payload: canonical.ItemEvent{
-			Position: canonical.ItemPosition{Item: 0},
+			Position: canonical.ItemPosition{Item: ordinal},
 			Payload:  canonical.ItemCompletedPayload{Item: item},
 		},
 	}

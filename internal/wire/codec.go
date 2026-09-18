@@ -211,6 +211,26 @@ func ResponseFailureCause(err error) error {
 	return err
 }
 
+type terminalProjectionUnrepresentableError struct{ cause error }
+
+func (e terminalProjectionUnrepresentableError) Error() string {
+	return "client protocol cannot represent a terminal error after response commitment"
+}
+
+func (e terminalProjectionUnrepresentableError) Unwrap() error { return e.cause }
+
+// TerminalProjectionUnrepresentable marks the expected protocol limitation
+// where a committed client stream has no in-band terminal error form. Encoder
+// defects must be returned directly and are never given this classification.
+func TerminalProjectionUnrepresentable(err error) error {
+	return terminalProjectionUnrepresentableError{cause: err}
+}
+
+func IsTerminalProjectionUnrepresentable(err error) bool {
+	var target terminalProjectionUnrepresentableError
+	return errors.As(err, &target)
+}
+
 func (s ResponseCompletionSnapshot) clone() ResponseCompletionSnapshot {
 	s.Changes = compat.CloneChanges(s.Changes)
 	return s

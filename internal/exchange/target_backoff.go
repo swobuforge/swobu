@@ -27,7 +27,16 @@ type targetBackoffKey struct {
 type targetBackoffRecord struct {
 	delay time.Duration
 	until time.Time
+	class targetBackoffClass
 }
+
+type targetBackoffClass uint8
+
+const (
+	targetBackoffTransport targetBackoffClass = iota + 1
+	targetBackoffUnavailable
+	targetBackoffIncompatible
+)
 
 // targetObservation identifies one provider call by exact target generation
 // and admission order. epoch and suppressed capture the availability knowledge
@@ -41,10 +50,12 @@ type targetObservation struct {
 }
 
 type targetObservationState struct {
-	nextSequence uint64
-	latestResult uint64
-	epoch        uint64
-	inFlight     uint64
+	nextSequence      uint64
+	latestReachable   uint64
+	latestIngress     uint64
+	latestSuppression uint64
+	epoch             uint64
+	inFlight          uint64
 }
 
 type targetGeneration struct {
@@ -130,21 +141,27 @@ func (l *targetBackoffLedger) observe(observation targetObservation, event excha
 	if state.inFlight > 0 {
 		state.inFlight--
 	}
-	if observation.sequence <= state.latestResult {
-		l.finishObservation(observation.key, state)
-		return
-	}
-	state.latestResult = observation.sequence
 	now := l.currentTime()
 	l.cleanup(now)
 	switch result := event.(type) {
 	case providerIngressReceived:
-		delete(l.records, observation.key)
+		state.latestReachable = max(state.latestReachable, observation.sequence)
+		state.latestIngress = max(state.latestIngress, observation.sequence)
+		if observation.sequence > state.latestSuppression {
+			delete(l.records, observation.key)
+		}
 	case providerCallFailed:
 		cause := result.failure.Cause()
 		var unavailable provider.UnavailableError
 		if errors.As(cause, &unavailable) {
+			if observation.sequence <= state.latestReachable {
+				break
+			}
+			state.latestSuppression = max(state.latestSuppression, observation.sequence)
 			record := l.records[observation.key]
+			if record.class == 0 {
+				record.class = targetBackoffTransport
+			}
 			deadline := record.until
 			if observation.epoch == state.epoch && !observation.suppressed {
 				record.delay = nextTargetBackoff(record.delay)
@@ -163,7 +180,33 @@ func (l *targetBackoffLedger) observe(observation targetObservation, event excha
 		}
 		var rejected provider.RejectedError
 		if errors.As(cause, &rejected) {
-			delete(l.records, observation.key)
+			state.latestReachable = max(state.latestReachable, observation.sequence)
+			var unavailable provider.TargetUnavailableError
+			var incompatible provider.TargetIncompatibleError
+			if errors.As(cause, &unavailable) || errors.As(cause, &incompatible) {
+				if observation.sequence <= state.latestIngress || observation.sequence <= state.latestSuppression {
+					if record := l.records[observation.key]; errors.As(cause, &incompatible) && record.class != 0 && record.class < targetBackoffIncompatible {
+						record.class = targetBackoffIncompatible
+						l.records[observation.key] = record
+					}
+					break
+				}
+				state.latestSuppression = observation.sequence
+				record := l.records[observation.key]
+				if errors.As(cause, &incompatible) {
+					record.class = targetBackoffIncompatible
+				} else if record.class != targetBackoffIncompatible {
+					record.class = targetBackoffUnavailable
+				}
+				if observation.epoch == state.epoch && !observation.suppressed {
+					record.delay = nextTargetBackoff(record.delay)
+					record.until = now.Add(record.delay)
+					state.epoch++
+				}
+				l.records[observation.key] = record
+			} else if record := l.records[observation.key]; record.class == targetBackoffTransport && observation.sequence > state.latestSuppression {
+				delete(l.records, observation.key)
+			}
 		}
 	}
 	l.finishObservation(observation.key, state)

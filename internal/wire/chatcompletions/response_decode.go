@@ -248,7 +248,7 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 					s.completed = true
 					return s.shiftPending(), nil
 				}
-				return canonical.Event{}, canonical.InternalError("chat completions stream ended before a finish reason")
+				return canonical.Event{}, canonical.NewBackendError("", 0, "chat completions stream ended before a finish reason", "")
 			}
 			return canonical.Event{}, err
 		}

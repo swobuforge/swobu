@@ -1,6 +1,7 @@
 package openaifamily
 
 import (
+	"net/http"
 	"net/url"
 
 	modelcatalogopenai "github.com/swobuforge/swobu/internal/adapters/outbound/modelcatalog/openai"
@@ -17,11 +18,29 @@ import (
 // constructors exist because their catalog or Messages header behavior differs
 // independently, not because a provider needs a named policy class.
 type ProviderRoutePolicy struct {
-	providerID           profile.ProviderID
-	auth                 AuthStrategy
-	modelCatalogDialect  ModelCatalogDialect
-	modelCatalog         ModelCatalogPolicy
-	applyProtocolHeaders func(protocolkind.ProtocolKind, string, HeaderSetter)
+	providerID                profile.ProviderID
+	auth                      AuthStrategy
+	modelCatalogDialect       ModelCatalogDialect
+	modelCatalog              ModelCatalogPolicy
+	applyProtocolHeaders      func(protocolkind.ProtocolKind, string, HeaderSetter)
+	targetUnavailableStatuses map[int]struct{}
+}
+
+// WithTargetUnavailableStatuses records provider-owned HTTP statuses that
+// prove the exact target generation is unavailable independently of a request.
+func (p ProviderRoutePolicy) WithTargetUnavailableStatuses(statuses ...int) ProviderRoutePolicy {
+	p.targetUnavailableStatuses = make(map[int]struct{}, len(statuses))
+	for _, status := range statuses {
+		if status >= http.StatusBadRequest {
+			p.targetUnavailableStatuses[status] = struct{}{}
+		}
+	}
+	return p
+}
+
+func (p ProviderRoutePolicy) targetUnavailableStatus(status int) bool {
+	_, ok := p.targetUnavailableStatuses[status]
+	return ok
 }
 
 // ProviderID returns the explicit provider composed into this adapter runtime.

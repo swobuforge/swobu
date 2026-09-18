@@ -110,7 +110,7 @@ func (e *generateContentStreamEncoder) encode(event sse.StreamEvent) ([]byte, er
 		}
 		return frame, err
 	case sse.StreamEventFailed:
-		return nil, canonical.InternalError(event.ErrorMessage)
+		return nil, wire.TerminalProjectionUnrepresentable(canonical.InternalError(event.ErrorMessage))
 	default:
 		return nil, nil
 	}

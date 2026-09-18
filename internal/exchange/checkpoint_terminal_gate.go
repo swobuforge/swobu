@@ -75,8 +75,8 @@ func (g *checkpointTerminalGate) Next(ctx context.Context) (canonical.Event, err
 		return canonical.Event{}, checkpointCommitError(err)
 	}
 
-	var responseFingerprint = g.responseFingerprint(captured.response)
-	if err := g.committer.commitDocument(ctx, captured.response, responseFingerprint); err != nil {
+	responseFingerprint := g.responseFingerprint(captured.clientResponse)
+	if err := g.committer.commitDocument(ctx, captured.checkpointResponse, responseFingerprint); err != nil {
 		base := g.last
 		if base.Kind == "" {
 			base = event
@@ -127,5 +127,15 @@ func (g *checkpointTerminalGate) Close(ctx context.Context) error {
 }
 
 func (g *checkpointTerminalGate) TerminalError() error { return g.terminal }
+
+func (g *checkpointTerminalGate) TerminalFailureCause() error {
+	if g.terminal != nil {
+		return g.terminal
+	}
+	if g.capture == nil {
+		return nil
+	}
+	return g.capture.TerminalFailureCause()
+}
 
 var _ canonical.ResponseStream = (*checkpointTerminalGate)(nil)

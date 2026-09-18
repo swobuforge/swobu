@@ -17,6 +17,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 func TestDefaultResponseIDGeneratorAllocatesPrefixedID(t *testing.T) {
@@ -364,6 +365,34 @@ func TestRunnerCheckpointCommitFailureReplacesStreamingTerminalSuccess(t *testin
 	}
 	if checkpointPuts != 1 {
 		t.Fatalf("checkpoint puts = %d, want one", checkpointPuts)
+	}
+}
+
+func TestGenerateContentCheckpointCommitFailurePreservesGateProvenance(t *testing.T) {
+	runner := withRuntime(streamingProviderTransport(io.NopCloser(strings.NewReader("ignored")))).
+		WithCheckpointStore(failingCheckpointStore{}).
+		WithResponseIDs(deterministicResponseIDGenerator{})
+	out, err := runPreparedProviderForTest(context.Background(), runner, ExchangeInput{
+		ExchangeID:       "generate_content_commit_failure",
+		ClientFamily:     canonical.ClientFamilyGenerateContent,
+		ClientDelivery:   delivery.StreamingDelivery(delivery.FramingSSE),
+		Request:          testCanonicalRequest("m"),
+		WorkspaceSlug:    "alpha",
+		ProviderProtocol: protocolkind.Responses,
+		ProviderDelivery: delivery.StreamingDelivery(delivery.FramingSSE),
+		Target:           provider.NewTargetSnapshot("openai", "openai", "https://example.test/v1", "cred-1", protocolkind.Responses, "responses", delivery.StreamingDelivery(delivery.FramingSSE)),
+		Contract:         NewExecutionContract(delivery.StreamingDelivery(delivery.FramingSSE)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.ReadAll(ClientTransportForTest(out).Body)
+	var checkpointErr CheckpointCommitError
+	if !errors.As(readErr, &checkpointErr) {
+		t.Fatalf("read error = %T %v, want CheckpointCommitError", readErr, readErr)
+	}
+	if stage, ok := wire.ResponseFailureStage(readErr); ok && stage == "client_stream_encode" {
+		t.Fatalf("checkpoint failure was relabeled as %q", stage)
 	}
 }
 
