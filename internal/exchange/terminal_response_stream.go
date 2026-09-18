@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 // terminalResponseStream converts a provider read failure after response start
@@ -37,6 +38,7 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 	event, err := s.upstream.Next(ctx)
 	if err != nil {
 		if s.started && (errors.Is(err, io.EOF) || !errors.Is(err, context.Canceled)) {
+			logPostStartStreamDiagnostic(s.last, err)
 			code, message := "provider_stream_decode_failed", "provider stream failed after response start"
 			if errors.Is(err, io.EOF) {
 				code, message = "provider_stream_incomplete", "provider stream ended before completed"
@@ -64,7 +66,7 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 				"last_event_kind", s.last.Kind,
 				"last_event_seq", s.last.Seq,
 			)
-			s.pending = terminalFailureEvents(s.last, code, message)
+			s.pending = terminalFailureEventsWithCause(s.last, code, message, err)
 			s.terminated = true
 			return s.Next(ctx)
 		}
@@ -83,6 +85,27 @@ func (s *terminalResponseStream) Next(ctx context.Context) (canonical.Event, err
 	return event, nil
 }
 
+// logPostStartStreamDiagnostic preserves the lazy stream boundary that failed
+// after client handoff. The stable warning and client event remain sanitized;
+// debug output is the credential-safe operator seam for decoder and canonical
+// invariant causes that otherwise disappear when delivery must be terminated.
+func logPostStartStreamDiagnostic(last canonical.Event, err error) {
+	if errors.Is(err, io.EOF) {
+		return
+	}
+	stage := "unknown"
+	if exact, ok := wire.ResponseFailureStage(err); ok {
+		stage = exact
+	}
+	slog.Debug("provider stream failure diagnostic",
+		"component", "exchange",
+		"event", "provider_stream_failure_diagnostic",
+		"exchange_id", last.ExchangeID,
+		"failure_stage", stage,
+		"diagnostic_error", wire.ResponseFailureCause(err),
+	)
+}
+
 func (s *terminalResponseStream) Close(ctx context.Context) error {
 	if s.upstream == nil {
 		return nil
@@ -91,6 +114,10 @@ func (s *terminalResponseStream) Close(ctx context.Context) error {
 }
 
 func terminalFailureEvents(base canonical.Event, code, message string) []canonical.Event {
+	return terminalFailureEventsWithCause(base, code, message, nil)
+}
+
+func terminalFailureEventsWithCause(base canonical.Event, code, message string, cause error) []canonical.Event {
 	when := base.Time
 	if when.IsZero() {
 		when = time.Now().UTC()
@@ -99,7 +126,7 @@ func terminalFailureEvents(base canonical.Event, code, message string) []canonic
 		{
 			ExchangeID: base.ExchangeID, Seq: base.Seq + 1, Time: when,
 			Kind: canonical.EventError, EnvID: base.EnvID, ParentID: base.ParentID,
-			Payload: canonical.ErrorPayload{Code: code, Message: message},
+			Payload: canonical.NewErrorPayloadWithDiagnostic(code, message, false, cause),
 		},
 		{
 			ExchangeID: base.ExchangeID, Seq: base.Seq + 2, Time: time.Now().UTC(),

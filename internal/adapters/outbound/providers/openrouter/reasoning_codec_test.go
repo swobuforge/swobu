@@ -211,7 +211,8 @@ func TestOpenRouterResponseTransformsPreserveUnownedRawJSON(t *testing.T) {
 		t.Fatal("no events decoded")
 	}
 
-	streamRaw := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"extension\":{\"constant\":9007199254740993}}}]}\n\ndata: [DONE]\n\n"
+	streamRaw := "data: {\"choices\":[{\"delta\":{\"reasoning\":\"think\",\"extension\":{\"constant\":9007199254740993}}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	streamDecoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
 		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(streamRaw)),
 	}})
@@ -532,6 +533,82 @@ func TestOpenRouterStreamingIgnoresNullReasoningAtTerminalFinish(t *testing.T) {
 	events := drainEvents(t, decoded.Stream)
 	if len(events) == 0 {
 		t.Fatal("no events decoded")
+	}
+}
+
+func TestOpenRouterStreamingIgnoresEmptyReasoningDetailsAfterAnswerOutput(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[]},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events := drainEvents(t, decoded.Stream); len(events) == 0 {
+		t.Fatal("empty reasoning_details terminal frame prevented response completion")
+	}
+}
+
+func TestOpenRouterStreamingRejectsNonEmptyReasoningDetailsAfterAnswerOutput(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"late trace"}]},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, err := decoded.Stream.Next(context.Background())
+		if err == nil {
+			continue
+		}
+		if !strings.Contains(err.Error(), "reasoning arrived after answer output") {
+			t.Fatalf("stream error = %v, want late-reasoning rejection", err)
+		}
+		return
+	}
+}
+
+func TestOpenRouterStreamingIgnoresRepeatedReasoningDetailAfterAnswerOutput(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	detail := `{"type":"reasoning.text","text":"trace"}`
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[` + detail + `]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning_details":[` + detail + `]},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{
+		MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw)),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events := drainEvents(t, decoded.Stream); len(events) == 0 {
+		t.Fatal("repeated reasoning detail prevented response completion")
 	}
 }
 

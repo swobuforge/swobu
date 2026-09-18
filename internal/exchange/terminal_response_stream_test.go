@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
+	"github.com/swobuforge/swobu/internal/wire"
 )
 
 type failAfterEventsStream struct {
@@ -71,6 +73,52 @@ func TestTerminalResponseStreamHidesUnderlyingPostStartFailure(t *testing.T) {
 	if strings.Contains(got, underlying.Error()) {
 		t.Fatalf("stable WARN log exposed arbitrary cause: %s", got)
 	}
+}
+
+func TestTerminalResponseStreamLogsPrivatePostStartFailureAtItsOriginalStage(t *testing.T) {
+	underlying := errors.New("item.completed ordinal 2 is duplicated")
+	upstream := &failAfterEventsStream{
+		events: []canonical.Event{{
+			ExchangeID: "exchange_1",
+			Seq:        1,
+			Kind:       canonical.EventEnvelopeStart,
+			EnvID:      "response_1",
+			Payload:    canonical.EnvelopeStartPayload{Kind: canonical.EnvResponse},
+		}},
+		err: wire.StageResponseFailure("canonical_response_validation", underlying),
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	stream := newTerminalResponseStream(upstream)
+	if _, err := stream.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 2 {
+		t.Fatalf("log entries = %#v, want stable warning and private diagnostic", entries)
+	}
+	var stable, diagnostic map[string]any
+	for _, entry := range entries {
+		if entry["event"] == "provider_stream_failure_diagnostic" {
+			diagnostic = entry
+		} else {
+			stable = entry
+		}
+	}
+	assertLogField(t, stable, "event", "provider_stream_failed_after_start")
+	if strings.Contains(fmt.Sprint(stable), underlying.Error()) {
+		t.Fatalf("stable warning exposed private diagnostic: %#v", stable)
+	}
+	assertLogField(t, diagnostic, "exchange_id", "exchange_1")
+	assertLogField(t, diagnostic, "failure_stage", "canonical_response_validation")
+	assertLogField(t, diagnostic, "diagnostic_error", underlying.Error())
 }
 
 func TestTerminalResponseStreamPreservesStructuredProviderFailure(t *testing.T) {

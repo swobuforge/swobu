@@ -3,4 +3,6 @@
 // It owns family-level encoding and stream decoding, not endpoint selection,
 // routing, or authentication. Provider-bound projections do not become trusted
 // client history. Tool names are resolved through the attempt's name mapping.
+// A repeated terminal choice is idempotent only when its finish reason is
+// unchanged and it carries no new output or filter result.
 package chatcompletions

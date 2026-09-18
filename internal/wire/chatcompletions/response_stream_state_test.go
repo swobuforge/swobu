@@ -339,6 +339,66 @@ func TestChatStreamAcceptsRepeatedResponseIdentity(t *testing.T) {
 	}
 }
 
+func TestChatStreamAcceptsIdenticalEmptyTerminalChoiceRepeatedByProvider(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	completed := drainChatStreamCompletedItems(t, canonical.CanonicalRequest{}, raw)
+	if len(completed) != 1 {
+		t.Fatalf("completed items = %#v, want one item after idempotent terminal repeat", completed)
+	}
+}
+
+func TestChatStreamAcceptsAssistantRoleOnOtherwiseEmptyRepeatedTerminalChoice(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	completed := drainChatStreamCompletedItems(t, canonical.CanonicalRequest{}, raw)
+	if len(completed) != 1 {
+		t.Fatalf("completed items = %#v, want one item after role-only terminal repeat", completed)
+	}
+}
+
+func TestChatStreamRejectsContradictoryRepeatedTerminalChoice(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	assertChatStreamBackendError(t, stream)
+}
+
+func TestChatStreamRejectsBufferedOutputAfterTerminalChoice(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"late\"},\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	assertChatStreamBackendError(t, stream)
+}
+
+func TestChatStreamRejectsContentFilterResultAfterTerminalChoice(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"content_filter_result\":{\"error\":{\"code\":\"blocked\",\"message\":\"late\"}}}]}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+	assertChatStreamBackendError(t, stream)
+}
+
+func TestChatStreamReturnsDecodeFailureWhenProviderEndsWithoutFinishReason(t *testing.T) {
+	raw := "data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{}}]}\n\n"
+	stream := decodeResponseStream(canonical.CanonicalRequest{}, nil, carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}, "ex", nil)
+
+	for {
+		event, err := stream.Next(context.Background())
+		if err == nil {
+			if event.Kind == canonical.EventError || event.Kind == canonical.EventEnvelopeEnd {
+				t.Fatalf("unfinished provider stream was converted into canonical terminal event %#v", event)
+			}
+			continue
+		}
+		if !strings.Contains(err.Error(), "ended before a finish reason") {
+			t.Fatalf("stream error = %v, want provider decode failure", err)
+		}
+		return
+	}
+}
+
 func TestChatStreamCompletesPreviouslyAbsentResponseIdentity(t *testing.T) {
 	raw := "data: {\"id\":\"chat_1\",\"choices\":[]}\n\n" +
 		"data: {\"id\":\"chat_1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"

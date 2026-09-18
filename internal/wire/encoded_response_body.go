@@ -68,7 +68,11 @@ func (b *EncodedResponseBody) Read(p []byte) (int, error) {
 		}
 		encoded, err := b.encode(event)
 		if err != nil {
-			err = StageResponseFailure("client_stream_encode", err)
+			if payload, ok := event.Payload.(canonical.ErrorPayload); ok && payload.DiagnosticCause() != nil {
+				err = payload.DiagnosticCause()
+			} else {
+				err = StageResponseFailure("client_stream_encode", err)
+			}
 			b.fail(err)
 			return 0, err
 		}

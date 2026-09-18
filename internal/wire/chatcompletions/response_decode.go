@@ -241,15 +241,14 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		event, err := s.reader.Next(ctx)
 		if err != nil {
 			if err == io.EOF && s.started && !s.completed {
-				s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
-				s.closeOpenChildren(canonical.EnvelopeStatusError)
-				s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
-				s.completed = true
-				if len(s.pending) > 0 {
-					out := s.pending[0]
-					s.pending = s.pending[1:]
-					return out, nil
+				if s.choiceFinished {
+					s.enqueue(canonical.Event{Kind: canonical.EventError, EnvID: s.responseID, Payload: canonical.ErrorPayload{Code: "stream_unexpected_eof", Message: "output stream ended before completed"}})
+					s.closeOpenChildren(canonical.EnvelopeStatusError)
+					s.enqueueEnvelopeEnd(s.responseID, canonical.EnvResponse, canonical.EnvelopeStatusError)
+					s.completed = true
+					return s.shiftPending(), nil
 				}
+				return canonical.Event{}, canonical.InternalError("chat completions stream ended before a finish reason")
 			}
 			return canonical.Event{}, err
 		}
@@ -286,6 +285,15 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 			continue
 		}
 		choice := chunk.Choices[0]
+		if s.choiceFinished {
+			if s.isIdempotentTerminalRepeat(choice) {
+				if len(s.pending) > 0 {
+					return s.shiftPending(), nil
+				}
+				continue
+			}
+			return canonical.Event{}, s.postFinishChoiceError(choice)
+		}
 		if openaiwire.IsContentFilterFinishReason(choice.FinishReason) {
 			s.handleChoiceContentFilter(ctx, choice)
 		} else {
@@ -299,6 +307,38 @@ func (s *chatCompletionsEventReader) Next(ctx context.Context) (canonical.Event,
 		if len(s.pending) > 0 {
 			return s.shiftPending(), nil
 		}
+	}
+}
+
+// isIdempotentTerminalRepeat admits only an empty duplicate of the exact
+// terminal choice already reduced. Some OpenAI-compatible relays repeat that
+// marker before [DONE]; any changed reason or additional output remains a
+// lifecycle contradiction.
+func (s *chatCompletionsEventReader) isIdempotentTerminalRepeat(choice streamChoiceBody) bool {
+	return strings.TrimSpace(choice.FinishReason) != "" &&
+		choice.FinishReason == s.completion.Reason() &&
+		(choice.Delta.Role == "" || choice.Delta.Role == string(canonical.MessageRoleAssistant)) &&
+		choice.Delta.Content == "" && len(choice.Delta.ToolCalls) == 0 &&
+		choice.Message.Role == "" && len(choice.Message.Content) == 0 && len(choice.Message.ToolCalls) == 0 &&
+		choice.ContentFilterResult.Error.Code == "" && choice.ContentFilterResult.Error.Message == ""
+}
+
+func (s *chatCompletionsEventReader) postFinishChoiceError(choice streamChoiceBody) error {
+	switch {
+	case strings.TrimSpace(choice.FinishReason) == "":
+		return canonical.NewBackendError("", 0, "chat completions stream emitted a non-terminal choice after its finish reason", "")
+	case choice.FinishReason != s.completion.Reason():
+		return canonical.NewBackendError("", 0, "chat completions stream changed its finish reason after completion", "")
+	case choice.Delta.Content != "":
+		return canonical.NewBackendError("", 0, "chat completions stream emitted text after its finish reason", "")
+	case len(choice.Delta.ToolCalls) != 0:
+		return canonical.NewBackendError("", 0, "chat completions stream emitted tool calls after its finish reason", "")
+	case choice.Message.Role != "" || len(choice.Message.Content) != 0 || len(choice.Message.ToolCalls) != 0:
+		return canonical.NewBackendError("", 0, "chat completions stream emitted a buffered message after its finish reason", "")
+	case choice.ContentFilterResult.Error.Code != "" || choice.ContentFilterResult.Error.Message != "":
+		return canonical.NewBackendError("", 0, "chat completions stream emitted a content filter result after its finish reason", "")
+	default:
+		return canonical.NewBackendError("", 0, "chat completions stream emitted an invalid role after its finish reason", "")
 	}
 }
 
@@ -373,9 +413,6 @@ func (s *chatCompletionsEventReader) applyChoiceDelta(choice streamChoiceBody) e
 func (s *chatCompletionsEventReader) applyChoiceFinish(ctx context.Context, choice streamChoiceBody) error {
 	if strings.TrimSpace(choice.FinishReason) == "" || s.completed { // swobu:io-string source=boundary
 		return nil
-	}
-	if s.choiceFinished {
-		return canonical.NewBackendError("", 0, "chat completions stream repeated its finish reason", "")
 	}
 	if err := s.validateToolOccurrenceFrontier(); err != nil {
 		return err

@@ -88,12 +88,13 @@ func decorateOpenRouterAttempt(ctx provider.AttemptContext) (protocolcodec.Attem
 type openRouterReasoningExtractor struct {
 	detailsRaw  []byte
 	detailItems []json.RawMessage
+	seenDetails map[string]struct{}
 	flat        strings.Builder
 }
 
 func (e *openRouterReasoningExtractor) ExtractBufferedChatReasoning(message map[string]json.RawMessage) (string, error) {
 	if raw, ok := message["reasoning_details"]; ok {
-		if err := e.captureDetails(raw); err != nil {
+		if _, err := e.captureDetails(raw); err != nil {
 			return "", err
 		}
 		delete(message, "reasoning_details")
@@ -109,11 +110,12 @@ func (e *openRouterReasoningExtractor) ExtractBufferedChatReasoning(message map[
 func (e *openRouterReasoningExtractor) ExtractStreamedChatReasoning(delta map[string]json.RawMessage) (protocolcodec.ChatReasoningFragment, error) {
 	observed := false
 	if raw, ok := delta["reasoning_details"]; ok {
-		if err := e.captureDetails(raw); err != nil {
+		added, err := e.captureDetails(raw)
+		if err != nil {
 			return protocolcodec.ChatReasoningFragment{}, err
 		}
 		delete(delta, "reasoning_details")
-		observed = true
+		observed = added
 	}
 	var text string
 	if raw, ok := delta["reasoning"]; ok {
@@ -127,30 +129,43 @@ func (e *openRouterReasoningExtractor) ExtractStreamedChatReasoning(delta map[st
 	return protocolcodec.ChatReasoningFragment{Text: text, Observed: observed}, nil
 }
 
-func (e *openRouterReasoningExtractor) captureDetails(raw json.RawMessage) error {
+func (e *openRouterReasoningExtractor) captureDetails(raw json.RawMessage) (bool, error) {
 	if !json.Valid(raw) {
-		return canonical.InternalError("OpenRouter reasoning_details is invalid JSON")
+		return false, canonical.InternalError("OpenRouter reasoning_details is invalid JSON")
 	}
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return canonical.InternalError("OpenRouter reasoning_details must be an array")
+		return false, canonical.InternalError("OpenRouter reasoning_details must be an array")
+	}
+	added := false
+	if e.seenDetails == nil {
+		e.seenDetails = make(map[string]struct{})
 	}
 	for _, item := range items {
 		if !json.Valid(item) {
-			return canonical.InternalError("OpenRouter reasoning_details contains invalid JSON")
+			return false, canonical.InternalError("OpenRouter reasoning_details contains invalid JSON")
 		}
+		key := string(item)
+		if _, seen := e.seenDetails[key]; seen {
+			continue
+		}
+		e.seenDetails[key] = struct{}{}
 		e.detailItems = append(e.detailItems, append(json.RawMessage(nil), item...))
+		added = true
 	}
-	if len(e.detailsRaw) == 0 && len(e.detailItems) == len(items) {
+	if len(e.detailsRaw) == 0 && added && len(e.detailItems) == len(items) {
 		e.detailsRaw = append([]byte(nil), raw...)
-		return nil
+		return true, nil
+	}
+	if !added {
+		return false, nil
 	}
 	encoded, err := json.Marshal(e.detailItems)
 	if err != nil {
-		return canonical.InternalError("OpenRouter reasoning_details could not be preserved")
+		return false, canonical.InternalError("OpenRouter reasoning_details could not be preserved")
 	}
 	e.detailsRaw = encoded
-	return nil
+	return true, nil
 }
 
 func (e *openRouterReasoningExtractor) NewChatReasoningItem(content string) (canonical.CanonicalItem, error) {

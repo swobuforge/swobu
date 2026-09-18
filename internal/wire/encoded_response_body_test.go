@@ -34,3 +34,28 @@ func TestEncodedResponseBodySettlesCompletionWithUpstreamFailureBeforeClose(t *t
 		t.Fatalf("completion = %#v, stage=%q, ok=%v", snapshot, stage, ok)
 	}
 }
+
+func TestEncodedResponseBodyPreservesUpstreamFailureWhenClientCannotEncodeTerminalError(t *testing.T) {
+	cause := StageResponseFailure("provider_stream_decode", errors.New("invalid provider terminal frame"))
+	events := canonical.NewSliceEventReader([]canonical.Event{{
+		Kind: canonical.EventError,
+		Payload: canonical.NewErrorPayloadWithDiagnostic(
+			"provider_stream_decode_failed",
+			"provider stream failed after response start",
+			false,
+			cause,
+		),
+	}})
+	completion, _, fail := NewResponseCompletion()
+	body := NewEncodedResponseBody(context.Background(), events,
+		func(canonical.Event) ([][]byte, error) { return nil, errors.New("client cannot encode terminal error") }, completion, fail)
+
+	if _, err := body.Read(make([]byte, 1)); !errors.Is(err, cause) {
+		t.Fatalf("read error = %v, want original upstream cause", err)
+	}
+	snapshot := completion.Snapshot()
+	stage, ok := ResponseFailureStage(snapshot.Err)
+	if snapshot.State != CompletionFailed || !ok || stage != "provider_stream_decode" {
+		t.Fatalf("completion = %#v, stage=%q, ok=%v", snapshot, stage, ok)
+	}
+}
