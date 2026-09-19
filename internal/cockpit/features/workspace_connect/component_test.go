@@ -2157,7 +2157,10 @@ func TestRealPiConfigurationCreatesMissingGlobalFiles(t *testing.T) {
 	d.chooseClient(clientconnect.ClientPi)
 	waitFor(t, func() bool {
 		h.Frame()
-		return d.Child.Get().isClient(clientconnect.ClientPi)
+		observations := d.Observations.Get()
+		return d.Child.Get().isClient(clientconnect.ClientPi) &&
+			len(observations) >= 1 &&
+			observationFor(t, observations, clientconnect.ClientPi).Kind == observationNeedsChange
 	})
 	observation = observationFor(t, d.Observations.Get(), clientconnect.ClientPi)
 	if frame := h.Frame(); !strings.Contains(frame, "apply ↵") || len(observation.Plan.ConfigPaths) != 2 || !strings.Contains(observation.Plan.ConfigPaths[0], "models.json") || !strings.Contains(observation.Plan.ConfigPaths[1], "settings.json") {
