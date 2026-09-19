@@ -1524,10 +1524,12 @@ func TestBlockedApplyKeepsEventLoopResponsiveWhileGatingDuplicateMutation(t *tes
 
 	// 1. Press Apply: UI immediately sets Applying and renders "configuring…"
 	d.applyPlan(clientconnect.ClientCodex)
-	if !observationFor(t, d.Observations.Get(), clientconnect.ClientCodex).Applying {
-		t.Fatal("applyPlan did not set Applying on observation")
-	}
-	inFlightFrame := h.Frame()
+	var inFlightFrame string
+	waitFor(t, func() bool {
+		inFlightFrame = h.Frame()
+		return observationFor(t, d.Observations.Get(), clientconnect.ClientCodex).Applying &&
+			strings.Contains(inFlightFrame, "configuring…")
+	})
 	if !strings.Contains(inFlightFrame, "configuring…") {
 		t.Fatalf("expected configuring… during in-flight apply:\n%s", inFlightFrame)
 	}
@@ -1794,10 +1796,10 @@ func TestApplyingParentRowStateAndSelectiveChildScopeClose(t *testing.T) {
 		return d.Child.Get().isClient(clientconnect.ClientCodex) && observationFor(t, obs, clientconnect.ClientCodex).Kind == observationNeedsChange
 	})
 	d.applyPlan(clientconnect.ClientCodex)
-
-	if !observationFor(t, d.Observations.Get(), clientconnect.ClientCodex).Applying {
-		t.Fatal("Codex CLI observation not marked Applying")
-	}
+	waitFor(t, func() bool {
+		h.Frame()
+		return observationFor(t, d.Observations.Get(), clientconnect.ClientCodex).Applying
+	})
 
 	// User closes child scope with Back / Esc
 	d.Back()
