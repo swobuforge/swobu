@@ -69,7 +69,10 @@ type TargetConfig struct {
 	Route       readmodel.RouteReadModel
 	Target      readmodel.TargetReadModel
 	mode        targetConfigMode
-	Embedded    bool
+	// placementDirty distinguishes explicit unsaved routing intent from the
+	// durable placement that seeded an edit form.
+	placementDirty bool
+	Embedded       bool
 
 	appState
 
@@ -237,6 +240,8 @@ func (w *TargetConfig) UpdateProps(fresh tui.Component) {
 // UpdateRoute refreshes the target config subject for create mode without resetting
 // operator-entered provider, setup, catalog, or model state.
 func (w *TargetConfig) UpdateRoute(workspaceID readmodel.WorkspaceID, route readmodel.RouteReadModel) {
+	placement, _ := reconcilePlacement(route, targetConfigModeCreate, "", w.Placement.Get(), true)
+	w.Placement.Set(placement)
 	w.WorkspaceID = workspaceID
 	w.Route = route
 	w.Target = readmodel.TargetReadModel{}
@@ -246,6 +251,9 @@ func (w *TargetConfig) UpdateRoute(workspaceID readmodel.WorkspaceID, route read
 // UpdateTarget refreshes the target config subject for edit mode without resetting
 // operator-entered provider, setup, catalog, or model state.
 func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route readmodel.RouteReadModel, target readmodel.TargetReadModel) {
+	placement, draftPreserved := reconcilePlacement(route, targetConfigModeEdit, target.ID, w.Placement.Get(), w.placementDirty)
+	w.Placement.Set(placement)
+	w.placementDirty = draftPreserved
 	w.WorkspaceID = workspaceID
 	w.Route = route
 	w.Target = target
@@ -255,6 +263,7 @@ func (w *TargetConfig) UpdateTarget(workspaceID readmodel.WorkspaceID, route rea
 		seedEndpointFromTarget(w, target)
 		w.SelectedModel.Set(selectedModelSeedFromTarget(target))
 		w.Placement.Set(currentPlacementForTarget(route, target.ID))
+		w.placementDirty = false
 		if w.Draft.Get().ProviderSpec != "" {
 			w.refreshSetup()
 		}

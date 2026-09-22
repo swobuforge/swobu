@@ -1,10 +1,13 @@
 package target_config
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	tui "github.com/grindlemire/go-tui"
+	"github.com/swobuforge/swobu/internal/cockpit/ports"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
@@ -30,7 +33,7 @@ func TestPlacementCanChangeDuringCreationAndEditing(t *testing.T) {
 
 func TestEditPlacementOptionsUsePostRemovalCollapsedTopology(t *testing.T) {
 	a := readmodel.TargetReadModel{ID: "a"}
-	b := readmodel.TargetReadModel{ID: "b"}
+	b := readmodel.TargetReadModel{ID: "b", Provider: "openai", Model: "gpt", ProviderProtocol: "responses", CredentialRef: "env:OPENAI_API_KEY"}
 	c := readmodel.TargetReadModel{ID: "c"}
 	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
 		{Targets: []readmodel.TargetReadModel{a}},
@@ -89,6 +92,127 @@ func TestExistingTargetPlacementIsDerivedFromEveryTopologyKind(t *testing.T) {
 	primary := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{a}}, {Targets: []readmodel.TargetReadModel{c}}}}
 	if got := currentPlacementForTarget(primary, a.ID); got.PeerTargetID != "" || got.Summary() != "primary" {
 		t.Fatalf("primary placement = %#v", got)
+	}
+}
+
+func TestPlacementReconciliationExcludesMissingAnchors(t *testing.T) {
+	a := readmodel.TargetReadModel{ID: "a"}
+	b := readmodel.TargetReadModel{ID: "b"}
+	c := readmodel.TargetReadModel{ID: "c"}
+	route := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{a}},
+		{Targets: []readmodel.TargetReadModel{b}},
+	}}
+
+	selected := readmodel.PlacementOptionReadModel{Label: "stale label", PeerTargetID: a.ID, Kind: readmodel.PlacementFallback}
+	if got, preserved := reconcilePlacement(route, targetConfigModeEdit, b.ID, selected, true); got.Label != "fallback 1" || got.PeerTargetID != a.ID || !preserved {
+		t.Fatalf("valid placement = %#v; want refreshed label with preserved anchor", got)
+	}
+
+	refreshed := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{b, c}}}}
+	got, preserved := reconcilePlacement(refreshed, targetConfigModeEdit, b.ID, selected, true)
+	if got.Kind != readmodel.PlacementBalance || got.PeerTargetID != c.ID || preserved {
+		t.Fatalf("edit placement after anchor removal = %#v; want durable balanced placement", got)
+	}
+
+	got, preserved = reconcilePlacement(refreshed, targetConfigModeCreate, "", selected, true)
+	if got.Kind != readmodel.PlacementFallback || got.PeerTargetID != b.ID || got.Label != "fallback 1" || preserved {
+		t.Fatalf("create placement after anchor removal = %#v; want last valid fallback", got)
+	}
+}
+
+func TestEditRefreshAdoptsDurablePlacementWhenSeededPlacementRemainsExpressible(t *testing.T) {
+	a := readmodel.TargetReadModel{ID: "a"}
+	b := readmodel.TargetReadModel{ID: "b", Provider: "openai", Model: "gpt", ProviderProtocol: "responses", CredentialRef: "env:OPENAI_API_KEY"}
+	original := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{a}},
+		{Targets: []readmodel.TargetReadModel{b}},
+	}}
+	refreshed := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{a, b}}}}
+	config := NewEditTargetConfig("dev", original, b, nil, nil)
+
+	config.UpdateTarget("dev", refreshed, b)
+
+	got := config.Placement.Get()
+	if got.Kind != readmodel.PlacementBalance || got.PeerTargetID != a.ID {
+		t.Fatalf("placement after durable move = %#v; want balance with a", got)
+	}
+}
+
+func TestEditRefreshPreservesFailedExplicitPlacementWhileItRemainsExpressible(t *testing.T) {
+	a := readmodel.TargetReadModel{ID: "a"}
+	b := readmodel.TargetReadModel{ID: "b", Provider: "openai", Model: "gpt", ProviderProtocol: "responses", CredentialRef: "env:OPENAI_API_KEY"}
+	balanced := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{a, b}}}}
+	config := NewEditTargetConfig("dev", balanced, b, func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		return ports.SaveTargetResult{}, errors.New("save rejected")
+	}, nil)
+	explicit := readmodel.PlacementOptionReadModel{Label: "fallback 1", PeerTargetID: a.ID, Kind: readmodel.PlacementFallback}
+
+	config.SelectPlacement(explicit)
+	if got := config.Placement.Get(); got.Kind != readmodel.PlacementFallback || got.PeerTargetID != a.ID {
+		t.Fatalf("placement after rejected fallback = %#v; want uncommitted fallback after a", got)
+	}
+	config.UpdateTarget("dev", balanced, b)
+
+	if got := config.Placement.Get(); got.Kind != explicit.Kind || got.PeerTargetID != explicit.PeerTargetID {
+		t.Fatalf("placement after failed save and refresh = %#v; want explicit fallback after a", got)
+	}
+}
+
+func TestEditRefreshReturnsPlacementAuthorityToDurableTopologyAfterDraftAnchorDisappears(t *testing.T) {
+	a := readmodel.TargetReadModel{ID: "a"}
+	b := readmodel.TargetReadModel{ID: "b", Provider: "openai", Model: "gpt", ProviderProtocol: "responses", CredentialRef: "env:OPENAI_API_KEY"}
+	c := readmodel.TargetReadModel{ID: "c"}
+	d := readmodel.TargetReadModel{ID: "d"}
+	original := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{a}},
+		{Targets: []readmodel.TargetReadModel{b, c}},
+	}}
+	config := NewEditTargetConfig("dev", original, b, func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		return ports.SaveTargetResult{}, errors.New("save rejected")
+	}, nil)
+
+	config.SelectPlacement(readmodel.PlacementOptionReadModel{Label: "fallback 1", PeerTargetID: a.ID, Kind: readmodel.PlacementFallback})
+
+	withoutDraftAnchor := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{b, c}}}}
+	config.UpdateTarget("dev", withoutDraftAnchor, b)
+	if got := config.Placement.Get(); got.Kind != readmodel.PlacementBalance || got.PeerTargetID != c.ID {
+		t.Fatalf("placement after draft anchor disappeared = %#v; want durable balance with c", got)
+	}
+
+	durableMove := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{c}},
+		{Targets: []readmodel.TargetReadModel{d}},
+		{Targets: []readmodel.TargetReadModel{b}},
+	}}
+	config.UpdateTarget("dev", durableMove, b)
+	if got := config.Placement.Get(); got.Kind != readmodel.PlacementFallback || got.PeerTargetID != d.ID {
+		t.Fatalf("placement after second durable move = %#v; want fallback after d", got)
+	}
+}
+
+func TestSuccessfulPlacementSaveReturnsAuthorityToDurableRefresh(t *testing.T) {
+	a := readmodel.TargetReadModel{ID: "a"}
+	b := readmodel.TargetReadModel{ID: "b", Provider: "openai", Model: "gpt", ProviderProtocol: "responses", CredentialRef: "env:OPENAI_API_KEY"}
+	balanced := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{a, b}}}}
+	fallback := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{a}},
+		{Targets: []readmodel.TargetReadModel{b}},
+	}}
+	config := NewEditTargetConfig("dev", balanced, b, func(context.Context, ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		return ports.SaveTargetResult{Target: b, Route: fallback}, nil
+	}, nil)
+	explicit := readmodel.PlacementOptionReadModel{Label: "fallback 1", PeerTargetID: a.ID, Kind: readmodel.PlacementFallback}
+
+	config.SelectPlacement(explicit)
+	if got := config.Placement.Get(); got.Kind != readmodel.PlacementFallback || got.PeerTargetID != a.ID {
+		t.Fatalf("placement after committed fallback = %#v; want committed fallback after a", got)
+	}
+	config.UpdateTarget("dev", balanced, b)
+
+	got := config.Placement.Get()
+	if got.Kind != readmodel.PlacementBalance || got.PeerTargetID != a.ID {
+		t.Fatalf("placement after successful save and later durable move = %#v; want balance with a", got)
 	}
 }
 

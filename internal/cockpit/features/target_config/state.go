@@ -403,6 +403,7 @@ func (w *TargetConfig) resetFlowState() {
 	w.stopAuthSessionObserver()
 	w.resetSetupState()
 	w.Placement.Set(defaultPlacementForRoute(w.Route))
+	w.placementDirty = false
 	w.catalogProbeSeq++
 }
 

@@ -392,6 +392,7 @@ func (w *TargetConfig) ContinueSetup() {
 // SelectPlacement commits the routing choice selected by the placement picker.
 func (w *TargetConfig) SelectPlacement(p readmodel.PlacementOptionReadModel) {
 	w.Placement.Set(p)
+	w.placementDirty = true
 	w.CommitEdit(w.actionContext())
 }
 
@@ -907,6 +908,8 @@ func (w *TargetConfig) CommitEdit(ctx context.Context) {
 	}
 	w.Target = saved.Target
 	w.Route = saved.Route
+	w.Placement.Set(currentPlacementForTarget(saved.Route, saved.Target.ID))
+	w.placementDirty = false
 	w.Error.Set("")
 	if w.OnSaved != nil {
 		w.OnSaved(saved)

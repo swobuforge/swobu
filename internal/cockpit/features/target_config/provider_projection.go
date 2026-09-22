@@ -215,6 +215,23 @@ func currentPlacementForTarget(route readmodel.RouteReadModel, id readmodel.Targ
 	return defaultPlacementForRoute(route)
 }
 
+// reconcilePlacement returns both the refreshed placement and whether explicit
+// draft authority survived reconciliation. Once the route cannot express the
+// draft, durable topology owns this and every later edit refresh.
+func reconcilePlacement(route readmodel.RouteReadModel, mode targetConfigMode, id readmodel.TargetID, current readmodel.PlacementOptionReadModel, preserveDraft bool) (readmodel.PlacementOptionReadModel, bool) {
+	if preserveDraft {
+		for _, option := range placementOptions(route, mode, id) {
+			if option.Kind == current.Kind && option.PeerTargetID == current.PeerTargetID {
+				return option, true
+			}
+		}
+	}
+	if mode == targetConfigModeEdit {
+		return currentPlacementForTarget(route, id), false
+	}
+	return defaultPlacementForRoute(route), false
+}
+
 func placementTierLabel(tierIndex int) string {
 	if tierIndex == 0 {
 		return "primary"

@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -143,6 +144,38 @@ func TestRouteSpecWithTargetCoversAddMoveEditAndTierCleanup(t *testing.T) {
 	}
 	if len(fallback.Tiers) != 3 || fallback.Tiers[2].Targets[0].ID != "d" {
 		t.Fatalf("fallback add = %#v", fallback)
+	}
+}
+
+func TestRefreshedTargetEditDoesNotSubmitRemovedPlacementPeer(t *testing.T) {
+	connection := workspaceapi.StandardConnection("openai", "", "env:KEY")
+	primary := readmodel.TargetReadModel{ID: "removed", Provider: "openai", Model: "gpt-primary", ProviderProtocol: "responses", CredentialRef: "env:KEY"}
+	edited := readmodel.TargetReadModel{ID: "edited", Provider: "openai", Model: "gpt-edited", ProviderProtocol: "responses", CredentialRef: "env:KEY"}
+	originalRoute := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{
+		{Targets: []readmodel.TargetReadModel{primary}},
+		{Targets: []readmodel.TargetReadModel{edited}},
+	}}
+	refreshedRoute := readmodel.RouteReadModel{ID: "chat", Tiers: []readmodel.TierReadModel{{Targets: []readmodel.TargetReadModel{edited}}}}
+	currentSpec := workspaceapi.RouteSpec{Tiers: []workspaceapi.TierSpec{{Targets: []workspaceapi.TargetDraft{{
+		ID: "edited", Model: "gpt-edited", Protocol: "responses", Connection: connection,
+	}}}}}
+
+	config := target_config.NewEditTargetConfig("dev", originalRoute, edited, func(_ context.Context, request ports.SaveTargetRequest) (ports.SaveTargetResult, error) {
+		target, err := targetFromSaveRequest(request, string(request.TargetID))
+		if err != nil {
+			return ports.SaveTargetResult{}, err
+		}
+		if _, err := routeSpecWithTarget(currentSpec, target, request.Placement); err != nil {
+			return ports.SaveTargetResult{}, err
+		}
+		return ports.SaveTargetResult{Target: edited, Route: refreshedRoute}, nil
+	}, nil)
+	config.UpdateTarget("dev", refreshedRoute, edited)
+
+	config.CommitEdit(context.Background())
+
+	if errText := config.Error.Get(); errText != "" {
+		t.Fatalf("commit after route refresh failed: %s", errText)
 	}
 }
 
