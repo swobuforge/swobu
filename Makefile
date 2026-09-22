@@ -11,12 +11,12 @@ SWOBU_VERSION ?= dev
 SWOBU_LDFLAGS := -s -w -X $(MODULE_PATH)/internal/app/operator/controlplane.swobuVersion=$(SWOBU_VERSION)
 GO_TEST_FLAGS ?= -failfast -timeout=5m
 
-.PHONY: help check check-build check-fmt check-installer check-test test generate check-generated build release-build clean fmt-check lint
+.PHONY: help check check-build check-fixture-line-endings check-fmt check-installer check-test test generate check-generated build release-build clean fmt-check lint
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Swobu commands:"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-check: check-build check-generated check-installer ## Run all checks
+check: check-build check-generated check-installer check-fixture-line-endings ## Run all checks
 	@$(MAKE) fmt-check
 	@$(MAKE) lint
 	@$(MAKE) test
@@ -29,6 +29,9 @@ check-test: ## Run tests
 
 check-installer: ## Check installer argument handling
 	@DRY_RUN=true START_SWOBU=false ./scripts/install.sh --version swobu-v0.0.0 >/dev/null
+
+check-fixture-line-endings:
+	@sh ./scripts/check-fixture-line-endings.sh
 
 generate: ## Regenerate cockpit GSX sources
 	@$(GO) generate ./internal/cockpit
