@@ -248,6 +248,10 @@ func (*openRouterReasoningExtractor) NewChatVisibleReasoningItem(content string)
 	return newOpenRouterReasoningItem(nil, false, content)
 }
 
+func (*openRouterReasoningExtractor) NewChatLateVisibleReasoningItem(content string) (canonical.CanonicalItem, error) {
+	return newOpenRouterReasoningItem(nil, false, content)
+}
+
 func (e *openRouterReasoningExtractor) FinalizeChatContinuation() (canonical.CanonicalItem, error) {
 	if !e.detailsPresent {
 		return canonical.CanonicalItem{}, nil

@@ -34,12 +34,22 @@ type ChatReasoningExtractor interface {
 	NewChatReasoningItem(text string) (canonical.CanonicalItem, error)
 }
 
-// ChatContinuationReasoningExtractor separates visible reasoning, which must
-// precede answer output, from opaque continuation state, which remains
-// appendable until the provider stream ends.
-type ChatContinuationReasoningExtractor interface {
-	ChatReasoningExtractor
+// ChatVisibleReasoningExtractor separates client-visible reasoning from any
+// provider-owned continuation state accumulated by the base extractor.
+type ChatVisibleReasoningExtractor interface {
 	NewChatVisibleReasoningItem(text string) (canonical.CanonicalItem, error)
+}
+
+// ChatLateVisibleReasoningExtractor explicitly admits a provider contract in
+// which visible reasoning may form a terminal item after answer or tool output.
+// Extractors without this capability retain the strict prelude-only invariant.
+type ChatLateVisibleReasoningExtractor interface {
+	NewChatLateVisibleReasoningItem(text string) (canonical.CanonicalItem, error)
+}
+
+// ChatContinuationReasoningExtractor owns opaque provider continuation state,
+// whose lifecycle is independent of visible reasoning order.
+type ChatContinuationReasoningExtractor interface {
 	FinalizeChatContinuation() (canonical.CanonicalItem, error)
 }
 
@@ -107,17 +117,22 @@ type ChatReasoningSSEBody struct {
 	tailFrames int
 	tailBytes  int
 
-	mu               sync.Mutex
-	reasoning        bytes.Buffer
-	ready            canonical.CanonicalItem
-	continuation     canonical.CanonicalItem
-	visibleDone      bool
-	continuationDone bool
+	mu                 sync.Mutex
+	reasoning          bytes.Buffer
+	lateReasoning      bytes.Buffer
+	ready              canonical.CanonicalItem
+	tail               canonical.CanonicalItem
+	continuation       canonical.CanonicalItem
+	preludeDone        bool
+	visiblePayloadSeen bool
+	lateVisibleOpen    bool
+	continuationDone   bool
 }
 
 const (
 	maxChatReasoningTailFrames = 64
 	maxChatReasoningTailBytes  = 256 << 10
+	maxChatLateReasoningBytes  = 256 << 10
 )
 
 // NewChatReasoningSSEBody constructs the Chat-only response transformation
@@ -202,17 +217,47 @@ func (b *ChatReasoningSSEBody) transform(chunk map[string]json.RawMessage) (bool
 		if err != nil {
 			return false, err
 		}
+		preludeBoundaryReached := chatPreludeBoundaryReached(choice, delta)
+		visiblePayloadStarted := chatVisiblePayloadStarted(delta)
 		if fragment.Observed {
 			b.mu.Lock()
-			if b.visibleDone {
+			if b.preludeDone {
+				_, admitted := b.extractor.(ChatLateVisibleReasoningExtractor)
+				if !admitted {
+					b.mu.Unlock()
+					return false, canonical.InternalError("Chat streamed reasoning arrived after answer output")
+				}
+				if !b.visiblePayloadSeen {
+					b.mu.Unlock()
+					return false, canonical.InternalError("Chat streamed reasoning arrived after finish without answer or tool output")
+				}
+				if visiblePayloadStarted {
+					b.mu.Unlock()
+					return false, canonical.InternalError("Chat streamed reasoning and answer output arrived in one late frame")
+				}
+				if b.lateReasoning.Len()+len(fragment.Text) > maxChatLateReasoningBytes {
+					b.mu.Unlock()
+					return false, canonical.NewBackendError("", 0, "Chat late visible reasoning exceeded its bound", "")
+				}
+				b.lateReasoning.WriteString(fragment.Text)
+				b.lateVisibleOpen = true
 				b.mu.Unlock()
-				return false, canonical.InternalError("Chat streamed reasoning arrived after answer output")
+			} else {
+				b.reasoning.WriteString(fragment.Text)
+				b.mu.Unlock()
 			}
-			b.reasoning.WriteString(fragment.Text)
-			b.mu.Unlock()
 		}
-		if chatOutputStarted(choice, delta) {
-			if err := b.completeVisible(); err != nil {
+		b.mu.Lock()
+		if visiblePayloadStarted {
+			b.visiblePayloadSeen = true
+		}
+		lateVisibleOpen := b.lateVisibleOpen
+		b.mu.Unlock()
+		if visiblePayloadStarted && lateVisibleOpen {
+			return false, canonical.InternalError("Chat answer output resumed after late reasoning")
+		}
+		if preludeBoundaryReached {
+			if err := b.completePrelude(); err != nil {
 				return false, err
 			}
 		}
@@ -226,25 +271,29 @@ func (b *ChatReasoningSSEBody) transform(chunk map[string]json.RawMessage) (bool
 	return terminal, nil
 }
 
-func chatOutputStarted(choice, delta map[string]json.RawMessage) bool {
+func chatPreludeBoundaryReached(choice, delta map[string]json.RawMessage) bool {
+	return chatVisiblePayloadStarted(delta) || (len(choice["finish_reason"]) > 0 && string(choice["finish_reason"]) != "null")
+}
+
+func chatVisiblePayloadStarted(delta map[string]json.RawMessage) bool {
 	var content string
 	_ = json.Unmarshal(delta["content"], &content)
 	var calls []json.RawMessage
 	_ = json.Unmarshal(delta["tool_calls"], &calls)
-	return content != "" || len(calls) > 0 || (len(choice["finish_reason"]) > 0 && string(choice["finish_reason"]) != "null")
+	return content != "" || len(calls) > 0
 }
 
-func (b *ChatReasoningSSEBody) completeVisible() error {
+func (b *ChatReasoningSSEBody) completePrelude() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.visibleDone {
+	if b.preludeDone {
 		return nil
 	}
-	continuation, split := b.extractor.(ChatContinuationReasoningExtractor)
+	visible, split := b.extractor.(ChatVisibleReasoningExtractor)
 	var item canonical.CanonicalItem
 	var err error
 	if split {
-		item, err = continuation.NewChatVisibleReasoningItem(b.reasoning.String())
+		item, err = visible.NewChatVisibleReasoningItem(b.reasoning.String())
 	} else {
 		item, err = b.extractor.NewChatReasoningItem(b.reasoning.String())
 	}
@@ -252,18 +301,29 @@ func (b *ChatReasoningSSEBody) completeVisible() error {
 		return err
 	}
 	b.ready = item
-	b.visibleDone = true
+	b.preludeDone = true
 	return nil
 }
 
 func (b *ChatReasoningSSEBody) completeFinal() error {
-	if err := b.completeVisible(); err != nil {
+	if err := b.completePrelude(); err != nil {
 		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.continuationDone {
 		return nil
+	}
+	if b.lateReasoning.Len() > 0 {
+		late, ok := b.extractor.(ChatLateVisibleReasoningExtractor)
+		if !ok {
+			return canonical.InternalError("Chat late visible reasoning was not admitted")
+		}
+		item, err := late.NewChatLateVisibleReasoningItem(b.lateReasoning.String())
+		if err != nil {
+			return err
+		}
+		b.tail = item
 	}
 	if continuation, ok := b.extractor.(ChatContinuationReasoningExtractor); ok {
 		item, err := continuation.FinalizeChatContinuation()
@@ -286,6 +346,20 @@ func (b *ChatReasoningSSEBody) Take() (canonical.CanonicalItem, bool) {
 	}
 	item := b.ready
 	b.ready = canonical.CanonicalItem{}
+	return item, true
+}
+
+// TakeTail returns visible reasoning that the provider delivered after answer
+// or tool output. It is a separate ordered response item rather than part of
+// the prelude, and becomes available only after the provider stream settles.
+func (b *ChatReasoningSSEBody) TakeTail() (canonical.CanonicalItem, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tail.Kind() == "" {
+		return canonical.CanonicalItem{}, false
+	}
+	item := b.tail
+	b.tail = canonical.CanonicalItem{}
 	return item, true
 }
 
@@ -342,16 +416,19 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 
 type readyChatReasoningSource interface {
 	Take() (canonical.CanonicalItem, bool)
+	TakeTail() (canonical.CanonicalItem, bool)
 }
 
 type chatReasoningPreludeStream struct {
-	upstream   canonical.ResponseStream
-	source     readyChatReasoningSource
-	ready      canonical.CanonicalItem
-	pending    []canonical.Event
-	emitted    bool
-	seq        int64
-	exchangeID string
+	upstream    canonical.ResponseStream
+	source      readyChatReasoningSource
+	ready       canonical.CanonicalItem
+	pending     []canonical.Event
+	emitted     bool
+	tailEmitted bool
+	nextItem    uint32
+	seq         int64
+	exchangeID  string
 }
 
 func newChatReasoningPreludeStream(upstream canonical.ResponseStream, item canonical.CanonicalItem, source readyChatReasoningSource, exchangeID string) *chatReasoningPreludeStream {
@@ -362,6 +439,7 @@ func (s *chatReasoningPreludeStream) Next(ctx context.Context) (canonical.Event,
 	if len(s.pending) > 0 {
 		event := s.pending[0]
 		s.pending = s.pending[1:]
+		s.observeItem(event)
 		return s.finish(event), nil
 	}
 	for {
@@ -384,10 +462,29 @@ func (s *chatReasoningPreludeStream) Next(ctx context.Context) (canonical.Event,
 				return s.finish(chatReasoningItemCompleted(item)), nil
 			}
 		}
+		if !s.tailEmitted && closesChatReasoningOutput(event) && s.source != nil {
+			if item, ok := s.source.TakeTail(); ok {
+				s.tailEmitted = true
+				s.pending = append(s.pending, event)
+				return s.finish(chatReasoningItemCompletedAt(item, s.nextItem)), nil
+			}
+		}
 		if s.emitted {
 			event = shiftChatReasoningItem(event)
 		}
+		s.observeItem(event)
 		return s.finish(event), nil
+	}
+}
+
+func (s *chatReasoningPreludeStream) observeItem(event canonical.Event) {
+	item, ok := event.Payload.(canonical.ItemEvent)
+	if !ok {
+		return
+	}
+	next := item.Position.Item + 1
+	if next > s.nextItem {
+		s.nextItem = next
 	}
 }
 
@@ -432,6 +529,15 @@ func chatReasoningItemCompletedAt(item canonical.CanonicalItem, ordinal uint32) 
 func opensChatReasoningPrelude(event canonical.Event) bool {
 	switch event.Kind {
 	case canonical.EventItemStart, canonical.EventItemCompleted, canonical.EventUsage, canonical.EventFinish, canonical.EventEnvelopeEnd, canonical.EventError:
+		return true
+	default:
+		return false
+	}
+}
+
+func closesChatReasoningOutput(event canonical.Event) bool {
+	switch event.Kind {
+	case canonical.EventUsage, canonical.EventFinish, canonical.EventEnvelopeEnd, canonical.EventError:
 		return true
 	default:
 		return false

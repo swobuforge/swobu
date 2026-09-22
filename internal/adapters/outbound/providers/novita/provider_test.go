@@ -200,6 +200,15 @@ func TestReasoningDetailsAreCapturedFromFragmentedStream(t *testing.T) {
 	}
 }
 
+func TestLateReasoningDetailsWithoutVisibleTextFailInsteadOfDisappearing(t *testing.T) {
+	stream := "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.signature\",\"signature\":\"opaque\"}]},\"finish_reason\":\"stop\"}]}\n\n"
+	body := protocolcodec.NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(stream)), &reasoningDetailsExtractor{})
+	if _, err := io.ReadAll(body); err == nil || !strings.Contains(err.Error(), "reasoning arrived after answer output") {
+		t.Fatalf("late metadata-only reasoning error = %v", err)
+	}
+}
+
 func TestNovitaReplayRejectsForeignAndDuplicateState(t *testing.T) {
 	bundle := NewRuntime(nil, credentialResolver{})
 	backend, err := bundle.BackendResolver.ResolveBackend(novitaTarget("https://api.novita.ai/openai/v1", "model"))

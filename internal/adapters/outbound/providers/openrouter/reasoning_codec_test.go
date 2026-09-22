@@ -786,12 +786,102 @@ func TestOpenRouterStreamingPreservesOpaqueDetailsAfterVisibleReasoningClosed(t 
 	assertOpenRouterCheckpointDetails(t, decoded, `[{"type":"reasoning.encrypted","data":"opaque"}]`)
 }
 
-func TestOpenRouterStreamingRejectsVisibleReasoningAfterAnswerOutput(t *testing.T) {
+func TestOpenRouterStreamingPreservesVisibleReasoningAfterAnswerOutput(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	lateReasoning := strings.Repeat("late-visible-reasoning ", 53)
+	lateReasoningJSON, err := json.Marshal(lateReasoning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":` + string(lateReasoningJSON) + `},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	var completed []canonical.CanonicalItem
+	for _, event := range events {
+		itemEvent, ok := event.Payload.(canonical.ItemEvent)
+		if event.Kind != canonical.EventItemCompleted || !ok {
+			continue
+		}
+		payload, ok := itemEvent.Payload.(canonical.ItemCompletedPayload)
+		if ok {
+			completed = append(completed, payload.Item)
+		}
+	}
+	if len(completed) != 2 || completed[0].Kind() != canonical.ItemKindMessage || completed[1].Kind() != canonical.ItemKindReasoning {
+		t.Fatalf("completed items = %#v, want answer then late reasoning", completed)
+	}
+	reasoning, _ := completed[1].Reasoning()
+	parts := reasoning.Parts()
+	if len(parts) != 1 || parts[0].Text() != lateReasoning {
+		t.Fatalf("late reasoning parts = %#v", parts)
+	}
+}
+
+func TestOpenRouterStreamingPreservesVisibleReasoningAfterToolCall(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	key := canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "lookup")
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{
+			canonicaltest.ToolDeclarations(t, canonicaltest.MustFunctionTool(key, "Lookup", canonicaltest.Schema(t, `{"type":"object"}`), canonical.Unspecified[bool]())),
+			canonicaltest.Message(t, canonical.MessageRoleUser, "look up"),
+		},
+	})
+	names, _, err := provider.BuildAttemptToolNames(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireName, err := names.WireName(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","id":"call_1","function":{"name":"` + wireName + `","arguments":"{}"}}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"late after tool"},"finish_reason":"tool_calls"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: request, ToolNames: names}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainEvents(t, decoded.Stream)
+	var kinds []canonical.ItemKind
+	var ordinals []uint32
+	for _, event := range events {
+		itemEvent, ok := event.Payload.(canonical.ItemEvent)
+		if event.Kind != canonical.EventItemCompleted || !ok {
+			continue
+		}
+		payload := itemEvent.Payload.(canonical.ItemCompletedPayload)
+		kinds = append(kinds, payload.Item.Kind())
+		ordinals = append(ordinals, itemEvent.Position.Item)
+	}
+	if len(kinds) != 2 || kinds[0] != canonical.ItemKindToolCall || kinds[1] != canonical.ItemKindReasoning || ordinals[0] != 0 || ordinals[1] != 1 {
+		t.Fatalf("tool/tail kinds and ordinals = %#v/%#v", kinds, ordinals)
+	}
+}
+
+func TestOpenRouterStreamingRejectsAnswerOutputResumingAfterLateReasoning(t *testing.T) {
 	backend := openRouterBackend(t, "model")
 	raw := strings.Join([]string{
 		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
 		"",
-		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"late visible"},"finish_reason":"stop"}]}`,
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"late visible"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"resumed"},"finish_reason":"stop"}]}`,
 		"",
 		"data: [DONE]",
 		"",
@@ -805,13 +895,36 @@ func TestOpenRouterStreamingRejectsVisibleReasoningAfterAnswerOutput(t *testing.
 		if nextErr == nil {
 			continue
 		}
-		if errors.Is(nextErr, io.EOF) {
-			t.Fatal("late visible reasoning was accepted")
+		if errors.Is(nextErr, io.EOF) || !strings.Contains(nextErr.Error(), "answer output resumed after late reasoning") {
+			t.Fatalf("resumed answer error = %v", nextErr)
 		}
-		if !strings.Contains(nextErr.Error(), "reasoning arrived after answer output") {
-			t.Fatalf("error = %v, want late visible reasoning rejection", nextErr)
+		return
+	}
+}
+
+func TestOpenRouterStreamingRejectsMixedLateReasoningAndAnswerFrame(t *testing.T) {
+	backend := openRouterBackend(t, "model")
+	raw := strings.Join([]string{
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chat_1","model":"model","choices":[{"delta":{"reasoning":"late visible","content":"mixed"},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}, provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader(raw))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, nextErr := decoded.Stream.Next(context.Background())
+		if nextErr == nil {
+			continue
 		}
-		break
+		if errors.Is(nextErr, io.EOF) || !strings.Contains(nextErr.Error(), "reasoning and answer output arrived in one late frame") {
+			t.Fatalf("mixed late frame error = %v", nextErr)
+		}
+		return
 	}
 }
 

@@ -43,6 +43,62 @@ func TestChatReasoningCarrierBoundsPostFinishTail(t *testing.T) {
 	}
 }
 
+func TestChatReasoningCarrierRejectsLateReasoningWithoutExplicitCapability(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"trace\":\"late\"},\"finish_reason\":\"stop\"}]}\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), testChatReasoningExtractor{})
+	if _, err := io.ReadAll(body); err == nil || !strings.Contains(err.Error(), "reasoning arrived after answer output") {
+		t.Fatalf("strict late reasoning error = %v", err)
+	}
+}
+
+func TestChatReasoningCarrierAcceptsLateReasoningOnlyWithExplicitCapability(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"trace\":\"late\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), lateTestChatReasoningExtractor{})
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatal(err)
+	}
+	item, ok := body.TakeTail()
+	if !ok {
+		t.Fatal("explicit late reasoning capability produced no tail item")
+	}
+	reasoning, _ := item.Reasoning()
+	if parts := reasoning.Parts(); len(parts) != 1 || parts[0].Text() != "late" {
+		t.Fatalf("tail reasoning = %#v", parts)
+	}
+}
+
+func TestChatReasoningCarrierRejectsLateReasoningAfterFinishWithoutVisibleOutput(t *testing.T) {
+	raw := "data: {\"choices\":[{\"delta\":{\"trace\":\"before\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"trace\":\"after\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), lateTestChatReasoningExtractor{})
+	if _, err := io.ReadAll(body); err == nil || !strings.Contains(err.Error(), "without answer or tool output") {
+		t.Fatalf("finish-only late reasoning error = %v", err)
+	}
+}
+
+func TestChatReasoningCarrierBoundsLateVisibleReasoningBeforeFinish(t *testing.T) {
+	oversized, err := json.Marshal(strings.Repeat("x", maxChatLateReasoningBytes+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":null}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"trace\":" + string(oversized) + "},\"finish_reason\":null}]}\n\n"
+	body := NewChatReasoningSSEBody(io.NopCloser(strings.NewReader(raw)), lateTestChatReasoningExtractor{})
+	_, readErr := io.ReadAll(body)
+	if readErr == nil || !strings.Contains(readErr.Error(), "late visible reasoning exceeded its bound") {
+		t.Fatalf("oversized late reasoning error = %v", readErr)
+	}
+	var backend canonical.BackendError
+	if !errors.As(readErr, &backend) {
+		t.Fatalf("oversized late reasoning error type = %T, want backend origin", readErr)
+	}
+}
+
 func TestChatReasoningCarrierAcceptsBoundedMetadataUsageAndRepeatedFinish(t *testing.T) {
 	raw := strings.Join([]string{
 		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
@@ -151,6 +207,45 @@ func TestChatReasoningPreludeStreamInsertsBeforeOutputAndResequences(t *testing.
 	}
 	if !upstream.closed {
 		t.Fatal("prelude stream did not close its upstream stream")
+	}
+}
+
+func TestChatReasoningStreamPreservesPreludeToolAndTailOrdinals(t *testing.T) {
+	prelude := testChatReasoningItem(t, "before")
+	tail := testChatReasoningItem(t, "after")
+	callID, err := canonical.NewToolCallID("call_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := canonical.NewToolKey(canonical.ToolNamespaceRequest, canonical.ToolKindFunction, "lookup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := canonical.NewToolCallItem(callID, key, canonical.NewJSONObjectToolInput(canonical.JSONObject{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &testResponseStream{events: []canonical.Event{
+		{Kind: canonical.EventEnvelopeStart},
+		{Kind: canonical.EventItemCompleted, Payload: canonical.ItemEvent{Position: canonical.ItemPosition{Item: 0}, Payload: canonical.ItemCompletedPayload{Item: call}}},
+		{Kind: canonical.EventFinish},
+	}}
+	stream := newChatReasoningPreludeStream(upstream, canonical.CanonicalItem{}, &testReadyReasoningSource{prelude: prelude, tail: tail}, "exchange-order")
+	var ordinals []uint32
+	for {
+		event, nextErr := stream.Next(context.Background())
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			t.Fatal(nextErr)
+		}
+		if item, ok := event.Payload.(canonical.ItemEvent); ok && event.Kind == canonical.EventItemCompleted {
+			ordinals = append(ordinals, item.Position.Item)
+		}
+	}
+	if len(ordinals) != 3 || ordinals[0] != 0 || ordinals[1] != 1 || ordinals[2] != 2 {
+		t.Fatalf("prelude/tool/tail ordinals = %#v, want [0 1 2]", ordinals)
 	}
 }
 
@@ -305,6 +400,29 @@ func TestChatReasoningCarrierFailsAtExtractorAndClosesRawBody(t *testing.T) {
 }
 
 type testChatReasoningExtractor struct{}
+
+type lateTestChatReasoningExtractor struct{ testChatReasoningExtractor }
+
+func (lateTestChatReasoningExtractor) NewChatLateVisibleReasoningItem(text string) (canonical.CanonicalItem, error) {
+	return testChatReasoningExtractor{}.NewChatReasoningItem(text)
+}
+
+type testReadyReasoningSource struct {
+	prelude canonical.CanonicalItem
+	tail    canonical.CanonicalItem
+}
+
+func (s *testReadyReasoningSource) Take() (canonical.CanonicalItem, bool) {
+	item := s.prelude
+	s.prelude = canonical.CanonicalItem{}
+	return item, item.Kind() != ""
+}
+
+func (s *testReadyReasoningSource) TakeTail() (canonical.CanonicalItem, bool) {
+	item := s.tail
+	s.tail = canonical.CanonicalItem{}
+	return item, item.Kind() != ""
+}
 
 func (testChatReasoningExtractor) ExtractBufferedChatReasoning(message map[string]json.RawMessage) (string, error) {
 	value, present := message["trace"]

@@ -3,7 +3,6 @@ package exchange
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -105,7 +104,7 @@ func logPostStartStreamDiagnostic(last canonical.Event, err error) {
 		"event", "provider_stream_failure_diagnostic",
 		"exchange_id", last.ExchangeID,
 		"failure_stage", stage,
-		"error_type", fmt.Sprintf("%T", wire.ResponseFailureCause(err)),
+		"error_type", safeErrorType(err),
 	)
 }
 
