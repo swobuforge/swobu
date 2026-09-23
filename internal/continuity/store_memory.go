@@ -1,83 +1,73 @@
 package continuity
 
 import (
-	"container/heap"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 )
 
-const maxMemoryStoreRecords = 1024
+const defaultMemoryStoreWeight = uint64(256 << 20)
 
-func NewMemoryStore() Store { return newMemoryStore() }
+func NewMemoryStore() Store { return newMemoryStore(defaultMemoryStoreWeight) }
 
-// historySegment is private physical storage. Checkpoints remain logically
-// self-contained while immutable prefixes are shared by ordinary Go pointers.
+// historySegment is private immutable physical storage. Within one chain each
+// segment has at most one child: only the chain head may be extended.
 type historySegment struct {
 	parent *historySegment
 	items  []canonical.CanonicalItem
 	length int
 }
 
-type memoryStorageReuse struct {
-	store     *memoryStore
-	workspace string
-	tail      *historySegment
+type historyChain struct {
+	head          canonical.SwobuResponseID
+	anchors       int
+	historyWeight uint64
 }
-
-func (memoryStorageReuse) isStorageReuseToken() {}
 
 type storedCheckpoint struct {
 	checkpoint  Checkpoint
 	prelude     []canonical.CanonicalItem
 	requestTail *historySegment
 	afterTail   *historySegment
+	chain       *historyChain
+	localWeight uint64
+	order       *list.Element
 }
 
 type memoryStore struct {
-	mu             sync.RWMutex
-	records        map[workspaceRecordID]storedCheckpoint
-	byHistory      map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}
-	visibleHistory map[workspaceHistoryKey]*historySegment
-	expires        expirationHeap
-	now            func() time.Time
+	mu         sync.RWMutex
+	records    map[workspaceRecordID]*storedCheckpoint
+	byHistory  map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}
+	order      *list.List
+	usedWeight uint64
+	maxWeight  uint64
 }
 
 type workspaceRecordID struct {
 	workspaceSlug string
 	id            canonical.SwobuResponseID
 }
+
 type workspaceHistoryKey struct {
 	workspaceSlug string
 	history       historyfingerprint.History
 }
 
-func newMemoryStore() *memoryStore {
-	return &memoryStore{records: make(map[workspaceRecordID]storedCheckpoint), byHistory: make(map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}), visibleHistory: make(map[workspaceHistoryKey]*historySegment), now: func() time.Time { return time.Now().UTC() }}
-}
+type orderedRecord struct{ key workspaceRecordID }
 
-type expirationEntry struct {
-	key workspaceRecordID
-	at  time.Time
-}
-type expirationHeap []expirationEntry
-
-func (h expirationHeap) Len() int           { return len(h) }
-func (h expirationHeap) Less(i, j int) bool { return h[i].at.Before(h[j].at) }
-func (h expirationHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *expirationHeap) Push(value any)    { *h = append(*h, value.(expirationEntry)) }
-func (h *expirationHeap) Pop() any {
-	old := *h
-	last := len(old) - 1
-	value := old[last]
-	*h = old[:last]
-	return value
+func newMemoryStore(maxWeight uint64) *memoryStore {
+	return &memoryStore{
+		records:   make(map[workspaceRecordID]*storedCheckpoint),
+		byHistory: make(map[workspaceHistoryKey]map[canonical.SwobuResponseID]struct{}),
+		order:     list.New(),
+		maxWeight: maxWeight,
+	}
 }
 
 func normalizeWorkspace(workspace string) (string, error) {
@@ -93,14 +83,17 @@ func (s *memoryStore) Get(_ context.Context, workspace string, id canonical.Swob
 	if err != nil {
 		return Checkpoint{}, false, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reclaimExpired(s.now())
+	s.mu.RLock()
 	record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: id}]
+	var snapshot storedCheckpoint
+	if ok {
+		snapshot = *record
+	}
+	s.mu.RUnlock()
 	if !ok {
 		return Checkpoint{}, false, nil
 	}
-	return materializeStoredCheckpoint(record), true, nil
+	return materializeStoredCheckpoint(snapshot), true, nil
 }
 
 func (s *memoryStore) FindByHistory(_ context.Context, workspace string, history historyfingerprint.History) (Checkpoint, bool, error) {
@@ -111,21 +104,23 @@ func (s *memoryStore) FindByHistory(_ context.Context, workspace string, history
 	if history.Scheme() == "" {
 		return Checkpoint{}, false, errors.New("history fingerprint is invalid")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reclaimExpired(s.now())
+	s.mu.RLock()
 	members := s.byHistory[workspaceHistoryKey{workspaceSlug: workspace, history: history}]
-	if len(members) != 1 {
+	var snapshot storedCheckpoint
+	found := false
+	if len(members) == 1 {
+		for id := range members {
+			if record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: id}]; ok {
+				snapshot = *record
+				found = true
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if !found {
 		return Checkpoint{}, false, nil
 	}
-	for id := range members {
-		record, ok := s.records[workspaceRecordID{workspaceSlug: workspace, id: id}]
-		if !ok {
-			return Checkpoint{}, false, nil
-		}
-		return materializeStoredCheckpoint(record), true, nil
-	}
-	return Checkpoint{}, false, nil
+	return materializeStoredCheckpoint(snapshot), true, nil
 }
 
 func (s *memoryStore) Put(_ context.Context, workspace string, commit Commit) error {
@@ -133,39 +128,79 @@ func (s *memoryStore) Put(_ context.Context, workspace string, commit Commit) er
 	if err != nil {
 		return err
 	}
+	id := commit.Checkpoint.Response.Response().SwobuID
+	key := workspaceRecordID{workspaceSlug: workspace, id: id}
+	s.mu.RLock()
+	_, duplicate := s.records[key]
+	s.mu.RUnlock()
+	if duplicate {
+		return ErrCheckpointExists
+	}
 	record := commit.Checkpoint.Clone()
-	if err := s.prepareRecord(&record); err != nil {
+	if err := validateCheckpoint(record); err != nil {
 		return err
 	}
-	id := record.Response.Response().SwobuID
+	prelude, retained, err := canonical.SplitRequestPrelude(record.Request.Items())
+	if err != nil {
+		return err
+	}
+	preludeItems := prelude.Items()
+	responseItems := record.Response.Items()
+	retainedWeights, err := canonicalItemWeights(retained)
+	if err != nil {
+		return err
+	}
+	preludeWeight, err := canonicalItemsWeight(preludeItems)
+	if err != nil {
+		return err
+	}
+	responseWeight, err := canonicalItemsWeight(responseItems)
+	if err != nil {
+		return err
+	}
+	localWeight, err := checkpointLocalWeight(workspace, record, preludeWeight, responseWeight)
+	if err != nil {
+		return err
+	}
+	record.Request = record.Request.WithItems(nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reclaimExpired(s.now())
-	key := workspaceRecordID{workspaceSlug: workspace, id: id}
 	if _, exists := s.records[key]; exists {
 		return ErrCheckpointExists
 	}
-	prelude, _, err := canonical.SplitRequestPrelude(record.Request.Items())
-	if err != nil {
-		return err
+
+	var chain *historyChain
+	var requestTail, afterTail *historySegment
+	var addedHistoryWeight uint64
+	predecessor := s.records[workspaceRecordID{workspaceSlug: workspace, id: commit.ResolvedFrom}]
+	if !commit.ResolvedFrom.IsZero() && predecessor != nil && predecessor.chain.head == commit.ResolvedFrom {
+		prefixLength := predecessor.afterTailLength()
+		if prefixLength > len(retained) {
+			return fmt.Errorf("checkpoint retained history is shorter than resolved predecessor")
+		}
+		chain = predecessor.chain
+		addedHistoryWeight = historySegmentRetainedWeight(retainedWeights[prefixLength:])
+		requestTail = appendSegment(predecessor.afterTail, retained[prefixLength:])
+		afterTail = appendSegment(requestTail, responseItems)
+		if len(responseItems) > 0 {
+			addedHistoryWeight += historySegmentWeight + responseWeight
+		}
+	} else {
+		chain = &historyChain{}
+		addedHistoryWeight = historySegmentRetainedWeight(retainedWeights)
+		requestTail = appendSegment(nil, retained)
+		afterTail = appendSegment(requestTail, responseItems)
+		if len(responseItems) > 0 {
+			addedHistoryWeight += historySegmentWeight + responseWeight
+		}
 	}
-	retained := canonical.RetainedHistory(record.Request.Items())
-	base, prefix, visibleKey, err := s.resolveStorageReuse(workspace, commit.Reuse, retained)
-	if err != nil {
-		return err
+
+	stored := &storedCheckpoint{
+		checkpoint: record, prelude: preludeItems, requestTail: requestTail,
+		afterTail: afterTail, chain: chain, localWeight: localWeight,
 	}
-	requestTail := appendSegment(base, retained[prefix:])
-	afterTail := appendSegment(requestTail, record.Response.Items())
-	record.Request = record.Request.WithItems(nil)
-	record.storageReuse = StorageReuse{token: memoryStorageReuse{store: s, workspace: workspace, tail: afterTail}}
-	stored := storedCheckpoint{checkpoint: record, prelude: prelude.Items(), requestTail: requestTail, afterTail: afterTail}
-	if len(s.records) >= maxMemoryStoreRecords {
-		s.evictOldest()
-	}
+	stored.order = s.order.PushBack(orderedRecord{key: key})
 	s.records[key] = stored
-	if visibleKey != nil {
-		s.visibleHistory[*visibleKey] = base
-	}
 	if record.History != nil {
 		historyKey := workspaceHistoryKey{workspaceSlug: workspace, history: *record.History}
 		if s.byHistory[historyKey] == nil {
@@ -173,24 +208,21 @@ func (s *memoryStore) Put(_ context.Context, workspace string, commit Commit) er
 		}
 		s.byHistory[historyKey][id] = struct{}{}
 	}
-	heap.Push(&s.expires, expirationEntry{key: key, at: *record.ExpiresAt})
+	chain.head = id
+	chain.anchors++
+	chain.historyWeight += addedHistoryWeight
+	s.usedWeight += localWeight + addedHistoryWeight
+	s.enforceCapacity()
 	return nil
 }
 
-func (s *memoryStore) prepareRecord(record *Checkpoint) error {
+func validateCheckpoint(record Checkpoint) error {
 	response := record.Response.Response()
 	if err := response.ValidateCommittedResponse(); err != nil {
 		return fmt.Errorf("invalid checkpoint response reference: %w", err)
 	}
 	if record.History != nil && record.History.Scheme() == "" {
 		return errors.New("checkpoint history fingerprint is invalid")
-	}
-	if record.ExpiresAt == nil {
-		expires := s.now().Add(defaultCheckpointTTL)
-		record.ExpiresAt = &expires
-	}
-	if !record.ExpiresAt.After(s.now()) {
-		return errors.New("checkpoint expiration must be in the future")
 	}
 	return nil
 }
@@ -199,11 +231,19 @@ func appendSegment(parent *historySegment, items []canonical.CanonicalItem) *his
 	if len(items) == 0 {
 		return parent
 	}
-	length := len(items)
+	detached := append([]canonical.CanonicalItem(nil), items...)
+	length := len(detached)
 	if parent != nil {
 		length += parent.length
 	}
-	return &historySegment{parent: parent, items: append([]canonical.CanonicalItem(nil), items...), length: length}
+	return &historySegment{parent: parent, items: detached, length: length}
+}
+
+func (r storedCheckpoint) afterTailLength() int {
+	if r.afterTail == nil {
+		return 0
+	}
+	return r.afterTail.length
 }
 
 func materializeStoredCheckpoint(record storedCheckpoint) Checkpoint {
@@ -224,119 +264,55 @@ func materializeItems(tail *historySegment) []canonical.CanonicalItem {
 	return items
 }
 
-func (s *memoryStore) resolveStorageReuse(workspace string, reuse StorageReuse, retained []canonical.CanonicalItem) (*historySegment, int, *workspaceHistoryKey, error) {
-	if reuse.token != nil {
-		if reuse.history != nil || reuse.prefixLength != 0 {
-			return nil, 0, nil, errors.New("storage reuse evidence is contradictory")
+func (s *memoryStore) enforceCapacity() {
+	for s.usedWeight > s.maxWeight && len(s.records) > 1 {
+		oldest := s.order.Front()
+		if oldest == nil {
+			return
 		}
-		token, ok := reuse.token.(memoryStorageReuse)
-		if !ok || token.store != s {
-			return nil, 0, nil, errors.New("storage reuse belongs to another store")
+		key := oldest.Value.(orderedRecord).key
+		record := s.records[key]
+		if record == nil {
+			s.order.Remove(oldest)
+			continue
 		}
-		if token.workspace != workspace {
-			return nil, 0, nil, errors.New("storage reuse belongs to another workspace")
-		}
-		if token.tail == nil {
-			return nil, 0, nil, nil
-		}
-		if token.tail.length > len(retained) {
-			return nil, 0, nil, errors.New("storage reuse checkpoint exceeds retained history")
-		}
-		return token.tail, token.tail.length, nil, nil
+		s.deleteRecord(key, record)
 	}
-	if reuse.history != nil {
-		if reuse.prefixLength < 0 || reuse.prefixLength > len(retained) {
-			return nil, 0, nil, errors.New("visible-history storage prefix is invalid")
+}
+
+func (s *memoryStore) deleteRecord(key workspaceRecordID, record *storedCheckpoint) {
+	delete(s.records, key)
+	s.order.Remove(record.order)
+	s.usedWeight -= record.localWeight
+	if record.checkpoint.History != nil {
+		historyKey := workspaceHistoryKey{workspaceSlug: key.workspaceSlug, history: *record.checkpoint.History}
+		delete(s.byHistory[historyKey], key.id)
+		if len(s.byHistory[historyKey]) == 0 {
+			delete(s.byHistory, historyKey)
 		}
-		key := workspaceHistoryKey{workspaceSlug: workspace, history: *reuse.history}
-		if existing := s.visibleHistory[key]; existing != nil {
-			return existing, reuse.prefixLength, &key, nil
-		}
-		base := appendSegment(nil, retained[:reuse.prefixLength])
-		return base, reuse.prefixLength, &key, nil
 	}
-	return nil, 0, nil, nil
+	record.chain.anchors--
+	if record.chain.anchors == 0 {
+		s.usedWeight -= record.chain.historyWeight
+	}
 }
 
 func (s *memoryStore) retainedItemCount() int {
-	seen := make(map[*historySegment]struct{})
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[*historyChain]struct{})
 	count := 0
 	for _, record := range s.records {
-		for tail := record.afterTail; tail != nil; tail = tail.parent {
-			if _, ok := seen[tail]; ok {
-				break
-			}
-			seen[tail] = struct{}{}
-			count += len(tail.items)
+		if _, ok := seen[record.chain]; ok {
+			continue
 		}
-	}
-	for _, root := range s.visibleHistory {
-		for tail := root; tail != nil; tail = tail.parent {
-			if _, ok := seen[tail]; ok {
-				break
-			}
-			seen[tail] = struct{}{}
-			count += len(tail.items)
+		if record.checkpoint.Response.Response().SwobuID != record.chain.head {
+			continue
+		}
+		seen[record.chain] = struct{}{}
+		for segment := record.afterTail; segment != nil; segment = segment.parent {
+			count += len(segment.items)
 		}
 	}
 	return count
-}
-
-func (s *memoryStore) reclaimExpired(now time.Time) {
-	deleted := false
-	for s.expires.Len() > 0 && !s.expires[0].at.After(now) {
-		entry := heap.Pop(&s.expires).(expirationEntry)
-		record, ok := s.records[entry.key]
-		if ok && record.checkpoint.ExpiresAt != nil && !record.checkpoint.ExpiresAt.After(now) {
-			s.deleteRecord(entry.key, record)
-			deleted = true
-		}
-	}
-	if deleted {
-		s.sweepVisibleHistory()
-	}
-}
-
-func (s *memoryStore) evictOldest() {
-	for s.expires.Len() > 0 {
-		entry := heap.Pop(&s.expires).(expirationEntry)
-		record, ok := s.records[entry.key]
-		if !ok || record.checkpoint.ExpiresAt == nil || !record.checkpoint.ExpiresAt.Equal(entry.at) {
-			continue
-		}
-		s.deleteRecord(entry.key, record)
-		s.sweepVisibleHistory()
-		return
-	}
-}
-
-func (s *memoryStore) deleteRecord(key workspaceRecordID, record storedCheckpoint) {
-	delete(s.records, key)
-	if record.checkpoint.History == nil {
-		return
-	}
-	historyKey := workspaceHistoryKey{workspaceSlug: key.workspaceSlug, history: *record.checkpoint.History}
-	delete(s.byHistory[historyKey], key.id)
-	if len(s.byHistory[historyKey]) == 0 {
-		delete(s.byHistory, historyKey)
-	}
-}
-
-// sweepVisibleHistory makes the optimization index non-owning: only entries
-// whose tail is reachable from a live checkpoint remain map-reachable.
-func (s *memoryStore) sweepVisibleHistory() {
-	reachable := make(map[*historySegment]struct{})
-	for _, record := range s.records {
-		for tail := record.afterTail; tail != nil; tail = tail.parent {
-			if _, ok := reachable[tail]; ok {
-				break
-			}
-			reachable[tail] = struct{}{}
-		}
-	}
-	for key, tail := range s.visibleHistory {
-		if _, ok := reachable[tail]; !ok {
-			delete(s.visibleHistory, key)
-		}
-	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -30,7 +29,7 @@ type checkpointCommitter struct {
 	request           canonical.CanonicalRequest
 	advance           *historyAdvance
 	executionAffinity executionaffinity.Key
-	storageReuse      continuity.StorageReuse
+	resolvedFrom      canonical.SwobuResponseID
 }
 
 // CheckpointCommitError identifies failure to make a client-visible response
@@ -57,7 +56,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 		return nil
 	}
 	c.once.Do(func() {
-		record := continuity.Checkpoint{Request: c.request.Clone(), Response: response.Clone(), ExecutionAffinity: c.executionAffinity, CreatedAt: time.Now().UTC()}
+		record := continuity.Checkpoint{Request: c.request.Clone(), Response: response.Clone(), ExecutionAffinity: c.executionAffinity}
 		if c.advance != nil && fingerprint != nil {
 			history, err := historyfingerprint.Advance(c.advance.Previous, c.advance.Request, *fingerprint)
 			if err != nil {
@@ -66,7 +65,7 @@ func (c *checkpointCommitter) commitDocument(ctx context.Context, response canon
 				record.History = &history
 			}
 		}
-		err := c.store.Put(ctx, c.workspaceSlug, continuity.Commit{Checkpoint: record, Reuse: c.storageReuse})
+		err := c.store.Put(ctx, c.workspaceSlug, continuity.Commit{Checkpoint: record, ResolvedFrom: c.resolvedFrom})
 		if err != nil {
 			c.logFailure("store", err)
 			c.err = checkpointCommitError(fmt.Errorf("checkpoint store failed: %w", err))

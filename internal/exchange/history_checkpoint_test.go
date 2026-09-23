@@ -127,7 +127,7 @@ func TestTwoExchangesResolveOneCheckpointBeforeSiblingCommits(t *testing.T) {
 	for index, state := range resolved {
 		id := canonical.SwobuResponseID(fmt.Sprintf("resp_child_%d", index))
 		response, _ := canonical.NewCanonicalResponse(canonical.ResponseRef{SwobuID: id}, "a", nil, canonical.Completed("stop"), canonical.NewUnknownTokenUsage())
-		committer := checkpointCommitter{exchangeID: string(id), workspaceSlug: "dev", store: store, request: state.draft.Current(), executionAffinity: state.executionAffinity, storageReuse: state.storageReuse}
+		committer := checkpointCommitter{exchangeID: string(id), workspaceSlug: "dev", store: store, request: state.draft.Current(), executionAffinity: state.executionAffinity, resolvedFrom: state.resolvedFrom}
 		if err := committer.commitDocument(ctx, response, nil); err != nil {
 			t.Fatal(err)
 		}

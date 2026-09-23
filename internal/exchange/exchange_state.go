@@ -35,7 +35,7 @@ type exchangeState struct {
 	evaluatedCandidateCount int
 	phase                   phase
 	advance                 *historyAdvance
-	storageReuse            continuity.StorageReuse
+	resolvedFrom            canonical.SwobuResponseID
 	executionAffinity       executionaffinity.Key
 	mcp                     *mcp.Run
 	providerUsage           []canonical.TokenUsage
@@ -270,7 +270,7 @@ type providerCall struct {
 	decodeContext      canonical.CanonicalRequest
 	inputSegment       canonical.CanonicalRequest
 	advance            *historyAdvance
-	storageReuse       continuity.StorageReuse
+	resolvedFrom       canonical.SwobuResponseID
 	executionAffinity  executionaffinity.Key
 	delayClientHandoff bool
 	providerRound      int
@@ -356,14 +356,14 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 	var err error
 	if phase.explicit {
 		draft, err = continuity.PrepareResume(s.input.request, record)
-		s.storageReuse = continuity.ReuseCheckpoint(record)
+		s.resolvedFrom = record.Response.Response().SwobuID
 		if record.History != nil && record.History.Scheme() == s.input.requestFingerprint.Scheme() {
 			history := *record.History
 			s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 		}
 	} else if found {
 		draft, err = continuity.PrepareResume(s.input.rebasedRequest.Request, record)
-		s.storageReuse = continuity.ReuseCheckpoint(record)
+		s.resolvedFrom = record.Response.Response().SwobuID
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	} else {
@@ -377,9 +377,6 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 			s.executionAffinity = s.input.explicitExecutionAffinity
 		}
 		draft, err = continuity.PrepareBegin(s.input.request)
-		completeRetained := canonical.RetainedHistory(s.input.request.Items())
-		currentRetained := canonical.RetainedHistory(s.input.rebasedRequest.Request.Items())
-		s.storageReuse = continuity.ReuseVisibleHistory(phase.history, len(completeRetained)-len(currentRetained))
 		history := phase.history
 		s.advance = &historyAdvance{Previous: &history, Request: s.input.requestFingerprint}
 	}

@@ -10,32 +10,17 @@ import (
 
 var ErrCheckpointExists = errors.New("checkpoint already exists")
 
-// StorageReuse is opaque evidence already established by continuity
-// resolution. Its sealed token is owned by the producing Store backend.
-type StorageReuse struct {
-	token        storageReuseToken
-	history      *historyfingerprint.History
-	prefixLength int
-}
-
-type storageReuseToken interface{ isStorageReuseToken() }
-
-// ReuseCheckpoint identifies an exact selected checkpoint's physical tail.
-func ReuseCheckpoint(checkpoint Checkpoint) StorageReuse {
-	return checkpoint.storageReuse
-}
-
-// ReuseVisibleHistory records the codec-declared historical prefix boundary.
-// The length counts retained canonical items, not request-scoped prelude.
-func ReuseVisibleHistory(history historyfingerprint.History, prefixLength int) StorageReuse {
-	return StorageReuse{history: &history, prefixLength: prefixLength}
-}
-
-// Commit is the immutable checkpoint and its optional storage-only reuse
-// evidence written at one successful response boundary.
+// Commit is one immutable checkpoint plus optional semantic provenance.
 type Commit struct {
 	Checkpoint Checkpoint
-	Reuse      StorageReuse
+
+	// ResolvedFrom identifies the exact checkpoint from which Checkpoint.Request
+	// was materialized as an append-only continuation. When non-zero, the
+	// retained history in Checkpoint.Request begins with that predecessor's
+	// complete after-response history. Callers must leave it zero after any
+	// history rewrite. Stores may ignore this provenance or use it only as a
+	// storage optimization; it is never durable thread identity.
+	ResolvedFrom canonical.SwobuResponseID
 }
 
 // Store retains immutable checkpoints inside workspace partitions. History

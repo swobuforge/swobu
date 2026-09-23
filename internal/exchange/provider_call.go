@@ -128,7 +128,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		targetGeneration:   generation,
 		factReads:          factReads,
 		advance:            s.advance,
-		storageReuse:       s.storageReuse,
+		resolvedFrom:       s.resolvedFrom,
 		executionAffinity:  s.executionAffinity,
 		delayClientHandoff: delayClientHandoff,
 		providerRound:      len(s.providerUsage),
@@ -281,7 +281,7 @@ func handoffResponseStream(ctx context.Context, call providerCall, stream canoni
 	committer := &checkpointCommitter{
 		exchangeID: call.exchangeID, workspaceSlug: call.workspaceSlug,
 		store: runner.CheckpointStore, request: call.fullRequest.Clone(),
-		advance: call.advance, executionAffinity: call.executionAffinity, storageReuse: call.storageReuse,
+		advance: call.advance, executionAffinity: call.executionAffinity, resolvedFrom: call.resolvedFrom,
 	}
 	gated := newCheckpointTerminalGate(capture, call.clientCodec, call.fullRequest, committer)
 	return encodeClientOutput(ctx, call, gated, incremental)

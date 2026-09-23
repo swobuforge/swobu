@@ -18,7 +18,10 @@ import (
 func DecodeBytesLimited(contentEncoding string, raw []byte, maxDecodedBytes int64) ([]byte, error) {
 	contentEncoding = normalizeContentEncoding(contentEncoding)
 	if contentEncoding == "" || contentEncoding == "identity" {
-		return append([]byte(nil), raw...), nil
+		if maxDecodedBytes > 0 && int64(len(raw)) > maxDecodedBytes {
+			return nil, errors.New("decoded body exceeds limit")
+		}
+		return raw, nil
 	}
 
 	reader, err := newDecoder(contentEncoding, bytes.NewReader(raw))

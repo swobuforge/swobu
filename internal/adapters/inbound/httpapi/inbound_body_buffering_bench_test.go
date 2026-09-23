@@ -14,7 +14,7 @@ import (
 // inbound request-body journey on the daemon hot path:
 //
 //	wire → io.ReadAll (decodeRequestBody)
-//	     → httpcontent identity clone (DecodeBytesLimited)
+//	     → httpcontent identity validation (DecodeBytesLimited, no copy)
 //	     → newTransportRequest (adopts bytes, no copy)
 //	     → exchange byte-owned transport boundary
 //	     → carrier.NewDocument boundary clone

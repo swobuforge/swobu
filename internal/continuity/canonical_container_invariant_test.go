@@ -23,7 +23,8 @@ func TestCanonicalContainerContractsStayMinimal(t *testing.T) {
 		}
 	}
 
-	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"History", "ExecutionAffinity", "Request", "Response", "CreatedAt", "ExpiresAt", "storageReuse"})
+	assertFields("Checkpoint", reflect.TypeOf(Checkpoint{}), []string{"History", "ExecutionAffinity", "Request", "Response"})
+	assertFields("Commit", reflect.TypeOf(Commit{}), []string{"Checkpoint", "ResolvedFrom"})
 	assertFields("ResolvedRequest", reflect.TypeOf(ResolvedRequest{}), []string{"request", "previousHistory"})
 	assertFields("previousHistory", reflect.TypeOf(previousHistory{}), []string{"response", "omitItems"})
 	assertFields("requestItemRange", reflect.TypeOf(requestItemRange{}), []string{"start", "end"})
@@ -96,6 +97,16 @@ func TestProductionHasNoSupersededSessionVocabulary(t *testing.T) {
 		"ErrSessionExists",
 		"ErrStaleSessionHead",
 		"ErrSessionSchemeMismatch",
+		"StorageReuse",
+		"storageReuseToken",
+		"memoryStorageReuse",
+		"ReuseCheckpoint",
+		"ReuseVisibleHistory",
+		"visibleHistory",
+		"sweepVisibleHistory",
+		"expirationHeap",
+		"expirationEntry",
+		"reclaimExpired",
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
