@@ -10,6 +10,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
@@ -686,6 +687,7 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		]
 	}`
 	turn1Input := RequestInput{
+		AccessID:        accessidentity.Local,
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn1ClientJSON)),
 		ClientHandler:   "codex-tui/0.147.0",
@@ -755,6 +757,7 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 	}`
 
 	turn2Input := RequestInput{
+		AccessID:        accessidentity.Local,
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn2ClientJSON)),
 		ClientHandler:   "codex-tui/0.147.0",

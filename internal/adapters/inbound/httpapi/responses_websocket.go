@@ -6,10 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/netip"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -51,99 +48,10 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 }
 
 func validateResponsesWebsocketAccess(request *http.Request) error {
-	peerHost, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr)) // swobu:io-string source=boundary
-	if err != nil {
-		return errResponsesWebsocketForbidden
-	}
-	peer, err := netip.ParseAddr(peerHost)
-	if err != nil || !peer.IsLoopback() {
-		return errResponsesWebsocketForbidden
-	}
-
-	scheme := "http"
-	if request.TLS != nil {
-		scheme = "https"
-	}
-	requestAuthority, ok := normalizedLoopbackAuthority(request.Host, scheme)
-	if !ok {
-		return errResponsesWebsocketForbidden
-	}
-
-	origins := request.Header.Values("Origin")
-	if len(origins) == 0 {
-		return nil
-	}
-	if len(origins) != 1 {
-		return errResponsesWebsocketForbidden
-	}
-	rawOrigin := strings.TrimSpace(origins[0]) // swobu:io-string source=boundary
-	if rawOrigin == "" || strings.EqualFold(rawOrigin, "null") {
-		return errResponsesWebsocketForbidden
-	}
-	origin, err := url.Parse(rawOrigin)
-	if err != nil ||
-		!strings.EqualFold(origin.Scheme, scheme) ||
-		origin.Host == "" ||
-		origin.User != nil ||
-		origin.Opaque != "" ||
-		origin.Path != "" ||
-		origin.RawPath != "" ||
-		origin.RawQuery != "" ||
-		origin.ForceQuery ||
-		origin.Fragment != "" {
-		return errResponsesWebsocketForbidden
-	}
-	originAuthority, ok := normalizedLoopbackAuthority(origin.Host, scheme)
-	if !ok || originAuthority != requestAuthority {
+	if ValidateLocalAdmission(request) != nil {
 		return errResponsesWebsocketForbidden
 	}
 	return nil
-}
-
-func normalizedLoopbackAuthority(authority string, scheme string) (string, bool) {
-	raw := strings.TrimSpace(authority) // swobu:io-string source=boundary
-	if raw == "" || strings.Contains(raw, "%") {
-		return "", false
-	}
-	parsed, err := url.Parse("//" + raw)
-	if err != nil ||
-		parsed.Host == "" ||
-		parsed.User != nil ||
-		parsed.Path != "" ||
-		parsed.RawQuery != "" ||
-		parsed.Fragment != "" ||
-		strings.HasSuffix(parsed.Host, ":") {
-		return "", false
-	}
-
-	host := parsed.Hostname()
-	switch {
-	case strings.EqualFold(host, "localhost"):
-		host = "localhost"
-	default:
-		address, parseErr := netip.ParseAddr(host)
-		if parseErr != nil || !address.IsLoopback() {
-			return "", false
-		}
-		host = address.String()
-	}
-
-	port := parsed.Port()
-	if port == "" {
-		switch strings.ToLower(scheme) {
-		case "http":
-			port = "80"
-		case "https":
-			port = "443"
-		default:
-			return "", false
-		}
-	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return "", false
-	}
-	return net.JoinHostPort(host, strconv.Itoa(portNumber)), true
 }
 
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
@@ -220,6 +128,10 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 }
 
 func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, transportHeaders http.Header, executionAffinity executionaffinity.Key, raw []byte) error {
+	accessID, err := authorityFromRequest(r, workspace)
+	if err != nil {
+		return canonical.BadRequest("Access credential is no longer authorized for this Workspace")
+	}
 	if int64(len(raw)) > maxOperatorJSONBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
@@ -246,6 +158,7 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	timing := trafficevidence.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
+		AccessID:          accessID,
 		Workspace:         workspace,
 		Request:           newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
 		ClientHandler:     trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),

@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -25,6 +26,7 @@ import (
 func runExchange(
 	ctx context.Context,
 	runner runtimeBundle,
+	accessID accessidentity.ID,
 	exchangeID string,
 	clientHandler trafficevidence.ClientHandler,
 	clientFamily canonical.ClientFamily,
@@ -54,7 +56,7 @@ func runExchange(
 	}
 	s := exchangeState{
 		input: exchangeInput{
-			exchangeID: exchangeID, clientHandler: clientHandler,
+			accessID: accessID, exchangeID: exchangeID, clientHandler: clientHandler,
 			clientProduct: trafficevidence.ClassifyClientFamily(string(clientHandler)), clientFamily: clientFamily, clientDelivery: clientDelivery,
 			request:               canonical.CloneCanonicalRequest(decoded.Request),
 			rebasedRequest:        rebased,
@@ -365,6 +367,7 @@ func appendProviderInflightEvidence(ctx context.Context, sink observation.Traffi
 		timing = *state.input.timing
 	}
 	event, err := trafficevidence.NewProviderInflightTrafficEvent(trafficevidence.TrafficEventInput{
+		AccessID:              state.input.accessID,
 		RequestID:             requestID,
 		Workspace:             state.input.workspace.Slug().String(),
 		ClientHandler:         state.input.clientHandler,
@@ -471,7 +474,7 @@ func summarizeRoutingEvidence(attempts []providerCallAttempt, candidateCount int
 func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, routing terminalRoutingEvidence, reusablePrefix trafficevidence.ReusablePrefixEvidence) RequestOutput {
 	var evidence *TrafficEvidenceInput
 	if target.TargetID != "" {
-		evidence = &TrafficEvidenceInput{workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientProduct: input.clientProduct, clientProtocol: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
+		evidence = &TrafficEvidenceInput{accessID: input.accessID, workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientProduct: input.clientProduct, clientProtocol: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
 	}
 	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response), AttemptCount: routing.providerCallCount}
 }

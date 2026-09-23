@@ -33,6 +33,7 @@ func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
 		nil,
 	)
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","workspace":"main","route":"chat","target_id":"target","auth_mode":"browser","future_option":true}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -59,6 +60,7 @@ func TestChatGPTLoginHandlerGenericStartRejectsMalformedBody(t *testing.T) {
 		}, nil, nil, nil,
 	)
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"auth_mode":`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -78,6 +80,7 @@ func TestChatGPTLoginHandlerGenericStart_RequiresExplicitAuthMode(t *testing.T) 
 		nil,
 	)
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -134,7 +137,7 @@ func TestChatGPTLoginHandlerGenericCancel(t *testing.T) {
 		},
 		nil,
 	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/cancel", nil)
+	req := operatorJSONTestRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/cancel", "{}")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -160,7 +163,7 @@ func TestChatGPTLoginHandlerGenericRetry(t *testing.T) {
 			}, nil
 		},
 	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/retry", nil)
+	req := operatorJSONTestRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/retry", "{}")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

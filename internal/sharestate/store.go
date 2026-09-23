@@ -211,6 +211,40 @@ func (s *Store) RevokeBindings(workspace routing.WorkspaceSlug, route *routing.R
 	return true, nil
 }
 
+// ReconcileBindings removes Grants whose routing identity no longer exists.
+// Reconciliation includes expired Grants so observing identity destruction is
+// a durable revocation boundary, not a temporary request-time failure.
+func (s *Store) ReconcileBindings(config routing.Config) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	updated := make([]Grant, 0, len(s.state.Grants))
+	removed := false
+	for _, grant := range s.state.Grants {
+		workspace, exists := config.Workspace(grant.Workspace)
+		if !exists {
+			removed = true
+			continue
+		}
+		if grant.Route.String() != "" {
+			if _, exists := workspace.Route(grant.Route); !exists {
+				removed = true
+				continue
+			}
+		}
+		updated = append(updated, grant)
+	}
+	if !removed {
+		return false, nil
+	}
+	previous := s.state.Grants
+	s.state.Grants = updated
+	if err := s.persist(); err != nil {
+		s.state.Grants = previous
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) Authenticate(bearer string) (Grant, error) {
 	candidate := []byte(strings.TrimSpace(bearer))
 	s.mu.Lock()

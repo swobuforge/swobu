@@ -7,7 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 )
 
 // Duration-histogram bucket indices (fixed six buckets). Every observed request

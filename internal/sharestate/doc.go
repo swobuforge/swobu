@@ -3,6 +3,7 @@
 // bearer Grants. A missing state file is a valid cold Store; EnsureEndpoint
 // creates only the stable identity key. EndpointID and hostname derive solely
 // from that key. TLSCredential is absent or atomically complete and may be
-// replaced without changing Endpoint identity. The package does not own route
-// semantics, Relay sessions, or ACME execution.
+// replaced without changing Endpoint identity. ReconcileBindings durably
+// revokes Grants after startup observes their Workspace or Route missing. The
+// package does not own route semantics, Relay sessions, or ACME execution.
 package sharestate

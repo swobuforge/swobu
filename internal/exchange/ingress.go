@@ -11,11 +11,12 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/observation"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -112,6 +113,7 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 }
 
 type RequestInput struct {
+	AccessID          accessidentity.ID
 	Workspace         routing.WorkspaceSlug
 	Request           carrier.TransportRequest
 	ClientHandler     trafficevidence.ClientHandler
@@ -137,6 +139,7 @@ type RequestOutput struct {
 // TrafficEvidenceInput is the immutable exchange fact set completed by the
 // inbound delivery owner's concrete DeliveryResult.
 type TrafficEvidenceInput struct {
+	accessID       accessidentity.ID
 	workspace      routing.Workspace
 	routeName      routing.RouteName
 	exchangeID     string
@@ -177,6 +180,9 @@ func (h RequestIngress) HandleRequestWithWorkspace(ctx context.Context, workspac
 }
 
 func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routing.Workspace, in RequestInput) (RequestOutput, error) {
+	if !in.AccessID.Valid() {
+		return RequestOutput{}, canonical.InternalError("access ID is required")
+	}
 	operation := in.Operation
 	if operation.Family == "" {
 		return RequestOutput{}, canonical.InternalError("client operation is not configured")
@@ -229,7 +235,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	// The normalized path is threaded into the exchange input so terminal evidence
 	// is complete on both success and failure — an exchange error finalizes the
 	// evidence inside runExchange, where it already holds the path.
-	out, err := runExchange(ctx, runner, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ExecutionAffinity)
+	out, err := runExchange(ctx, runner, in.AccessID, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ExecutionAffinity)
 	if err != nil {
 		return out, err
 	}
@@ -257,6 +263,7 @@ func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.R
 		diagnostics = append(diagnostics, "possible_duplicate_provider_execution_and_cost")
 	}
 	base := trafficevidence.TrafficEventInput{
+		AccessID:              evidence.accessID,
 		RequestID:             requestID,
 		Workspace:             evidence.workspace.Slug().String(),
 		ClientHandler:         evidence.clientHandler,

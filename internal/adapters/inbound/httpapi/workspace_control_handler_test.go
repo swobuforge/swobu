@@ -30,6 +30,7 @@ func TestWorkspaceControlHandlerCreatesAndReadsSemanticResources(t *testing.T) {
 	handler := NewWorkspaceControlHandler(service)
 	body := `{"slug":"dev","initial_route":"chat","target":{"id":"a","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`
 	request := httptest.NewRequest(http.MethodPost, "/_swobu/workspaces", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -123,6 +124,7 @@ func TestRouteGETThenPUTExactResponseIsNoOp(t *testing.T) {
 func TestWorkspaceControlHandlerRejectsWholeWorkspaceReplacement(t *testing.T) {
 	handler := NewWorkspaceControlHandler(workspaces.Service{})
 	request := httptest.NewRequest(http.MethodPut, "/_swobu/workspaces/dev", strings.NewReader(`{"routes":[]}`))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusMethodNotAllowed {
@@ -137,6 +139,7 @@ func TestWorkspaceControlHandlerRejectsMalformedTrailingJSON(t *testing.T) {
 	handler := NewWorkspaceControlHandler(workspaces.Service{})
 	body := `{"slug":"dev","initial_route":"chat","target":{"id":"a","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:KEY"}}}} garbage`
 	request := httptest.NewRequest(http.MethodPost, "/_swobu/workspaces", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -232,6 +235,9 @@ func TestWorkspaceCommandsRoundTripProviderArmsAcrossStoreReopen(t *testing.T) {
 func assertWorkspaceCommandStatus(t *testing.T, handler http.Handler, method, path, body string, want int) string {
 	t.Helper()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if method != http.MethodGet && method != http.MethodHead {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != want {

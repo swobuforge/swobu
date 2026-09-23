@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	. "github.com/swobuforge/swobu/internal/exchange"
@@ -177,6 +178,7 @@ func capabilityFallbackIngress(workspace routing.Workspace, store continuity.Sto
 func runCapabilityFallbackTurn(t *testing.T, ingress RequestIngress, workspace routing.Workspace, exchangeID, raw string) RequestOutput {
 	t.Helper()
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+		AccessID:  accessidentity.Local,
 		Workspace: workspace.Slug(), Request: NewTransportRequest("POST", "/v1/responses", nil, []byte(raw)),
 		ClientHandler: "capability-fallback-test", Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingNone, ExchangeID: exchangeID,

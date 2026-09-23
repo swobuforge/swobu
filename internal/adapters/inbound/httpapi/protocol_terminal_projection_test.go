@@ -152,7 +152,7 @@ func TestChatStreamingClientProjectsPostIdentityResponsesFailureInStream(t *test
 	}
 }
 
-func terminalProjectionHandler(t *testing.T, transport terminalProjectionTransport) Handler {
+func terminalProjectionHandler(t *testing.T, transport terminalProjectionTransport) http.Handler {
 	t.Helper()
 	workspace := terminalProjectionWorkspace(t)
 	runtime := terminalProjectionRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: transport}
@@ -161,7 +161,7 @@ func terminalProjectionHandler(t *testing.T, transport terminalProjectionTranspo
 		runtime,
 		exchange.RuntimePoliciesSpec{PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()}},
 	)
-	return NewHandler(ingress, nil)
+	return localAuthorityTestHandler(NewHandler(ingress, nil))
 }
 
 func terminalProjectionWorkspace(t *testing.T) routing.Workspace {

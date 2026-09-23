@@ -115,7 +115,7 @@ func TestResponsesImageIncidentCallsChatWithSyntheticImageOnce(t *testing.T) {
 	}
 }
 
-func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) Handler {
+func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) http.Handler {
 	t.Helper()
 	workspace := imageIncidentWorkspace(t)
 	runtime := imageIncidentRuntime{
@@ -129,7 +129,7 @@ func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) Handl
 			PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		},
 	)
-	return NewHandler(ingress, nil)
+	return localAuthorityTestHandler(NewHandler(ingress, nil))
 }
 
 func imageIncidentWorkspace(t *testing.T) routing.Workspace {

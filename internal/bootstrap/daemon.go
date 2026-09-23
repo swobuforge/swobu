@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/accessstate"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
@@ -53,6 +54,7 @@ type Status struct {
 type Daemon struct {
 	configStore       *configstore.Store
 	shareStore        *sharestate.Store
+	accessStore       *accessstate.Store
 	shareRuntime      *sharetransport.OwnerRuntime
 	server            *http.Server
 	listener          net.Listener
@@ -103,6 +105,16 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	accessStore, err := accessstate.Open(filepath.Join(filepath.Dir(in.ConfigPath), "access.json"))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := shareStore.ReconcileBindings(store.Config()); err != nil {
+		return nil, fmt.Errorf("reconcile Share bindings: %w", err)
+	}
+	if _, err := accessStore.ReconcileWorkspaces(store.Config()); err != nil {
+		return nil, fmt.Errorf("reconcile access workspaces: %w", err)
+	}
 	startupConfig, err := config.ResolveStartupConfig(in.StartupConfig.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve daemon address: %w", err)
@@ -112,6 +124,7 @@ func Start(ctx context.Context, in StartInput) (*Daemon, error) {
 	daemon := &Daemon{
 		configStore: store,
 		shareStore:  shareStore,
+		accessStore: accessStore,
 		logger:      logger,
 		serveDone:   make(chan struct{}),
 	}

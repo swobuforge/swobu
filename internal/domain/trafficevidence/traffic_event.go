@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -154,6 +155,7 @@ func (t Timing) DurationMillis() (int, bool) {
 }
 
 type TrafficEvent struct {
+	accessID                  accessidentity.ID
 	requestID                 RequestID
 	eventKind                 EventKind
 	workspace                 string
@@ -191,6 +193,7 @@ type TrafficEvent struct {
 }
 
 type TrafficEventInput struct {
+	AccessID                  accessidentity.ID
 	RequestID                 RequestID
 	Workspace                 string
 	ClientProtocol            ClientProtocol
@@ -370,6 +373,7 @@ func NewTerminalTrafficEvent(base TrafficEventInput, outcome TerminalOutcome) (T
 
 func newTrafficEventBase(normalized TrafficEventInput) TrafficEvent {
 	return TrafficEvent{
+		accessID:                  normalized.AccessID,
 		requestID:                 normalized.RequestID,
 		workspace:                 normalized.Workspace,
 		clientProtocol:            normalized.ClientProtocol,
@@ -396,6 +400,9 @@ func newTrafficEventBase(normalized TrafficEventInput) TrafficEvent {
 }
 
 func normalizeTrafficEventInput(input TrafficEventInput) (TrafficEventInput, error) {
+	if !input.AccessID.Valid() {
+		return TrafficEventInput{}, fmt.Errorf("access ID is required")
+	}
 	if input.RequestID.IsZero() {
 		return TrafficEventInput{}, fmt.Errorf("request id is required")
 	}
@@ -505,6 +512,7 @@ func normalizeTrafficEventUniqueStrings(src []string) []string {
 }
 
 func (e TrafficEvent) RequestID() RequestID                      { return e.requestID }
+func (e TrafficEvent) AccessID() accessidentity.ID               { return e.accessID }
 func (e TrafficEvent) EventKind() EventKind                      { return e.eventKind }
 func (e TrafficEvent) Workspace() string                         { return e.workspace }
 func (e TrafficEvent) ClientProtocol() ClientProtocol            { return e.clientProtocol }

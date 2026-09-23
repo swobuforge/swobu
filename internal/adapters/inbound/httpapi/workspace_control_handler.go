@@ -58,6 +58,9 @@ func (h workspaceControlHandlers) getWorkspace(w http.ResponseWriter, r *http.Re
 }
 
 func (h workspaceControlHandlers) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !decodeWorkspaceJSON(w, r, &struct{}{}) {
+		return
+	}
 	if err := h.service.DeleteWorkspace(r.Context(), r.PathValue("workspace")); err != nil {
 		h.writeError(w, err)
 		return
@@ -101,7 +104,7 @@ func (h workspaceControlHandlers) deleteRoute(w http.ResponseWriter, r *http.Req
 	var body struct {
 		Replacement string `json:"replacement,omitempty"`
 	}
-	if r.Body != nil && r.ContentLength != 0 && !decodeWorkspaceJSON(w, r, &body) {
+	if !decodeWorkspaceJSON(w, r, &body) {
 		return
 	}
 	value, err := h.service.DeleteRoute(r.Context(), workspaces.DeleteRoute{
@@ -149,7 +152,7 @@ func (h workspaceControlHandlers) renameRoute(w http.ResponseWriter, r *http.Req
 
 func decodeWorkspaceJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	if err := decodeOperatorJSONObject(w, r, target, "workspace command"); err != nil {
-		writeWorkspaceJSON(w, http.StatusBadRequest, workspaces.CommandError{Code: workspaces.InvalidArgument, Message: "invalid command body: " + err.Error()})
+		writeWorkspaceJSON(w, operatorJSONErrorStatus(err), workspaces.CommandError{Code: workspaces.InvalidArgument, Message: "invalid command body: " + err.Error()})
 		return false
 	}
 	return true

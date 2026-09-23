@@ -1,6 +1,7 @@
 package daemonlifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -231,10 +232,11 @@ func Down(ctx context.Context, in DownInput) (DownResult, error) {
 		return DownResultAlreadyStopped, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, platformconfig.BaseURL(addr)+"/_swobu/down", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, platformconfig.BaseURL(addr)+"/_swobu/down", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		if _, class := FetchStatus(ctx, client, addr); class == StatusClassDown {

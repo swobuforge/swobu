@@ -29,8 +29,8 @@ import (
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
-func newTestHandler(ingress requestIngress) Handler {
-	return NewHandler(ingress, nil)
+func newTestHandler(ingress requestIngress) http.Handler {
+	return localAuthorityTestHandler(NewHandler(ingress, nil))
 }
 
 func TestLogRequestOutcomeUsesDeliveryOwnedClientCancellation(t *testing.T) {
@@ -1474,6 +1474,7 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 	out := make([]exchange.RequestInput, 0, copies)
 	for range copies {
 		out = append(out, exchange.RequestInput{
+			AccessID:        in.AccessID,
 			Workspace:       in.Workspace,
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, in.Request.Body),
 			ClientHandler:   in.ClientHandler,

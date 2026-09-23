@@ -11,11 +11,21 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
+	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/sharestate"
 )
+
+type shareTrafficCapture struct {
+	events chan trafficevidence.TrafficEvent
+}
+
+func (s shareTrafficCapture) Append(_ context.Context, event trafficevidence.TrafficEvent) {
+	s.events <- event
+}
 
 func TestShareHandlerRecognizesCORSPreflightBeforeDependencies(t *testing.T) {
 	for _, test := range []struct {
@@ -178,13 +188,14 @@ func TestShareHandlerAuthenticatedResponsesRequestRetainsCORS(t *testing.T) {
 			documentBody: `{"id":"resp","model":"coding-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"1"}]}]}`,
 		},
 	}
+	traffic := shareTrafficCapture{events: make(chan trafficevidence.TrafficEvent, 2)}
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"coding","input":"Reply 1"}`))
 	request.Header.Set("Origin", "https://www.typingmind.com")
 	request.Header.Set("Authorization", "Bearer "+grant.Bearer)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
-	NewShareHandler(shareStore, configStore, exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{}), nil).ServeHTTP(response, request)
+	NewShareHandler(shareStore, configStore, exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{TrafficEvidence: traffic}), traffic).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
@@ -193,6 +204,48 @@ func TestShareHandlerAuthenticatedResponsesRequestRetainsCORS(t *testing.T) {
 		t.Fatalf("response did not traverse Responses ingress: %s", response.Body.String())
 	}
 	assertShareCORSHeaders(t, response.Header())
+	select {
+	case event := <-traffic.events:
+		if event.AccessID() != accessidentity.Share {
+			t.Fatalf("Share Traffic Evidence AccessID = %v", event.AccessID())
+		}
+	default:
+		t.Fatal("Share request emitted no Traffic Evidence")
+	}
+}
+
+func TestShareHandlerDelegatesShareIdentityWithoutBearer(t *testing.T) {
+	workspace := shareModelsWorkspace(t)
+	shareStore, err := sharestate.Open(filepath.Join(t.TempDir(), "share.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shareStore.EnsureEndpoint(); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := shareStore.Issue(workspace.Slug(), routing.RouteName{}, sharestate.ExpiryOneDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &capturingRequestIngress{}
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"coding","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer "+grant.Bearer)
+	request.Header.Set("Content-Type", "application/json")
+	// Exercise the exact request transformation Share performs before delegating
+	// to the common protocol handler.
+	delegated := authorityTestHandler(NewHandler(capture, nil), accessidentity.Share)
+	clone := request.Clone(request.Context())
+	consumeShareBearer(clone, grant.Bearer)
+	clone.URL.Path = "/c/" + workspace.Slug().String() + "/responses"
+	recorder := httptest.NewRecorder()
+	delegated.ServeHTTP(recorder, clone)
+
+	if capture.got.AccessID != accessidentity.Share {
+		t.Fatalf("delegated AccessID = %v, want share; status=%d body=%s", capture.got.AccessID, recorder.Code, recorder.Body.String())
+	}
+	if got := capture.got.Request.Header.Get("Authorization"); got != "" || strings.Contains(capture.got.Request.URL, grant.Bearer) {
+		t.Fatalf("Share bearer reached delegated ingress: header=%q URL=%q", got, capture.got.Request.URL)
+	}
 }
 
 func TestShareHandlerInviteRetainsSecurityHeadersAndAddsCORS(t *testing.T) {

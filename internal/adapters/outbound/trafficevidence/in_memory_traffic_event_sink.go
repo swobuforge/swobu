@@ -48,6 +48,7 @@ type StatusCounters struct {
 
 type RecentTrafficRow struct {
 	RequestID         string                              `json:"request_id"`
+	AccessID          string                              `json:"access_id"`
 	Workspace         string                              `json:"workspace"`
 	ClientHandler     string                              `json:"client_handler,omitempty"`
 	ClientProtocol    string                              `json:"client_protocol,omitempty"`
@@ -245,7 +246,7 @@ func classifyCounters(counters *StatusCounters, event trafficevidence.TrafficEve
 
 func recentTrafficRow(event stampedTrafficEvent) RecentTrafficRow {
 	trafficEvent := event.event
-	row := RecentTrafficRow{Workspace: trafficEvent.Workspace(),
+	row := RecentTrafficRow{Workspace: trafficEvent.Workspace(), AccessID: trafficEvent.AccessID().String(),
 		ClientHandler:         string(trafficEvent.ClientHandler()),
 		ClientProtocol:        string(trafficEvent.ClientProtocol()),
 		ClientFamily:          string(trafficEvent.ClientFamily()),

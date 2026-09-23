@@ -15,7 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/credentialfiles"
 	"github.com/swobuforge/swobu/internal/cockpit/features/target_config"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 

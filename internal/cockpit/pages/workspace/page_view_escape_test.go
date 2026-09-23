@@ -7,9 +7,9 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestPage_EscapeBacksOutFromTargetToRouteSectionAndExit(t *testing.T) {

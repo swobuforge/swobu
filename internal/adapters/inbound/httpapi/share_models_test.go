@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -56,7 +57,7 @@ func TestRouteShareHTTPDoesNotReachSiblingRoute(t *testing.T) {
 		}},
 	}
 	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
-	handler := NewHandler(workspaceBoundIngress{workspace: projected, ingress: ingress}, nil)
+	handler := authorityTestHandler(NewHandler(workspaceBoundIngress{workspace: projected, ingress: ingress}, nil), accessidentity.Share)
 	request := httptest.NewRequest(http.MethodPost, "/c/dev/responses", strings.NewReader(`{"model":"writing","input":"hello"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_route_share_isolation")

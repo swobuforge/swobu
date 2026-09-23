@@ -77,7 +77,7 @@ func routePath(slug, route string) string {
 	return workspacePath(slug) + "/routes/" + url.PathEscape(strings.TrimSpace(route))
 }
 func (c *Client) workspaceRequest(ctx context.Context, method, path string, body any, want int, out any) error {
-	var encoded []byte
+	var encoded = []byte("{}")
 	var err error
 	if body != nil {
 		encoded, err = json.Marshal(body)
@@ -89,7 +89,7 @@ func (c *Client) workspaceRequest(ctx context.Context, method, path string, body
 	if err != nil {
 		return fmt.Errorf("operator client: command request could not be built")
 	}
-	if body != nil {
+	if method != http.MethodGet && method != http.MethodHead {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)

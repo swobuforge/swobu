@@ -25,6 +25,10 @@ func (h ShutdownHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	if err := decodeOperatorJSONObject(w, req, &struct{}{}, "shutdown command"); err != nil {
+		http.Error(w, err.Error(), operatorJSONErrorStatus(err))
+		return
+	}
 	if h.request == nil {
 		http.Error(w, "shutdown unavailable", http.StatusInternalServerError)
 		return

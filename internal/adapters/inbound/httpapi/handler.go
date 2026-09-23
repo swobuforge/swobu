@@ -66,6 +66,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSwobuError(writer, canonical.BadEndpoint("endpoint name is invalid"))
 		return
 	}
+	accessID, err := authorityFromRequest(r, workspace)
+	if err != nil {
+		status := http.StatusUnauthorized
+		if errors.Is(err, errWorkspaceForbidden) {
+			status = http.StatusForbidden
+		}
+		http.Error(writer, http.StatusText(status), status)
+		return
+	}
 
 	if websocketUpgrade(r) {
 		normalizedPath, err := canonical.NormalizePath(operationPath)
@@ -122,6 +131,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
+		AccessID:          accessID,
 		Workspace:         workspace,
 		Request:           transportRequest,
 		ClientHandler:     clientHandler,

@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -32,6 +33,7 @@ func terminalTrafficEventForFamily(t *testing.T, requestID, clientHandler, provi
 		t.Fatalf("NewTimingWithOptional: %v", err)
 	}
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
+		AccessID:       accessidentity.Local,
 		RequestID:      id,
 		Workspace:      "default",
 		ClientHandler:  trafficevidence.ClientHandler(clientHandler),
@@ -85,6 +87,22 @@ func TestReportReducer_MergesByDimension(t *testing.T) {
 	}
 	if report.InstallID != "install-1" {
 		t.Fatalf("install id = %q", report.InstallID)
+	}
+}
+
+func TestProductTelemetryDoesNotSerializeAccessIdentity(t *testing.T) {
+	event := terminalTrafficEvent(t, "req_access_privacy", "Codex/1.2", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false)
+	if event.AccessID() != accessidentity.Local {
+		t.Fatalf("traffic evidence AccessID = %v", event.AccessID())
+	}
+	reducer := newReportReducer()
+	reducer.Observe(event)
+	raw, err := json.Marshal(reducer.snapshot("install", "0.1.0", "linux", "amd64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "access_id") || strings.Contains(string(raw), accessidentity.Local.String()) {
+		t.Fatalf("serialized product telemetry exposed Access identity: %s", raw)
 	}
 }
 
@@ -217,6 +235,7 @@ func TestReportReducer_ProjectsTTFBAndSuccessDelivery(t *testing.T) {
 		t.Fatalf("timing: %v", err)
 	}
 	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
+		AccessID:  accessidentity.Local,
 		RequestID: id, Workspace: "default", ClientHandler: "Codex/1", RequestPath: "/responses",
 		ProviderSpec: "openai", Route: route, Timing: timing,
 		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),

@@ -14,6 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
@@ -244,6 +245,7 @@ func TestNVIDIAHostedResponsesAndMessagesIngressLowerToSharedStreamingChat(t *te
 				normalizedPath = canonical.NormalizedPathMessages
 			}
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
+				AccessID:        accessidentity.Local,
 				ExchangeID:      "nvidia-" + tc.name,
 				Request:         exchange.NewTransportRequest(http.MethodPost, tc.path, nil, []byte(tc.body)),
 				Operation:       canonical.ClientOperation{Family: tc.family, NormalizedPath: normalizedPath},
@@ -298,6 +300,7 @@ func TestNVIDIAHostedClientIdentityDoesNotChangeProviderRequest(t *testing.T) {
 			header.Set("User-Agent", userAgent)
 		}
 		out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
+			AccessID:        accessidentity.Local,
 			ExchangeID:      "nvidia-client-" + userAgent,
 			Request:         exchange.NewTransportRequest(http.MethodPost, "/chat/completions", header, []byte(`{"model":"nvidia-route","messages":[{"role":"user","content":"hello"}],"stream":true}`)),
 			Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyChatCompletions, NormalizedPath: canonical.NormalizedPathChatCompletions},

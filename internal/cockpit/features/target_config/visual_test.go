@@ -14,7 +14,7 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 	"github.com/swobuforge/swobu/internal/testkit/testscreen"
 )
 

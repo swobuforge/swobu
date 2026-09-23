@@ -69,7 +69,7 @@ func (h ChatGPTLoginHandler) serveGenericStart(w http.ResponseWriter, req *http.
 		AuthMode     string `json:"auth_mode"`
 	}
 	if err := decodeOperatorJSONObject(w, req, &body, "auth session start request"); err != nil {
-		writeChatGPTLoginError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		writeChatGPTLoginError(w, operatorJSONErrorStatus(err), "INVALID_ARGUMENT", err.Error())
 		return
 	}
 	slog.Debug("auth session start HTTP request",
@@ -145,6 +145,10 @@ func (h ChatGPTLoginHandler) serveGenericSession(w http.ResponseWriter, req *htt
 }
 
 func (h ChatGPTLoginHandler) serveGenericCancel(w http.ResponseWriter, req *http.Request) {
+	if err := decodeOperatorJSONObject(w, req, &struct{}{}, "auth session cancel request"); err != nil {
+		writeChatGPTLoginError(w, operatorJSONErrorStatus(err), "INVALID_ARGUMENT", err.Error())
+		return
+	}
 	if h.authCancel == nil {
 		writeChatGPTLoginError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "auth session cancel is unavailable")
 		return
@@ -179,6 +183,10 @@ func (h ChatGPTLoginHandler) serveGenericCancel(w http.ResponseWriter, req *http
 }
 
 func (h ChatGPTLoginHandler) serveGenericRetry(w http.ResponseWriter, req *http.Request) {
+	if err := decodeOperatorJSONObject(w, req, &struct{}{}, "auth session retry request"); err != nil {
+		writeChatGPTLoginError(w, operatorJSONErrorStatus(err), "INVALID_ARGUMENT", err.Error())
+		return
+	}
 	if h.authRetry == nil {
 		writeChatGPTLoginError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "auth session retry is unavailable")
 		return

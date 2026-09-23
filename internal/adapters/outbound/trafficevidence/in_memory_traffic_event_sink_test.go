@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -15,7 +16,7 @@ func TestProjectStatus_ReconcilesInflightIntoTerminalRow(t *testing.T) {
 	store := NewTrafficEventStore(StoreConfig{})
 	requestID, _ := trafficevidence.ParseRequestID("req_live_reconcile")
 	route, _ := trafficevidence.NewRoute("target-a", "model-a")
-	base := trafficevidence.TrafficEventInput{
+	base := trafficevidence.TrafficEventInput{AccessID: accessidentity.Local,
 		RequestID: requestID, Workspace: "acme", RequestPath: "/responses",
 		Route: route, ProviderSpec: "openai", ProviderModel: "model-a",
 		WorkspaceRouteModelID: "chatgpt-dmytrii",
@@ -81,7 +82,7 @@ func TestProjectStatus_RecentTrafficUsesCanonicalTimingAndTokenUsageObjects(t *t
 	if err != nil {
 		t.Fatalf("NewTokenUsageWithOptional returned error: %v", err)
 	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{Workspace: "acme", RequestPath: "/responses",
+	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{AccessID: accessidentity.Local, Workspace: "acme", RequestPath: "/responses",
 		RequestID:      requestID,
 		Route:          route,
 		Timing:         timing,
@@ -218,7 +219,7 @@ func TestProjectStatus_PreservesAbsentZeroAndPositiveCacheCounters(t *testing.T)
 		requestID, _ := trafficevidence.ParseRequestID(fmt.Sprintf("req_cache_%d", index))
 		route, _ := trafficevidence.NewRoute("target", "model")
 		usage, _ := trafficevidence.NewTokenUsage(trafficevidence.TokenUsageParams{CacheReadTokens: value, CacheWriteTokens: value})
-		event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
+		event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{AccessID: accessidentity.Local,
 			RequestID: requestID, Workspace: "acme", RequestPath: "/responses", Route: route, ProviderSpec: "openai", TokenUsage: usage,
 			TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		}, trafficevidence.TerminalOutcome{Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"})

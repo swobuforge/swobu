@@ -13,6 +13,7 @@ import (
 
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
@@ -53,6 +54,7 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 		"thinking":{"type":"enabled","budget_tokens":10000}
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
+		AccessID:        accessidentity.Local,
 		ExchangeID:      "zai-reasoning-budget",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/messages", nil, raw),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyMessages, NormalizedPath: canonical.NormalizedPathMessages},
@@ -142,6 +144,7 @@ func TestResponsesExplicitEffortCompletesThroughZAIExactly(t *testing.T) {
 		"stream":true
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), zaiReasoningWorkspace(t), exchange.RequestInput{
+		AccessID:        accessidentity.Local,
 		ExchangeID:      "zai-responses-explicit-effort",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, raw),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
@@ -208,6 +211,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 		"stream":true
 	}`)
 	firstOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
+		AccessID:        accessidentity.Local,
 		ExchangeID:      "zai-responses-function-call",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, first),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
@@ -234,6 +238,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 		"stream":true
 	}`)
 	secondOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
+		AccessID:        accessidentity.Local,
 		ExchangeID:      "zai-responses-function-result",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, second),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},

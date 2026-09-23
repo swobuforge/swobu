@@ -200,10 +200,11 @@ func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error 
 	if sessionID == "" {
 		return fmt.Errorf("operator client: auth session id is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/cancel", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/cancel", strings.NewReader("{}"))
 	if err != nil {
 		return fmt.Errorf("operator client: auth session cancel request could not be built")
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("operator client: auth session cancel is unavailable")
@@ -220,10 +221,11 @@ func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSe
 	if sessionID == "" {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/retry", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/retry", strings.NewReader("{}"))
 	if err != nil {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry request could not be built")
 	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry is unavailable")

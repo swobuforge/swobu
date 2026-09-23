@@ -7,6 +7,7 @@ type StatusProjection struct {
 }
 
 type RecentTrafficRow struct {
+	AccessID  string `json:"access_id"`
 	RequestID string `json:"request_id"`
 	Endpoint  string `json:"endpoint"`
 	// ClientHandler is the normalized client identifier derived from ingress

@@ -11,9 +11,9 @@ import (
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
 	"github.com/swobuforge/swobu/internal/cockpit/ui"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestBedrockRegionSelectionLaunchesFirstProbe(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	mediaadapter "github.com/swobuforge/swobu/internal/adapters/outbound/media"
 	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
+	accessapp "github.com/swobuforge/swobu/internal/app/operator/access"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
@@ -100,13 +101,20 @@ func buildDaemonServeMux(
 		},
 	))
 	bindingCoordinator := &routebindings.Coordinator{}
-	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime, bindingCoordinator)
+	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.accessStore, daemon.shareRuntime, bindingCoordinator)
 	if err != nil {
 		return nil, nil, err
 	}
 	workspaceControl := httpapi.NewWorkspaceControlHandler(workspaceService)
 	mux.Handle("/_swobu/workspaces", workspaceControl)
 	mux.Handle("/_swobu/workspaces/", workspaceControl)
+	accessService, err := accessapp.NewService(daemon.accessStore, daemon.configStore, bindingCoordinator)
+	if err != nil {
+		return nil, nil, err
+	}
+	accessControl := httpapi.NewAccessControlHandler(accessService)
+	mux.Handle("/_swobu/access", accessControl)
+	mux.Handle("/_swobu/access/", accessControl)
 	shareService, err := shares.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime, bindingCoordinator)
 	if err != nil {
 		return nil, nil, err
@@ -131,5 +139,8 @@ func buildDaemonServeMux(
 	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
 	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
 
-	return mux, chatGPTLogin, nil
+	protected := httpapi.NewLocalAdmissionHandler(mux, daemon.accessStore)
+	outer := http.NewServeMux()
+	outer.Handle("/", protected)
+	return outer, chatGPTLogin, nil
 }

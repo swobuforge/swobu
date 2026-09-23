@@ -37,6 +37,7 @@ func postTargetProbe(t *testing.T, handler TargetProbeHandler, connection worksp
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
@@ -54,6 +55,7 @@ func TestModelCatalogProbeHandlerRequiresTypedPOST(t *testing.T) {
 func TestModelCatalogProbeHandlerRejectsTrailingJSON(t *testing.T) {
 	h := NewTargetProbeHandler(&stubTargetProber{})
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", strings.NewReader(`{"connection":{}} {}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -157,6 +159,7 @@ func TestModelCatalogProbeHandlerUsesFirstManifestProtocolWhenUnspecified(t *tes
 
 func TestModelCatalogProbeHandlerRejectsInvalidConnectionUnion(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", strings.NewReader(`{"connection":{},"provider_protocol":"responses"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	NewTargetProbeHandler(&stubTargetProber{}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "target probe request is invalid") {

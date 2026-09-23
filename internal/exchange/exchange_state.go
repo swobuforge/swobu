@@ -11,6 +11,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
@@ -55,6 +56,7 @@ type historyAdvance struct {
 }
 
 type exchangeInput struct {
+	accessID                  accessidentity.ID
 	exchangeID                string
 	clientHandler             trafficevidence.ClientHandler
 	clientProduct             trafficevidence.ClientFamily

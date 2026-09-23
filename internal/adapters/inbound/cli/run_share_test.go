@@ -34,7 +34,7 @@ func TestRunShareRefusesIncompatibleControlPlaneBeforeMutation(t *testing.T) {
 	if mutationCalls != 0 {
 		t.Fatalf("mutation calls = %d, want zero", mutationCalls)
 	}
-	if !strings.Contains(stderr.String(), "control-plane protocol 8") || !strings.Contains(stderr.String(), "requires 9") {
+	if !strings.Contains(stderr.String(), "control-plane protocol 8") || !strings.Contains(stderr.String(), "requires 10") {
 		t.Fatalf("stderr = %q, want protocol mismatch", stderr.String())
 	}
 }

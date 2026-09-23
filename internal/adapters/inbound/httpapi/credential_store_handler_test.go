@@ -17,6 +17,7 @@ func TestCredentialStoreHandlerPersistsInDaemonAndReturnsOnlyReference(t *testin
 	request := httptest.NewRequest(http.MethodPost, "/_swobu/credentials", strings.NewReader(
 		`{"provider_spec":"zai","name":"cockpit/target/personal/zai/target","secret":"zai-secret"}`,
 	))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -44,6 +45,7 @@ func TestCredentialStoreHandlerRejectsIncompleteCommandBeforePersistence(t *test
 	request := httptest.NewRequest(http.MethodPost, "/_swobu/credentials", strings.NewReader(
 		`{"provider_spec":"custom","name":"slot","secret":""}`,
 	))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)

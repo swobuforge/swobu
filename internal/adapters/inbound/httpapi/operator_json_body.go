@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"strings"
 )
 
 // maxOperatorJSONBodyBytes reuses the shipped control-message deployment
@@ -14,9 +16,16 @@ import (
 // media payloads admitted by the larger inference-request envelope.
 const maxOperatorJSONBodyBytes = 1 << 20
 
+var errOperatorJSONContentType = errors.New("Content-Type must be application/json")
+
 // decodeOperatorJSONObject establishes the HTTP memory envelope before the
 // transport-agnostic decoder observes extensible object members.
 func decodeOperatorJSONObject(w http.ResponseWriter, req *http.Request, target any, surface string) error {
+	value := strings.TrimSpace(req.Header.Get("Content-Type"))
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil || mediaType != "application/json" {
+		return errOperatorJSONContentType
+	}
 	if req.Body == nil {
 		return fmt.Errorf("%s body is invalid JSON", surface)
 	}
@@ -30,6 +39,13 @@ func decodeOperatorJSONObject(w http.ResponseWriter, req *http.Request, target a
 		return fmt.Errorf("%s body is invalid JSON", surface)
 	}
 	return decodeOperatorJSONBytes(raw, target, surface)
+}
+
+func operatorJSONErrorStatus(err error) int {
+	if errors.Is(err, errOperatorJSONContentType) {
+		return http.StatusUnsupportedMediaType
+	}
+	return http.StatusBadRequest
 }
 
 func decodeOperatorJSONBytes(raw []byte, target any, surface string) error {

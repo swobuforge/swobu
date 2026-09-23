@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
@@ -16,7 +17,7 @@ func TestBuildTerminalTrafficEventPreservesResolvedProviderAndModel(t *testing.T
 	routeName, _ := routing.ParseRouteName("openai")
 	target := provider.NewTargetSnapshot("tgt_opaque", "anthropic", "https://api.anthropic.com", "env:KEY", protocolkind.Messages, "messages", delivery.BufferedDelivery())
 	target.Model = "claude-sonnet-4-6"
-	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
+	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{accessID: accessidentity.Local,
 		workspace:   requestpathWorkspace(t),
 		routeName:   routeName,
 		exchangeID:  "req_target_evidence",
@@ -36,7 +37,7 @@ func TestBuildTerminalTrafficEventExposesPossibleDuplicateProviderWork(t *testin
 	routeName, _ := routing.ParseRouteName("openai")
 	target := provider.NewTargetSnapshot("target-a", "openai", "https://api.openai.com", "env:KEY", protocolkind.Responses, "responses", delivery.BufferedDelivery())
 	target.Model = "model"
-	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
+	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{accessID: accessidentity.Local,
 		workspace:   requestpathWorkspace(t),
 		routeName:   routeName,
 		exchangeID:  "req_duplicate_risk",
@@ -62,7 +63,7 @@ func TestBuildTerminalTrafficEventCarriesReusablePrefixEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
+	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{accessID: accessidentity.Local,
 		workspace: requestpathWorkspace(t), exchangeID: "req-prefix", requestPath: canonical.NormalizedPathResponses,
 		request: testCanonicalRequest("model"), target: provider.TargetSnapshot{TargetID: "target", TargetVersion: 4, ProviderSpec: "openai", Model: "model", ProtocolKind: protocolkind.Responses},
 		reusablePrefix: prefix,
@@ -81,7 +82,7 @@ func TestBuildTerminalTrafficEventCarriesCompletionCacheUsage(t *testing.T) {
 	completion, complete, _ := wire.NewResponseCompletion()
 	completion.ObserveUsage(usage)
 	complete(nil, nil)
-	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{
+	event, err := BuildTerminalTrafficEvent(&TrafficEvidenceInput{accessID: accessidentity.Local,
 		workspace: requestpathWorkspace(t), exchangeID: "req-cache-usage", requestPath: canonical.NormalizedPathResponses,
 		request: testCanonicalRequest("model"), target: provider.TargetSnapshot{TargetID: "target", TargetVersion: 1, ProviderSpec: "openai", Model: "model", ProtocolKind: protocolkind.Responses},
 		response: BufferedResponse{completion: completion},

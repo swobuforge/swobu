@@ -2,6 +2,7 @@ package sharestate
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -168,6 +169,104 @@ func TestOpenRejectsEmptyRouteInV2WithoutMutation(t *testing.T) {
 	if string(after) != string(raw) {
 		t.Fatal("rejected v2 state was mutated")
 	}
+}
+
+func TestReconcileBindingsRevokesMissingWorkspaceAndRouteOnly(t *testing.T) {
+	store := openTestStore(t)
+	presentWorkspace := mustWorkspaceSlug(t, "present")
+	missingWorkspace := mustWorkspaceSlug(t, "missing")
+	presentRoute := mustRouteName(t, "present-route")
+	missingRoute := mustRouteName(t, "missing-route")
+	presentWorkspaceGrant, err := store.Issue(presentWorkspace, routing.RouteName{}, ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentRouteGrant, err := store.Issue(presentWorkspace, presentRoute, ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingWorkspaceGrant, err := store.Issue(missingWorkspace, routing.RouteName{}, ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingRouteGrant, err := store.Issue(presentWorkspace, missingRoute, ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := configWithWorkspaceAndRoute(t, presentWorkspace, presentRoute)
+	changed, err := store.ReconcileBindings(config)
+	if err != nil || !changed {
+		t.Fatalf("ReconcileBindings = %v, %v", changed, err)
+	}
+	for scope, bearer := range map[string]string{"workspace": presentWorkspaceGrant.Bearer, "route": presentRouteGrant.Bearer} {
+		if _, err := store.Authenticate(bearer); err != nil {
+			t.Fatalf("present %s grant was revoked: %v", scope, err)
+		}
+	}
+	for scope, bearer := range map[string]string{"workspace": missingWorkspaceGrant.Bearer, "route": missingRouteGrant.Bearer} {
+		if _, err := store.Authenticate(bearer); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("missing %s grant survived: %v", scope, err)
+		}
+	}
+
+	reopened, err := Open(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := reopened.ReconcileBindings(config); err != nil || changed {
+		t.Fatalf("second ReconcileBindings = %v, %v", changed, err)
+	}
+	for _, bearer := range []string{missingWorkspaceGrant.Bearer, missingRouteGrant.Bearer} {
+		if _, err := reopened.Authenticate(bearer); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("revoked grant returned after reopen: %v", err)
+		}
+	}
+}
+
+func configWithWorkspaceAndRoute(t *testing.T, slug routing.WorkspaceSlug, routeName routing.RouteName) routing.Config {
+	t.Helper()
+	provider, err := routing.ParseProvider("openai", func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := routing.NewStandardConnection(provider, "https://example.com", "env:OPENAI_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := routing.ParseTargetID("primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := routing.ParseUpstreamModel("model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	protocol, err := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier, err := routing.NewTier([]routing.Target{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := routing.NewRoute(routeName, []routing.Tier{tier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := routing.NewConfig([]routing.Workspace{workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
 }
 
 func openTestStore(t *testing.T) *Store {

@@ -37,7 +37,7 @@ func (h ShareControlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Expires sharestate.Expiry `json:"expires"`
 	}
 	if err := decodeOperatorJSONObject(w, r, &body, "share command"); err != nil {
-		writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeWorkspaceJSON(w, operatorJSONErrorStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
 	switch r.Method {

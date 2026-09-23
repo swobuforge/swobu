@@ -14,6 +14,7 @@ import (
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -59,6 +60,7 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+				AccessID:   accessidentity.Local,
 				ExchangeID: "gemini-" + tc.name, Request: NewTransportRequest(http.MethodPost, tc.path, http.Header{"Content-Type": {"application/json"}}, []byte(tc.body)),
 				Operation: tc.operation, ResponseFraming: delivery.FramingSSE,
 			})
@@ -118,6 +120,7 @@ func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t 
 		]
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+		AccessID:   accessidentity.Local,
 		ExchangeID: "gemini-buffered-portable-search",
 		Request: NewTransportRequest(
 			http.MethodPost,
@@ -186,6 +189,7 @@ func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *
 		"input":"hello"
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
+		AccessID:   accessidentity.Local,
 		ExchangeID: "gemini-responses-parallel-tool-calls-false",
 		Request: NewTransportRequest(
 			http.MethodPost,

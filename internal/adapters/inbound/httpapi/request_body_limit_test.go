@@ -18,10 +18,9 @@ func TestOperatorJSONHandlersRejectOversizeBeforeApplicationBehavior(t *testing.
 	t.Run("workspace command", func(t *testing.T) {
 		body := append([]byte(`{"slug":"dev","initial_route":"chat","target":{"id":"a","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`), padding...)
 		recorder := httptest.NewRecorder()
-		NewWorkspaceControlHandler(workspaceapi.Service{}).ServeHTTP(
-			recorder,
-			httptest.NewRequest(http.MethodPost, "/_swobu/workspaces", bytes.NewReader(body)),
-		)
+		request := httptest.NewRequest(http.MethodPost, "/_swobu/workspaces", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		NewWorkspaceControlHandler(workspaceapi.Service{}).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("status=%d, want bounded rejection", recorder.Code)
 		}
@@ -35,7 +34,9 @@ func TestOperatorJSONHandlersRejectOversizeBeforeApplicationBehavior(t *testing.
 		}, nil, nil, nil)
 		body := append([]byte(`{"provider_spec":"chatgpt","auth_mode":"browser"}`), padding...)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", bytes.NewReader(body)))
+		request := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		handler.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest || called {
 			t.Fatalf("status=%d application_called=%t, want bounded rejection", recorder.Code, called)
 		}
@@ -49,7 +50,9 @@ func TestOperatorJSONHandlersRejectOversizeBeforeApplicationBehavior(t *testing.
 		}
 		body := append(raw, padding...)
 		recorder := httptest.NewRecorder()
-		NewTargetProbeHandler(stub).ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", bytes.NewReader(body)))
+		request := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		NewTargetProbeHandler(stub).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest || len(stub.attempts) != 0 {
 			t.Fatalf("status=%d provider_attempts=%d, want bounded rejection", recorder.Code, len(stub.attempts))
 		}

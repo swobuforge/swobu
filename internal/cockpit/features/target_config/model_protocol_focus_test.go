@@ -6,8 +6,8 @@ import (
 
 	tui "github.com/grindlemire/go-tui"
 	"github.com/swobuforge/swobu/internal/cockpit/readmodel"
-	"github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
+	profile "github.com/swobuforge/swobu/internal/profile"
+	testkit "github.com/swobuforge/swobu/internal/testkit/cockpittestkit"
 )
 
 func TestModelSelectionDefaultsProtocolAndAdvancesSelectionToCreate(t *testing.T) {

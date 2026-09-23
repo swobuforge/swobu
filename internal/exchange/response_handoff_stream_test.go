@@ -72,7 +72,7 @@ func TestBufferedResponseHandoffKeepsIdentityInsideExchangeUntilOutput(t *testin
 
 func TestExchangeFallsBackWhenUnavailablePrecedesResponseIdentity(t *testing.T) {
 	runner, workspace, calls := responseHandoffFallbackFixture(t, 1)
-	out, err := runExchange(context.Background(), runner, "response_fallback", "unknown", canonical.ClientFamilyResponses, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
+	out, err := runLocalExchange(context.Background(), runner, "response_fallback", "unknown", canonical.ClientFamilyResponses, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestExchangeFallsBackWhenUnavailablePrecedesResponseIdentity(t *testing.T) 
 
 func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 	runner, workspace, calls := responseHandoffFallbackFixture(t, 2)
-	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathMessages, executionaffinity.Key{})
+	out, err := runLocalExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathMessages, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestExchangeDoesNotFallBackAfterResponseIdentity(t *testing.T) {
 
 func TestGenerateContentCommittedTerminalFailurePreservesProviderStageThroughCheckpointWrappers(t *testing.T) {
 	runner, workspace, _ := responseHandoffFallbackFixture(t, 2)
-	out, err := runExchange(context.Background(), runner, "generate_content_terminal", "unknown", canonical.ClientFamilyGenerateContent, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathStreamGenerateContent, executionaffinity.Key{})
+	out, err := runLocalExchange(context.Background(), runner, "generate_content_terminal", "unknown", canonical.ClientFamilyGenerateContent, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathStreamGenerateContent, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestExchangeFallsBackWhenHostedSearchFailsAfterResponseIdentity(t *testing.
 		ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),
 	})
 
-	out, err := runExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathMessages, executionaffinity.Key{})
+	out, err := runLocalExchange(context.Background(), runner, "response_committed", "unknown", canonical.ClientFamilyMessages, delivery.StreamingDelivery(delivery.FramingSSE), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathMessages, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}

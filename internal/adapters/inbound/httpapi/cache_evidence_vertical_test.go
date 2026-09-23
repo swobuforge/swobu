@@ -51,7 +51,7 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle("/c/", NewHandler(ingress, store))
+	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress, store)))
 	mux.Handle("/_swobu/status-projection", NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
 		return store.ProjectStatus(trafficevidencestore.ProjectionInput{State: "running", Scope: scope}), nil
 	}))
@@ -121,7 +121,7 @@ func TestClientFamilyTraversesRealHTTPIndependentlyFromProtocolAndProvider(t *te
 		TrafficEvidence: store,
 		PolicyResolver:  exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 	})
-	server := httptest.NewServer(NewHandler(ingress, store))
+	server := httptest.NewServer(localAuthorityTestHandler(NewHandler(ingress, store)))
 	defer server.Close()
 
 	issueClientFamilyRequest(t, server, "/c/cache/responses", "Codex/1.2", `{"model":"default","input":"one","stream":false}`)

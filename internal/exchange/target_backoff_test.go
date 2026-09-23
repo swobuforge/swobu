@@ -41,7 +41,7 @@ func TestTargetBackoffSkipsUnavailableTargetAcrossExchanges(t *testing.T) {
 	decoded.CacheLocality = locality
 
 	for _, exchangeID := range []string{"ex_discovery", "ex_avoids"} {
-		if _, err := runExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{}); err != nil {
+		if _, err := runLocalExchange(context.Background(), runner, exchangeID, "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), decoded, nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{}); err != nil {
 			t.Fatal(err)
 		}
 	}

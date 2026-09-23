@@ -1168,7 +1168,7 @@ func TestBedrockMantleOmitsUnsupportedStructuredOutputWithoutFallback(t *testing
 			carrier.Meta{},
 		)}, nil
 	}}
-	_, err = runExchange(
+	_, err = runLocalExchange(
 		context.Background(),
 		runner,
 		"ex_mantle_structured_fallback",
@@ -1234,7 +1234,7 @@ func TestResponsesStopSequenceIsOmittedWithoutRouteFallback(t *testing.T) {
 			carrier.Meta{},
 		)}, nil
 	}}
-	_, err = runExchange(
+	_, err = runLocalExchange(
 		context.Background(),
 		runner,
 		"ex_responses_stop_fallback",
@@ -1322,7 +1322,7 @@ func TestUntypedPreparationFailureDoesNotMakeFallbackEligible(t *testing.T) {
 		return bufferedProviderTransport(nil)(ctx, target, doc)
 	}}
 
-	_, err = runExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
+	_, err = runLocalExchange(context.Background(), runner, "ex_decision_is_not_policy", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
 	if err == nil {
 		t.Fatal("unmarked codec rejection unexpectedly succeeded through fallback")
 	}
@@ -1380,7 +1380,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "turn two")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_previous"},
 	})
 
-	_, err = runExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
+	_, err = runLocalExchange(context.Background(), runner, "ex_fallback", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(request), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1452,7 +1452,7 @@ func TestExchangeDoesNotExecuteFallbackAfterResponseProjectionFailure(t *testing
 			return bufferedProviderTransport(nil)(ctx, target, document)
 		},
 	}
-	response, err := runExchange(context.Background(), runner, "ex_response_projection_terminal", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
+	response, err := runLocalExchange(context.Background(), runner, "ex_response_projection_terminal", "unknown", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
 	if err != nil {
 		t.Fatal(err)
 	}

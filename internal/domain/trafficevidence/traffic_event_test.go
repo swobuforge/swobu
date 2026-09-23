@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/routing"
 )
@@ -24,7 +25,7 @@ func successOutcome() TerminalOutcome {
 func TestNewProviderInflightTrafficEventCarriesOnlyExecutionStartFacts(t *testing.T) {
 	requestID, _ := ParseRequestID("req_inflight")
 	route, _ := NewRoute("target-a", "model-a")
-	event, err := NewProviderInflightTrafficEvent(TrafficEventInput{
+	event, err := NewProviderInflightTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local,
 		RequestID: requestID, Workspace: "alpha", RequestPath: "/responses",
 		Route: route, ProviderSpec: "openai", ProviderModel: "model-a",
 		WorkspaceRouteModelID: "chatgpt-dmytrii",
@@ -46,7 +47,7 @@ func TestNewProviderInflightTrafficEventCarriesOnlyExecutionStartFacts(t *testin
 func TestNewProviderInflightTrafficEventRequiresIssuedAttempt(t *testing.T) {
 	requestID, _ := ParseRequestID("req_inflight_invalid")
 	route, _ := NewRoute("target-a", "model-a")
-	_, err := NewProviderInflightTrafficEvent(TrafficEventInput{
+	_, err := NewProviderInflightTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local,
 		RequestID: requestID, Workspace: "alpha", RequestPath: "/responses",
 		Route: route, ProviderSpec: "openai",
 	}, 0)
@@ -94,7 +95,7 @@ func TestTrafficEvent_ClonesAdaptationChain(t *testing.T) {
 		Applied: []string{"p.encode"},
 		Mutated: true,
 	}}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		ClientProtocol:      "openai_compat",
@@ -180,7 +181,7 @@ func TestTrafficEvent_PreservesZeroProviderCallAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local,
 		RequestID:      requestID,
 		Workspace:      "alpha",
 		RequestPath:    "/responses",
@@ -206,7 +207,7 @@ func TestTrafficEvent_RejectsTerminalInProgressResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	if _, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	if _, err := NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 	}, TerminalOutcome{Result: ResultClassInProgress, StatusCode: 200, DeliveryKind: "succeeded"}); err == nil {
@@ -257,7 +258,7 @@ func TestTrafficEvent_RejectsDuplicateStageReports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 		StageReports: []StageReport{
@@ -279,7 +280,7 @@ func TestTrafficEvent_RejectsMutatedStageReportWithoutAppliedPatches(t *testing.
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 		StageReports: []StageReport{
@@ -300,7 +301,7 @@ func TestTrafficEvent_RejectsStageReportWithEmptyStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 		StageReports: []StageReport{
@@ -321,7 +322,7 @@ func TestTrafficEvent_RejectsStageReportWithEmptyCarrier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 		StageReports: []StageReport{
@@ -342,7 +343,7 @@ func TestTrafficEvent_AccessorsDeepCloneNestedMetadataSlices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		Route: route,
@@ -387,7 +388,7 @@ func TestTrafficEvent_NormalizesStageReportCaseWhitespaceAndAppliedOrdering(t *t
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	event, err := NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	event, err := NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
 		Route: route,
@@ -427,7 +428,7 @@ func TestTrafficEvent_DetectsDuplicateStageReportsAfterNormalization(t *testing.
 	if err != nil {
 		t.Fatalf("NewRoute returned error: %v", err)
 	}
-	_, err = NewTerminalTrafficEvent(TrafficEventInput{RequestID: requestID, Workspace: "alpha",
+	_, err = NewTerminalTrafficEvent(TrafficEventInput{AccessID: accessidentity.Local, RequestID: requestID, Workspace: "alpha",
 		RequestPath: "/responses", ProviderSpec: "openai",
 		Route: route,
 		StageReports: []StageReport{

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -69,8 +70,26 @@ func (h ShareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	bound := workspaceBoundIngress{workspace: projected, ingress: h.ingress, workspaceScope: workspaceScope}
 	request := r.Clone(r.Context())
+	request = request.WithContext(context.WithValue(request.Context(), admissionContextKey{}, admittedAuthority(func(routing.WorkspaceSlug) (accessidentity.ID, error) { return accessidentity.Share, nil })))
+	consumeShareBearer(request, bearer)
 	request.URL.Path = "/c/" + projected.Slug().String() + shareProtocolPath(r.URL.Path)
 	NewHandler(bound, h.traffic).ServeHTTP(w, request)
+}
+
+func consumeShareBearer(r *http.Request, bearer string) {
+	for _, name := range []string{"Authorization", "x-api-key"} {
+		values := r.Header.Values(name)
+		r.Header.Del(name)
+		for _, value := range values {
+			candidate := strings.TrimSpace(value)
+			if strings.HasPrefix(candidate, "Bearer ") {
+				candidate = strings.TrimSpace(strings.TrimPrefix(candidate, "Bearer "))
+			}
+			if candidate != bearer {
+				r.Header.Add(name, value)
+			}
+		}
+	}
 }
 
 type workspaceBoundIngress struct {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	"github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/internal/sharestate"
 )
 
 func TestDaemonPersistsAndResolvesPastedZAICredentialAcrossTargetReload(t *testing.T) {
@@ -134,6 +137,157 @@ func TestWorkspaceCommandPersistsAcrossDaemonRestart(t *testing.T) {
 	response = requestWorkspace(t, http.MethodGet, second.BaseURL()+"/_swobu/workspaces/persisted", "")
 	if response.status != http.StatusOK || !strings.Contains(response.body, `"default_route":"chat"`) || !strings.Contains(response.body, `"id":"primary"`) {
 		t.Fatalf("restored status=%d body=%s", response.status, response.body)
+	}
+}
+
+func TestStartRevokesShareBindingsForRoutingIdentityMissingAtRestart(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "swobu.yaml")
+	first, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := `{"slug":"prod","initial_route":"coding","target":{"id":"primary","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`
+	response := requestWorkspace(t, http.MethodPost, first.BaseURL()+"/_swobu/workspaces", command)
+	if response.status != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.status, response.body)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	presentConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sharePath := filepath.Join(dir, "share.json")
+	shares, err := sharestate.Open(sharePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shares.EnsureEndpoint(); err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := routing.ParseWorkspaceSlug("prod")
+	route, _ := routing.ParseRouteName("coding")
+	workspaceGrant, err := shares.Issue(workspace, routing.RouteName{}, sharestate.ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeGrant, err := shares.Issue(workspace, route, sharestate.ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(configPath, []byte("schema_version: 1\nworkspaces: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	observedMissing, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observedMissing.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(configPath, presentConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recreated.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err := sharestate.Open(sharePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for scope, bearer := range map[string]string{"workspace": workspaceGrant.Bearer, "route": routeGrant.Bearer} {
+		if _, err := reconciled.Authenticate(bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
+			t.Fatalf("%s Share bearer survived observed routing identity destruction: %v", scope, err)
+		}
+	}
+}
+
+func TestStartRevokesShareBindingForRouteMissingAtRestart(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "swobu.yaml")
+	first, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := `{"slug":"prod","initial_route":"coding","target":{"id":"primary","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`
+	response := requestWorkspace(t, http.MethodPost, first.BaseURL()+"/_swobu/workspaces", command)
+	if response.status != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.status, response.body)
+	}
+	command = `{"workspace":"prod","name":"review","target":{"id":"review-primary","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`
+	response = requestWorkspace(t, http.MethodPost, first.BaseURL()+"/_swobu/workspaces/prod/routes", command)
+	if response.status != http.StatusOK {
+		t.Fatalf("create route status=%d body=%s", response.status, response.body)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	presentConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sharePath := filepath.Join(dir, "share.json")
+	shares, err := sharestate.Open(sharePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shares.EnsureEndpoint(); err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := routing.ParseWorkspaceSlug("prod")
+	review, _ := routing.ParseRouteName("review")
+	grant, err := shares.Issue(workspace, review, sharestate.ExpiryNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missingRouteConfig := bytes.Replace(presentConfig, []byte("      review:\n"), []byte("      removed:\n"), 1)
+	if bytes.Equal(missingRouteConfig, presentConfig) {
+		t.Fatalf("persisted config did not contain review route:\n%s", presentConfig)
+	}
+	if err := os.WriteFile(configPath, missingRouteConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	observedMissing, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observedMissing.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(configPath, presentConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := Start(context.Background(), StartInput{ConfigPath: configPath, StartupConfig: config.StartupConfig{Addr: "127.0.0.1:0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recreated.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err := sharestate.Open(sharePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciled.Authenticate(grant.Bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
+		t.Fatalf("route Share bearer survived observed route identity destruction: %v", err)
 	}
 }
 

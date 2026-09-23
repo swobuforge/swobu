@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/swobuforge/swobu/internal/accessstate"
 	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/configstore"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -17,6 +18,7 @@ import (
 type Service struct {
 	store    *configstore.Store
 	shares   *sharestate.Store
+	access   *accessstate.Store
 	runtime  *sharetransport.OwnerRuntime
 	bindings *routebindings.Coordinator
 }
@@ -30,6 +32,8 @@ func NewService(store *configstore.Store, lifecycle ...any) (Service, error) {
 		switch value := dependency.(type) {
 		case *sharestate.Store:
 			service.shares = value
+		case *accessstate.Store:
+			service.access = value
 		case *sharetransport.OwnerRuntime:
 			service.runtime = value
 		case *routebindings.Coordinator:
@@ -339,16 +343,25 @@ func connectionWithCredential(connection routing.Connection, credential string) 
 }
 
 func (s Service) destructiveConfigUpdate(ctx context.Context, bindingWorkspace routing.WorkspaceSlug, route *routing.RouteName, edit func(routing.Config) (routing.Config, error)) (routing.Config, error) {
-	if s.shares == nil || s.bindings == nil {
+	if (s.shares == nil && s.access == nil) || s.bindings == nil {
 		return s.store.Update(ctx, edit)
 	}
 	unlock := s.bindings.Lock()
 	defer unlock()
 	removed := false
 	next, err := s.store.UpdatePrepared(ctx, edit, func(_, _ routing.Config) error {
-		var revokeErr error
-		removed, revokeErr = s.shares.RevokeBindings(bindingWorkspace, route)
-		return revokeErr
+		if s.shares != nil {
+			var revokeErr error
+			removed, revokeErr = s.shares.RevokeBindings(bindingWorkspace, route)
+			if revokeErr != nil {
+				return revokeErr
+			}
+		}
+		if route == nil && s.access != nil {
+			_, revokeErr := s.access.RevokeWorkspace(bindingWorkspace)
+			return revokeErr
+		}
+		return nil
 	})
 	if removed && s.runtime != nil {
 		s.runtime.StopIfInactive()
