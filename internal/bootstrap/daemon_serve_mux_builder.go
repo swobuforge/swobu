@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
@@ -14,13 +15,17 @@ import (
 	accessapp "github.com/swobuforge/swobu/internal/app/operator/access"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
+	connectapp "github.com/swobuforge/swobu/internal/app/operator/connect"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	"github.com/swobuforge/swobu/internal/app/operator/credentialfiles"
+	"github.com/swobuforge/swobu/internal/app/operator/credentialmaterialization"
 	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
+	"github.com/swobuforge/swobu/internal/clientconnect"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/operatorweb"
 	"github.com/swobuforge/swobu/internal/sharestate"
 	"github.com/swobuforge/swobu/internal/sharetransport"
 	"github.com/swobuforge/swobu/shareprotocol"
@@ -90,18 +95,36 @@ func buildDaemonServeMux(
 	persistCredential := func(providerSpec string, keyName string, secret string) (string, error) {
 		return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
 	}
-	mux.Handle("/_swobu/credentials", httpapi.NewCredentialStoreHandler(
-		func(_ context.Context, providerSpec string, keyName string, secret string) (string, error) {
-			return persistCredential(providerSpec, keyName, secret)
-		},
-	))
+	credentialMaterializer, err := credentialmaterialization.NewService(persistCredential, func(providerSpec, credentialRef string) error {
+		return credentialsadapter.DeleteMaterializedCredential(providerSpec, credentialRef)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := credentialMaterializer.SetPendingPath(daemon.configPath + ".credential-material.json"); err != nil {
+		return nil, nil, fmt.Errorf("open pending credential metadata: %w", err)
+	}
+	daemon.materializer = &credentialMaterializer
+	if err := credentialMaterializer.Reconcile(credentialReferences(daemon.configStore.Config()), time.Now()); err != nil {
+		return nil, nil, fmt.Errorf("reconcile credential material registry: %w", err)
+	}
+	mux.Handle("/_swobu/credentials", httpapi.NewCredentialStoreHandler(credentialMaterializer.Materialize))
 	mux.Handle("/_swobu/credential-files", httpapi.NewCredentialFilesHandler(
 		func(_ context.Context, path string) (credentialfiles.Listing, error) {
 			return credentialfiles.Browse(path)
 		},
 	))
+	providerAuthoringHandler := httpapi.NewProviderCatalogHandler()
+	mux.Handle("/_swobu/provider-authoring", providerAuthoringHandler)
+	mux.Handle("/_swobu/provider-authoring/", providerAuthoringHandler)
+	connectService, err := connectapp.NewService(clientconnect.NewService())
+	if err != nil {
+		return nil, nil, fmt.Errorf("Connect service: %w", err)
+	}
+	connectHandler := httpapi.NewConnectHandler(connectService)
+	mux.Handle("/_swobu/connect/", connectHandler)
 	bindingCoordinator := &routebindings.Coordinator{}
-	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.accessStore, daemon.shareRuntime, bindingCoordinator)
+	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.accessStore, daemon.shareRuntime, bindingCoordinator, &credentialMaterializer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -138,8 +161,13 @@ func buildDaemonServeMux(
 	authSessionHandler := httpapi.NewAuthSessionHandler(authManager.Start, authManager.Poll, authManager.Cancel, authManager.Retry)
 	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
 	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
+	web, err := operatorweb.NewHandler()
+	if err != nil {
+		return nil, nil, fmt.Errorf("Web Operator assets: %w", err)
+	}
+	mux.Handle("/", web)
 
-	protected := httpapi.NewLocalAdmissionHandler(mux, daemon.accessStore)
+	protected := httpapi.NewLocalBrowserHandler(mux, daemon.accessStore)
 	outer := http.NewServeMux()
 	outer.Handle("/", protected)
 	return outer, chatGPTLogin, nil
