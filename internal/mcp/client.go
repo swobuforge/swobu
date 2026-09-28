@@ -34,6 +34,28 @@ const (
 
 var errAuthenticationRequired = errors.New("MCP source requires authentication")
 
+// ResultProjectionError means the remote tool returned a response that was
+// received but could not be represented in Swobu's canonical tool-result
+// vocabulary. It is deliberately distinct from a remote tool error and from
+// transport/protocol failure so execution evidence can preserve uncertainty.
+type ResultProjectionError struct{ cause error }
+
+func (e *ResultProjectionError) Error() string {
+	if e == nil || e.cause == nil {
+		return "MCP result projection failed"
+	}
+	return e.cause.Error()
+}
+func (e *ResultProjectionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+func projectionError(format string, args ...any) error {
+	return &ResultProjectionError{cause: fmt.Errorf(format, args...)}
+}
+
 type session struct {
 	source     canonical.MCPToolSource
 	sdk        *mcp.ClientSession
@@ -223,12 +245,28 @@ func (s *session) call(ctx context.Context, remoteName string, input canonical.J
 }
 
 func (s *session) callWithTimeout(ctx context.Context, remoteName string, input canonical.JSONObject, timeout time.Duration) ([]canonical.ToolResultPart, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	var arguments map[string]any
-	if err := json.Unmarshal([]byte(input.String()), &arguments); err != nil {
+	arguments, err := toolArguments(input)
+	if err != nil {
 		return nil, false, err
 	}
+	return s.callPreparedWithTimeout(ctx, remoteName, arguments, timeout)
+}
+
+func toolArguments(input canonical.JSONObject) (map[string]any, error) {
+	var arguments map[string]any
+	if err := json.Unmarshal([]byte(input.String()), &arguments); err != nil {
+		return nil, err
+	}
+	return arguments, nil
+}
+
+func (s *session) callPrepared(ctx context.Context, remoteName string, arguments map[string]any) ([]canonical.ToolResultPart, bool, error) {
+	return s.callPreparedWithTimeout(ctx, remoteName, arguments, ToolCallTimeout)
+}
+
+func (s *session) callPreparedWithTimeout(ctx context.Context, remoteName string, arguments map[string]any, timeout time.Duration) ([]canonical.ToolResultPart, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	result, err := s.sdk.CallTool(ctx, &mcp.CallToolParams{Name: remoteName, Arguments: arguments})
 	if err != nil {
 		return nil, false, fmt.Errorf("call MCP tool %q: %w", remoteName, err)
@@ -238,32 +276,26 @@ func (s *session) callWithTimeout(ctx context.Context, remoteName string, input 
 	for _, content := range result.Content {
 		text, ok := content.(*mcp.TextContent)
 		if !ok {
-			return projectionFailureResult(), true, nil
+			return nil, false, projectionError("MCP tool %q returned an unsupported result content type", remoteName)
 		}
 		totalBytes += len(text.Text)
 		if totalBytes > MaxToolResultBytes {
-			return nil, false, fmt.Errorf("MCP tool %q exceeded the result limit", remoteName)
+			return nil, false, projectionError("MCP tool %q exceeded the result limit", remoteName)
 		}
 		parts = append(parts, canonical.NewTextToolResultPart(text.Text))
 	}
 	if result.StructuredContent != nil {
 		raw, err := json.Marshal(result.StructuredContent)
 		if err != nil {
-			return projectionFailureResult(), true, nil
+			return nil, false, projectionError("MCP tool %q structured result could not be projected: %v", remoteName, err)
 		}
 		totalBytes += len(raw)
 		if totalBytes > MaxToolResultBytes {
-			return projectionFailureResult(), true, nil
+			return nil, false, projectionError("MCP tool %q structured result exceeded the result limit", remoteName)
 		}
 		parts = append(parts, canonical.NewTextToolResultPart(string(raw)))
 	}
 	return parts, result.IsError, nil
-}
-
-func projectionFailureResult() []canonical.ToolResultPart {
-	return []canonical.ToolResultPart{canonical.NewTextToolResultPart(
-		"The MCP tool may have completed, but Swobu could not project its result content type.",
-	)}
 }
 
 func (s *session) close() error {

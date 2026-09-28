@@ -164,7 +164,7 @@ func reducerTestState(t *testing.T) exchangeState {
 	t.Helper()
 	return exchangeState{
 		input: exchangeInput{
-			exchangeID:         "ex_reducer",
+			clientRequestID:    "ex_reducer",
 			clientFamily:       canonical.ClientFamilyResponses,
 			clientDelivery:     delivery.BufferedDelivery(),
 			request:            testCanonicalRequest("a"),
@@ -578,7 +578,7 @@ func TestSynchronousCompletionFailureAdvancesRouteCandidate(t *testing.T) {
 	recordedFirst, _ := findProviderCallAttempt(fellBack.nextState, first.id)
 	second := activeProviderAttempt(t, fellBack.nextState)
 	if recordedFirst.status != providerCallAttemptFailed ||
-		recordedFirst.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred ||
+		recordedFirst.failure.Attempt.Execution() != provider.DispositionMayHaveOccurred ||
 		second.id != 2 || second.candidateIndex != 1 {
 		t.Fatalf("completion fallback attempts = %#v", fellBack.nextState.providerCallAttempts)
 	}
@@ -834,7 +834,7 @@ func TestNativeRequestDecodeFailureDoesNotTriggerSemanticRetry(t *testing.T) {
 	}
 	failedAttempt, _ := findProviderCallAttempt(failed.nextState, active.id)
 	if failedAttempt.status != providerCallAttemptFailed ||
-		failedAttempt.failure.Attempt.Execution() != provider.ExecutionMayHaveOccurred {
+		failedAttempt.failure.Attempt.Execution() != provider.DispositionMayHaveOccurred {
 		t.Fatalf("attempt = %#v, want possible provider execution", failedAttempt)
 	}
 	if len(failed.nextState.effectiveChanges) != 0 {
@@ -1403,12 +1403,12 @@ func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := exchangeState{input: exchangeInput{exchangeID: "turn-1", request: testCanonicalRequest("a"), workspace: workspace}, executionAffinity: testExecutionAffinity("affinity-1")}
+	base := exchangeState{input: exchangeInput{clientRequestID: "turn-1", request: testCanonicalRequest("a"), workspace: workspace}, executionAffinity: testExecutionAffinity("affinity-1")}
 	first, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base.input.exchangeID = "turn-2"
+	base.input.clientRequestID = "turn-2"
 	second, err := applyRoutePlan(base)
 	if err != nil {
 		t.Fatal(err)

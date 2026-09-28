@@ -173,6 +173,78 @@ func TestCharacterizeTargetFactUsesValidIsolatedFixturesForEveryFact(t *testing.
 	}
 }
 
+type fixtureSettlementTransport struct {
+	sends       int
+	settlements []error
+}
+
+func (t *fixtureSettlementTransport) Send(_ context.Context, _ carrier.Document) (provider.Ingress, error) {
+	t.sends++
+	if t.sends != 2 {
+		param := "first"
+		if t.sends == 3 {
+			param = "different"
+		}
+		return nil, targetFactStructuredRejection(param)
+	}
+	return completedTargetFactIngress(protocolkind.Responses, delivery.BufferedDelivery()), nil
+}
+
+func (t *fixtureSettlementTransport) FixtureSettled(err error) {
+	t.settlements = append(t.settlements, err)
+}
+
+func TestInconclusiveCharacterizationStillNotifiesSuccessfulControlFixture(t *testing.T) {
+	transport := &fixtureSettlementTransport{}
+	codec := Codec{Protocol: protocolkind.Responses}
+	target := provider.TargetSnapshot{ProviderSpec: "custom", TargetID: "target", TargetVersion: 1, Model: "model", ProtocolKind: protocolkind.Responses}
+	resolution := codec.CharacterizeTargetFact(context.Background(), target, provider.AcceptsReasoningDisabled, transport)
+	if resolution.Conclusive || transport.sends != 3 || len(transport.settlements) != 1 || transport.settlements[0] != nil {
+		t.Fatalf("resolution=%#v sends=%d fixture terminals=%v; want inconclusive and successful control", resolution, transport.sends, transport.settlements)
+	}
+}
+
+type observingFixtureTransport struct {
+	ingress     provider.Ingress
+	settlements []error
+}
+
+func (t *observingFixtureTransport) Send(context.Context, carrier.Document) (provider.Ingress, error) {
+	return t.ingress, nil
+}
+
+func (t *observingFixtureTransport) FixtureSettled(err error) {
+	t.settlements = append(t.settlements, err)
+}
+
+type closingFixtureBody struct {
+	io.Reader
+	closeErr error
+}
+
+func (b closingFixtureBody) Close() error { return b.closeErr }
+
+func TestCharacterizationFixtureReportsOwnDecodeStreamAndCloseFailures(t *testing.T) {
+	codec := Codec{Protocol: protocolkind.ChatCompletions}
+	target := provider.TargetSnapshot{ProviderSpec: "custom", TargetID: "target", TargetVersion: 1, Model: "model", ProtocolKind: protocolkind.ChatCompletions}
+	for _, test := range []struct {
+		name    string
+		ingress provider.Ingress
+	}{
+		{"decode", provider.DocumentIngress{Document: carrier.NewDocument(protocolkind.ChatCompletions, "application/json", nil, []byte(`not-json`), carrier.Meta{})}},
+		{"stream", provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: io.NopCloser(strings.NewReader("data: invalid-json\n\n"))}}},
+		{"close", provider.StreamIngress{Stream: carrier.ByteStream{MediaType: "text/event-stream", Body: closingFixtureBody{Reader: strings.NewReader("data: [DONE]\n\n"), closeErr: errors.New("close failed")}}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			transport := &observingFixtureTransport{ingress: test.ingress}
+			resolution := codec.CharacterizeTargetFact(context.Background(), target, provider.AcceptsChatStreamIncludeUsage, transport)
+			if resolution.Conclusive || len(transport.settlements) != 1 || transport.settlements[0] == nil {
+				t.Fatalf("resolution=%#v fixture terminals=%v; want one invalid fixture", resolution, transport.settlements)
+			}
+		})
+	}
+}
+
 func TestCharacterizeTargetFactReusesOneSyntheticThreadIdentity(t *testing.T) {
 	var projected []executionaffinity.Key
 	codec := Codec{

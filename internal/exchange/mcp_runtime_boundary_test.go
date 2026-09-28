@@ -7,6 +7,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/execution"
+	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
 )
 
@@ -69,7 +71,7 @@ func TestUnavailableOnlyMCPRuntimeDoesNotDelayClientHandoff(t *testing.T) {
 	}
 }
 
-func TestMCPExecutionRecordsPolyfillTruth(t *testing.T) {
+func TestMCPPreflightFailureDoesNotCreateExecution(t *testing.T) {
 	t.Parallel()
 	callID, err := canonical.NewToolCallID("call_1")
 	if err != nil {
@@ -88,22 +90,50 @@ func TestMCPExecutionRecordsPolyfillTruth(t *testing.T) {
 		t.Fatal(err)
 	}
 	call, _ := item.ToolCall()
-	outcome, err := reduceCallingMCP(
+	_, err = reduceCallingMCP(
 		context.Background(), exchangeState{mcp: &mcp.Run{}},
 		callingMCPPhase{calls: []canonical.ToolCallItem{call}},
 		mcpBatchStarted{},
 		runtimeBundle{},
 	)
+	if err == nil {
+		t.Fatal("MCP preflight without a binding unexpectedly reached execution")
+	}
+}
+
+func TestCancelledMCPBatchDoesNotBeginPreflightOrConsumeOrdinal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ordinal := uint64(0)
+	state := exchangeState{mcp: &mcp.Run{}, invocationOrdinal: &ordinal}
+	outcome, err := reduceCallingMCP(ctx, state, callingMCPPhase{calls: []canonical.ToolCallItem{{}}}, mcpBatchStarted{}, runtimeBundle{})
+	if err != nil || ordinal != 0 || outcome.command != nil {
+		t.Fatalf("pre-cancelled MCP: err=%v ordinal=%d command=%T", err, ordinal, outcome.command)
+	}
+}
+
+func TestMCPExecuteCancellationSettlesWithoutFailureSubtype(t *testing.T) {
+	id, err := execution.NewExchangeID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Starting the local execution mechanism must not create compatibility
-	// evidence; only semantic loss in a later projection may do that.
-	if len(outcome.nextState.effectiveChanges) != 0 {
-		t.Fatalf("MCP start changes = %#v, want exact", outcome.nextState.effectiveChanges)
+	invocationID, err := execution.NewInvocationID(id, 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(outcome.nextState.effectiveChanges) != 0 {
-		t.Fatalf("MCP execution invented semantic changes = %#v", outcome.nextState.effectiveChanges)
+	capture := &characterizationEvidenceCapture{}
+	state := exchangeState{}
+	phase := callingMCPPhase{invocationID: invocationID}
+	outcome, err := reduceCallingMCP(context.Background(), state, phase, mcpToolReturned{err: context.Canceled}, runtimeBundle{ExecutionEvidence: capture})
+	if err != nil || len(capture.events) != 1 {
+		t.Fatalf("MCP cancellation: transition=%#v err=%v events=%v", outcome, err, capture.events)
+	}
+	settled := capture.events[0].(executionevidence.MCPInvocationSettled)
+	if settled.Outcome() != execution.Cancelled || settled.Occurrence() != execution.MayHaveOccurred || settled.Failure() != "" {
+		t.Fatalf("MCP cancellation settlement = %#v", settled)
+	}
+	if _, ok := outcome.nextState.phase.(failedPhase); !ok {
+		t.Fatalf("MCP cancellation did not terminate exchange: %T", outcome.nextState.phase)
 	}
 }
 
@@ -117,5 +147,35 @@ func TestMCPBatchReservationIsACommandBoundary(t *testing.T) {
 	}
 	if _, ok := outcome.command.(beginMCPBatchCommand); !ok {
 		t.Fatalf("batch reservation command = %T", outcome.command)
+	}
+}
+
+func TestClassifyMCPResultUsesToolErrorBitNotItemKindBit(t *testing.T) {
+	callID, err := canonical.NewToolCallID("call_classify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("ok")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, failure, ok := classifyMCPResult(result)
+	if !ok || outcome != execution.Succeeded || failure != "" {
+		t.Fatalf("ordinary MCP result classified as outcome=%q failure=%q ok=%v", outcome, failure, ok)
+	}
+}
+
+func TestClassifyMCPResultPreservesRemoteToolError(t *testing.T) {
+	callID, err := canonical.NewToolCallID("call_error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := canonical.NewToolResultItem(callID, []canonical.ToolResultPart{canonical.NewTextToolResultPart("denied")}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, failure, ok := classifyMCPResult(result)
+	if !ok || outcome != execution.Failed || failure != executionevidence.FailureToolError {
+		t.Fatalf("remote MCP error classified as outcome=%q failure=%q ok=%v", outcome, failure, ok)
 	}
 }

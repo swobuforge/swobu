@@ -10,8 +10,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	profile "github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -38,7 +38,7 @@ func currentGoldenReport() productReport {
 				TargetProtocol:      protocolkind.Responses,
 				Operation:           "response",
 				Provider:            profile.ProviderSpecOpenAI,
-				Result:              trafficevidence.ResultClassSuccess,
+				Result:              productprojection.ResultSuccess,
 				StatusCode:          200,
 				DeliveryKind:        delivery.Succeeded,
 				CanonicalErrorCode:  "",
@@ -59,7 +59,7 @@ func currentGoldenReport() productReport {
 				TargetProtocol:      protocolkind.Messages,
 				Operation:           "message",
 				Provider:            profile.ProviderSpecAnthropic,
-				Result:              trafficevidence.ResultClassBackendError,
+				Result:              productprojection.ResultBackendError,
 				StatusCode:          503,
 				DeliveryKind:        delivery.ExchangeFailed,
 				CanonicalErrorCode:  canonical.ErrorCodeBadEndpoint,

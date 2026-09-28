@@ -17,10 +17,11 @@ type EncodeContext struct {
 	ResolveImage func(context.Context, canonical.URLImage) (InspectedImage, error)
 }
 
-// AttemptContext carries execution facts for one provider attempt. It excludes
-// canonical request semantics, credentials, and transport-owned state.
+// AttemptContext carries provider-facing execution facts for one attempt.
+// CorrelationID preserves protocol continuity; it is never the Swobu-owned
+// execution ExchangeID. Canonical semantics and credentials stay outside it.
 type AttemptContext struct {
-	ExchangeID            string
+	CorrelationID         string
 	ExecutionAffinity     executionaffinity.Key
 	CacheLocality         cachelocality.Key
 	HasNextRouteCandidate bool

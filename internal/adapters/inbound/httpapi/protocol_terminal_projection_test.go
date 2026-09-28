@@ -161,7 +161,7 @@ func terminalProjectionHandler(t *testing.T, transport terminalProjectionTranspo
 		runtime,
 		exchange.RuntimePoliciesSpec{PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()}},
 	)
-	return localAuthorityTestHandler(NewHandler(ingress, nil))
+	return localAuthorityTestHandler(NewHandler(ingress))
 }
 
 func terminalProjectionWorkspace(t *testing.T) routing.Workspace {

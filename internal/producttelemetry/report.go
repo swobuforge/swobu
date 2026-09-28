@@ -3,8 +3,8 @@ package producttelemetry
 import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	profile "github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -80,38 +80,36 @@ type reportRuntime struct {
 	Arch    string `json:"arch"`
 }
 
-// ReportTrafficRow is one aggregate traffic cell: a closed dimension tuple, a
-// request count, and fixed six-bucket duration and TTFB histograms whose entries
-// each sum to Count (every request lands in exactly one bucket; the last bucket
-// holds requests with no recorded timing). The dimension fields carry owned domain
-// types — canonical.NormalizedPath, profile.ProviderID,
-// delivery.ResultKind, canonical.ErrorCode — end to end; the
-// terminal-event constructor validates each against its vocabulary
-// (NewTerminalTrafficEvent), so a non-canonical value is rejected at the source
-// rather than carried to the report. They serialize to JSON strings at the marshal
-// edge and are never reduced to untyped strings earlier. status_code is a raw int;
-// the analytical failure taxonomy (and the coarse success/cancelled/failure
-// outcome) is derived downstream, never on the client. See product-telemetry.md.
+// Product dimensions are owned by this lossy projection and remain
+// string-backed so the versioned JSON schema stays unchanged.
+type reportClientProtocol = string
+type reportOperation = string
+type reportResult = productprojection.ResultClass
+
+// reportTrafficRow is one aggregate telemetry cell: a dimension tuple, request
+// count, and fixed six-bucket duration and TTFB histograms. The final bucket
+// means timing was unknown. The report is a lossy projection, not Execution
+// Evidence; status_code may use the telemetry-specific analytic convention.
 type reportTrafficRow struct {
-	ClientFamily        reportClientFamily             `json:"client_family"`
-	RequestedModel      reportModelClass               `json:"requested_model"`
-	ResolvedModel       reportModelClass               `json:"resolved_model"`
-	ClientProtocol      trafficevidence.ClientProtocol `json:"client_protocol"`
-	TargetProtocol      protocolkind.ProtocolKind      `json:"target_protocol"`
-	Operation           trafficevidence.NormalizedOp   `json:"operation"`
-	Provider            profile.ProviderID             `json:"provider"`
-	Result              trafficevidence.ResultClass    `json:"result"`
-	StatusCode          int                            `json:"status_code"`
-	DeliveryKind        delivery.ResultKind            `json:"delivery_kind"`
-	CanonicalErrorCode  canonical.ErrorCode            `json:"canonical_error_code"`
-	AttemptCount        int                            `json:"attempt_count"`
-	FallbackRecovered   bool                           `json:"fallback_recovered"`
-	ContinuityRecovered bool                           `json:"continuity_recovered"`
-	CrossProtocol       bool                           `json:"cross_protocol"`
-	WireMutated         bool                           `json:"wire_mutated"`
-	Count               int                            `json:"count"`
-	DurationMS          [6]int                         `json:"duration_ms"`
-	TTFBMS              [6]int                         `json:"ttfb_ms"`
+	ClientFamily        reportClientFamily        `json:"client_family"`
+	RequestedModel      reportModelClass          `json:"requested_model"`
+	ResolvedModel       reportModelClass          `json:"resolved_model"`
+	ClientProtocol      reportClientProtocol      `json:"client_protocol"`
+	TargetProtocol      protocolkind.ProtocolKind `json:"target_protocol"`
+	Operation           reportOperation           `json:"operation"`
+	Provider            profile.ProviderID        `json:"provider"`
+	Result              reportResult              `json:"result"`
+	StatusCode          int                       `json:"status_code"`
+	DeliveryKind        delivery.ResultKind       `json:"delivery_kind"`
+	CanonicalErrorCode  canonical.ErrorCode       `json:"canonical_error_code"`
+	AttemptCount        int                       `json:"attempt_count"`
+	FallbackRecovered   bool                      `json:"fallback_recovered"`
+	ContinuityRecovered bool                      `json:"continuity_recovered"`
+	CrossProtocol       bool                      `json:"cross_protocol"`
+	WireMutated         bool                      `json:"wire_mutated"`
+	Count               int                       `json:"count"`
+	DurationMS          [6]int                    `json:"duration_ms"`
+	TTFBMS              [6]int                    `json:"ttfb_ms"`
 }
 
 type reportModelClass string

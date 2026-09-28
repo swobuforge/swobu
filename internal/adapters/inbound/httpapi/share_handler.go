@@ -9,7 +9,6 @@ import (
 	"github.com/swobuforge/swobu/internal/configstore"
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/sharestate"
 )
@@ -19,13 +18,12 @@ type ShareHandler struct {
 	shareStore  *sharestate.Store
 	configStore *configstore.Store
 	ingress     exchange.RequestIngress
-	traffic     observation.TrafficEventSink
 }
 
 // NewShareHandler constructs the public Share adapter around existing Share
 // state and ingress.
-func NewShareHandler(shareStore *sharestate.Store, configStore *configstore.Store, ingress exchange.RequestIngress, traffic observation.TrafficEventSink) ShareHandler {
-	return ShareHandler{shareStore: shareStore, configStore: configStore, ingress: ingress, traffic: traffic}
+func NewShareHandler(shareStore *sharestate.Store, configStore *configstore.Store, ingress exchange.RequestIngress) ShareHandler {
+	return ShareHandler{shareStore: shareStore, configStore: configStore, ingress: ingress}
 }
 
 // ServeHTTP applies public Share HTTP policy before delegating authenticated
@@ -73,7 +71,7 @@ func (h ShareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	request = request.WithContext(context.WithValue(request.Context(), admissionContextKey{}, admittedAuthority(func(routing.WorkspaceSlug) (accessidentity.ID, error) { return accessidentity.Share, nil })))
 	consumeShareBearer(request, bearer)
 	request.URL.Path = "/c/" + projected.Slug().String() + shareProtocolPath(r.URL.Path)
-	NewHandler(bound, h.traffic).ServeHTTP(w, request)
+	NewHandler(bound).ServeHTTP(w, request)
 }
 
 func consumeShareBearer(r *http.Request, bearer string) {

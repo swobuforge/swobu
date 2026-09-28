@@ -18,6 +18,9 @@ const (
 type Result struct {
 	Kind ResultKind
 	Err  error
+	// HTTPStatus is the actual status emitted for this semantic operation.
+	// Zero means no HTTP response status applies or was emitted (e.g. WebSocket).
+	HTTPStatus int
 }
 
 // ValidResultKind reports whether kind is a recognized terminal outcome.

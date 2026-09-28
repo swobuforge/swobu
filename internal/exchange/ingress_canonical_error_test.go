@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
-	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 )
 
 // terminalCanonicalErrorCode carries a code iff the terminal error is (or wraps)
@@ -36,30 +36,30 @@ func TestTerminalCanonicalErrorCode_PresentIffCanonical(t *testing.T) {
 	}
 }
 
-func TestRequestOutcomeFromSwobuError_UsesRecoveryOwnedStatusAndResult(t *testing.T) {
+func TestCanonicalErrorResultAndRecoveryOwnedStatus(t *testing.T) {
 	cases := []struct {
 		name       string
 		code       canonical.ErrorCode
-		wantResult trafficevidence.ResultClass
+		wantResult productprojection.ResultClass
 		wantStatus int
 	}{
 		{
 			name:       "Swobu capability",
 			code:       canonical.ErrorCodeNotImplemented,
-			wantResult: trafficevidence.ResultClassNotImplemented,
+			wantResult: productprojection.ResultNotImplemented,
 			wantStatus: http.StatusNotImplemented,
 		},
 		{
 			name:       "temporary target availability",
 			code:       canonical.ErrorCodeNoAvailableTarget,
-			wantResult: trafficevidence.ResultClassSwobuError,
+			wantResult: productprojection.ResultSwobuError,
 			wantStatus: http.StatusServiceUnavailable,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := requestOutcomeFromSwobuError(tc.code); got != tc.wantResult {
+			if got := productprojection.ResultFromCanonical(string(tc.code)); got != tc.wantResult {
 				t.Fatalf("result = %q, want %q", got, tc.wantResult)
 			}
 			if got := requestOutcomeStatusForSwobuError(tc.code); got != tc.wantStatus {

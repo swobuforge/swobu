@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/netip"
@@ -344,12 +345,9 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 		t.Fatalf("structured result text = %q", structuredText.Text())
 	}
 	parts, isError, err = activeSession.call(ctx, "unsupported", input)
-	if err != nil || !isError || len(parts) != 1 {
+	var projectionErr *ResultProjectionError
+	if !errors.As(err, &projectionErr) || isError || parts != nil {
 		t.Fatalf("unsupported result = %#v isError=%v err=%v", parts, isError, err)
-	}
-	unsupportedText, _ := parts[0].Text()
-	if !strings.Contains(unsupportedText.Text(), "may have completed") {
-		t.Fatalf("unsupported result text = %q", unsupportedText.Text())
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()

@@ -70,7 +70,7 @@ func TestTransportKeepsBackendFailuresBackendOriginated(t *testing.T) {
 	backend := geminiBackend(t, server.Client(), server.URL+"/v1")
 	_, err := backend.Transport.Send(context.Background(), geminiTextDocument(t, backend))
 	var failure provider.AttemptFailure
-	if !errors.As(err, &failure) || failure.Execution() != provider.ExecutionMayHaveOccurred {
+	if !errors.As(err, &failure) || failure.Execution() != provider.DispositionMayHaveOccurred {
 		t.Fatalf("failure = %T %v, want may-have-executed attempt failure", err, err)
 	}
 	var backendError canonical.BackendError
@@ -89,7 +89,7 @@ func TestTransportRejectsSuccessfulNonSSEResponseAsBackendFailure(t *testing.T) 
 	backend := geminiBackend(t, server.Client(), server.URL+"/v1")
 	_, err := backend.Transport.Send(context.Background(), geminiTextDocument(t, backend))
 	var failure provider.AttemptFailure
-	if !errors.As(err, &failure) || failure.Execution() != provider.ExecutionMayHaveOccurred {
+	if !errors.As(err, &failure) || failure.Execution() != provider.DispositionMayHaveOccurred {
 		t.Fatalf("failure = %T %v, want may-have-executed failure", err, err)
 	}
 	var backendError canonical.BackendError

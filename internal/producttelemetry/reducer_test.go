@@ -6,67 +6,32 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
-	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	profile "github.com/swobuforge/swobu/internal/profile"
-	"github.com/swobuforge/swobu/internal/routing"
 )
 
-func terminalTrafficEvent(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
-	return terminalTrafficEventForFamily(t, requestID, clientHandler, providerSpec, requestPath, trafficevidence.ClientFamilyCodex, result, statusCode, durationMs, deliveryKind, canonicalErrorCode, attemptCount, fallbackRecovered)
+func terminalObservation(providerSpec, requestPath, result string, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) productprojection.Observation {
+	return terminalObservationForFamily(providerSpec, requestPath, clientfamily.Codex, result, statusCode, durationMs, deliveryKind, canonicalErrorCode, attemptCount, fallbackRecovered)
 }
 
-func terminalTrafficEventForFamily(t *testing.T, requestID, clientHandler, providerSpec, requestPath string, clientFamily trafficevidence.ClientFamily, result trafficevidence.ResultClass, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) trafficevidence.TrafficEvent {
-	t.Helper()
-	id, err := trafficevidence.ParseRequestID(requestID)
-	if err != nil {
-		t.Fatalf("ParseRequestID: %v", err)
+func terminalObservationForFamily(providerSpec, requestPath string, clientFamily clientfamily.Family, result string, statusCode, durationMs int, deliveryKind, canonicalErrorCode string, attemptCount int, fallbackRecovered bool) productprojection.Observation {
+	return productprojection.Observation{
+		ClientFamily: string(clientFamily), RequestedModel: "default", ResolvedModel: "configured", ClientProtocol: "responses", Operation: requestPath,
+		Provider: providerSpec, TargetProtocol: string(protocolkind.Responses), Result: result,
+		StatusCode: statusCode, DurationMS: &durationMs, DeliveryKind: deliveryKind,
+		ErrorCode: canonicalErrorCode, AttemptCount: attemptCount, FallbackRecovered: fallbackRecovered,
 	}
-	route, err := trafficevidence.NewRoute(providerSpec, "m")
-	if err != nil {
-		t.Fatalf("NewRoute: %v", err)
-	}
-	timing, err := trafficevidence.NewTimingWithOptional(nil, &durationMs)
-	if err != nil {
-		t.Fatalf("NewTimingWithOptional: %v", err)
-	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
-		AccessID:       accessidentity.Local,
-		RequestID:      id,
-		Workspace:      "default",
-		ClientHandler:  trafficevidence.ClientHandler(clientHandler),
-		ClientFamily:   clientFamily,
-		ClientProtocol: trafficevidence.ClientProtocol("responses"),
-		RequestPath:    canonical.NormalizedPath(requestPath),
-		ProviderSpec:   profile.ProviderID(providerSpec),
-		Route:          route,
-		Timing:         timing,
-		TargetProtocol: protocolkind.Responses,
-		TargetVersion:  routing.TargetVersion(1),
-	}, trafficevidence.TerminalOutcome{
-		Result:             result,
-		StatusCode:         statusCode,
-		DeliveryKind:       delivery.ResultKind(deliveryKind),
-		CanonicalErrorCode: canonical.ErrorCode(canonicalErrorCode),
-		AttemptCount:       attemptCount,
-		FallbackRecovered:  fallbackRecovered,
-	})
-	if err != nil {
-		t.Fatalf("NewTerminalTrafficEvent: %v", err)
-	}
-	return event
 }
 
 func TestReportReducer_MergesByDimension(t *testing.T) {
 	r := newReportReducer()
-	// Two requests with identical dimensions — including the same client
-	// Product/Version — merge into one row (count 2). Distinct Product/Version
-	// tokens are distinct rows (see TestReportReducer_UserAgentIsADimension). The
-	// producer owns the one-terminal-event-per-request invariant.
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
-	r.Observe(terminalTrafficEvent(t, "req_2", "Codex/1.2", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 600, "succeeded", "", 1, false))
+	// Two observations with the same bounded dimensions merge into one row.
+	// The producer owns the one-terminal-observation-per-exchange invariant.
+	r.ObserveExecution(terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 600, "succeeded", "", 1, false))
 
 	report := r.snapshot("install-1", "0.1.0", "linux", "amd64")
 	if len(report.Traffic) != 1 {
@@ -91,68 +56,60 @@ func TestReportReducer_MergesByDimension(t *testing.T) {
 }
 
 func TestProductTelemetryDoesNotSerializeAccessIdentity(t *testing.T) {
-	event := terminalTrafficEvent(t, "req_access_privacy", "Codex/1.2", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false)
-	if event.AccessID() != accessidentity.Local {
-		t.Fatalf("traffic evidence AccessID = %v", event.AccessID())
-	}
+	event := terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false)
+	event.RequestedModel = "custom"
+	event.ResolvedModel = "configured"
 	reducer := newReportReducer()
-	reducer.Observe(event)
+	reducer.ObserveExecution(event)
 	raw, err := json.Marshal(reducer.snapshot("install", "0.1.0", "linux", "amd64"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "access_id") || strings.Contains(string(raw), accessidentity.Local.String()) {
+	if strings.Contains(string(raw), "access_id") || strings.Contains(string(raw), "req_access_privacy") {
 		t.Fatalf("serialized product telemetry exposed Access identity: %s", raw)
+	}
+}
+
+func TestReportReducerRetainsBoundedModelAndProtocolDimensions(t *testing.T) {
+	observation := terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 0, "succeeded", "", 1, false)
+	zero := 0
+	observation.RequestedModel = "custom"
+	observation.ResolvedModel = "configured"
+	observation.CrossProtocol = true
+	observation.WireMutated = true
+	observation.TTFBMS = &zero
+	r := newReportReducer()
+	r.ObserveExecution(observation)
+	row := r.snapshot("install", "0.1.0", "linux", "amd64").Traffic[0]
+	if row.RequestedModel != reportModelCustom || row.ResolvedModel != reportModelConfigured || !row.CrossProtocol || !row.WireMutated {
+		t.Fatalf("lost bounded dimensions: %+v", row)
+	}
+	if row.DurationMS[durationBucketUnder100ms] != 1 || row.TTFBMS[durationBucketUnder100ms] != 1 || row.DurationMS[durationBucketUnknown] != 0 {
+		t.Fatalf("known zero timing lost: %+v", row)
 	}
 }
 
 func TestReportReducer_ProjectsBoundedClientProductSeparatelyFromProtocolAndProvider(t *testing.T) {
 	tests := []struct {
-		family trafficevidence.ClientFamily
+		family clientfamily.Family
 		want   reportClientFamily
 	}{
-		{trafficevidence.ClientFamilyCodex, reportClientFamilyCodex},
-		{trafficevidence.ClientFamilyClaudeCode, reportClientFamilyClaudeCode},
-		{trafficevidence.ClientFamilyCline, reportClientFamilyCline},
-		{trafficevidence.ClientFamilyOpenCode, reportClientFamilyOpenCode},
-		{trafficevidence.ClientFamilyAider, reportClientFamilyAider},
-		{trafficevidence.ClientFamilyVSCode, reportClientFamilyVSCode},
-		{trafficevidence.ClientFamilyOther, reportClientFamilyOther},
-		{trafficevidence.ClientFamilyUnknown, reportClientFamilyUnknown},
+		{clientfamily.Codex, reportClientFamilyCodex},
+		{clientfamily.ClaudeCode, reportClientFamilyClaudeCode},
+		{clientfamily.Cline, reportClientFamilyCline},
+		{clientfamily.OpenCode, reportClientFamilyOpenCode},
+		{clientfamily.Aider, reportClientFamilyAider},
+		{clientfamily.VSCode, reportClientFamilyVSCode},
+		{clientfamily.Other, reportClientFamilyOther},
+		{clientfamily.Unknown, reportClientFamilyUnknown},
 	}
 	for _, tt := range tests {
 		r := newReportReducer()
-		r.Observe(terminalTrafficEventForFamily(t, "req_1", "must-not-be-classified-here", "openai", "/responses", tt.family, trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+		r.ObserveExecution(terminalObservationForFamily("openai", "/responses", tt.family, productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
 		row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
 		if row.ClientFamily != tt.want || row.ClientProtocol != "responses" || row.Provider != "openai" {
 			t.Fatalf("family %q projected row %+v", tt.family, row)
 		}
-	}
-}
-
-func TestReportReducer_ProjectsOnlyBoundedModelCategories(t *testing.T) {
-	tests := []struct {
-		name          string
-		requested     string
-		route         string
-		providerModel string
-		wantRequested reportModelClass
-		wantResolved  reportModelClass
-	}{
-		{"public default", "default", "route-a", "private-upstream-model", reportModelDefault, reportModelConfigured},
-		{"configured route", "route-a", "route-a", "private-upstream-model", reportModelConfigured, reportModelConfigured},
-		{"arbitrary alias", "customer-secret-model-alias", "route-a", "private-upstream-model", reportModelCustom, reportModelConfigured},
-		{"missing evidence", "", "", "", reportModelUnknown, reportModelUnknown},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := classifyRequestedModel(test.requested, test.route); got != test.wantRequested {
-				t.Fatalf("requested class = %q, want %q", got, test.wantRequested)
-			}
-			if got := classifyResolvedModel(test.route, test.providerModel); got != test.wantResolved {
-				t.Fatalf("resolved class = %q, want %q", got, test.wantResolved)
-			}
-		})
 	}
 }
 
@@ -176,11 +133,10 @@ func TestProductReportDoesNotEncodeArbitraryModelStrings(t *testing.T) {
 
 func TestReportReducer_UserAgentIsNotADimension(t *testing.T) {
 	r := newReportReducer()
-	// Two requests identical except for the client Product/Version must NOT merge:
-	// the version is part of the observed client identity. Mapping a token to a
-	// family is a downstream decision, not a reducer decision.
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
-	r.Observe(terminalTrafficEvent(t, "req_2", "Codex/1.3", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+	// Arbitrary User-Agent version tokens are not dimensions of the bounded
+	// observation; both observations merge by client family.
+	r.ObserveExecution(terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
 
 	rows := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic
 	if len(rows) != 1 || rows[0].Count != 2 {
@@ -190,7 +146,7 @@ func TestReportReducer_UserAgentIsNotADimension(t *testing.T) {
 
 func TestReportReducer_ResetClearsAccumulator(t *testing.T) {
 	r := newReportReducer()
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1", "openai", "/responses", trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses", productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
 	if r.Empty() {
 		t.Fatal("expected non-empty after observe")
 	}
@@ -208,8 +164,8 @@ func TestReportReducer_ResetClearsAccumulator(t *testing.T) {
 // The analytical failure taxonomy is derived downstream, never on the client.
 func TestReportReducer_ProjectsTerminalFacts(t *testing.T) {
 	r := newReportReducer()
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1", "openai", "/responses",
-		trafficevidence.ResultClassBackendError, 502, 40, "exchange_failed", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultBackendError, 502, 40, "exchange_failed", "", 1, false))
 
 	row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
 	if row.StatusCode != 502 {
@@ -227,23 +183,9 @@ func TestReportReducer_ProjectsTTFBAndSuccessDelivery(t *testing.T) {
 	r := newReportReducer()
 	// TTFB 40ms and duration 40ms both land in the under-100ms bucket. Success
 	// carries delivery_kind "succeeded" and no canonical error code.
-	ttfb := 40
-	id, _ := trafficevidence.ParseRequestID("req_1")
-	route, _ := trafficevidence.NewRoute("openai", "m")
-	timing, err := trafficevidence.NewTimingWithOptional(&ttfb, ptrInt(40))
-	if err != nil {
-		t.Fatalf("timing: %v", err)
-	}
-	event, err := trafficevidence.NewTerminalTrafficEvent(trafficevidence.TrafficEventInput{
-		AccessID:  accessidentity.Local,
-		RequestID: id, Workspace: "default", ClientHandler: "Codex/1", RequestPath: "/responses",
-		ProviderSpec: "openai", Route: route, Timing: timing,
-		TargetProtocol: protocolkind.Responses, TargetVersion: routing.TargetVersion(1),
-	}, trafficevidence.TerminalOutcome{Result: trafficevidence.ResultClassSuccess, StatusCode: 200, DeliveryKind: "succeeded"})
-	if err != nil {
-		t.Fatalf("event: %v", err)
-	}
-	r.Observe(event)
+	measured := 40
+	event := productprojection.Observation{ClientFamily: string(clientfamily.Codex), ClientProtocol: "responses", Operation: "/responses", Provider: "openai", TargetProtocol: string(protocolkind.Responses), Result: "success", StatusCode: 200, DeliveryKind: "succeeded", DurationMS: &measured, TTFBMS: &measured}
+	r.ObserveExecution(event)
 
 	row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
 	if row.DeliveryKind != "succeeded" {
@@ -264,8 +206,8 @@ func TestReportReducer_ProjectsRoutingDimensions(t *testing.T) {
 	r := newReportReducer()
 	// Two attempts on distinct candidates that ultimately handed off: a fallback
 	// recovered the request. attempt_count 2 buckets to "2".
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 30, "succeeded", "", 2, true))
+	r.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 30, "succeeded", "", 2, true))
 
 	row := r.snapshot("install-1", "0.1.0", "linux", "amd64").Traffic[0]
 	if row.AttemptCount != 2 {
@@ -288,8 +230,8 @@ func TestReportReducer_FoldsCardinalityIntoOverflow(t *testing.T) {
 	for _, family := range clientFamilies {
 		for _, a := range attempts {
 			for _, s := range statuses {
-				r.Observe(terminalTrafficEventForFamily(t, "req", "Codex/1", "openai", "/responses",
-					trafficevidence.ClientFamily(family), trafficevidence.ResultClassBackendError, s, 10, "exchange_failed", "", a, false))
+				r.ObserveExecution(terminalObservationForFamily("openai", "/responses",
+					clientfamily.Family(family), productprojection.ResultBackendError, s, 10, "exchange_failed", "", a, false))
 				n++
 			}
 		}
@@ -339,7 +281,7 @@ func TestProductReport_MaximalEncodesUnderCeiling(t *testing.T) {
 			TargetProtocol:      protocolkind.ChatCompletions,
 			Operation:           "chat_completion",
 			Provider:            profile.ProviderSpecOpenRouter,
-			Result:              trafficevidence.ResultClassBackendError,
+			Result:              string(productprojection.ResultBackendError),
 			StatusCode:          599,
 			DeliveryKind:        delivery.CheckpointCommitFailed,
 			CanonicalErrorCode:  canonical.ErrorCodeUnsupportedDelivery,
@@ -382,8 +324,8 @@ func TestReportReducer_OutputValidatesAtHighCount(t *testing.T) {
 	r := newReportReducer()
 	const burst = 1_000_000 // 7 digits; well under MaxInt32 (~99k/s for 6h would be required to reach it).
 	for range burst {
-		r.Observe(terminalTrafficEvent(t, "req", "Codex/1.2", "openai", "/responses",
-			trafficevidence.ResultClassSuccess, 200, 50, "succeeded", "", 1, false))
+		r.ObserveExecution(terminalObservation("openai", "/responses",
+			productprojection.ResultSuccess, 200, 50, "succeeded", "", 1, false))
 	}
 	report := r.snapshot("0123456789abcdef0123456789abcdef", "0.1.0", "linux", "amd64")
 	if len(report.Traffic) != 1 || report.Traffic[0].Count != burst {

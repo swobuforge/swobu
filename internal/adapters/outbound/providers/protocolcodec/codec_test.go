@@ -35,7 +35,7 @@ func TestStandardProtocolCacheSensitiveRenderingIsDeterministic(t *testing.T) {
 		t.Run(string(protocol), func(t *testing.T) {
 			codec := Codec{Protocol: protocol}
 			projection := func(exchangeID string, deliveryMode delivery.Delivery) []byte {
-				document, _, err := codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID}, Canonical: request, Delivery: deliveryMode})
+				document, _, err := codec.Encode(provider.Request{Attempt: provider.AttemptContext{CorrelationID: exchangeID}, Canonical: request, Delivery: deliveryMode})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -584,7 +584,7 @@ func TestFlatResponsesFailsWhenPolicyDependsOnResidualMCP(t *testing.T) {
 func TestChatCompletionsCodecOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{canonical.NewWebSearchDeclaration()})
 	request := provider.Request{
-		Attempt: provider.AttemptContext{ExchangeID: "exchange-shared-lowering"},
+		Attempt: provider.AttemptContext{CorrelationID: "exchange-shared-lowering"},
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model: canonical.Specify("model"),
 			Items: []canonical.CanonicalItem{
@@ -602,7 +602,7 @@ func TestChatCompletionsCodecOmitsWebSearchWithoutNativeLowering(t *testing.T) {
 
 func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 	codec := Codec{Protocol: protocolkind.ChatCompletions}
-	request := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "exchange-identity"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}
+	request := provider.Request{Attempt: provider.AttemptContext{CorrelationID: "exchange-identity"}, Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("model")})}
 	decoded, err := codec.Decode(context.Background(), request, provider.DocumentIngress{Document: carrier.NewDocument(
 		protocolkind.ChatCompletions, "application/json", nil,
 		[]byte(`{"id":"provider-response","model":"model","choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}]}`), carrier.Meta{},
@@ -614,7 +614,7 @@ func TestDecodePreservesExchangeIdentityAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.ExchangeID != request.Attempt.ExchangeID {
+	if event.ExchangeID != request.Attempt.CorrelationID {
 		t.Fatalf("exchange id = %q", event.ExchangeID)
 	}
 
@@ -671,7 +671,7 @@ func TestResponsesContinuationCaptureRequiresPersistenceEligibleRequest(t *testi
 			t.Parallel()
 
 			request := provider.Request{
-				Attempt: provider.AttemptContext{ExchangeID: "exchange-store-policy"},
+				Attempt: provider.AttemptContext{CorrelationID: "exchange-store-policy"},
 				Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 					Model: canonical.Specify("model"),
 					Store: test.requestStore,
@@ -755,7 +755,7 @@ func TestCompileChatRequest_ToolPolicyConsumesEmittedProjection(t *testing.T) {
 	set, _ := canonical.NewToolSet([]canonical.ToolDeclaration{webSearch})
 	searchKey := webSearch.Key()
 	request := provider.Request{
-		Attempt: provider.AttemptContext{ExchangeID: "exchange-policy-lowering"},
+		Attempt: provider.AttemptContext{CorrelationID: "exchange-policy-lowering"},
 		Canonical: canonical.NewCanonicalRequest(canonical.RequestParams{
 			Model:      canonical.Specify("model"),
 			ToolPolicy: canonical.Specify(canonical.NewToolPolicy(canonical.ToolPolicySpecific, &searchKey)),

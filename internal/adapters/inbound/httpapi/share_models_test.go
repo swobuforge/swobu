@@ -57,7 +57,7 @@ func TestRouteShareHTTPDoesNotReachSiblingRoute(t *testing.T) {
 		}},
 	}
 	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
-	handler := authorityTestHandler(NewHandler(workspaceBoundIngress{workspace: projected, ingress: ingress}, nil), accessidentity.Share)
+	handler := authorityTestHandler(NewHandler(workspaceBoundIngress{workspace: projected, ingress: ingress}), accessidentity.Share)
 	request := httptest.NewRequest(http.MethodPost, "/c/dev/responses", strings.NewReader(`{"model":"writing","input":"hello"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_route_share_isolation")

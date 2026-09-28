@@ -13,43 +13,39 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
 
+type ExecutionDisposition string
+
+const (
+	DispositionNotDispatched           ExecutionDisposition = "not_dispatched"
+	DispositionRejectedBeforeExecution ExecutionDisposition = "rejected_before_execution"
+	DispositionMayHaveOccurred         ExecutionDisposition = "may_have_occurred"
+)
+
 type classifiedFailure interface {
 	error
 	providerFailure()
 }
 
-// ExecutionPossibility records only what Swobu can prove about one issued
-// provider call. It is independent of the provider failure class.
-type ExecutionPossibility uint8
-
-const (
-	ExecutionNotDispatched ExecutionPossibility = iota + 1
-	ExecutionRejectedBeforeExecution
-	ExecutionMayHaveOccurred
-)
-
 // AttemptFailure is the validated terminal fact for one provider attempt.
 // Bound transports conservatively wrap an untyped error as
-// ExecutionMayHaveOccurred; only the exact adapter may claim an earlier fact.
+// DispositionMayHaveOccurred; only the exact adapter may claim an earlier fact.
 type AttemptFailure struct {
-	execution ExecutionPossibility
+	execution ExecutionDisposition
 	cause     error
 }
 
 func (e AttemptFailure) Error() string { return e.cause.Error() }
 func (e AttemptFailure) Unwrap() error { return e.cause }
 
-func (e AttemptFailure) Execution() ExecutionPossibility { return e.execution }
+func (e AttemptFailure) Execution() ExecutionDisposition { return e.execution }
 func (e AttemptFailure) Cause() error                    { return e.cause }
 
 func (e AttemptFailure) valid() bool {
 	return e.cause != nil &&
-		(e.execution == ExecutionNotDispatched ||
-			e.execution == ExecutionRejectedBeforeExecution ||
-			e.execution == ExecutionMayHaveOccurred)
+		(e.execution == DispositionNotDispatched || e.execution == DispositionRejectedBeforeExecution || e.execution == DispositionMayHaveOccurred)
 }
 
-func newAttemptFailure(execution ExecutionPossibility, cause error) AttemptFailure {
+func newAttemptFailure(execution ExecutionDisposition, cause error) AttemptFailure {
 	if cause == nil {
 		panic("provider attempt failure requires a cause")
 	}
@@ -65,15 +61,15 @@ func newAttemptFailure(execution ExecutionPossibility, cause error) AttemptFailu
 }
 
 func AttemptNotDispatched(cause error) AttemptFailure {
-	return newAttemptFailure(ExecutionNotDispatched, cause)
+	return newAttemptFailure(DispositionNotDispatched, cause)
 }
 
 func AttemptRejectedBeforeExecution(cause error) AttemptFailure {
-	return newAttemptFailure(ExecutionRejectedBeforeExecution, cause)
+	return newAttemptFailure(DispositionRejectedBeforeExecution, cause)
 }
 
 func AttemptMayHaveExecuted(cause error) AttemptFailure {
-	return newAttemptFailure(ExecutionMayHaveOccurred, cause)
+	return newAttemptFailure(DispositionMayHaveOccurred, cause)
 }
 
 // AsAttemptFailure extracts a validated issued-call fact.

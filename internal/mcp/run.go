@@ -456,35 +456,91 @@ func (r *Run) validateAttemptPolicy(attempt canonical.CanonicalRequest) error {
 	return policyErr
 }
 
-// Call executes one call already classified and budgeted as MCP-owned.
-func (r *Run) Call(ctx context.Context, call canonical.ToolCallItem) (canonical.CanonicalItem, error) {
+// PreparedCall is a locally validated MCP execution. Constructing it performs
+// no external I/O; Execute is the boundary that issues tools/call.
+type PreparedCall struct {
+	run       *Run
+	call      canonical.ToolCallItem
+	owned     binding
+	active    *session
+	arguments map[string]any
+}
+
+// ExecutionIdentity returns the opaque source and tool identity for a
+// prepared call. It exposes no endpoint, credential, or input content.
+func (p PreparedCall) ExecutionIdentity() (canonical.ToolKey, canonical.ToolKey, bool) {
+	if p.run == nil || p.active == nil {
+		return canonical.ToolKey{}, canonical.ToolKey{}, false
+	}
+	return p.owned.source.Clone(), p.call.Tool().Clone(), true
+}
+
+// PrepareCall performs binding, session, and input validation before any
+// external MCP operation begins.
+func (r *Run) PrepareCall(call canonical.ToolCallItem) (PreparedCall, error) {
 	if r == nil {
-		return canonical.CanonicalItem{}, canonical.InternalError("MCP call requires an open runtime")
+		return PreparedCall{}, canonical.InternalError("MCP call requires an open runtime")
 	}
 	owned, ok := r.bindings[call.Tool()]
 	if !ok {
-		return canonical.CanonicalItem{}, canonical.InternalError("MCP call has no request-owned execution binding")
+		return PreparedCall{}, canonical.InternalError("MCP call has no request-owned execution binding")
 	}
 	active := r.sessions[owned.source]
 	if active == nil {
-		return canonical.CanonicalItem{}, canonical.NewBackendError(
+		return PreparedCall{}, canonical.NewBackendError(
 			"mcp:"+owned.source.Name(), http.StatusUnauthorized,
 			"MCP source is not authorized for this request", "",
 		)
 	}
 	input, ok := call.Input().Object()
 	if !ok {
-		return canonical.CanonicalItem{}, canonical.InternalError("MCP tool call input is not an object")
+		return PreparedCall{}, canonical.InternalError("MCP tool call input is not an object")
 	}
-	parts, isError, err := active.call(ctx, owned.remoteName, input)
+	arguments, err := toolArguments(input)
 	if err != nil {
-		return canonical.CanonicalItem{}, dependencyError(active.source, err)
+		return PreparedCall{}, canonical.InternalError("MCP tool call input could not be converted")
 	}
-	result, err := canonical.NewToolResultItem(call.CallID(), parts, isError)
+	return PreparedCall{run: r, call: call, owned: owned, active: active, arguments: arguments}, nil
+}
+
+// Execute performs the external MCP tools/call operation for a prepared call.
+func (p PreparedCall) Execute(ctx context.Context) (canonical.CanonicalItem, error) {
+	if p.run == nil || p.active == nil {
+		return canonical.CanonicalItem{}, canonical.InternalError("MCP prepared call is invalid")
+	}
+	parts, isError, err := p.active.callPrepared(ctx, p.owned.remoteName, p.arguments)
+	if err != nil {
+		return canonical.CanonicalItem{}, dependencyError(p.active.source, err)
+	}
+	result, err := canonical.NewToolResultItem(p.call.CallID(), parts, isError)
 	if err != nil {
 		return canonical.CanonicalItem{}, canonical.InternalError(err.Error())
 	}
 	return result, nil
+}
+
+// Call is retained as a convenience for callers that do not need to observe
+// the preflight/execution boundary separately.
+func (r *Run) Call(ctx context.Context, call canonical.ToolCallItem) (canonical.CanonicalItem, error) {
+	prepared, err := r.PrepareCall(call)
+	if err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	return prepared.Execute(ctx)
+}
+
+// ExecutionSource returns the canonical MCP source bound to one executable
+// tool call. It exposes identity only; arguments, endpoint and credentials
+// remain private to the MCP runtime.
+func (r *Run) ExecutionSource(call canonical.ToolCallItem) (canonical.ToolKey, bool) {
+	if r == nil {
+		return canonical.ToolKey{}, false
+	}
+	owned, ok := r.bindings[call.Tool()]
+	if !ok {
+		return canonical.ToolKey{}, false
+	}
+	return owned.source.Clone(), true
 }
 
 // Close releases every request-owned SDK session.

@@ -60,8 +60,8 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
-				AccessID:   accessidentity.Local,
-				ExchangeID: "gemini-" + tc.name, Request: NewTransportRequest(http.MethodPost, tc.path, http.Header{"Content-Type": {"application/json"}}, []byte(tc.body)),
+				AccessID:        accessidentity.Local,
+				ClientRequestID: "gemini-" + tc.name, Request: NewTransportRequest(http.MethodPost, tc.path, http.Header{"Content-Type": {"application/json"}}, []byte(tc.body)),
 				Operation: tc.operation, ResponseFraming: delivery.FramingSSE,
 			})
 			if err != nil {
@@ -120,8 +120,8 @@ func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t 
 		]
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
-		AccessID:   accessidentity.Local,
-		ExchangeID: "gemini-buffered-portable-search",
+		AccessID:        accessidentity.Local,
+		ClientRequestID: "gemini-buffered-portable-search",
 		Request: NewTransportRequest(
 			http.MethodPost,
 			"/responses",
@@ -189,8 +189,8 @@ func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *
 		"input":"hello"
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
-		AccessID:   accessidentity.Local,
-		ExchangeID: "gemini-responses-parallel-tool-calls-false",
+		AccessID:        accessidentity.Local,
+		ClientRequestID: "gemini-responses-parallel-tool-calls-false",
 		Request: NewTransportRequest(
 			http.MethodPost,
 			"/responses",

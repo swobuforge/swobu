@@ -16,7 +16,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	"github.com/swobuforge/swobu/internal/profile"
+	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 )
@@ -393,7 +393,7 @@ func providerRequest(t *testing.T, request canonical.CanonicalRequest, responseD
 	if err != nil {
 		t.Fatal(err)
 	}
-	return provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_venice"}, Canonical: request, ToolNames: names, Delivery: responseDelivery}
+	return provider.Request{Attempt: provider.AttemptContext{CorrelationID: "ex_venice"}, Canonical: request, ToolNames: names, Delivery: responseDelivery}
 }
 
 func resolvedCodec(t *testing.T) provider.Codec {

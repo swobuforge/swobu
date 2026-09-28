@@ -63,7 +63,7 @@ type targetFactFixtureResult struct {
 	rejection targetFactRejection
 }
 
-func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, executionAffinity executionaffinity.Key, fact provider.TargetFact, value bool, transport provider.Transport) targetFactFixtureResult {
+func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetSnapshot, request canonical.CanonicalRequest, fixtureDelivery delivery.Delivery, executionAffinity executionaffinity.Key, fact provider.TargetFact, value bool, transport provider.Transport) (result targetFactFixtureResult) {
 	facts := provider.NewTargetFacts(func(read provider.TargetFact) (bool, bool) {
 		if read != fact {
 			return true, false
@@ -103,17 +103,30 @@ func (c Codec) runTargetFactFixture(ctx context.Context, target provider.TargetS
 		}
 		return targetFactFixtureResult{}
 	}
+	// Only the fixture runner knows whether the received ingress decoded and
+	// streamed successfully. Transport failures have already terminated at Send.
+	var terminalErr error
+	if observer, ok := transport.(provider.TargetFactFixtureObserver); ok {
+		defer func() { observer.FixtureSettled(terminalErr) }()
+	}
 	decoded, err := c.Decode(ctx, providerRequest, ingress)
 	if err != nil {
+		terminalErr = err
 		return targetFactFixtureResult{}
 	}
-	defer decoded.Stream.Close(ctx)
+	defer func() {
+		if closeErr := decoded.Stream.Close(ctx); closeErr != nil && terminalErr == nil {
+			terminalErr = closeErr
+			result = targetFactFixtureResult{}
+		}
+	}()
 	for {
 		_, err = decoded.Stream.Next(ctx)
 		if errors.Is(err, io.EOF) {
 			return targetFactFixtureResult{outcome: targetFactFixtureSucceeded}
 		}
 		if err != nil {
+			terminalErr = err
 			return targetFactFixtureResult{}
 		}
 	}

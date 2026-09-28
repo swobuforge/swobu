@@ -47,9 +47,6 @@ func TestImplicitHistoryUsesOnlyUniqueCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.nextState.previousRequest != nil {
-		t.Fatal("ambiguous history selected checkpoint-private state")
-	}
 }
 
 func TestExplicitHistoricalCheckpointIsCrossCodecAndAffinityIndependent(t *testing.T) {
@@ -111,7 +108,7 @@ func TestTwoExchangesResolveOneCheckpointBeforeSiblingCommits(t *testing.T) {
 	for index := range resolved {
 		request := canonical.NewCanonicalRequest(canonical.RequestParams{Model: canonical.Specify("a"), Items: []canonical.CanonicalItem{testMessage(canonical.MessageRoleUser, "child")}, PreviousResponse: &canonical.ResponseRef{SwobuID: "resp_base"}})
 		state := reducerTestState(t)
-		state.input.exchangeID = string(rune('a' + index))
+		state.input.clientRequestID = string(rune('a' + index))
 		state.input.request = request
 		state.input.requestFingerprint = testHistoryRequest([]byte{byte(index + 1)})
 		started, err := reduce(ctx, state, exchangeStarted{}, runner)

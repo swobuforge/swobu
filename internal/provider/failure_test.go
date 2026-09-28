@@ -64,7 +64,7 @@ func TestTransportFailurePreservesInvocationCancellation(t *testing.T) {
 		t.Fatalf("error = %T, want CancelledError", err)
 	}
 	failure, ok := AsAttemptFailure(err)
-	if !ok || failure.Execution() != ExecutionMayHaveOccurred {
+	if !ok || failure.Execution() != DispositionMayHaveOccurred {
 		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 }
@@ -111,7 +111,7 @@ func TestBindTransportDefaultsUntypedFailureToPossibleExecution(t *testing.T) {
 	})
 	_, err := transport.Send(context.Background(), carrier.Document{})
 	failure, ok := AsAttemptFailure(err)
-	if !ok || failure.Execution() != ExecutionMayHaveOccurred {
+	if !ok || failure.Execution() != DispositionMayHaveOccurred {
 		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 	var internal InternalError
@@ -123,12 +123,12 @@ func TestBindTransportDefaultsUntypedFailureToPossibleExecution(t *testing.T) {
 func TestAttemptFailureConstructionClosesExecutionVocabulary(t *testing.T) {
 	cause := Unavailable(errors.New("down"))
 	for _, tc := range []struct {
-		execution ExecutionPossibility
+		execution ExecutionDisposition
 		construct func(error) AttemptFailure
 	}{
-		{ExecutionNotDispatched, AttemptNotDispatched},
-		{ExecutionRejectedBeforeExecution, AttemptRejectedBeforeExecution},
-		{ExecutionMayHaveOccurred, AttemptMayHaveExecuted},
+		{DispositionNotDispatched, AttemptNotDispatched},
+		{DispositionRejectedBeforeExecution, AttemptRejectedBeforeExecution},
+		{DispositionMayHaveOccurred, AttemptMayHaveExecuted},
 	} {
 		failure := tc.construct(cause)
 		if failure.Execution() != tc.execution || failure.Cause() == nil {

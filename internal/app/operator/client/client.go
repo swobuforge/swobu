@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
@@ -66,31 +65,6 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		Status:  fmt.Sprintf("backend %d", resp.StatusCode),
 		Message: message,
 	}, nil
-}
-
-// Status returns the daemon-owned traffic projection for an operator scope.
-func (c *Client) Status(ctx context.Context, scope string) (StatusProjection, error) {
-	scope = strings.TrimSpace(scope) // swobu:io-string source=boundary
-	if scope == "" {
-		return StatusProjection{}, fmt.Errorf("operator client: status projection scope is required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/status-projection?scope="+url.QueryEscape(scope), nil)
-	if err != nil {
-		return StatusProjection{}, fmt.Errorf("operator client: status projection request could not be built")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return StatusProjection{}, fmt.Errorf("operator client: status projection is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return StatusProjection{}, errorFromResponse(resp, "operator client: status projection failed")
-	}
-	var projection StatusProjection
-	if err := json.NewDecoder(resp.Body).Decode(&projection); err != nil {
-		return StatusProjection{}, fmt.Errorf("operator client: status projection could not be decoded")
-	}
-	return projection, nil
 }
 
 // DaemonVersion returns the daemon's version from the /_swobu/status endpoint.

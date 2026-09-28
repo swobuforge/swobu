@@ -195,3 +195,7 @@ func writeWorkspaceJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_, _ = w.Write(append(raw, '\n'))
 }
+
+func writeOperatorJSON(w http.ResponseWriter, status int, value any) {
+	writeWorkspaceJSON(w, status, value)
+}

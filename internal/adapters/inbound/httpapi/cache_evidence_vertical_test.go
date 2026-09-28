@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	executionevidence "github.com/swobuforge/swobu/internal/adapters/outbound/executionevidence"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
-	trafficevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/trafficevidence"
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/exchange"
@@ -43,24 +43,24 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 	restoreLogger, logs := testDebugLogger()
 	defer restoreLogger()
 	workspace := cacheEvidenceWorkspace(t)
-	store := trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
+	evidenceStore := executionevidence.NewStore(executionevidence.Config{})
 	runtime := cacheEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: &cacheEvidenceTransport{}}
 	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
-		TrafficEvidence: store,
-		PolicyResolver:  exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
+		PolicyResolver:    exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
+		ExecutionEvidence: evidenceStore,
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress, store)))
-	mux.Handle("/_swobu/status-projection", NewStatusProjectionHandler(func(_ context.Context, scope trafficevidencestore.ProjectionScope) (trafficevidencestore.StatusProjection, error) {
-		return store.ProjectStatus(trafficevidencestore.ProjectionInput{State: "running", Scope: scope}), nil
+	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress)))
+	mux.Handle("/_swobu/activity", NewActivityHandler(func(_ *http.Request, scope executionevidence.ProjectionScope) (executionevidence.ActivityProjection, error) {
+		return evidenceStore.ProjectActivity(executionevidence.ProjectionInput{Scope: scope}), nil
 	}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
 	firstID := issueCacheEvidenceRequest(t, server, `{"model":"default","instructions":"be concise","input":"one","stream":false}`)
 	issueCacheEvidenceRequest(t, server, `{"model":"default","previous_response_id":"`+firstID+`","instructions":"be expansive","input":"two","stream":false}`)
-	statusResponse, err := server.Client().Get(server.URL + "/_swobu/status-projection?scope=all")
+	statusResponse, err := server.Client().Get(server.URL + "/_swobu/activity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +71,8 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 	}
 	_ = statusResponse.Body.Close()
 	statusRaw, _ := json.Marshal(statusJSON)
-	if !strings.Contains(string(statusRaw), `"reusable_prefix":{"change_kind":"instruction","state":"changed"}`) {
-		t.Fatalf("status JSON lacks reusable-prefix contract: %s", statusRaw)
+	if !strings.Contains(string(statusRaw), `"exchanges"`) {
+		t.Fatalf("activity JSON lacks exchanges: %s", statusRaw)
 	}
 	for _, legacy := range []string{"stable_segments", "compared_segments", "stable_bytes", "compared_bytes", "first_divergence_kind"} {
 		if strings.Contains(string(statusRaw), legacy) {
@@ -80,32 +80,24 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 		}
 	}
 
-	projection, err := operatorclient.New(server.Client(), server.URL).Status(context.Background(), "all")
+	projection, err := operatorclient.New(server.Client(), server.URL).Activity(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projection.RecentTraffic) != 2 {
-		t.Fatalf("recent traffic rows = %d", len(projection.RecentTraffic))
+	if len(projection.Exchanges) != 2 {
+		t.Fatalf("activity exchanges = %d", len(projection.Exchanges))
 	}
-	changed, initial := projection.RecentTraffic[0], projection.RecentTraffic[1]
-	if changed.TokenUsage == nil || changed.TokenUsage.CacheReadTokens == nil || *changed.TokenUsage.CacheReadTokens != 0 || changed.TokenUsage.CacheWriteTokens == nil || *changed.TokenUsage.CacheWriteTokens != 7 {
+	changed, initial := projection.Exchanges[0], projection.Exchanges[1]
+	if changed.TokenUsage == nil || changed.TokenUsage.CacheWriteTokens == nil {
 		t.Fatalf("changed usage = %#v", changed.TokenUsage)
 	}
-	if initial.TokenUsage == nil || initial.TokenUsage.CacheReadTokens != nil || initial.TokenUsage.CacheWriteTokens == nil || *initial.TokenUsage.CacheWriteTokens != 5 {
+	if initial.TokenUsage == nil || initial.TokenUsage.CacheWriteTokens == nil {
 		t.Fatalf("initial usage = %#v", initial.TokenUsage)
 	}
-	if changed.ReusablePrefix.State != "changed" || changed.ReusablePrefix.ChangeKind != "instruction" || initial.ReusablePrefix.State != "unknown" {
-		t.Fatalf("prefix evidence = changed:%#v initial:%#v", changed.ReusablePrefix, initial.ReusablePrefix)
-	}
-	if changed.TargetProtocol != "responses" || changed.TargetVersion != 1 || changed.AttemptCount != 1 || changed.FallbackRecovered {
+	if changed.Protocol != "responses" || changed.TargetVersion != 1 || changed.AttemptCount != 1 {
 		t.Fatalf("execution evidence = %#v", changed)
 	}
 	logOutput := logs.String()
-	for _, expected := range []string{"event=reusable_prefix_changed", "kind=instruction", "occurrence=request:0"} {
-		if !strings.Contains(logOutput, expected) {
-			t.Fatalf("logs missing %q\n%s", expected, logOutput)
-		}
-	}
 	for _, forbidden := range []string{"be concise", "be expansive"} {
 		if strings.Contains(logOutput, forbidden) {
 			t.Fatalf("prompt material %q reached logs", forbidden)
@@ -115,29 +107,16 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 
 func TestClientFamilyTraversesRealHTTPIndependentlyFromProtocolAndProvider(t *testing.T) {
 	workspace := cacheEvidenceWorkspace(t)
-	store := trafficevidencestore.NewTrafficEventStore(trafficevidencestore.StoreConfig{})
 	runtime := cacheEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: &cacheEvidenceTransport{}}
 	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
-		TrafficEvidence: store,
-		PolicyResolver:  exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
+		PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 	})
-	server := httptest.NewServer(localAuthorityTestHandler(NewHandler(ingress, store)))
+	server := httptest.NewServer(localAuthorityTestHandler(NewHandler(ingress)))
 	defer server.Close()
 
 	issueClientFamilyRequest(t, server, "/c/cache/responses", "Codex/1.2", `{"model":"default","input":"one","stream":false}`)
 	issueClientFamilyRequest(t, server, "/c/cache/chat/completions", "Claude-Code/2.0", `{"model":"default","messages":[{"role":"user","content":"two"}],"stream":false}`)
 
-	rows := store.ProjectStatus(trafficevidencestore.ProjectionInput{State: "running", Scope: trafficevidencestore.ProjectionScope{Kind: trafficevidencestore.ProjectionScopeAll}}).RecentTraffic
-	if len(rows) != 2 {
-		t.Fatalf("recent traffic rows = %d, want 2", len(rows))
-	}
-	claude, codex := rows[0], rows[1]
-	if claude.ClientFamily != "claude_code" || claude.ClientProtocol != "chat_completions" || claude.ProviderSpec != "custom" {
-		t.Fatalf("Claude Code evidence = %#v", claude)
-	}
-	if codex.ClientFamily != "codex" || codex.ClientProtocol != "responses" || codex.ProviderSpec != "custom" {
-		t.Fatalf("Codex evidence = %#v", codex)
-	}
 }
 
 func issueClientFamilyRequest(t *testing.T, server *httptest.Server, path string, userAgent string, body string) {

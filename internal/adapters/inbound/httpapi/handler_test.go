@@ -18,8 +18,8 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
@@ -30,7 +30,7 @@ import (
 )
 
 func newTestHandler(ingress requestIngress) http.Handler {
-	return localAuthorityTestHandler(NewHandler(ingress, nil))
+	return localAuthorityTestHandler(NewHandler(ingress))
 }
 
 func TestLogRequestOutcomeUsesDeliveryOwnedClientCancellation(t *testing.T) {
@@ -90,8 +90,11 @@ func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	if request.Model() == "" {
 		t.Fatal("request was not forwarded")
 	}
-	if got, want := capturing.got.ClientHandler, trafficevidence.NormalizeClientHandler("Codex/1.2"); got != want {
-		t.Fatalf("client handler = %q, want %q", got, want)
+	if got, want := capturing.got.ClientFamily, clientfamily.Classify("Codex/1.2"); got != want {
+		t.Fatalf("client family = %q, want %q", got, want)
+	}
+	if capturing.got.ClientRequestID == "req-123" {
+		t.Fatal("client-supplied request ID became the canonical exchange identity")
 	}
 }
 
@@ -1477,10 +1480,9 @@ func replicateRequestInputForTest(in exchange.RequestInput, copies int) ([]excha
 			AccessID:        in.AccessID,
 			Workspace:       in.Workspace,
 			Request:         exchange.NewTransportRequest(in.Request.Method, in.Request.URL, header, in.Request.Body),
-			ClientHandler:   in.ClientHandler,
+			ClientFamily:    in.ClientFamily,
 			Operation:       in.Operation,
 			ResponseFraming: in.ResponseFraming,
-			ExchangeID:      in.ExchangeID,
 		})
 	}
 	return out, nil

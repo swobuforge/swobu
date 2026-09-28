@@ -12,18 +12,9 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
-	"github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 )
-
-type channelTrafficEventSink struct {
-	events chan trafficevidence.TrafficEvent
-}
-
-func (s channelTrafficEventSink) Append(_ context.Context, event trafficevidence.TrafficEvent) {
-	s.events <- event
-}
 
 func TestHandleRequestWithWorkspaceRequiresAccessID(t *testing.T) {
 	workspace := requestpathWorkspace(t)
@@ -32,7 +23,7 @@ func TestHandleRequestWithWorkspaceRequiresAccessID(t *testing.T) {
 		return nil, nil
 	})}
 	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
-		ExchangeID:      "missing-access",
+		ClientRequestID: "missing-access",
 		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
@@ -71,38 +62,21 @@ func requestpathWorkspace(t *testing.T) routing.Workspace {
 	return workspace
 }
 
-func TestRequestPathPublishesInflightEvidenceBeforeProviderReturns(t *testing.T) {
+func TestRequestPathReachesProviderBeforeItReturns(t *testing.T) {
 	workspace := requestpathWorkspace(t)
 	release := make(chan struct{})
 	providerEntered := make(chan struct{})
-	sink := channelTrafficEventSink{events: make(chan trafficevidence.TrafficEvent, 1)}
 	runner := withRuntime(func(_ context.Context, target provider.TargetSnapshot, _ carrier.Document) (provider.Ingress, error) {
 		close(providerEntered)
 		<-release
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})
-	runner.TrafficEvidence = sink
 
 	done := make(chan error, 1)
 	go func() {
 		_, err := runLocalExchange(context.Background(), runner, "req_inflight_live", "codex-tui/0.147.0", canonical.ClientFamilyResponses, delivery.BufferedDelivery(), testDecodedRequest(testCanonicalRequest("a")), nil, workspace, nil, canonical.NormalizedPathResponses, executionaffinity.Key{})
 		done <- err
 	}()
-
-	select {
-	case event := <-sink.events:
-		if event.Result() != trafficevidence.ResultClassInProgress || event.EventKind() != trafficevidence.EventKindProviderInflight {
-			t.Fatalf("in-flight kind/result = %q/%q", event.EventKind(), event.Result())
-		}
-		if event.WorkspaceRouteModelID() != "a" || event.ProviderSpec() != "custom" || event.ProviderModel() != "upstream-target-a" {
-			t.Fatalf("route/target evidence = %q %q/%q", event.WorkspaceRouteModelID(), event.ProviderSpec(), event.ProviderModel())
-		}
-		if event.StatusCode() != 0 {
-			t.Fatalf("in-flight status = %d, want none", event.StatusCode())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for in-flight evidence before provider returned")
-	}
 
 	select {
 	case <-providerEntered:
@@ -122,7 +96,7 @@ func TestRequestPathNeverAttemptsTargetFromAnotherRoute(t *testing.T) {
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ExchangeID: "route-a", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ClientRequestID: "route-a", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +127,7 @@ func TestRequestPathProjectedRouteCannotEscapeOneRouteWorkspace(t *testing.T) {
 	})}
 	_, err = ingress.HandleRequestWithWorkspace(context.Background(), projected, RequestInput{
 		AccessID:        accessidentity.Local,
-		ExchangeID:      "shared-route",
+		ClientRequestID: "shared-route",
 		Request:         NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"a","input":"hi"}`)),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
@@ -173,7 +147,7 @@ func TestRequestPathFixedClientModelUsesConfiguredDefaultRoute(t *testing.T) {
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ExchangeID: "fixed-model", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-owned-model","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ClientRequestID: "fixed-model", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"client-owned-model","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +163,7 @@ func TestRequestPathPublicDefaultModelAttemptsConfiguredDefaultRoute(t *testing.
 		refs = append(refs, target.TargetID)
 		return provider.DocumentIngress{Document: carrier.NewDocument(target.ProtocolKind, "application/json", nil, []byte(`{"id":"resp","model":"m","output_text":"ok"}`), carrier.Meta{})}, nil
 	})}
-	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ExchangeID: "default", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"default","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
+	_, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{AccessID: accessidentity.Local, ClientRequestID: "default", Request: NewTransportRequest(http.MethodPost, "/responses", nil, []byte(`{"model":"default","input":"hi"}`)), Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses}, ResponseFraming: delivery.FramingSSE})
 	if err != nil {
 		t.Fatal(err)
 	}

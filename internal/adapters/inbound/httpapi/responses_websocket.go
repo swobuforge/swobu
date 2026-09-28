@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +15,10 @@ import (
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -100,8 +100,6 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		<-readerDone
 	}()
 
-	connectionID := requestIDFromRequest(r)
-	var messageSequence uint64
 	for {
 		var message string
 		select {
@@ -118,16 +116,14 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 			return
 		}
 
-		messageSequence++
-		exchangeID := connectionID + "/create/" + strconv.FormatUint(messageSequence, 10)
 		request := r.WithContext(ctx)
-		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, exchangeID, transportHeaders.Header, connectionThreadID, []byte(message)); err != nil && ctx.Err() == nil {
+		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, transportHeaders.Header, connectionThreadID, []byte(message)); err != nil && ctx.Err() == nil {
 			_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
 		}
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, requestID string, transportHeaders http.Header, executionAffinity executionaffinity.Key, raw []byte) error {
+func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, transportHeaders http.Header, executionAffinity executionaffinity.Key, raw []byte) error {
 	accessID, err := authorityFromRequest(r, workspace)
 	if err != nil {
 		return canonical.BadRequest("Access credential is no longer authorized for this Workspace")
@@ -150,34 +146,35 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 	if strings.TrimSpace(requestType) != websocketRequestTypeResponseCreate { // swobu:io-string source=boundary
 		return canonical.NotImplemented("Swobu cannot yet process this Responses websocket request type")
 	}
+	requestID := newRequestID()
 	delete(envelope, "type")
 	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return canonical.BadRequest("websocket request body is invalid JSON")
 	}
-	timing := trafficevidence.NewUnknownTiming()
+	timing := observation.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
 		AccessID:          accessID,
 		Workspace:         workspace,
 		Request:           newTransportRequest(http.MethodPost, string(normalizedPath), transportHeaders, payload),
-		ClientHandler:     trafficevidence.NormalizeClientHandler(r.Header.Get("User-Agent")),
+		ClientFamily:      clientfamily.Classify(r.Header.Get("User-Agent")),
 		Operation:         canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming:   delivery.FramingWebSocket,
 		Timing:            &timing,
 		ExecutionAffinity: executionAffinity,
-		ExchangeID:        requestID,
+		ClientRequestID:   requestID,
 	})
 	if err != nil {
-		h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err})
+		h.finalizeDelivery(out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err}, nil)
 		return err
 	}
 	result := writeResponsesWebsocketSuccess(r.Context(), conn, requestID, out.Response, &timing)
-	h.finalizeTrafficEvidence(r.Context(), requestID, workspace.String(), canonical.ClientFamilyResponses, normalizedPath, out, &timing, result)
+	h.finalizeDelivery(out, &timing, result, nil)
 	return result.Err
 }
 
-func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *trafficevidence.Timing) delivery.Result {
+func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *observation.Timing) delivery.Result {
 	streaming, ok := response.(exchange.MessageStreamingResponse)
 	if !ok {
 		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("websocket response is not message-oriented streaming output")}
@@ -200,7 +197,7 @@ func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, r
 	return classifyDeliveryFailure(ctx, nil, err, nil)
 }
 
-func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response carrier.MessageTransportResponse, timing *trafficevidence.Timing) error {
+func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response carrier.MessageTransportResponse, timing *observation.Timing) error {
 	stats, err := drainWebsocketMessagesWithStats(ctx, response.Messages, &websocketFrameSink{conn: conn, timing: timing})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -252,7 +249,7 @@ func (e websocketFrameWriteError) Unwrap() error { return e.err }
 
 type websocketFrameSink struct {
 	conn      *websocket.Conn
-	timing    *trafficevidence.Timing
+	timing    *observation.Timing
 	firstByte bool
 }
 

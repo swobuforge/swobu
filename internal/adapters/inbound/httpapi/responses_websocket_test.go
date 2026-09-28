@@ -148,7 +148,7 @@ func (i cancellationWebsocketIngress) HandleRequest(ctx context.Context, _ excha
 
 func (i *recordingWebsocketIngress) HandleRequest(ctx context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
 	i.mu.Lock()
-	i.ids = append(i.ids, in.ExchangeID)
+	i.ids = append(i.ids, in.ClientRequestID)
 	i.affinities = append(i.affinities, in.ExecutionAffinity)
 	i.mu.Unlock()
 	return synthesizeRequestOutputFromEnvelope(ctx, in, testStreamingTextResponse("resp", "m", "text", "ok", "completed"))

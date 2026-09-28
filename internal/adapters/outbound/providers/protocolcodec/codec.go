@@ -148,7 +148,7 @@ func CompileResponsesRequest(req provider.Request, dialect ResponsesDialect) (re
 		responses.EncodeInput{Request: req.Canonical, PreviousHistory: req.PreviousHistory, ToolNames: req.ToolNames},
 		req.Delivery,
 		&changes,
-		req.Attempt.ExchangeID,
+		req.Attempt.CorrelationID,
 		responses.EncodeOptions{},
 		responses.CompileOptions{
 			ToolLowering:               responses.ProtocolToolLowering().Overlay(dialect.Tools),
@@ -185,7 +185,7 @@ func CompileChatRequest(req provider.Request, dialect ChatDialect) (chatcompleti
 		req.ToolNames,
 		req.Delivery,
 		&changes,
-		req.Attempt.ExchangeID,
+		req.Attempt.CorrelationID,
 		chatcompletions.CompileOptions{
 			Lowering:               chatcompletions.ProtocolLowering().Overlay(dialect.Lowering),
 			UseMaxCompletionTokens: dialect.UseMaxCompletionTokens,
@@ -218,7 +218,7 @@ func CompileMessagesRequest(req provider.Request, dialect MessagesDialect) (mess
 		req.ToolNames,
 		req.Delivery,
 		&changes,
-		req.Attempt.ExchangeID,
+		req.Attempt.CorrelationID,
 		messages.CompileOptions{
 			Lowering: messages.ProtocolLowering().Overlay(dialect.Lowering),
 		},
@@ -269,7 +269,7 @@ func (c Codec) decodeBase(ctx context.Context, request provider.Request, ingress
 }
 
 func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc carrier.Document) (wire.ProviderDecodeResult, error) {
-	exchangeID := request.Attempt.ExchangeID
+	exchangeID := request.Attempt.CorrelationID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderDocumentDecoder{}).DecodeProviderDocumentWithOptions(ctx, request.Canonical, request.ToolNames, doc, exchangeID)
@@ -284,7 +284,7 @@ func (c Codec) decodeDocument(ctx context.Context, request provider.Request, doc
 }
 
 func (c Codec) decodeStream(stream carrier.ByteStream, request provider.Request) (wire.ProviderDecodeResult, error) {
-	exchangeID := request.Attempt.ExchangeID
+	exchangeID := request.Attempt.CorrelationID
 	switch c.Protocol {
 	case protocolkind.ChatCompletions:
 		return (chatcompletions.ProviderEnvelopeDecoder{}).DecodeProviderEnvelopeWithOptions(request.Canonical, request.ToolNames, stream, exchangeID)

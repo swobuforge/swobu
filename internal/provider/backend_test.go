@@ -43,7 +43,7 @@ func TestProviderRequestKeepsExecutionFactsInsideAttemptContext(t *testing.T) {
 		"Attempt", "Canonical", "TargetFacts", "PreviousHistory", "EncodeContext", "Delivery", "ToolNames",
 	})
 	assertFields("AttemptContext", reflect.TypeOf(AttemptContext{}), []string{
-		"ExchangeID", "ExecutionAffinity", "CacheLocality", "HasNextRouteCandidate",
+		"CorrelationID", "ExecutionAffinity", "CacheLocality", "HasNextRouteCandidate",
 	})
 	assertFields("EncodeContext", reflect.TypeOf(EncodeContext{}), []string{"Context", "ResolveImage"})
 }

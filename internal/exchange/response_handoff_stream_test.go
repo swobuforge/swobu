@@ -208,7 +208,7 @@ func (responseHandoffFallbackCodec) Encode(provider.Request) (carrier.Document, 
 }
 
 func (c responseHandoffFallbackCodec) Decode(_ context.Context, request provider.Request, _ provider.Ingress) (provider.DecodedResponse, error) {
-	stream := stubResponseEventReader(request.Attempt.ExchangeID)
+	stream := stubResponseEventReader(request.Attempt.CorrelationID)
 	if c.fail {
 		failure := provider.Unavailable(errors.New("primary unavailable"))
 		if request.Canonical.ToolPolicy().Mode == canonical.ToolPolicySpecific {

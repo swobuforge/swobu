@@ -564,7 +564,7 @@ func (c testBackendCodec) Encode(req provider.Request) (carrier.Document, []comp
 }
 
 func (c testBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
-	exchangeID := request.Attempt.ExchangeID
+	exchangeID := request.Attempt.CorrelationID
 	switch in := ingress.(type) {
 	case provider.StreamIngress:
 		var result wire.ProviderDecodeResult

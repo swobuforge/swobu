@@ -6,46 +6,80 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sync"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	evidence "github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/observation"
-	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/wire"
 )
+
+func occurrenceFromDisposition(value provider.ExecutionDisposition) execution.Occurrence {
+	switch value {
+	case provider.DispositionNotDispatched, provider.DispositionRejectedBeforeExecution:
+		return execution.DidNotOccur
+	case provider.DispositionMayHaveOccurred:
+		return execution.MayHaveOccurred
+	default:
+		return execution.MayHaveOccurred
+	}
+}
 
 func runExchange(
 	ctx context.Context,
 	runner runtimeBundle,
 	accessID accessidentity.ID,
 	exchangeID string,
-	clientHandler trafficevidence.ClientHandler,
+	canonicalExchangeID execution.ExchangeID,
+	clientProduct clientfamily.Family,
 	clientFamily canonical.ClientFamily,
 	clientDelivery delivery.Delivery,
 	decoded wire.ClientRequestResult,
 	ingressChanges []compat.Change,
 	workspace routing.Workspace,
-	timing *trafficevidence.Timing,
+	timing *observation.Timing,
 	requestPath canonical.NormalizedPath,
 	explicitExecutionAffinity executionaffinity.Key,
-) (RequestOutput, error) {
+) (out RequestOutput, err error) {
+	var invocationOrdinal uint64
+	var finalizeOnce sync.Once
+	finalize := func(result delivery.Result) {
+		finalizeOnce.Do(func() {
+			settleExecutionEvidence(runner.ExecutionEvidence, canonicalExchangeID, result)
+		})
+	}
+	// ExchangeStarted is appended by ingress before this function. Every
+	// subsequent return therefore carries the same once-only settlement
+	// capability, including validation, response-ID, and reducer failures.
+	defer func() {
+		if canonicalExchangeID.Valid() && out.FinalizeExecutionEvidence == nil {
+			out.FinalizeExecutionEvidence = finalize
+		}
+	}()
 	if err := validateCheckpointRuntime(runner); err != nil {
 		return RequestOutput{}, err
 	}
 	if err := compat.ValidateChanges(ingressChanges); err != nil {
 		return RequestOutput{}, canonical.InternalError(err.Error())
 	}
+	if !canonicalExchangeID.Valid() {
+		return RequestOutput{}, canonical.InternalError("exchange identity is required")
+	}
 	responseID, err := allocateResponseID(ctx, exchangeID, runner.ResponseIDs)
 	if err != nil {
+		// No ExchangeSettled is emitted here: delivery owns finalization.
 		return RequestOutput{}, err
 	}
 	var rebased *wire.RebasedRequest
@@ -56,8 +90,9 @@ func runExchange(
 	}
 	s := exchangeState{
 		input: exchangeInput{
-			accessID: accessID, exchangeID: exchangeID, clientHandler: clientHandler,
-			clientProduct: trafficevidence.ClassifyClientFamily(string(clientHandler)), clientFamily: clientFamily, clientDelivery: clientDelivery,
+			accessID: accessID, clientRequestID: exchangeID,
+			canonicalExchangeID: canonicalExchangeID,
+			clientProduct:       clientProduct, clientFamily: clientFamily, clientDelivery: clientDelivery,
 			request:               canonical.CloneCanonicalRequest(decoded.Request),
 			rebasedRequest:        rebased,
 			requestFingerprint:    decoded.RequestFingerprint,
@@ -67,10 +102,11 @@ func runExchange(
 			explicitExecutionAffinity: explicitExecutionAffinity,
 			requestPath:               requestPath,
 		},
-		swobuResponseID:  responseID,
-		phase:            startingPhase{},
-		effectiveChanges: compat.CloneChanges(ingressChanges),
-		targetBackoff:    runner.TargetBackoff.snapshot(workspace.Slug().String()),
+		swobuResponseID:   responseID,
+		phase:             startingPhase{},
+		effectiveChanges:  compat.CloneChanges(ingressChanges),
+		targetBackoff:     runner.TargetBackoff.snapshot(workspace.Slug().String()),
+		invocationOrdinal: &invocationOrdinal,
 	}
 	defer func() {
 		if s.mcp != nil {
@@ -81,42 +117,129 @@ func runExchange(
 	for steps := 0; steps < 1000; steps++ {
 		tr, reduceErr := reduce(ctx, s, current, runner)
 		if reduceErr != nil {
-			return RequestOutput{}, canonical.InternalError(reduceErr.Error())
+			return RequestOutput{FinalizeExecutionEvidence: finalize}, canonical.InternalError(reduceErr.Error())
 		}
 		s = tr.nextState
 		switch p := s.phase.(type) {
 		case completedPhase:
-			return terminalRequestOutput(s.input, p.response, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, true), terminalReusablePrefix(s)), nil
+			out := terminalRequestOutput(s, p.response, p.target, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, true))
+			out.FinalizeExecutionEvidence = finalize
+			return out, nil
 		case failedPhase:
-			return terminalRequestOutput(s.input, nil, p.target, s.route.name, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, false), terminalReusablePrefix(s)), p.problem
+			out := terminalRequestOutput(s, nil, p.target, summarizeRoutingEvidence(s.providerCallAttempts, s.evaluatedCandidateCount, false))
+			out.FinalizeExecutionEvidence = finalize
+			return out, p.problem
 		}
 		if tr.command == nil {
 			return RequestOutput{}, canonical.InternalError(fmt.Sprintf("exchange invariant: active phase %T produced no command", s.phase))
 		}
 		call, providerCall := tr.command.(callProviderCommand)
-		if providerCall {
-			appendProviderInflightEvidence(ctx, runner.TrafficEvidence, s)
+		if mcpCall, ok := tr.command.(callMCPCommand); ok {
+			if phase, ok := s.phase.(callingMCPPhase); ok && phase.invocationID.Valid() {
+				mcpCall.invocationID = phase.invocationID
+				mcpCall.evidence = runner.ExecutionEvidence
+				tr.command = mcpCall
+			}
 		}
 		var observation targetObservation
 		if providerCall {
 			observation = runner.TargetBackoff.begin(workspace.Slug().String(), call.backend.Target)
 			logProviderAttemptStarted(s, call)
+			tr.command = call
 		}
 		started := time.Now()
 		current = executeCommand(ctx, tr.command)
 		if providerCall {
+			if result, ok := current.(providerCallFailed); !ok || result.failure.Execution() != provider.DispositionNotDispatched {
+				_, _ = startModelInvocation(&s, call, runner.ExecutionEvidence, started)
+			}
+			emitProviderInvocationTransportSettlement(runner.ExecutionEvidence, s, call, current)
 			logProviderAttemptCommandResult(s, call, current, time.Since(started))
 			runner.TargetBackoff.observe(observation, current)
 		}
 	}
-	return RequestOutput{}, canonical.InternalError("exchange transition limit reached")
+	err = canonical.InternalError("exchange transition limit reached")
+	// No ExchangeSettled is emitted here: delivery owns finalization.
+	return RequestOutput{}, err
+}
+
+func startModelInvocation(state *exchangeState, call callProviderCommand, sink observation.ExecutionEvidenceSink, at time.Time) (execution.InvocationID, error) {
+	if state == nil || !state.inputExchangeID().Valid() {
+		return execution.InvocationID{}, errors.New("model invocation requires exchange identity")
+	}
+	if state.invocationOrdinal == nil {
+		return execution.InvocationID{}, errors.New("invocation ordinal allocator is missing")
+	}
+	resource, err := modelInvocationResource(call)
+	if err != nil {
+		return execution.InvocationID{}, err
+	}
+	index, ok := providerCallAttemptIndex(*state, call.attemptID)
+	if !ok {
+		return execution.InvocationID{}, errors.New("model invocation requires an existing provider attempt")
+	}
+	id, err := execution.NewInvocationID(state.inputExchangeID(), *state.invocationOrdinal+1)
+	if err != nil {
+		return execution.InvocationID{}, err
+	}
+	started, err := evidence.NewModelInvocationStarted(id, at, resource)
+	if err != nil {
+		return execution.InvocationID{}, err
+	}
+	*state.invocationOrdinal++
+	attempts := append([]providerCallAttempt(nil), state.providerCallAttempts...)
+	attempts[index].executionInvocationID = id
+	state.providerCallAttempts = attempts
+	appendExecutionEvidence(sink, started, id.ExchangeID().String())
+	return id, nil
+}
+
+func modelInvocationResource(call callProviderCommand) (evidence.ModelResource, error) {
+	provider, err := routing.ParseProvider(call.backend.Target.ProviderSpec, func(string) bool { return true })
+	if err != nil {
+		return evidence.ModelResource{}, err
+	}
+	model, err := routing.ParseUpstreamModel(call.backend.Target.Model)
+	if err != nil {
+		return evidence.ModelResource{}, err
+	}
+	target, err := routing.ParseTargetID(call.backend.Target.TargetID)
+	if err != nil {
+		return evidence.ModelResource{}, err
+	}
+	return evidence.NewModelResource(call.route, target, routing.TargetVersion(call.backend.Target.TargetVersion), provider, call.backend.Target.ProtocolKind, model, evidence.ExchangeAttempt)
+}
+
+func settleExecutionEvidence(sink observation.ExecutionEvidenceSink, id execution.ExchangeID, result delivery.Result) {
+	if sink == nil {
+		return
+	}
+	code := canonical.TerminalErrorCode(result.Err)
+	settled, err := evidence.NewExchangeSettled(id, time.Now(), result.Kind, result.HTTPStatus, code)
+	if err != nil {
+		logExecutionEvidenceFailure(id.String(), err)
+		return
+	}
+	appendExecutionEvidence(sink, settled, id.String())
+}
+
+func logExecutionEvidenceFailure(exchangeID string, err error) {
+	slog.Warn("execution evidence append failed", "component", "exchange", "event", "execution_evidence_append_failed", "exchange_id", exchangeID, "error", err)
+}
+
+func appendExecutionEvidence(sink observation.ExecutionEvidenceSink, event evidence.Event, exchangeID string) {
+	if sink != nil {
+		if err := sink.AppendExecutionEvidence(event); err != nil {
+			logExecutionEvidenceFailure(exchangeID, err)
+		}
+	}
 }
 
 func logProviderAttemptStarted(state exchangeState, call callProviderCommand) {
 	attempt, _ := findProviderCallAttempt(state, call.attemptID)
 	slog.Debug("provider attempt started",
 		"component", "exchange", "event", "provider_attempt_started",
-		"request_id", state.input.exchangeID, "attempt", int(call.attemptID),
+		"request_id", state.correlationID(), "attempt", int(call.attemptID),
 		"target_id", call.backend.Target.TargetID, "provider", call.backend.Target.ProviderSpec,
 		"model", call.backend.Target.Model, "provider_round", attempt.providerRound,
 		"candidate_index", attempt.candidateIndex, "native_previous_response", attempt.nativePreviousResponse,
@@ -128,7 +251,7 @@ func logProviderAttemptStarted(state exchangeState, call callProviderCommand) {
 // client-response construction before the attempt is accepted for handoff.
 func logProviderAttemptCommandResult(state exchangeState, call callProviderCommand, event exchangeEvent, duration time.Duration) {
 	attrs := []any{"component", "exchange",
-		"request_id", state.input.exchangeID, "attempt", int(call.attemptID),
+		"request_id", state.correlationID(), "attempt", int(call.attemptID),
 		"target_id", call.backend.Target.TargetID, "provider", call.backend.Target.ProviderSpec,
 		"model", call.backend.Target.Model, "duration", duration}
 	if failed, ok := event.(providerCallFailed); ok {
@@ -154,39 +277,76 @@ func logProviderAttemptCommandResult(state exchangeState, call callProviderComma
 	slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt ingress received", anyAttrs(attrs)...)
 }
 
-func observeProviderAttemptTerminal(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, completion *wire.ResponseCompletion) {
-	if completion == nil {
+func emitProviderInvocationTransportSettlement(sink observation.ExecutionEvidenceSink, state exchangeState, call callProviderCommand, event exchangeEvent) {
+	if sink == nil {
 		return
 	}
-	completion.OnTerminal(func(snapshot wire.ResponseCompletionSnapshot) {
-		attrs := []any{
-			"component", "exchange", "event", "provider_attempt_finished",
-			"request_id", state.input.exchangeID, "attempt", int(attemptID),
-			"target_id", attempt.target.TargetID, "provider", attempt.target.ProviderSpec,
-			"model", attempt.target.Model,
-		}
-		if snapshot.State == wire.CompletionCompleted {
-			attrs = append(attrs, "outcome", "completed")
-			slog.LogAttrs(context.Background(), slog.LevelDebug, "provider attempt finished", anyAttrs(attrs)...)
-			return
-		}
-		stage := "unknown"
-		if exact, ok := wire.ResponseFailureStage(snapshot.Err); ok {
-			stage = exact
-		}
-		attrs = append(attrs,
-			"outcome", "aborted_after_handoff",
-			"failure_stage", stage,
-			"error_type", safeErrorType(snapshot.Err),
-		)
-		attrs, level := appendTypedTerminalError(attrs, snapshot.Err)
-		var backendErr canonical.BackendError
-		if errors.As(snapshot.Err, &backendErr) {
-			logStructuredProviderErrorDetail(state, attemptID, attempt, backendErr)
-		}
-		logPrivateDiagnosticCause(state, attemptID, attempt, snapshot.Err)
-		slog.LogAttrs(context.Background(), level, "provider attempt aborted after handoff", anyAttrs(attrs)...)
-	})
+	attempt, ok := findProviderCallAttempt(state, call.attemptID)
+	if !ok || !attempt.executionInvocationID.Valid() {
+		return
+	}
+	failed, ok := event.(providerCallFailed)
+	if !ok {
+		return
+	}
+	possibility := provider.DispositionMayHaveOccurred
+	switch failed.failure.Execution() {
+	case provider.DispositionNotDispatched:
+		possibility = provider.DispositionNotDispatched
+	case provider.DispositionRejectedBeforeExecution:
+		possibility = provider.DispositionRejectedBeforeExecution
+	}
+	class := modelFailureFromCause(failed.failure.Cause())
+	outcome := execution.Failed
+	if errors.Is(failed.failure.Cause(), context.Canceled) {
+		outcome, class = execution.Cancelled, ""
+	}
+	settled, err := evidence.NewModelInvocationSettled(attempt.executionInvocationID, time.Now(), outcome, occurrenceFromDisposition(possibility), class, canonical.NewUnknownTokenUsage())
+	if err == nil {
+		appendExecutionEvidence(sink, settled, state.correlationID())
+	}
+}
+
+// modelFailureFromCause maps provider-owned typed causes into canonical model
+// evidence. Logging severity is deliberately not consulted: logs project this
+// semantic fact, never define it.
+func modelFailureFromCause(err error) evidence.ModelFailure {
+	err = provider.NormalizeFailure(err)
+	var timeout provider.TimeoutError
+	if errors.As(err, &timeout) {
+		return evidence.FailureTimeout
+	}
+	var rejected provider.RejectedError
+	if errors.As(err, &rejected) {
+		return evidence.FailureRejected
+	}
+	var unavailable provider.UnavailableError
+	if errors.As(err, &unavailable) {
+		return evidence.FailureUnavailable
+	}
+	var targetUnavailable provider.TargetUnavailableError
+	if errors.As(err, &targetUnavailable) {
+		return evidence.FailureTargetUnavailable
+	}
+	var targetIncompatible provider.TargetIncompatibleError
+	if errors.As(err, &targetIncompatible) {
+		return evidence.FailureTargetIncompatible
+	}
+	var invalid provider.InvalidRequestError
+	if errors.As(err, &invalid) {
+		return evidence.FailureInvalidRequest
+	}
+	return evidence.FailureInternal
+}
+
+func emitProviderInvocationSettlement(sink observation.ExecutionEvidenceSink, state exchangeState, attempt providerCallAttempt, outcome execution.Outcome, occurrence execution.Occurrence, class evidence.ModelFailure, usage canonical.TokenUsage) {
+	if sink == nil || !attempt.executionInvocationID.Valid() {
+		return
+	}
+	settled, err := evidence.NewModelInvocationSettled(attempt.executionInvocationID, time.Now(), outcome, occurrence, class, usage)
+	if err == nil {
+		appendExecutionEvidence(sink, settled, state.correlationID())
+	}
 }
 
 func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID providerCallAttemptID, attempt providerCallAttempt, err error) {
@@ -201,7 +361,7 @@ func logProviderAttemptFailedBeforeHandoff(state exchangeState, attemptID provid
 	}
 	attrs := []any{
 		"component", "exchange", "event", "provider_attempt_finished",
-		"request_id", state.input.exchangeID, "attempt", int(attemptID),
+		"request_id", state.correlationID(), "attempt", int(attemptID),
 		"target_id", attempt.target.TargetID, "provider", attempt.target.ProviderSpec,
 		"model", attempt.target.Model, "outcome", "failed_before_handoff",
 		"failure_class", failureClass, "failure_stage", stage, "error_type", safeErrorType(err),
@@ -230,7 +390,7 @@ func logPrivateDiagnosticCause(state exchangeState, attemptID providerCallAttemp
 	}
 	slog.Debug("provider decoder diagnostic",
 		"component", "exchange", "event", "provider_decoder_diagnostic",
-		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
+		"request_id", state.correlationID(), "attempt", int(attemptID), "target_id", attempt.target.TargetID,
 		"error_type", fmt.Sprintf("%T", canonicalErr.DiagnosticCause),
 	)
 }
@@ -282,7 +442,7 @@ func logStructuredProviderErrorDetail(state exchangeState, attemptID providerCal
 	detail := backendErr.ProviderError
 	attrs := []any{
 		"component", "exchange", "event", "provider_error_detail",
-		"request_id", state.input.exchangeID, "attempt", int(attemptID), "target_id", attempt.target.TargetID,
+		"request_id", state.correlationID(), "attempt", int(attemptID), "target_id", attempt.target.TargetID,
 		"backend_error_type", detail.Type, "backend_error_code", detail.Code,
 		"backend_error_param", detail.Param,
 		"backend_request_id", detail.RequestID, "source_protocol", backendErr.SourceProtocol.String(),
@@ -326,14 +486,10 @@ func providerFailureLogClassification(err error) (string, slog.Level) {
 	return "internal", slog.LevelError
 }
 
-func executionValue(execution provider.ExecutionPossibility) string {
+func executionValue(execution provider.ExecutionDisposition) string {
 	switch execution {
-	case provider.ExecutionNotDispatched:
-		return "not_dispatched"
-	case provider.ExecutionRejectedBeforeExecution:
-		return "rejected_before_execution"
-	case provider.ExecutionMayHaveOccurred:
-		return "may_have_occurred"
+	case provider.DispositionNotDispatched, provider.DispositionRejectedBeforeExecution, provider.DispositionMayHaveOccurred:
+		return string(execution)
 	default:
 		return "unknown"
 	}
@@ -345,57 +501,6 @@ func anyAttrs(values []any) []slog.Attr {
 		attrs = append(attrs, slog.Any(values[i].(string), values[i+1]))
 	}
 	return attrs
-}
-
-func appendProviderInflightEvidence(ctx context.Context, sink observation.TrafficEventSink, state exchangeState) {
-	if sink == nil || len(state.providerCallAttempts) == 0 {
-		return
-	}
-	attempt := state.providerCallAttempts[len(state.providerCallAttempts)-1]
-	requestID, err := trafficevidence.ParseRequestID(state.input.exchangeID)
-	if err != nil {
-		logInflightEvidenceFailure(state.input.exchangeID, err)
-		return
-	}
-	route, err := trafficevidence.NewRoute(attempt.target.TargetID, state.input.request.Model())
-	if err != nil {
-		logInflightEvidenceFailure(state.input.exchangeID, err)
-		return
-	}
-	timing := trafficevidence.NewUnknownTiming()
-	if state.input.timing != nil {
-		timing = *state.input.timing
-	}
-	event, err := trafficevidence.NewProviderInflightTrafficEvent(trafficevidence.TrafficEventInput{
-		AccessID:              state.input.accessID,
-		RequestID:             requestID,
-		Workspace:             state.input.workspace.Slug().String(),
-		ClientHandler:         state.input.clientHandler,
-		ClientFamily:          state.input.clientProduct,
-		ClientProtocol:        trafficevidence.ClientProtocol(state.input.clientFamily),
-		RequestPath:           state.input.requestPath,
-		Route:                 route,
-		Timing:                timing,
-		ModelRequested:        state.input.request.Model(),
-		ModelResolved:         state.input.request.Model(),
-		WorkspaceRouteModelID: state.route.name.String(),
-		ProviderSpec:          profile.ProviderID(attempt.target.ProviderSpec),
-		ProviderModel:         attempt.target.Model,
-	}, len(state.providerCallAttempts))
-	if err != nil {
-		logInflightEvidenceFailure(state.input.exchangeID, err)
-		return
-	}
-	sink.Append(ctx, event)
-}
-
-func logInflightEvidenceFailure(requestID string, err error) {
-	slog.Warn("traffic evidence in-flight commit failed",
-		"component", "exchange",
-		"event", "traffic_evidence_inflight_commit_failed",
-		"request_id", requestID,
-		"error", err,
-	)
 }
 
 func executeCommand(ctx context.Context, cmd command) exchangeEvent {
@@ -426,19 +531,113 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 	case characterizeTargetFactsCommand:
 		resolutions := make(map[provider.TargetFact]bool, len(c.facts))
 		for _, fact := range c.facts {
-			resolution := c.backend.CharacterizeTargetFact(ctx, fact)
+			transport := &characterizationTransport{nextInvocation: c.nextInvocation, sink: c.sink, target: c.target, route: c.route}
+			backend := c.backend
+			backend.Transport = transport
+			transport.delegate = c.backend.Transport
+			resolution := backend.CharacterizeTargetFact(ctx, fact)
 			if resolution.Conclusive {
 				resolutions[fact] = resolution.Value
 			}
 		}
 		return targetFactsCharacterized{attemptID: c.attemptID, generation: c.generation, resolutions: resolutions}
 	case callMCPCommand:
-		result, err := c.run.Call(ctx, c.call)
+		if c.invocationID.Valid() {
+			emitMCPInvocationStarted(c.evidence, c.resource, c.invocationID, c.invocationID.ExchangeID().String())
+		}
+		result, err := c.prepared.Execute(ctx)
 		return mcpToolReturned{result: result, err: err}
 	case beginMCPBatchCommand:
 		return mcpBatchStarted{err: c.run.BeginBatch(c.calls)}
 	default:
 		panic(fmt.Sprintf("exchange invariant: unsupported closed command %T", cmd))
+	}
+}
+
+type characterizationTransport struct {
+	delegate       provider.Transport
+	nextInvocation func() execution.InvocationID
+	sink           observation.ExecutionEvidenceSink
+	target         provider.TargetSnapshot
+	route          routing.RouteName
+	pending        []execution.InvocationID
+}
+
+func (t *characterizationTransport) Send(ctx context.Context, document carrier.Document) (provider.Ingress, error) {
+	if t.nextInvocation == nil || t.sink == nil {
+		return t.delegate.Send(ctx, document)
+	}
+	startedAt := time.Now()
+	ingress, sendErr := t.delegate.Send(ctx, document)
+	if typed, ok := provider.AsAttemptFailure(sendErr); ok && typed.Execution() == provider.DispositionNotDispatched {
+		return ingress, sendErr
+	}
+	providerID, err := routing.ParseProvider(t.target.ProviderSpec, func(string) bool { return true })
+	if err != nil {
+		return ingress, sendErr
+	}
+	model, err := routing.ParseUpstreamModel(t.target.Model)
+	if err != nil {
+		return ingress, sendErr
+	}
+	targetID, err := routing.ParseTargetID(t.target.TargetID)
+	if err != nil {
+		return ingress, sendErr
+	}
+	resource, err := evidence.NewModelResource(t.route, targetID, routing.TargetVersion(t.target.TargetVersion), providerID, t.target.ProtocolKind, model, evidence.TargetCharacterization)
+	if err != nil {
+		return ingress, sendErr
+	}
+	id := t.nextInvocation()
+	if !id.Valid() {
+		return ingress, sendErr
+	}
+	started, err := evidence.NewModelInvocationStarted(id, startedAt, resource)
+	if err == nil && t.sink != nil {
+		appendExecutionEvidence(t.sink, started, id.ExchangeID().String())
+	}
+	if sendErr != nil {
+		possibility := provider.DispositionMayHaveOccurred
+		failure := modelFailureFromCause(sendErr)
+		outcome := execution.Failed
+		if typed, ok := provider.AsAttemptFailure(sendErr); ok {
+			possibility = typed.Execution()
+			failure = modelFailureFromCause(typed.Cause())
+		}
+		if errors.Is(sendErr, context.Canceled) {
+			outcome, failure = execution.Cancelled, ""
+		}
+		settled, settleErr := evidence.NewModelInvocationSettled(id, time.Now(), outcome, occurrenceFromDisposition(possibility), failure, canonical.NewUnknownTokenUsage())
+		if settleErr == nil && t.sink != nil {
+			appendExecutionEvidence(t.sink, settled, id.ExchangeID().String())
+		}
+		return ingress, sendErr
+	}
+	// Transport success is only external ingress. Defer settlement until the
+	// codec characterizer has consumed the fixture result, so a decode/stream
+	// failure cannot be misreported as a successful execution at ingress.
+	t.pending = append(t.pending, id)
+	return ingress, sendErr
+}
+
+// FixtureSettled consumes exactly one successfully dispatched fixture. The
+// aggregate fact resolution must never rewrite this invocation's terminal.
+func (t *characterizationTransport) FixtureSettled(terminalErr error) {
+	if t == nil || len(t.pending) == 0 {
+		return
+	}
+	id := t.pending[0]
+	t.pending = t.pending[1:]
+	outcome, occurrence, failure := execution.Succeeded, execution.Occurred, evidence.ModelFailure("")
+	if terminalErr != nil {
+		outcome, occurrence, failure = execution.Failed, execution.MayHaveOccurred, evidence.FailureResponseInvalid
+		if errors.Is(terminalErr, context.Canceled) {
+			outcome, failure = execution.Cancelled, ""
+		}
+	}
+	settled, err := evidence.NewModelInvocationSettled(id, time.Now(), outcome, occurrence, failure, canonical.NewUnknownTokenUsage())
+	if err == nil && t.sink != nil {
+		appendExecutionEvidence(t.sink, settled, id.ExchangeID().String())
 	}
 }
 
@@ -448,9 +647,8 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 // fallback recovered the request; it is not retained (the terminal event needs
 // the recovery fact, not the candidate tally).
 type terminalRoutingEvidence struct {
-	providerCallCount          int
-	fallbackRecovered          bool
-	possibleDuplicateExecution bool
+	providerCallCount int
+	fallbackRecovered bool
 }
 
 // summarizeRoutingEvidence derives the recovery fact from the contiguous route
@@ -461,27 +659,44 @@ func summarizeRoutingEvidence(attempts []providerCallAttempt, candidateCount int
 		providerCallCount: len(attempts),
 	}
 	summary.fallbackRecovered = completed && candidateCount > 1
-	for index, attempt := range attempts {
-		if index+1 < len(attempts) && attempt.failure != nil &&
-			attempt.failure.Attempt.Execution() == provider.ExecutionMayHaveOccurred {
-			summary.possibleDuplicateExecution = true
-			break
-		}
-	}
 	return summary
 }
 
-func terminalRequestOutput(input exchangeInput, response ClientResponse, target provider.TargetSnapshot, routeName routing.RouteName, routing terminalRoutingEvidence, reusablePrefix trafficevidence.ReusablePrefixEvidence) RequestOutput {
-	var evidence *TrafficEvidenceInput
+func terminalRequestOutput(state exchangeState, response ClientResponse, target provider.TargetSnapshot, routing terminalRoutingEvidence) RequestOutput {
+	var evidence *ProductObservationInputData
 	if target.TargetID != "" {
-		evidence = &TrafficEvidenceInput{accessID: input.accessID, workspace: input.workspace, routeName: routeName, exchangeID: input.exchangeID, clientHandler: input.clientHandler, clientProduct: input.clientProduct, clientProtocol: input.clientFamily, requestPath: input.requestPath, request: input.request.Clone(), target: target, response: response, routing: routing, reusablePrefix: reusablePrefix}
+		evidence = &ProductObservationInputData{
+			clientProduct: state.input.clientProduct, clientProtocol: state.input.clientFamily,
+			requestedModel: telemetryRequestedModel(state.input.request.Model(), state.route.name.String()),
+			resolvedModel:  telemetryResolvedModel(state.route.name.String(), target.Model),
+			requestPath:    state.input.requestPath, provider: string(target.ProviderSpec),
+			targetProtocol: target.ProtocolKind.String(), responseStatus: clientResponseStatus(response),
+			crossProtocol: string(state.input.clientFamily) != target.ProtocolKind.String(),
+			attemptCount:  routing.providerCallCount, fallbackRecovered: routing.fallbackRecovered,
+			continuityRecovered: state.resolvedFrom != "", wireMutated: len(state.effectiveChanges) > 0,
+		}
 	}
-	return RequestOutput{Response: response, Target: target, TrafficEvidence: evidence, Compatibility: responseCompletion(response), AttemptCount: routing.providerCallCount}
+	return RequestOutput{Response: response, Target: target, ProductObservationInput: evidence, Compatibility: responseCompletion(response), AttemptCount: routing.providerCallCount}
 }
 
-func terminalReusablePrefix(state exchangeState) trafficevidence.ReusablePrefixEvidence {
-	if len(state.providerCallAttempts) > 0 && state.providerCallAttempts[len(state.providerCallAttempts)-1].nativePreviousResponse {
-		return trafficevidence.NativeReusablePrefix()
+// Model categories are classified before the telemetry seam; raw model names
+// never become part of the terminal observation or remote report.
+func telemetryRequestedModel(requested, route string) string {
+	switch {
+	case requested == "":
+		return "unknown"
+	case requested == "default":
+		return "default"
+	case route != "" && requested == route:
+		return "configured"
+	default:
+		return "custom"
 	}
-	return state.reusablePrefix
+}
+
+func telemetryResolvedModel(route, providerModel string) string {
+	if route != "" && providerModel != "" {
+		return "configured"
+	}
+	return "unknown"
 }

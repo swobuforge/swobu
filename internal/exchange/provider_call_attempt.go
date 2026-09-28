@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
@@ -36,6 +37,7 @@ type providerCallAttempt struct {
 	factReads              map[provider.TargetFact]bool
 	requestChanges         []compat.Change
 	status                 providerCallAttemptStatus
+	executionInvocationID  execution.InvocationID
 	failure                *providerCallFailure
 }
 
@@ -119,6 +121,6 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 	s.phase = callingProviderPhase{attemptID: attemptID, call: call}
 	return reducerOutcome{
 		nextState: s,
-		command:   callProviderCommand{attemptID: attemptID, backend: call.backend, document: call.document},
+		command:   callProviderCommand{attemptID: attemptID, backend: call.backend, document: call.document, route: s.route.name},
 	}, nil
 }

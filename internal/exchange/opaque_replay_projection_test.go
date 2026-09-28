@@ -571,14 +571,14 @@ func (responsesProtocolBackendCodec) Encode(req provider.Request) (carrier.Docum
 		PreviousHistory: req.PreviousHistory,
 		ToolNames:       req.ToolNames,
 	}
-	result, err := (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, req.Attempt.ExchangeID)
+	result, err := (responses.ProviderRequestDocumentEncoder{}).EncodeProviderRequestDocument(input, req.Delivery, req.Attempt.CorrelationID)
 	return result.Document, result.Changes, err
 }
 
 func (responsesProtocolBackendCodec) Decode(ctx context.Context, request provider.Request, ingress provider.Ingress) (provider.DecodedResponse, error) {
 	switch in := ingress.(type) {
 	case provider.DocumentIngress:
-		result, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, request.Attempt.ExchangeID)
+		result, err := (responses.ProviderDocumentDecoder{}).DecodeProviderDocument(ctx, request.Canonical, request.ToolNames, in.Document, request.Attempt.CorrelationID)
 		return provider.DecodedResponse{Stream: result.Stream, Changes: result.Changes, ProgressiveChanges: result.ProgressiveChanges}, err
 	default:
 		return provider.DecodedResponse{}, canonical.InternalError("test provider ingress is unsupported")
@@ -690,10 +690,10 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		AccessID:        accessidentity.Local,
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn1ClientJSON)),
-		ClientHandler:   "codex-tui/0.147.0",
+		ClientFamily:    "other",
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingNone,
-		ExchangeID:      "turn1_exchange",
+		ClientRequestID: "turn1_exchange",
 	}
 
 	turn1Out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, turn1Input)
@@ -760,10 +760,10 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		AccessID:        accessidentity.Local,
 		Workspace:       workspace.Slug(),
 		Request:         NewTransportRequest("POST", "/v1/responses", nil, []byte(turn2ClientJSON)),
-		ClientHandler:   "codex-tui/0.147.0",
+		ClientFamily:    "other",
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingNone,
-		ExchangeID:      "turn2_exchange",
+		ClientRequestID: "turn2_exchange",
 	}
 
 	turn2Out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, turn2Input)

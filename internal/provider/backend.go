@@ -90,6 +90,13 @@ type TargetFactResolution struct {
 	Conclusive bool
 }
 
+// TargetFactFixtureObserver is an optional characterization-only notification.
+// A nil error means the individual fixture response was fully decoded; errors
+// describe that fixture's response, independently of aggregate fact resolution.
+type TargetFactFixtureObserver interface {
+	FixtureSettled(error)
+}
+
 // CharacterizeTargetFact delegates one isolated fact to the exact backend
 // codec. Codecs without empirical dialect branches return inconclusive.
 func (b Backend) CharacterizeTargetFact(ctx context.Context, fact TargetFact) TargetFactResolution {

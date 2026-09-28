@@ -5,8 +5,8 @@ import (
 
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	profile "github.com/swobuforge/swobu/internal/profile"
 )
 
@@ -21,7 +21,7 @@ const (
 	durationBucketUnknown    = 5
 )
 
-// ReportReducer accumulates terminal traffic events into the bounded dimensions
+// ReportReducer accumulates terminal execution observations into bounded dimensions
 // of a ProductReport. It is owned by the single telemetry goroutine, which
 // serializes all access — therefore it holds no mutex. It never retains content
 // or per-request identifiers (the producer owns the one-terminal-event-per-
@@ -35,11 +35,11 @@ type trafficRowKey struct {
 	clientFamily        reportClientFamily
 	requestedModel      reportModelClass
 	resolvedModel       reportModelClass
-	clientProtocol      trafficevidence.ClientProtocol
+	clientProtocol      reportClientProtocol
 	targetProtocol      protocolkind.ProtocolKind
-	operation           trafficevidence.NormalizedOp
+	operation           reportOperation
 	provider            profile.ProviderID
-	result              trafficevidence.ResultClass
+	result              reportResult
 	statusCode          int
 	deliveryKind        delivery.ResultKind
 	canonicalErrorCode  canonical.ErrorCode
@@ -63,42 +63,15 @@ func newReportReducer() *reportReducer {
 	return &reportReducer{rows: make(map[trafficRowKey]*trafficRowAccum)}
 }
 
-// The provider spec and request path are carried verbatim from the evidence.
-// Telemetry does not classify them or fold unrecognized values to "other": the
-// constructor has already proved each is a canonical vocabulary member, so an
-// unrecognized value is an upstream invariant violation rejected at the source,
-// not a telemetry category. The coarse protocol dimension is derived downstream,
-// never invented here. See product-telemetry.md.
-
-// boundUserAgentProduct truncates the client token to the report vocabulary's
-// maximum length so every reducer-constructed report is byte-bounded (see
-// TestProductReport_MaximalEncodesUnderCeiling). The evidence carries the raw
-// token; only this projection edge bounds it.
-// Observe folds one terminal traffic event into the accumulator. Non-terminal
-// events are ignored. Activation is installation-lifetime State overlaid by the
-// runtime, never derived here.
-
-func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
-	if event.EventKind() != trafficevidence.EventKindProviderTerminal {
-		return
-	}
+// ObserveExecution folds a terminal, content-free observation into the bounded
+// report. The delivery boundary owns its one-observation-per-exchange invariant.
+func (r *reportReducer) ObserveExecution(ob productprojection.Observation) {
 	key := trafficRowKey{
-		clientFamily:        reportClientFamily(event.ClientFamily()),
-		requestedModel:      classifyRequestedModel(event.ModelRequested(), event.WorkspaceRouteModelID()),
-		resolvedModel:       classifyResolvedModel(event.WorkspaceRouteModelID(), event.ProviderModel()),
-		clientProtocol:      event.ClientProtocol(),
-		targetProtocol:      event.TargetProtocol(),
-		operation:           event.NormalizedOp(),
-		provider:            event.ProviderSpec(),
-		result:              event.Result(),
-		statusCode:          event.StatusCode(),
-		deliveryKind:        event.DeliveryKind(),
-		canonicalErrorCode:  event.CanonicalErrorCode(),
-		attemptCount:        event.AttemptCount(),
-		fallbackRecovered:   event.FallbackRecovered(),
-		continuityRecovered: event.ContinuityRecovered(),
-		crossProtocol:       event.ClientProtocol() != trafficevidence.ClientProtocolUnknown && string(event.ClientProtocol()) != event.TargetProtocol().String(),
-		wireMutated:         hasWireMutation(event.Mutations()),
+		clientFamily: reportClientFamily(ob.ClientFamily), requestedModel: reportModelClass(ob.RequestedModel), resolvedModel: reportModelClass(ob.ResolvedModel), clientProtocol: reportClientProtocol(ob.ClientProtocol),
+		targetProtocol: protocolkind.ProtocolKind(ob.TargetProtocol), operation: reportOperation(ob.Operation),
+		provider: profile.ProviderID(ob.Provider), result: reportResult(ob.Result), statusCode: ob.StatusCode,
+		deliveryKind: delivery.ResultKind(ob.DeliveryKind), canonicalErrorCode: canonical.ErrorCode(ob.ErrorCode), attemptCount: ob.AttemptCount,
+		fallbackRecovered: ob.FallbackRecovered, continuityRecovered: ob.ContinuityRecovered, wireMutated: ob.WireMutated, crossProtocol: ob.CrossProtocol,
 	}
 	accum := r.rowAccum(key)
 	if accum == nil {
@@ -106,10 +79,16 @@ func (r *reportReducer) Observe(event trafficevidence.TrafficEvent) {
 		return
 	}
 	accum.count++
-	ms, hasDuration := event.Timing().DurationMillis()
-	accum.duration[durationBucketIndex(ms, hasDuration)]++
-	ttfbMS, hasTTFB := event.Timing().TTFBMillis()
-	accum.ttfb[durationBucketIndex(ttfbMS, hasTTFB)]++
+	if ob.DurationMS != nil {
+		accum.duration[durationBucketIndex(*ob.DurationMS, true)]++
+	} else {
+		accum.duration[durationBucketIndex(0, false)]++
+	}
+	if ob.TTFBMS != nil {
+		accum.ttfb[durationBucketIndex(*ob.TTFBMS, true)]++
+	} else {
+		accum.ttfb[durationBucketIndex(0, false)]++
+	}
 }
 
 func (r *reportReducer) rowAccum(key trafficRowKey) *trafficRowAccum {
@@ -169,26 +148,6 @@ func (r *reportReducer) snapshot(installID, version, osFamily, arch string) prod
 		Traffic:       rows,
 		OverflowCount: r.overflowCount,
 	}
-}
-
-func classifyRequestedModel(requested string, route string) reportModelClass {
-	switch {
-	case requested == "":
-		return reportModelUnknown
-	case requested == "default":
-		return reportModelDefault
-	case route != "" && requested == route:
-		return reportModelConfigured
-	default:
-		return reportModelCustom
-	}
-}
-
-func classifyResolvedModel(route string, providerModel string) reportModelClass {
-	if route != "" && providerModel != "" {
-		return reportModelConfigured
-	}
-	return reportModelUnknown
 }
 
 // Reset clears the active accumulator after it is frozen into an immutable
@@ -266,13 +225,4 @@ func sortTrafficRows(rows []reportTrafficRow) {
 		}
 		return !a.WireMutated && b.WireMutated
 	})
-}
-
-func hasWireMutation(mutations []trafficevidence.Mutation) bool {
-	for _, mutation := range mutations {
-		if mutation.HasChanges() {
-			return true
-		}
-	}
-	return false
 }

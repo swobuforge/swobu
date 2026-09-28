@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 )
 
 func newRuntimeTestStore(t *testing.T) store {
@@ -43,8 +43,8 @@ func runtimeTestState(t *testing.T, endpoint string) *runtimeState {
 
 func observeRuntimeEvent(t *testing.T, reducer *reportReducer, requestID string) {
 	t.Helper()
-	reducer.Observe(terminalTrafficEvent(t, requestID, "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	reducer.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 }
 
 func TestRuntimeFlushRetainsPendingAndPreservesNewActiveEvents(t *testing.T) {
@@ -74,8 +74,8 @@ func TestRuntimeFlushRetainsPendingAndPreservesNewActiveEvents(t *testing.T) {
 	if s.pending == nil || !s.reducer.Empty() {
 		t.Fatal("failed upload must retain pending and reset active reducer")
 	}
-	s.reducer.Observe(terminalTrafficEvent(t, "req_2", "Claude-Code/1.0", "anthropic", "/messages",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	s.reducer.ObserveExecution(terminalObservation("anthropic", "/messages",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	s.flush()
 	if s.pending != nil || s.reducer.Empty() {
 		t.Fatal("successful retry must clear only pending and preserve active events")
@@ -132,8 +132,8 @@ func TestStartRuntimeDevOutputsReportWithoutTransmission(t *testing.T) {
 
 	var output bytes.Buffer
 	runtime := StartRuntime("dev", slog.New(slog.NewTextHandler(&output, nil)))
-	runtime.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	runtime.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	runtime.Close()
 
 	if calls.Load() != 0 {
@@ -155,8 +155,8 @@ func TestStartRuntimeReleasedVersionUploadsReport(t *testing.T) {
 	t.Setenv("SWOBU_TELEMETRY_ENDPOINT_URL", server.URL)
 
 	runtime := StartRuntime("0.1.0", slog.New(slog.NewTextHandler(io.Discard, nil)))
-	runtime.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	runtime.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	runtime.Close()
 
 	if calls.Load() != 1 {
@@ -175,8 +175,8 @@ func TestRuntimeCloseDrainsAcceptedEventsAndBoundsFlush(t *testing.T) {
 		store: newRuntimeTestStore(t), Version: "0.1.0", Endpoint: server.URL,
 		FirstFlushDelay: time.Hour, Cadence: time.Hour, UploadTimeout: 20 * time.Millisecond,
 	})
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	started := time.Now()
 	r.Close()
 	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
@@ -198,8 +198,8 @@ func TestRuntimeInspectIsObservationalAndDoesNotTransmit(t *testing.T) {
 		FirstFlushDelay: time.Hour, Cadence: time.Hour,
 	})
 	defer r.Close()
-	r.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	r.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	body, err := r.InspectJSON(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -244,8 +244,8 @@ func TestRuntime_refreshPreference_ResetsOnRevisionChange(t *testing.T) {
 	if enabled := s.refreshPreference(); !enabled || s.preference.Revision != "" {
 		t.Fatalf("initial adopt: enabled=%v revision=%q", enabled, s.preference.Revision)
 	}
-	s.reducer.Observe(terminalTrafficEvent(t, "req_1", "Codex/1.2", "openai", "/responses",
-		trafficevidence.ResultClassSuccess, 200, 40, "succeeded", "", 1, false))
+	s.reducer.ObserveExecution(terminalObservation("openai", "/responses",
+		productprojection.ResultSuccess, 200, 40, "succeeded", "", 1, false))
 	if s.reducer.Empty() {
 		t.Fatal("expected the reducer to hold the observed event")
 	}

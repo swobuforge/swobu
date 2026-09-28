@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
@@ -36,6 +36,18 @@ type Runtime struct {
 	commands chan<- runtimeCommand
 	cancel   context.CancelFunc
 	done     <-chan struct{}
+}
+
+// ObserveExecution submits one already-projected execution outcome without
+// exposing request content, credentials, or lifecycle identities to callers.
+func (r *Runtime) ObserveExecution(observation productprojection.Observation) {
+	if r == nil {
+		return
+	}
+	select {
+	case r.commands <- runtimeCommand{execution: observation}:
+	default:
+	}
 }
 
 // runtimeConfig is the in-package wiring input. The public StartRuntime constructs
@@ -138,16 +150,6 @@ func durationOr(value, fallback time.Duration) time.Duration {
 
 // Observe offers one terminal traffic event to the actor. It never blocks the
 // request path: if the buffer is full the event is dropped (telemetry is lossy).
-func (r *Runtime) Observe(event trafficevidence.TrafficEvent) {
-	if r == nil {
-		return
-	}
-	select {
-	case r.commands <- runtimeCommand{event: event}:
-	default:
-	}
-}
-
 // Close signals the actor to stop and waits. Idempotent.
 func (r *Runtime) Close() {
 	if r == nil {
@@ -183,8 +185,8 @@ type inspectResponse struct {
 }
 
 type runtimeCommand struct {
-	event   trafficevidence.TrafficEvent
-	inspect chan<- inspectResponse
+	execution productprojection.Observation
+	inspect   chan<- inspectResponse
 }
 
 // runtimeState is the goroutine-local actor state: only the run goroutine reads
@@ -230,7 +232,9 @@ func (s *runtimeState) run(ctx context.Context, commands <-chan runtimeCommand, 
 				continue
 			}
 			if s.preference.Enabled {
-				s.reducer.Observe(command.event)
+				if command.execution.Operation != "" {
+					s.reducer.ObserveExecution(command.execution)
+				}
 				if firstTimer == nil {
 					firstTimer = time.NewTimer(s.firstFlushDelay)
 					firstFlush = firstTimer.C
@@ -257,7 +261,9 @@ func (s *runtimeState) drain(commands <-chan runtimeCommand) {
 			if command.inspect != nil {
 				command.inspect <- s.inspect()
 			} else if s.preference.Enabled {
-				s.reducer.Observe(command.event)
+				if command.execution.Operation != "" {
+					s.reducer.ObserveExecution(command.execution)
+				}
 			}
 		default:
 			return

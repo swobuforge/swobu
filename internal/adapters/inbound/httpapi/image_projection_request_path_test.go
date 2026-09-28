@@ -129,7 +129,7 @@ func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) http.
 			PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		},
 	)
-	return localAuthorityTestHandler(NewHandler(ingress, nil))
+	return localAuthorityTestHandler(NewHandler(ingress))
 }
 
 func imageIncidentWorkspace(t *testing.T) routing.Workspace {

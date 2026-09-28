@@ -14,10 +14,13 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
+	evidence "github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
 	"github.com/swobuforge/swobu/internal/mcp"
+	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -42,9 +45,8 @@ type exchangeState struct {
 	providerUsage           []canonical.TokenUsage
 	effectiveChanges        []compat.Change
 	cacheLocality           cachelocality.Key
-	reusablePrefix          trafficevidence.ReusablePrefixEvidence
-	previousRequest         *canonical.CanonicalRequest
 	targetBackoff           targetBackoffSnapshot
+	invocationOrdinal       *uint64
 }
 
 // historyAdvance is the complete optional input for composing the completed
@@ -56,10 +58,13 @@ type historyAdvance struct {
 }
 
 type exchangeInput struct {
-	accessID                  accessidentity.ID
-	exchangeID                string
-	clientHandler             trafficevidence.ClientHandler
-	clientProduct             trafficevidence.ClientFamily
+	accessID        accessidentity.ID
+	clientRequestID string
+	// canonicalExchangeID is Swobu-owned identity. exchangeID remains a
+	// transport/history correlation key and must never be reparsed to decide
+	// whether canonical evidence exists.
+	canonicalExchangeID       execution.ExchangeID
+	clientProduct             clientfamily.Family
 	clientFamily              canonical.ClientFamily
 	clientDelivery            delivery.Delivery
 	request                   canonical.CanonicalRequest
@@ -69,10 +74,18 @@ type exchangeInput struct {
 	explicitCacheLocality     cachelocality.Key
 	explicitExecutionAffinity executionaffinity.Key
 	workspace                 routing.Workspace
-	timing                    *trafficevidence.Timing
+	timing                    *observation.Timing
 	// requestPath is the ingress-owned normalized path, captured before the
 	// exchange runs so terminal evidence is complete on both success and failure.
 	requestPath canonical.NormalizedPath
+}
+
+func (s exchangeState) inputExchangeID() execution.ExchangeID {
+	return s.input.canonicalExchangeID
+}
+
+func (s exchangeState) correlationID() string {
+	return s.input.clientRequestID
 }
 
 type routePlan struct {
@@ -122,12 +135,13 @@ type resolvingTargetFactsPhase struct {
 func (resolvingTargetFactsPhase) isPhase() {}
 
 type callingMCPPhase struct {
-	selection providerCallSelection
-	target    provider.TargetSnapshot
-	response  completedProviderResponse
-	calls     []canonical.ToolCallItem
-	results   []canonical.CanonicalItem
-	next      int
+	selection    providerCallSelection
+	target       provider.TargetSnapshot
+	response     completedProviderResponse
+	calls        []canonical.ToolCallItem
+	results      []canonical.CanonicalItem
+	next         int
+	invocationID execution.InvocationID
 }
 
 func (callingMCPPhase) isPhase() {}
@@ -230,21 +244,27 @@ type callProviderCommand struct {
 	attemptID providerCallAttemptID
 	backend   provider.Backend
 	document  carrier.Document
+	route     routing.RouteName
 }
 
 type characterizeTargetFactsCommand struct {
-	attemptID  providerCallAttemptID
-	target     provider.TargetSnapshot
-	generation targetExceptionGeneration
-	facts      []provider.TargetFact
-	backend    provider.Backend
+	attemptID      providerCallAttemptID
+	target         provider.TargetSnapshot
+	generation     targetExceptionGeneration
+	facts          []provider.TargetFact
+	backend        provider.Backend
+	route          routing.RouteName
+	nextInvocation func() execution.InvocationID
+	sink           observation.ExecutionEvidenceSink
 }
 
 func (characterizeTargetFactsCommand) isCommand() {}
 
 type callMCPCommand struct {
-	run  *mcp.Run
-	call canonical.ToolCallItem
+	prepared     mcp.PreparedCall
+	resource     evidence.MCPResource
+	invocationID execution.InvocationID
+	evidence     observation.ExecutionEvidenceSink
 }
 
 func (callMCPCommand) isCommand() {}
@@ -278,6 +298,7 @@ type providerCall struct {
 	providerRound      int
 	targetGeneration   targetExceptionGeneration
 	factReads          map[provider.TargetFact]bool
+	evidenceSettlement func(execution.Outcome, canonical.TokenUsage)
 }
 
 type reducerOutcome struct {
@@ -395,8 +416,6 @@ func reduceLoadingCheckpoint(s exchangeState, phase loadingCheckpointPhase, even
 		} else {
 			s.executionAffinity, err = executionaffinity.Derive("swobu/genesis-response/v1", s.input.workspace.Slug().String(), s.swobuResponseID.String())
 		}
-		previous := record.Request.Clone()
-		s.previousRequest = &previous
 	}
 	s, err = applyRoutePlan(s)
 	if err != nil {
@@ -417,7 +436,7 @@ func logCheckpointResolution(state exchangeState, phase loadingCheckpointPhase, 
 	slog.Debug("history checkpoint resolved",
 		"component", "exchange",
 		"event", "history_checkpoint_resolved",
-		"request_id", state.input.exchangeID,
+		"request_id", state.input.clientRequestID,
 		"lookup", map[bool]string{true: "explicit", false: "implicit"}[phase.explicit],
 		"resolution", resolution,
 		"fingerprint_scheme", string(scheme),
@@ -496,7 +515,15 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			s.phase = resolvingTargetFactsPhase{attemptID: phase.attemptID, backend: phase.call.backend}
 			return reducerOutcome{nextState: s, command: characterizeTargetFactsCommand{
 				attemptID: phase.attemptID, target: phase.call.backend.Target,
-				generation: attempt.targetGeneration, backend: phase.call.backend, facts: facts,
+				generation: attempt.targetGeneration, backend: phase.call.backend, facts: facts, route: s.route.name,
+				nextInvocation: func() execution.InvocationID {
+					if s.invocationOrdinal == nil {
+						return execution.InvocationID{}
+					}
+					*s.invocationOrdinal++
+					id, _ := execution.NewInvocationID(s.inputExchangeID(), *s.invocationOrdinal)
+					return id
+				}, sink: runner.ExecutionEvidence,
 			}}, nil
 		}
 		outcome, err := advanceProviderExecution(ctx, s, runner)
@@ -505,6 +532,17 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 	case providerIngressReceived:
 		if result.attemptID != phase.attemptID {
 			return reducerOutcome{}, fmt.Errorf("exchange invariant: provider call attempt %d returned while %d is active", result.attemptID, phase.attemptID)
+		}
+		if runner.ExecutionEvidence != nil {
+			phase.call.evidenceSettlement = func(outcome execution.Outcome, usage canonical.TokenUsage) {
+				if outcome == execution.Succeeded {
+					emitProviderInvocationSettlement(runner.ExecutionEvidence, s, attempt, execution.Succeeded, execution.Occurred, "", usage)
+				} else if outcome == execution.Cancelled {
+					emitProviderInvocationSettlement(runner.ExecutionEvidence, s, attempt, execution.Cancelled, execution.Occurred, "", usage)
+				} else {
+					emitProviderInvocationSettlement(runner.ExecutionEvidence, s, attempt, execution.Failed, execution.Occurred, evidence.FailureResponseInvalid, usage)
+				}
+			}
 		}
 		response, completedResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		changes := providerCompatibility.completedChanges()
@@ -557,7 +595,6 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		}
 		if completion := responseCompletion(response); completion != nil {
 			completion.ConfigureCompatibility(effective, providerCompatibility.progressive)
-			observeProviderAttemptTerminal(s, phase.attemptID, attempt, completion)
 		}
 		s.phase = completedPhase{response: response, target: attempt.target}
 		return reducerOutcome{nextState: s}, nil
@@ -762,7 +799,7 @@ func selectSameTargetAlternative(attempts []providerCallAttempt) (providerCallSe
 
 func nativeReferenceFailureAdmitsFullHistory(attempt providerCallAttempt) bool {
 	if attempt.failure == nil ||
-		attempt.failure.Attempt.Execution() != provider.ExecutionRejectedBeforeExecution ||
+		attempt.failure.Attempt.Execution() != provider.DispositionRejectedBeforeExecution ||
 		!attempt.nativePreviousResponse {
 		return false
 	}
@@ -786,9 +823,9 @@ func providerRecoveryPermitted(attempt providerCallAttempt) bool {
 		return false
 	}
 	switch attempt.failure.Attempt.Execution() {
-	case provider.ExecutionNotDispatched, provider.ExecutionRejectedBeforeExecution:
+	case provider.DispositionNotDispatched, provider.DispositionRejectedBeforeExecution:
 		return true
-	case provider.ExecutionMayHaveOccurred:
+	case provider.DispositionMayHaveOccurred:
 		return true
 	default:
 		return false

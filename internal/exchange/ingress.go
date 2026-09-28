@@ -4,19 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
-	trafficevidence "github.com/swobuforge/swobu/internal/domain/trafficevidence"
+	"github.com/swobuforge/swobu/internal/domain/executionevidence"
+	"github.com/swobuforge/swobu/internal/domain/productprojection"
 	"github.com/swobuforge/swobu/internal/observation"
-	profile "github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/wire"
@@ -33,12 +37,12 @@ type RequestIngress struct {
 }
 
 type RuntimePoliciesSpec struct {
-	ObservationStore observation.Store
-	TrafficEvidence  observation.TrafficEventSink
-	CheckpointStore  continuity.Store
-	ResponseIDs      ResponseIDGenerator
-	ImageFetcher     provider.ImageFetcher
-	PolicyResolver   WorkspacePolicyResolver
+	ObservationStore  observation.Store
+	ExecutionEvidence observation.ExecutionEvidenceSink
+	CheckpointStore   continuity.Store
+	ResponseIDs       ResponseIDGenerator
+	ImageFetcher      provider.ImageFetcher
+	PolicyResolver    WorkspacePolicyResolver
 }
 
 // WorkspacePolicy is resolved once after workspace selection and then
@@ -100,14 +104,14 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
-			Runtime:          runtime,
-			TrafficEvidence:  policies.TrafficEvidence,
-			CheckpointStore:  policies.CheckpointStore,
-			ResponseIDs:      policies.ResponseIDs,
-			ImageFetcher:     policies.ImageFetcher,
-			PolicyResolver:   policyResolver,
-			TargetBackoff:    newTargetBackoffLedger(),
-			TargetExceptions: newTargetExceptions(),
+			Runtime:           runtime,
+			ExecutionEvidence: policies.ExecutionEvidence,
+			CheckpointStore:   policies.CheckpointStore,
+			ResponseIDs:       policies.ResponseIDs,
+			ImageFetcher:      policies.ImageFetcher,
+			PolicyResolver:    policyResolver,
+			TargetBackoff:     newTargetBackoffLedger(),
+			TargetExceptions:  newTargetExceptions(),
 		},
 	}
 }
@@ -116,42 +120,46 @@ type RequestInput struct {
 	AccessID          accessidentity.ID
 	Workspace         routing.WorkspaceSlug
 	Request           carrier.TransportRequest
-	ClientHandler     trafficevidence.ClientHandler
+	ClientFamily      clientfamily.Family
 	Operation         canonical.ClientOperation
 	ResponseFraming   delivery.Framing
-	Timing            *trafficevidence.Timing
+	Timing            *observation.Timing
 	ExecutionAffinity executionaffinity.Key
-	// ExchangeID is the request-scoped identifier used for event and decision
-	// tracing. Callers must supply one unique value per exchange run.
-	ExchangeID string
+	// ClientRequestID is protocol correlation only. RequestIngress owns
+	// canonical ExchangeID allocation after admission reaches this boundary.
+	ClientRequestID string
 }
 
 type RequestOutput struct {
-	Response        ClientResponse
-	Target          provider.TargetSnapshot
-	TrafficEvidence *TrafficEvidenceInput
-	Compatibility   *wire.ResponseCompletion
+	Response                ClientResponse
+	Target                  provider.TargetSnapshot
+	ProductObservationInput *ProductObservationInputData
+	Compatibility           *wire.ResponseCompletion
 	// AttemptCount is the authoritative number of issued provider commands.
 	// It lets the terminal HTTP log prove a rejected request never contacted a target.
 	AttemptCount int
+	// FinalizeExecutionEvidence is owned by the inbound delivery boundary.
+	// Exchange execution is semantically complete before this function runs;
+	// the delivery owner supplies the actual terminal result exactly once.
+	FinalizeExecutionEvidence func(delivery.Result)
 }
 
-// TrafficEvidenceInput is the immutable exchange fact set completed by the
-// inbound delivery owner's concrete DeliveryResult.
-type TrafficEvidenceInput struct {
-	accessID       accessidentity.ID
-	workspace      routing.Workspace
-	routeName      routing.RouteName
-	exchangeID     string
-	clientHandler  trafficevidence.ClientHandler
-	clientProduct  trafficevidence.ClientFamily
-	clientProtocol canonical.ClientFamily
-	requestPath    canonical.NormalizedPath
-	request        canonical.CanonicalRequest
-	target         provider.TargetSnapshot
-	response       ClientResponse
-	routing        terminalRoutingEvidence
-	reusablePrefix trafficevidence.ReusablePrefixEvidence
+// ProductObservationInputData carries only the bounded telemetry dimensions
+// established before the inbound delivery result and final timing are known.
+type ProductObservationInputData struct {
+	clientProduct       clientfamily.Family
+	requestedModel      string
+	resolvedModel       string
+	clientProtocol      canonical.ClientFamily
+	requestPath         canonical.NormalizedPath
+	provider            string
+	targetProtocol      string
+	responseStatus      int
+	attemptCount        int
+	fallbackRecovered   bool
+	continuityRecovered bool
+	wireMutated         bool
+	crossProtocol       bool
 }
 
 // HandleRequest resolves the endpoint name, derives client semantics from the
@@ -199,11 +207,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	if clientCodec == nil {
 		return RequestOutput{}, canonical.NotImplemented("Swobu has no client codec for this request family")
 	}
-	exchangeID := strings.TrimSpace(in.ExchangeID) // swobu:io-string source=boundary
-	if exchangeID == "" {
-		return RequestOutput{}, canonical.InternalError("exchange id is required")
-	}
-
+	clientRequestID := strings.TrimSpace(in.ClientRequestID) // swobu:io-string source=boundary
 	runner := h.runner
 	resolver := runner.PolicyResolver
 	if resolver == nil {
@@ -218,7 +222,7 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	}
 	runner.Policy = resolved.Clone()
 
-	requestDoc, err := newClientRequestDocument(clientFamily, in.Request, runner.Policy.Limits.MaxRequestBytes, exchangeID)
+	requestDoc, err := newClientRequestDocument(clientFamily, in.Request, runner.Policy.Limits.MaxRequestBytes, clientRequestID)
 	if err != nil {
 		return RequestOutput{}, err
 	}
@@ -231,122 +235,93 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
+	canonicalExchangeID, identityErr := execution.NewExchangeID()
+	if identityErr != nil {
+		return RequestOutput{}, canonical.InternalError("exchange identity could not be allocated")
+	}
 	clientDelivery := normalizeClientDelivery(decodedDelivery, in.ResponseFraming)
+	// Exchange admission is complete only after transport decoding, canonical
+	// request validation, and delivery normalization. Failures before this
+	// point must not fabricate an admitted exchange lifecycle.
+	if runner.ExecutionEvidence != nil {
+		started, startErr := executionevidence.NewExchangeStarted(canonicalExchangeID, in.AccessID, workspace.Slug(), time.Now(), in.ClientFamily, clientFamily, normalizedPath)
+		if startErr != nil {
+			return RequestOutput{}, canonical.InternalError("exchange evidence could not be started")
+		}
+		if err := runner.ExecutionEvidence.AppendExecutionEvidence(started); err != nil {
+			slog.Warn("execution evidence append failed", "exchange_id", canonicalExchangeID.String(), "error", err)
+		}
+	}
 	// The normalized path is threaded into the exchange input so terminal evidence
 	// is complete on both success and failure — an exchange error finalizes the
 	// evidence inside runExchange, where it already holds the path.
-	out, err := runExchange(ctx, runner, in.AccessID, exchangeID, in.ClientHandler, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ExecutionAffinity)
+	out, err := runExchange(ctx, runner, in.AccessID, clientRequestID, canonicalExchangeID, in.ClientFamily, clientFamily, clientDelivery, decodeResult.Request, decodeResult.Changes, workspace, in.Timing, normalizedPath, in.ExecutionAffinity)
 	if err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func BuildTerminalTrafficEvent(evidence *TrafficEvidenceInput, result delivery.Result, timing trafficevidence.Timing) (trafficevidence.TrafficEvent, error) {
+func BuildProductObservation(evidence *ProductObservationInputData, result delivery.Result) *productprojection.Observation {
 	if evidence == nil {
-		return trafficevidence.TrafficEvent{}, errors.New("traffic evidence input is absent")
+		return nil
 	}
-	requestID, parseErr := trafficevidence.ParseRequestID(strings.TrimSpace(evidence.exchangeID))
-	if parseErr != nil {
-		return trafficevidence.TrafficEvent{}, parseErr
+	status := productObservationStatus(result, evidence.responseStatus)
+	return &productprojection.Observation{
+		ClientFamily:   string(evidence.clientProduct),
+		RequestedModel: evidence.requestedModel, ResolvedModel: evidence.resolvedModel,
+		ClientProtocol: string(evidence.clientProtocol), Operation: string(evidence.requestPath),
+		Provider: evidence.provider, TargetProtocol: evidence.targetProtocol,
+		Result: string(terminalProductResult(result)), StatusCode: status, DeliveryKind: string(result.Kind),
+		ErrorCode: string(terminalCanonicalErrorCode(result.Err)), AttemptCount: evidence.attemptCount,
+		FallbackRecovered: evidence.fallbackRecovered, ContinuityRecovered: evidence.continuityRecovered,
+		WireMutated:   evidence.wireMutated,
+		CrossProtocol: evidence.crossProtocol,
 	}
-	if strings.TrimSpace(evidence.target.TargetID) == "" { // swobu:io-string source=boundary
-		return trafficevidence.TrafficEvent{}, fmt.Errorf("traffic evidence target is required")
-	}
-	route, routeErr := trafficevidence.NewRoute(evidence.target.TargetID, evidence.request.Model())
-	if routeErr != nil {
-		return trafficevidence.TrafficEvent{}, routeErr
-	}
-	resultClass, statusCode := requestOutcomeEvidence(result, evidence.response)
-	diagnostics := requestOutcomeDiagnostics(result.Err)
-	if evidence.routing.possibleDuplicateExecution {
-		diagnostics = append(diagnostics, "possible_duplicate_provider_execution_and_cost")
-	}
-	base := trafficevidence.TrafficEventInput{
-		AccessID:              evidence.accessID,
-		RequestID:             requestID,
-		Workspace:             evidence.workspace.Slug().String(),
-		ClientHandler:         evidence.clientHandler,
-		ClientFamily:          evidence.clientProduct,
-		ClientProtocol:        trafficevidence.ClientProtocol(evidence.clientProtocol),
-		RequestPath:           evidence.requestPath,
-		Route:                 route,
-		Timing:                timing,
-		ModelRequested:        evidence.request.Model(),
-		ModelResolved:         evidence.request.Model(),
-		WorkspaceRouteModelID: evidence.routeName.String(),
-		ProviderSpec:          profile.ProviderID(evidence.target.ProviderSpec),
-		ProviderModel:         evidence.target.Model,
-		ExchangeDiagnostics:   diagnostics,
-		TargetProtocol:        evidence.target.ProtocolKind,
-		TargetVersion:         routing.TargetVersion(evidence.target.TargetVersion),
-		ReusablePrefix:        evidence.reusablePrefix,
-	}
-	if completion := responseCompletion(evidence.response); completion != nil {
-		base.TokenUsage = trafficTokenUsage(completion.Snapshot().Usage)
-	}
-	outcome := trafficevidence.TerminalOutcome{
-		Result:             resultClass,
-		StatusCode:         statusCode,
-		DeliveryKind:       result.Kind,
-		CanonicalErrorCode: terminalCanonicalErrorCode(result.Err),
-		AttemptCount:       evidence.routing.providerCallCount,
-		FallbackRecovered:  evidence.routing.fallbackRecovered,
-	}
-	return trafficevidence.NewTerminalTrafficEvent(base, outcome)
 }
 
-func trafficTokenUsage(usage canonical.TokenUsage) trafficevidence.TokenUsage {
-	input, hasInput := usage.InputTokens()
-	output, hasOutput := usage.OutputTokens()
-	reasoning, hasReasoning := usage.ReasoningTokens()
-	cacheRead, hasCacheRead := usage.CacheReadTokens()
-	cacheWrite, hasCacheWrite := usage.CacheWriteTokens()
-	pointer := func(value int, present bool) *int {
-		if !present {
-			return nil
+// productObservationStatus preserves the public delivery status semantics in
+// the deliberately lossy telemetry projection without exposing provider prose.
+func productObservationStatus(result delivery.Result, responseStatus int) int {
+	if result.Kind == delivery.ClientCancelled {
+		return http.StatusRequestTimeout - 1 // 499, client closed request
+	}
+	if result.Kind == delivery.Succeeded && result.Err == nil {
+		if result.HTTPStatus > 0 {
+			return result.HTTPStatus
 		}
-		return &value
-	}
-	converted, err := trafficevidence.NewTokenUsage(trafficevidence.TokenUsageParams{
-		InputTokens: pointer(input, hasInput), OutputTokens: pointer(output, hasOutput),
-		ReasoningTokens: pointer(reasoning, hasReasoning), CacheReadTokens: pointer(cacheRead, hasCacheRead),
-		CacheWriteTokens: pointer(cacheWrite, hasCacheWrite),
-	})
-	if err != nil {
-		return trafficevidence.TokenUsage{}
-	}
-	return converted
-}
-
-func requestOutcomeEvidence(deliveryResult delivery.Result, response ClientResponse) (trafficevidence.ResultClass, int) {
-	if deliveryResult.Kind == delivery.ClientCancelled {
-		return trafficevidence.ResultClassCancelled, 499
-	}
-	err := deliveryResult.Err
-	if deliveryResult.Kind == delivery.Succeeded && err == nil {
-		statusCode := clientResponseStatus(response)
-		if statusCode <= 0 {
-			statusCode = http.StatusOK
+		if responseStatus > 0 {
+			return responseStatus
 		}
-		return trafficevidence.ResultClassSuccess, statusCode
+		return http.StatusOK
 	}
-
 	var backendErr canonical.BackendError
-	if errors.As(err, &backendErr) {
-		statusCode := backendErr.StatusCode
-		if statusCode <= 0 {
-			statusCode = http.StatusBadGateway
-		}
-		return trafficevidence.ResultClassBackendError, statusCode
+	if errors.As(result.Err, &backendErr) && backendErr.StatusCode > 0 {
+		return backendErr.StatusCode
 	}
-
 	var swobuErr canonical.Error
-	if errors.As(err, &swobuErr) {
-		return requestOutcomeFromSwobuError(swobuErr.Code), requestOutcomeStatusForSwobuError(swobuErr.Code)
+	if errors.As(result.Err, &swobuErr) {
+		return requestOutcomeStatusForSwobuError(swobuErr.Code)
 	}
+	return http.StatusInternalServerError
+}
 
-	return trafficevidence.ResultClassSwobuError, http.StatusInternalServerError
+func terminalProductResult(result delivery.Result) productprojection.ResultClass {
+	if result.Kind == delivery.ClientCancelled {
+		return productprojection.ResultCancelled
+	}
+	if result.Kind == delivery.Succeeded && result.Err == nil {
+		return productprojection.ResultSuccess
+	}
+	var backendErr canonical.BackendError
+	if errors.As(result.Err, &backendErr) {
+		return productprojection.ResultBackendError
+	}
+	var swobuErr canonical.Error
+	if errors.As(result.Err, &swobuErr) {
+		return productprojection.ResultFromCanonical(string(swobuErr.Code))
+	}
+	return productprojection.ResultSwobuError
 }
 
 // terminalCanonicalErrorCode extracts the typed canonical error code from a
@@ -374,23 +349,6 @@ func clientResponseStatus(response ClientResponse) int {
 		return response.Response.Status
 	}
 	return 0
-}
-
-func requestOutcomeFromSwobuError(code canonical.ErrorCode) trafficevidence.ResultClass {
-	switch code {
-	case canonical.ErrorCodeUnsupportedOperation:
-		return trafficevidence.ResultClassUnsupportedOperation
-	case canonical.ErrorCodeUnsupportedDelivery:
-		return trafficevidence.ResultClassUnsupportedDeliveryVariant
-	case canonical.ErrorCodeNotImplemented:
-		return trafficevidence.ResultClassNotImplemented
-	case canonical.ErrorCodeBadEndpoint, canonical.ErrorCodeUnsupportedEndpoint, canonical.ErrorCodeUnknownTarget:
-		return trafficevidence.ResultClassSwobuError
-	case canonical.ErrorCodeBadRequest, canonical.ErrorCodeInternal, canonical.ErrorCodeProviderTimeout, canonical.ErrorCodeProviderUnavailable:
-		return trafficevidence.ResultClassSwobuError
-	default:
-		return trafficevidence.ResultClassSwobuError
-	}
 }
 
 func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {

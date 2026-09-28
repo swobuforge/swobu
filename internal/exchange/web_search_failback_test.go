@@ -180,8 +180,8 @@ func runCapabilityFallbackTurn(t *testing.T, ingress RequestIngress, workspace r
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, RequestInput{
 		AccessID:  accessidentity.Local,
 		Workspace: workspace.Slug(), Request: NewTransportRequest("POST", "/v1/responses", nil, []byte(raw)),
-		ClientHandler: "capability-fallback-test", Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
-		ResponseFraming: delivery.FramingNone, ExchangeID: exchangeID,
+		ClientFamily: "other", Operation: canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
+		ResponseFraming: delivery.FramingNone, ClientRequestID: exchangeID,
 	})
 	if err != nil {
 		t.Fatalf("%s failed: %v", exchangeID, err)

@@ -72,7 +72,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	targetFacts := targetFactsForAttempt(runner.TargetExceptions, generation)
 	providerRequest := provider.Request{
 		Attempt: provider.AttemptContext{
-			ExchangeID:            s.input.exchangeID,
+			CorrelationID:         s.correlationID(),
 			CacheLocality:         s.cacheLocality,
 			ExecutionAffinity:     s.executionAffinity,
 			HasNextRouteCandidate: hasNextRouteCandidate(s, selection),
@@ -123,7 +123,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	return providerCall{
 		backend: backend, request: providerRequest, document: doc, clientCodec: clientCodec,
 		decodeContext:  bindRequestToTarget(attemptRequest, path.target.Model),
-		clientDelivery: s.input.clientDelivery, exchangeID: s.input.exchangeID,
+		clientDelivery: s.input.clientDelivery, exchangeID: s.correlationID(),
 		workspaceSlug: workspaceSlug, fullRequest: resolved.Request(),
 		targetGeneration:   generation,
 		factReads:          factReads,
@@ -212,6 +212,9 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	events = canonical.NewBoundResponseIdentityStream(events, binding)
 	events = canonical.NewValidatedResponseStream(events)
 	events = newStagedResponseStream(events, "canonical_response_validation")
+	if call.evidenceSettlement != nil {
+		events = newProviderEvidenceStream(events, call.evidenceSettlement)
+	}
 	if call.delayClientHandoff {
 		defer events.Close(ctx)
 		envelope, err := canonical.ReadClosedEnvelope(ctx, events, canonical.EnvResponse)

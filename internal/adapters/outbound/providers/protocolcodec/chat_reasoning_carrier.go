@@ -393,7 +393,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 		if err != nil || item.Kind() == "" {
 			return decoded, err
 		}
-		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, item, nil, request.Attempt.ExchangeID)
+		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, item, nil, request.Attempt.CorrelationID)
 		return decoded, nil
 	case provider.StreamIngress:
 		body := NewChatReasoningSSEBody(value.Stream.Body, extractor)
@@ -404,7 +404,7 @@ func DecodeChatWithReasoningCarrier(ctx context.Context, standard Codec, request
 			_ = body.Close()
 			return decoded, err
 		}
-		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, canonical.CanonicalItem{}, body, request.Attempt.ExchangeID)
+		decoded.Stream = newChatReasoningPreludeStream(decoded.Stream, canonical.CanonicalItem{}, body, request.Attempt.CorrelationID)
 		if _, ok := extractor.(ChatContinuationReasoningExtractor); ok {
 			decoded.CheckpointResponse = body.checkpointResponse
 		}
