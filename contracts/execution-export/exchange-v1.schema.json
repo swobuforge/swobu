@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://swobu.dev/contracts/execution-export/exchange-v1.schema.json",
+  "title": "Swobu execution history NDJSON v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "type", "exchange", "invocations"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "type": {"const": "exchange"},
+        "exchange": {"$ref": "#/$defs/exchange"},
+        "invocations": {"type": "array", "items": {"$ref": "#/$defs/invocation"}}
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "exchange": {
+      "type": "object",
+      "required": ["exchange_id", "access_id", "workspace_slug", "started_at", "settled_at", "duration_ns", "client_family", "client_protocol", "normalized_operation", "delivery_result"],
+      "properties": {
+        "exchange_id": {"type": "string", "pattern": "^ex_[A-Za-z0-9_-]+$"},
+        "access_id": {"type": "string"}, "workspace_slug": {"type": "string"},
+        "started_at": {"type": "string", "format": "date-time"}, "settled_at": {"type": "string", "format": "date-time"},
+        "duration_ns": {"type": "integer", "minimum": 0}, "client_family": {"type": "string"}, "client_protocol": {"type": "string"},
+        "normalized_operation": {"type": "string"}, "delivery_result": {"type": "string"}, "client_status_code": {"type": "integer"}, "canonical_error_code": {"type": "string"}
+      }, "additionalProperties": false
+    },
+    "invocation": {"oneOf": [
+      {"$ref": "#/$defs/model_invocation"},
+      {"$ref": "#/$defs/mcp_invocation"}
+    ]},
+    "invocation_common": {"type":"object", "required":["invocation_id","ordinal","started_at","settled_at","duration_ns","outcome","occurrence"], "properties":{"invocation_id":{"type":"string","pattern":"^inv_[A-Za-z0-9_-]+_[1-9][0-9]*$"},"ordinal":{"type":"integer","minimum":1},"started_at":{"type":"string","format":"date-time"},"settled_at":{"type":"string","format":"date-time"},"duration_ns":{"type":"integer","minimum":0},"outcome":{"type":"string"},"occurrence":{"type":"string"},"failure_class":{"type":"string"}}},
+    "model_invocation": {"allOf":[{"$ref":"#/$defs/invocation_common"},{"type":"object","required":["kind","resource"],"properties":{"kind":{"const":"model"},"resource":{"$ref":"#/$defs/model_resource"}}}],"unevaluatedProperties":false},
+    "mcp_invocation": {"allOf":[{"$ref":"#/$defs/invocation_common"},{"type":"object","required":["kind","resource"],"properties":{"kind":{"const":"mcp_tool"},"resource":{"$ref":"#/$defs/mcp_resource"}}}],"unevaluatedProperties":false},
+    "model_resource": {
+      "type": "object",
+      "required": ["target_id", "target_version", "provider_spec", "provider_protocol", "provider_model", "purpose"],
+      "properties": {
+        "route_name": {"type": "string"}, "target_id": {"type": "string"}, "target_version": {"type": "string"},
+        "provider_spec": {"type": "string"}, "provider_protocol": {"type": "string"}, "provider_model": {"type": "string"}, "purpose": {"type": "string"},
+        "input_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0},
+        "reasoning_tokens": {"type": "integer", "minimum": 0}, "cache_read_tokens": {"type": "integer", "minimum": 0}, "cache_write_tokens": {"type": "integer", "minimum": 0}
+      }, "additionalProperties": false
+    },
+    "mcp_resource": {
+      "type": "object", "required": ["source_tool_key", "tool_key"],
+      "properties": {"source_tool_key": {"type": "string"}, "tool_key": {"type": "string"}}, "additionalProperties": false
+    }
+  }
+}
