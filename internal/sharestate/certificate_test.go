@@ -24,7 +24,9 @@ func TestCertificateValidityRenewalAndRetryAreIndependent(t *testing.T) {
 	if err := store.EnsureEndpoint(); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	// Installation validates against the real clock; keep the fixture valid
+	// while preserving its 90-day lifetime and 25-day renewal window.
+	now := time.Now().UTC().Truncate(time.Second)
 	id, _ := store.EndpointID()
 	tlsKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
