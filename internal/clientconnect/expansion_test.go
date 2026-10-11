@@ -427,10 +427,69 @@ func TestKiloDeclaresSwobuBackendAndPreservesForeignProviders(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	text := string(got)
-	for _, want := range []string{`"model": "swobu/default"`, `"baseURL":"http://127.0.0.1:7926/c/work"`, `"name":"Swobu"`, `"name":"Swobu default"`, `"tool_call":true`, `"baseURL": "https://old"`, `"baseURL": "https://leave"`, `"mcp": {"keep": true}`} {
+	for _, want := range []string{`"model": "swobu/default"`, `"baseURL":"http://127.0.0.1:7926/c/work"`, `"name":"Swobu"`, `"name":"Swobu default"`, `"tool_call":true`, `"web_search":true`, `"baseURL": "https://old"`, `"baseURL": "https://leave"`, `"mcp": {"keep": true}`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestKiloWebSearchOptInUsesReviewedChangeAndConverges(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		initial     string
+		wantBefore  string
+		wantExists  bool
+		wantChange  bool
+		wantReplace bool
+	}{
+		{name: "absent", initial: `{"keep":true}`, wantChange: true},
+		{name: "disabled", initial: `{"web_search":false,"keep":true}`, wantBefore: "false", wantExists: true, wantChange: true, wantReplace: true},
+		{name: "enabled", initial: `{"web_search":true,"keep":true}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "kilo.jsonc")
+			original := "{\n  // preserve operator comment\n  " + strings.TrimPrefix(test.initial, "{")
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mutation, err := planKilo(path, testTarget(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var searchChange *Change
+			for i := range mutation.plan.Changes {
+				if mutation.plan.Changes[i].Field == "web search" {
+					searchChange = &mutation.plan.Changes[i]
+				}
+			}
+			if (searchChange != nil) != test.wantChange || mutation.plan.RequiresReplace() != test.wantReplace {
+				t.Fatalf("plan = %#v, want change=%v replace=%v", mutation.plan, test.wantChange, test.wantReplace)
+			}
+			if searchChange != nil && (searchChange.Before != test.wantBefore || searchChange.BeforeExists != test.wantExists || searchChange.After != "true") {
+				t.Fatalf("web-search change = %#v", *searchChange)
+			}
+			if mutation.apply != nil {
+				if err := mutation.apply(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(got)
+			for _, want := range []string{"preserve operator comment", `"keep":true`, `"web_search":true`} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("configuration missing %q:\n%s", want, text)
+				}
+			}
+			verified, err := planKilo(path, testTarget(t))
+			if err != nil || !verified.plan.AlreadyConfigured() {
+				t.Fatalf("replan = %#v, error = %v", verified.plan, err)
+			}
+		})
 	}
 }
 
@@ -1012,7 +1071,7 @@ func TestPiApplyMergesUnrelatedModelCatalogEdit(t *testing.T) {
 func TestSameBackendWithOldEndpointRequiresReplace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kilo.json")
-	_ = os.WriteFile(path, []byte(`{"model":"swobu/default","provider":{"swobu":{"name":"Swobu","options":{"baseURL":"http://127.0.0.1:7926/c/old"},"models":{"default":{"name":"Swobu default","tool_call":true}}}}}`), 0o600)
+	_ = os.WriteFile(path, []byte(`{"model":"swobu/default","web_search":true,"provider":{"swobu":{"name":"Swobu","options":{"baseURL":"http://127.0.0.1:7926/c/old"},"models":{"default":{"name":"Swobu default","tool_call":true}}}}}`), 0o600)
 	mutation, err := planKilo(path, testTarget(t))
 	if err != nil {
 		t.Fatal(err)

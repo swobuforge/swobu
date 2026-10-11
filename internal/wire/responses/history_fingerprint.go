@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
@@ -130,6 +131,51 @@ func fingerprintResponsesHistory(input json.RawMessage, explicitPrevious bool, s
 		return responsesHistoryResult{}, err
 	}
 	return responsesHistoryResult{previous: previous, request: current, current: currentRaw}, nil
+}
+
+func fingerprintResponsesWebSearchDeclarations(request historyfingerprint.Request, tools []responsesToolDefinitionDTO) (historyfingerprint.Request, error) {
+	declarations := make([]responsesToolDefinitionDTO, 0, len(tools))
+	for _, tool := range tools {
+		if strings.ToLower(strings.TrimSpace(tool.Type)) != "web_search" && strings.ToLower(strings.TrimSpace(tool.Type)) != "web_search_preview" {
+			continue
+		}
+		mode, err := decodeResponsesWebSearchAccessMode(tool)
+		if err != nil {
+			return historyfingerprint.Request{}, err
+		}
+		if mode == canonical.WebSearchAccessUnspecified {
+			continue
+		}
+		var external, indexed *bool
+		switch mode {
+		case canonical.WebSearchAccessCached:
+			value := false
+			external = &value
+		case canonical.WebSearchAccessLive:
+			value := true
+			external = &value
+		case canonical.WebSearchAccessIndexed:
+			value := true
+			external, indexed = &value, &value
+		default:
+			return historyfingerprint.Request{}, canonical.BadRequest("responses web-search access mode is invalid")
+		}
+		declarations = append(declarations, responsesToolDefinitionDTO{
+			Type: "web_search", ExternalWebAccess: external, IndexedWebAccess: indexed,
+		})
+	}
+	if len(declarations) == 0 {
+		return request, nil
+	}
+	raw, err := json.Marshal(slices.Clip(declarations))
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	material, err := historyfingerprint.FrameJSONValue(raw)
+	if err != nil {
+		return historyfingerprint.Request{}, err
+	}
+	return request.WithAdditionalMaterial(material)
 }
 
 func responsesHistoryRunHasCompletedWebSearch(items []responsesHistoryItemDTO) bool {

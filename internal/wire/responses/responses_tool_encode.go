@@ -13,17 +13,19 @@ import (
 // ProviderRequestTool is one typed Responses tool declaration before exact-
 // provider spelling and the single JSON serialization boundary.
 type ProviderRequestTool struct {
-	Type         string                `json:"type"`
-	Name         string                `json:"name,omitempty"`
-	Description  string                `json:"description,omitempty"`
-	Parameters   any                   `json:"parameters,omitempty"`
-	Strict       *bool                 `json:"strict,omitempty"`
-	Format       any                   `json:"format,omitempty"`
-	Tools        []ProviderRequestTool `json:"tools,omitempty"`
-	Execution    string                `json:"execution,omitempty"`
-	DeferLoading *bool                 `json:"defer_loading,omitempty"`
-	CallType     string                `json:"-"`
-	ResultType   string                `json:"-"`
+	Type              string                `json:"type"`
+	Name              string                `json:"name,omitempty"`
+	Description       string                `json:"description,omitempty"`
+	Parameters        any                   `json:"parameters,omitempty"`
+	Strict            *bool                 `json:"strict,omitempty"`
+	Format            any                   `json:"format,omitempty"`
+	Tools             []ProviderRequestTool `json:"tools,omitempty"`
+	Execution         string                `json:"execution,omitempty"`
+	DeferLoading      *bool                 `json:"defer_loading,omitempty"`
+	ExternalWebAccess *bool                 `json:"external_web_access,omitempty"`
+	IndexedWebAccess  *bool                 `json:"indexed_web_access,omitempty"`
+	CallType          string                `json:"-"`
+	ResultType        string                `json:"-"`
 }
 
 // ToolLoweringContext identifies one declaration during ordered lowering.
@@ -117,6 +119,11 @@ func DefaultToolLowering() ToolLowering {
 		Function: nativeFunction,
 		Custom:   nativeCustom,
 		WebSearch: func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+			if mode, ok := tool.WebSearchAccessMode(); ok && mode != canonical.WebSearchAccessUnspecified {
+				return ToolProjection{}, nil, canonical.NotImplemented(
+					"selected Responses target cannot preserve the requested web-search access restriction",
+				)
+			}
 			return webSearchToolProjection(), []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
 		},
 		Discovery: func(ctx ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
@@ -215,6 +222,47 @@ func HostedSearchProjection(fragment ProviderRequestTool, supportsSourceInclude 
 	projection.TargetName = fragment.Name
 	projection.SupportsWebSearchSourceInclude = supportsSourceInclude
 	return projection
+}
+
+// HostedSearchWithAccessProjection preserves the canonical bounded web-access
+// mode while using only fields proven for the selected Responses target.
+func HostedSearchWithAccessProjection(fragment ProviderRequestTool, supportsSourceInclude bool) ToolTransformer {
+	return func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		mode, ok := tool.WebSearchAccessMode()
+		if !ok {
+			return ToolProjection{}, nil, canonical.InternalError("Responses hosted search lowering received a non-search declaration")
+		}
+		lowered := fragment
+		switch mode {
+		case canonical.WebSearchAccessUnspecified:
+		case canonical.WebSearchAccessCached:
+			value := false
+			lowered.ExternalWebAccess = &value
+		case canonical.WebSearchAccessLive:
+			value := true
+			lowered.ExternalWebAccess = &value
+		case canonical.WebSearchAccessIndexed:
+			external, indexed := true, true
+			lowered.ExternalWebAccess, lowered.IndexedWebAccess = &external, &indexed
+		default:
+			return ToolProjection{}, nil, canonical.InternalError("canonical web-search access mode is invalid")
+		}
+		return HostedSearchProjection(lowered, supportsSourceInclude), nil, nil
+	}
+}
+
+// HostedSearchProjectionWithoutAccess rejects restricted declarations for
+// hosted-search dialects that have not qualified Codex's access fields.
+func HostedSearchProjectionWithoutAccess(fragment ProviderRequestTool, supportsSourceInclude bool) ToolTransformer {
+	return func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
+		mode, _ := tool.WebSearchAccessMode()
+		if mode != canonical.WebSearchAccessUnspecified {
+			return ToolProjection{}, nil, canonical.NotImplemented(
+				"selected Responses target cannot preserve the requested web-search access restriction",
+			)
+		}
+		return HostedSearchProjection(fragment, supportsSourceInclude), nil, nil
+	}
 }
 
 func discoveryToolProjection(encoded ProviderRequestTool) ToolProjection {

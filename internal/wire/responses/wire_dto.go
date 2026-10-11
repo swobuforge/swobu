@@ -261,6 +261,7 @@ type responsesToolDefinitionDTO struct {
 	Tools              []responsesToolDefinitionDTO   `json:"tools,omitempty"`
 	Execution          string                         `json:"execution,omitempty"`
 	ExternalWebAccess  *bool                          `json:"external_web_access,omitempty"`
+	IndexedWebAccess   *bool                          `json:"indexed_web_access,omitempty"`
 	SearchContentTypes []string                       `json:"search_content_types,omitempty"`
 	OutputFormat       string                         `json:"output_format,omitempty"`
 	Filters            *responsesWebSearchFiltersDTO  `json:"filters,omitempty"`
@@ -277,19 +278,94 @@ type responsesToolDefinitionDTO struct {
 	ConnectorID        *string                        `json:"connector_id,omitempty"`
 	TunnelID           *string                        `json:"tunnel_id,omitempty"`
 	DeferLoading       *bool                          `json:"defer_loading,omitempty"`
+	unknownFields      []string
+	presentFields      []string
+}
+
+func (tool *responsesToolDefinitionDTO) UnmarshalJSON(raw []byte) error {
+	type wire responsesToolDefinitionDTO
+	var decoded wire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	known := map[string]struct{}{
+		"type": {}, "name": {}, "description": {}, "parameters": {}, "strict": {}, "format": {}, "tools": {},
+		"execution": {}, "external_web_access": {}, "indexed_web_access": {}, "search_content_types": {},
+		"output_format": {}, "filters": {}, "user_location": {}, "search_context_size": {}, "server_label": {},
+		"server_description": {}, "server_url": {}, "allowed_tools": {}, "allowed_callers": {}, "require_approval": {},
+		"headers": {}, "authorization": {}, "connector_id": {}, "tunnel_id": {}, "defer_loading": {},
+	}
+	for key := range object {
+		decoded.presentFields = append(decoded.presentFields, key)
+		if _, ok := known[key]; !ok {
+			decoded.unknownFields = append(decoded.unknownFields, key)
+		}
+	}
+	*tool = responsesToolDefinitionDTO(decoded)
+	return nil
 }
 
 type responsesWebSearchFiltersDTO struct {
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
 	BlockedDomains []string `json:"blocked_domains,omitempty"`
+	unknownFields  []string
+	presentFields  []string
+}
+
+func (filters *responsesWebSearchFiltersDTO) UnmarshalJSON(raw []byte) error {
+	type wire responsesWebSearchFiltersDTO
+	var decoded wire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	for key := range object {
+		decoded.presentFields = append(decoded.presentFields, key)
+		if key != "allowed_domains" && key != "blocked_domains" {
+			decoded.unknownFields = append(decoded.unknownFields, key)
+		}
+	}
+	*filters = responsesWebSearchFiltersDTO(decoded)
+	return nil
 }
 
 type responsesWebSearchLocationDTO struct {
-	Type     string `json:"type,omitempty"`
-	Country  string `json:"country,omitempty"`
-	Region   string `json:"region,omitempty"`
-	City     string `json:"city,omitempty"`
-	Timezone string `json:"timezone,omitempty"`
+	Type          string `json:"type,omitempty"`
+	Country       string `json:"country,omitempty"`
+	Region        string `json:"region,omitempty"`
+	City          string `json:"city,omitempty"`
+	Timezone      string `json:"timezone,omitempty"`
+	unknownFields []string
+	presentFields []string
+}
+
+func (location *responsesWebSearchLocationDTO) UnmarshalJSON(raw []byte) error {
+	type wire responsesWebSearchLocationDTO
+	var decoded wire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	for key := range object {
+		decoded.presentFields = append(decoded.presentFields, key)
+		switch key {
+		case "type", "country", "region", "city", "timezone":
+		default:
+			decoded.unknownFields = append(decoded.unknownFields, key)
+		}
+	}
+	*location = responsesWebSearchLocationDTO(decoded)
+	return nil
 }
 
 type responsesTextDeltaEventDTO struct {

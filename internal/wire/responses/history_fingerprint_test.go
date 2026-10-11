@@ -621,6 +621,47 @@ func TestResponsesRequestFingerprintIgnoresUnknownKnownItemFields(t *testing.T) 
 	}
 }
 
+func TestResponsesRequestFingerprintIncludesBoundedWebSearchAccess(t *testing.T) {
+	decode := func(tool string) historyfingerprint.Request {
+		t.Helper()
+		raw := []byte(`{"model":"m","tools":[` + tool + `],"input":"search"}`)
+		decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decoded.Request.RequestFingerprint
+	}
+	cached := decode(`{"type":"web_search","external_web_access":false}`)
+	live := decode(`{"type":"web_search","external_web_access":true}`)
+	unspecified := decode(`{"type":"web_search"}`)
+	if cached == live || cached == unspecified || live == unspecified {
+		t.Fatal("web-search access restriction did not participate in request identity")
+	}
+	if cached != decode(`{"external_web_access":false,"type":"web_search"}`) {
+		t.Fatal("member ordering changed normalized web-search request identity")
+	}
+}
+
+func TestCachedSearchModeDoesNotAlterSettledHistoryPredecessor(t *testing.T) {
+	decode := func(tool string) wire.ClientRequestResult {
+		t.Helper()
+		raw := []byte(`{"model":"m","tools":[` + tool + `],"input":[{"type":"message","role":"user","content":"q"},{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","queries":["q"],"sources":[]}},{"type":"message","role":"user","content":"next"}]}`)
+		decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.NewDocument("", "application/json", nil, raw, carrier.Meta{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decoded.Request
+	}
+	cached := decode(`{"type":"web_search","external_web_access":false}`)
+	live := decode(`{"type":"web_search","external_web_access":true}`)
+	if cached.RebasedRequest == nil || live.RebasedRequest == nil || cached.RebasedRequest.Previous != live.RebasedRequest.Previous {
+		t.Fatal("current search access mode changed the settled-history predecessor")
+	}
+	if cached.RequestFingerprint == live.RequestFingerprint {
+		t.Fatal("current search access mode was lost from the current request fingerprint")
+	}
+}
+
 func TestFunctionCallArgumentRepresentationsFingerprintEqually(t *testing.T) {
 	object, err := fingerprintResponsesResponseValue([]responsesHistoryItemDTO{{
 		Type: "function_call", CallID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"one"}`),

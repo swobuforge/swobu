@@ -105,13 +105,13 @@ func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *tes
 	dir := openCodeConfigDir(home, nil)
 	low := writeOpenCodeConfig(t, dir, "config.json", `{"model":"other/model","provider":{"swobu":{"options":{"baseURL":"https://old","apiKey":"operator"},"models":{"default":{"limit":{"context":200000,"output":64000}}}}},"disabled_providers":["swobu"]}`)
 	middle := writeOpenCodeConfig(t, dir, "opencode.json", `{"model":"swobu/default","provider":{"swobu":{"npm":"@ai-sdk/openai","options":{"baseURL":"https://middle"}}},"experimental":{"policies":"opaque"}}`)
-	high := writeOpenCodeConfig(t, dir, "opencode.jsonc", "{\n  // keep comment\n  \"provider\": {\"swobu\": {\"options\": {\"baseURL\": \"https://high\"}}},\n  \"unrelated\": true,\n}\n")
+	high := writeOpenCodeConfig(t, dir, "opencode.jsonc", "{\n  // keep comment\n  \"unrelated\": true,\n}\n")
 	service := openCodeService(t, home, map[string]string{"OPENCODE_CONFIG": "ignored", "OPENCODE_CONFIG_DIR": "ignored", "OPENCODE_CONFIG_CONTENT": "ignored"}, false)
 	plan, err := service.Plan(context.Background(), ClientOpenCode, testTarget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.ConfigPaths) != 1 || plan.ConfigPaths[0] != high || len(plan.Changes) != 1 || plan.Changes[0].Field != "endpoint" || plan.Changes[0].Before != "https://high" {
+	if len(plan.ConfigPaths) != 1 || plan.ConfigPaths[0] != middle || len(plan.Changes) != 1 || plan.Changes[0].Field != "endpoint" || plan.Changes[0].Before != "https://middle" {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if _, err := service.Apply(context.Background(), plan); err != nil {
@@ -123,20 +123,78 @@ func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *tes
 	if !strings.Contains(string(lowAfter), `"apiKey":"operator"`) || !strings.Contains(string(lowAfter), `"limit":{"context":200000,"output":64000}`) || !strings.Contains(string(middleAfter), `"policies":"opaque"`) {
 		t.Fatal("operator-owned lower-precedence configuration changed")
 	}
-	for _, want := range []string{"keep comment", `"unrelated": true`, testTarget(t).WorkspaceURL()} {
+	for _, want := range []string{"keep comment", `"unrelated": true`} {
 		if !strings.Contains(string(highAfter), want) {
-			t.Fatalf("highest-precedence source missing %q:\n%s", want, highAfter)
+			t.Fatalf("highest-precedence unrelated config missing %q:\n%s", want, highAfter)
 		}
+	}
+	if !strings.Contains(string(middleAfter), testTarget(t).WorkspaceURL()) {
+		t.Fatalf("provider schema file missing new endpoint:\n%s", middleAfter)
 	}
 	for _, unowned := range []string{`"apiKey"`, `"models"`, `"limit"`} {
 		if strings.Contains(string(highAfter), unowned) {
-			t.Fatalf("highest-precedence file redundantly shadows lower %s:\n%s", unowned, highAfter)
+			t.Fatalf("unrelated high-priority file unexpectedly owns %s:\n%s", unowned, highAfter)
 		}
 	}
 	v2Home := t.TempDir()
-	writeOpenCodeConfig(t, openCodeConfigDir(v2Home, nil), "config.json", `{"providers":{}}`)
-	if _, err := openCodeService(t, v2Home, nil, false).Plan(context.Background(), ClientOpenCode, testTarget(t)); err == nil || !strings.Contains(err.Error(), "native V2") {
-		t.Fatalf("V2 error = %v", err)
+	v2Path := writeOpenCodeConfig(t, openCodeConfigDir(v2Home, nil), "config.json", `{"model":"other/model","providers":{},"websearch":{"enabled":true,"provider":"exa","consent":"granted"},"unrelated":{"keep":true}}`)
+	v2Service := openCodeService(t, v2Home, nil, false)
+	v2Plan, err := v2Service.Plan(context.Background(), ClientOpenCode, testTarget(t))
+	if err != nil {
+		t.Fatalf("V2 plan error = %v", err)
+	}
+	if len(v2Plan.Changes) == 0 {
+		t.Fatalf("V2 plan = %#v, want Swobu provider changes", v2Plan)
+	}
+	if _, err := v2Service.Apply(context.Background(), v2Plan); err != nil {
+		t.Fatalf("V2 apply error = %v", err)
+	}
+	v2Raw, err := os.ReadFile(v2Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"package":"@opencode/ai/providers/openai-compatible"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"model":"swobu/default"`, `"websearch":{"enabled":true,"provider":"exa","consent":"granted"}`, `"unrelated":{"keep":true}`} {
+		if !strings.Contains(string(v2Raw), want) {
+			t.Fatalf("V2 configuration missing %q:\n%s", want, v2Raw)
+		}
+	}
+}
+
+func TestOpenCodeRejectsConflictingV1AndV2Schemas(t *testing.T) {
+	home := t.TempDir()
+	dir := openCodeConfigDir(home, nil)
+	writeOpenCodeConfig(t, dir, "config.json", `{"provider":{}}`)
+	writeOpenCodeConfig(t, dir, "opencode.json", `{"providers":{}}`)
+	if _, err := openCodeService(t, home, nil, false).Plan(context.Background(), ClientOpenCode, testTarget(t)); err == nil || !strings.Contains(err.Error(), "schemas conflict") {
+		t.Fatalf("conflicting schema error = %v", err)
+	}
+}
+
+func TestOpenCodeIntroducesV2SchemaInHighestPriorityConfigLayer(t *testing.T) {
+	home := t.TempDir()
+	dir := openCodeConfigDir(home, nil)
+	low := writeOpenCodeConfig(t, dir, "config.json", `{"theme":"dark"}`)
+	high := writeOpenCodeConfig(t, dir, "opencode.jsonc", "{\n  // higher-priority operator layer\n  \"model\": \"other/model\",\n}\n")
+	service := openCodeService(t, home, nil, false)
+	plan, err := service.Plan(context.Background(), ClientOpenCode, testTarget(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConfigPaths) != 1 || plan.ConfigPaths[0] != high {
+		t.Fatalf("plan path = %#v, want highest-priority existing file %q", plan.ConfigPaths, high)
+	}
+	if _, err := service.Apply(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	highAfter, _ := os.ReadFile(high)
+	lowAfter, _ := os.ReadFile(low)
+	for _, want := range []string{"higher-priority operator layer", `"model": "swobu/default"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`} {
+		if !strings.Contains(string(highAfter), want) {
+			t.Fatalf("highest-priority config missing %q:\n%s", want, highAfter)
+		}
+	}
+	if string(lowAfter) != `{"theme":"dark"}` {
+		t.Fatalf("lower-priority config changed: %s", lowAfter)
 	}
 }
 

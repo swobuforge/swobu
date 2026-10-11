@@ -40,6 +40,15 @@ func openCodeLeaves(target Target) []openCodeLeaf {
 	}
 }
 
+func openCodeV2Leaves(target Target) []openCodeLeaf {
+	return []openCodeLeaf{
+		{field: "backend", path: keyPath{"model"}, after: "swobu/default", replace: true},
+		{field: "provider package", path: keyPath{"providers", "swobu", "package"}, after: "@opencode/ai/providers/openai-compatible"},
+		{field: "endpoint", path: keyPath{"providers", "swobu", "settings", "baseURL"}, after: target.WorkspaceURL(), replace: true},
+		{field: "model", path: keyPath{"providers", "swobu", "models", "default"}, after: "default", encoded: []byte(`{"name":"Swobu default"}`)},
+	}
+}
+
 func (s *Service) openCodePaths() ([]string, error) {
 	dir := s.getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -65,45 +74,33 @@ func planOpenCodeCurrent(_ context.Context, s *Service, target Target) (plannedM
 	if err != nil {
 		return plannedMutation{}, openCodeProblem(err)
 	}
-	leaves := openCodeLeaves(target)
-	values := make([]openCodeValue, len(leaves))
-	var writeFile foreignFile
 	editor := jsonEditor{allowComments: true}
+	files := make([]foreignFile, len(paths))
+	writeIndex := -1
 	for i, path := range paths {
 		file, err := inspectForeignFile(path, []byte("{}\n"))
 		if err != nil {
 			return plannedMutation{}, openCodeProblem(err)
 		}
-		if file.existed || (!writeFile.existed && i == len(paths)-1) {
-			writeFile = file
+		files[i] = file
+		if file.existed {
+			writeIndex = i
 		}
-		if !file.existed {
-			continue
+	}
+	for index := len(files) - 1; index >= 0; index-- {
+		if files[index].existed && openCodeHasProviderSchema(files[index], editor) {
+			writeIndex = index
+			break
 		}
-		var raw json.RawMessage
-		if exists, err := editor.Value(file.raw, keyPath{"providers"}, &raw); err != nil {
-			return plannedMutation{}, openCodeProblem(err)
-		} else if exists {
-			return plannedMutation{}, openCodeProblem(fmt.Errorf("native V2 providers configuration is not supported"))
-		}
-		for i, leaf := range leaves {
-			if leaf.replace {
-				value, exists, err := editor.String(file.raw, leaf.path)
-				if err != nil {
-					return plannedMutation{}, openCodeProblem(err)
-				}
-				if exists {
-					values[i] = openCodeValue{value: value, exists: true}
-				}
-				continue
-			}
-			var value json.RawMessage
-			exists, err := editor.Value(file.raw, leaf.path, &value)
-			if err != nil {
-				return plannedMutation{}, openCodeProblem(err)
-			}
-			values[i].exists = values[i].exists || exists
-		}
+	}
+	if writeIndex < 0 {
+		writeIndex = len(files) - 1
+	}
+	writeFile := files[writeIndex]
+
+	leaves, values, err := resolveOpenCodeSchema(files, target, editor)
+	if err != nil {
+		return plannedMutation{}, openCodeProblem(err)
 	}
 
 	var changes []Change
@@ -134,4 +131,81 @@ func planOpenCodeCurrent(_ context.Context, s *Service, target Target) (plannedM
 		}
 	}
 	return plannedMutation{plan: plan, apply: func(context.Context) error { return writeFile.replace(next) }}, nil
+}
+
+func openCodeHasProviderSchema(file foreignFile, editor jsonEditor) bool {
+	if !file.existed {
+		return false
+	}
+	for _, key := range []string{"provider", "providers"} {
+		var raw json.RawMessage
+		exists, err := editor.Value(file.raw, keyPath{key}, &raw)
+		if err == nil && exists {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveOpenCodeSchema(files []foreignFile, target Target, editor jsonEditor) ([]openCodeLeaf, []openCodeValue, error) {
+	v1Seen, v2Seen := false, false
+	for _, file := range files {
+		if !file.existed {
+			continue
+		}
+		for _, key := range []string{"provider", "providers"} {
+			var raw json.RawMessage
+			exists, err := editor.Value(file.raw, keyPath{key}, &raw)
+			if err != nil {
+				return nil, nil, err
+			}
+			if exists {
+				if len(raw) == 0 || raw[0] != '{' {
+					return nil, nil, fmt.Errorf("OpenCode %s configuration must be an object", key)
+				}
+				if key == "provider" {
+					v1Seen = true
+				} else {
+					v2Seen = true
+				}
+			}
+		}
+	}
+	if v1Seen && v2Seen {
+		return nil, nil, fmt.Errorf("OpenCode V1 and V2 provider schemas conflict across configuration files")
+	}
+	if !v2Seen {
+		return readOpenCodeLeaves(files, openCodeLeaves(target), editor)
+	}
+	return readOpenCodeLeaves(files, openCodeV2Leaves(target), editor)
+}
+
+func readOpenCodeLeaves(files []foreignFile, leaves []openCodeLeaf, editor jsonEditor) ([]openCodeLeaf, []openCodeValue, error) {
+	values := make([]openCodeValue, len(leaves))
+	for _, file := range files {
+		if !file.existed {
+			continue
+		}
+		for i, leaf := range leaves {
+			if leaf.replace {
+				value, exists, err := editor.String(file.raw, leaf.path)
+				if err != nil {
+					return nil, nil, err
+				}
+				if exists {
+					values[i] = openCodeValue{value: value, exists: true}
+				}
+				continue
+			}
+			var raw json.RawMessage
+			exists, err := editor.Value(file.raw, leaf.path, &raw)
+			if err != nil {
+				return nil, nil, err
+			}
+			if exists {
+				values[i].exists = true
+			}
+		}
+	}
+	return leaves, values, nil
 }

@@ -105,12 +105,22 @@ func ChatOutOfBandHostedSearch() chatcompletions.ToolTransformer {
 // ResponsesHostedSearchTool lowers canonical hosted search for Responses.
 // Source disclosure must be established independently for the exact target.
 func ResponsesHostedSearchTool(spelling string, supportsSourceInclude bool) responses.ToolTransformer {
-	return func(_ responses.ToolLoweringContext, tool canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
+	return func(ctx responses.ToolLoweringContext, tool canonical.ToolDeclaration) (responses.ToolProjection, []compat.Change, error) {
 		if spelling == "" {
 			return responses.ToolProjection{}, []compat.Change{{Capability: canonical.RequestToolsKind, Occurrence: canonical.ToolOccurrence(tool.Key()), Kind: compat.Omission}}, nil
 		}
-		return responses.HostedSearchProjection(responses.ProviderRequestTool{Type: spelling}, supportsSourceInclude), nil, nil
+		return responses.HostedSearchProjectionWithoutAccess(
+			responses.ProviderRequestTool{Type: spelling}, supportsSourceInclude,
+		)(ctx, tool)
 	}
+}
+
+// ResponsesHostedSearchWithAccessTool adds Codex's bounded access mode only
+// for targets whose hosted Responses contract accepts those exact fields.
+func ResponsesHostedSearchWithAccessTool(spelling string, supportsSourceInclude bool) responses.ToolTransformer {
+	return responses.HostedSearchWithAccessProjection(
+		responses.ProviderRequestTool{Type: spelling}, supportsSourceInclude,
+	)
 }
 
 // ResponsesCustomAsFunction lowers one canonical Custom declaration through

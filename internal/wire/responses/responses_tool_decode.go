@@ -141,6 +141,25 @@ func decodeResponsesToolNode(tool responsesToolDefinitionDTO, ctx responsesToolN
 }
 
 func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
+	if feature == canonical.ResponseItemsKind {
+		return decodeResponsesProviderWebSearchTool(tool, ctx, feature, changeLog, exchangeID)
+	}
+	return decodeResponsesWebSearchDetails(tool, ctx, feature, changeLog, exchangeID)
+}
+
+func decodeResponsesWebSearchDetails(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
+	if unknown := unknownResponsesWebSearchFields(tool); len(unknown) > 0 {
+		return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
+			"responses web-search declaration contains unrecognized constraints",
+			"Use only web-search fields supported by Swobu and retry",
+		)
+	}
+	if len(tool.unknownFields) > 0 {
+		return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
+			"responses web-search declaration contains unrecognized constraints",
+			"Use only web-search fields supported by Swobu and retry",
+		)
+	}
 	if strings.TrimSpace(tool.Name) != "" || len(tool.Tools) > 0 || len(tool.Parameters) > 0 || len(tool.Format) > 0 { // swobu:io-string source=boundary
 		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search tool has invalid declaration fields")
 	}
@@ -156,15 +175,20 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responses
 	if strings.TrimSpace(tool.OutputFormat) != "" { // swobu:io-string source=boundary
 		return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 	}
-	if tool.ExternalWebAccess != nil {
-		if !*tool.ExternalWebAccess {
-			return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
-		}
-		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Omission, responsesToolFieldSubject(ctx, "external_web_access")); err != nil {
-			return canonical.ToolDeclaration{}, false, err
-		}
+	accessMode, err := decodeResponsesWebSearchAccessMode(tool)
+	if err != nil {
+		return canonical.ToolDeclaration{}, false, err
+	}
+	if tool.IndexedWebAccess != nil && tool.ExternalWebAccess != nil && !*tool.ExternalWebAccess {
+		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search access constraints are contradictory")
 	}
 	if tool.Filters != nil {
+		if len(tool.Filters.unknownFields) > 0 {
+			return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
+				"responses web-search filters contain unrecognized constraints",
+				"Remove the unrecognized filters and retry",
+			)
+		}
 		for _, values := range [][]string{tool.Filters.AllowedDomains, tool.Filters.BlockedDomains} {
 			for _, value := range values {
 				if strings.TrimSpace(value) == "" {
@@ -172,11 +196,19 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responses
 				}
 			}
 			if len(values) > 0 {
-				return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
+				return canonical.ToolDeclaration{}, false, canonical.NotImplemented(
+					"selected target cannot preserve responses web-search domain filters",
+				)
 			}
 		}
 	}
 	if tool.UserLocation != nil {
+		if len(tool.UserLocation.unknownFields) > 0 {
+			return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
+				"responses web-search location contains unrecognized constraints",
+				"Use only web-search location fields supported by Swobu and retry",
+			)
+		}
 		if kind := strings.TrimSpace(tool.UserLocation.Type); kind != "approximate" { // swobu:io-string source=boundary
 			return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 		}
@@ -184,12 +216,69 @@ func decodeResponsesWebSearchTool(tool responsesToolDefinitionDTO, ctx responses
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
+	if tool.IndexedWebAccess != nil && !*tool.IndexedWebAccess {
+		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses indexed web access must be true when specified")
+	}
 	if raw := strings.TrimSpace(tool.SearchContextSize); raw != "" { // swobu:io-string source=boundary
 		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Approximation, responsesToolFieldSubject(ctx, "search_context_size")); err != nil {
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
-	return canonical.NewWebSearchDeclaration(), true, nil
+	declaration, err := canonical.NewWebSearchDeclarationWithAccess(accessMode)
+	if err != nil {
+		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search access mode is invalid")
+	}
+	return declaration, true, nil
+}
+
+func decodeResponsesProviderWebSearchTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
+	if len(unknownResponsesWebSearchFields(tool)) > 0 {
+		return canonical.ToolDeclaration{}, false, canonical.NewBackendError("responses", 0, "responses web-search declaration is malformed", "")
+	}
+	return decodeResponsesWebSearchDetails(tool, ctx, feature, changeLog, exchangeID)
+}
+
+func unknownResponsesWebSearchFields(tool responsesToolDefinitionDTO) []string {
+	allowed := map[string]struct{}{
+		"type": {}, "external_web_access": {}, "indexed_web_access": {},
+		"search_context_size": {}, "user_location": {}, "filters": {},
+		"search_content_types": {}, "output_format": {},
+	}
+	var unknown []string
+	for _, key := range tool.presentFields {
+		if _, ok := allowed[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	if tool.Filters != nil {
+		for _, key := range tool.Filters.presentFields {
+			if key != "allowed_domains" && key != "blocked_domains" {
+				unknown = append(unknown, "filters."+key)
+			}
+		}
+	}
+	if tool.UserLocation != nil {
+		allowedLocation := map[string]struct{}{"type": {}, "country": {}, "region": {}, "city": {}, "timezone": {}}
+		for _, key := range tool.UserLocation.presentFields {
+			if _, ok := allowedLocation[key]; !ok {
+				unknown = append(unknown, "user_location."+key)
+			}
+		}
+	}
+	return unknown
+}
+
+func decodeResponsesWebSearchAccessMode(tool responsesToolDefinitionDTO) (canonical.WebSearchAccessMode, error) {
+	if tool.IndexedWebAccess != nil && *tool.IndexedWebAccess {
+		return canonical.WebSearchAccessIndexed, nil
+	}
+	if tool.ExternalWebAccess != nil {
+		if !*tool.ExternalWebAccess {
+			return canonical.WebSearchAccessCached, nil
+		}
+		return canonical.WebSearchAccessLive, nil
+	}
+	return canonical.WebSearchAccessUnspecified, nil
 }
 
 func dropResponsesWebSearchOperation(ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {

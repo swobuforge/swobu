@@ -23,8 +23,16 @@ presence needed to review that write. Comments and all other settings remain
 operator-owned.
 
 Connect configures the normal global default; invocation-specific environment,
-project, organization, and managed settings may still override it. Native V2
-`providers` configuration is not supported.
+project, organization, and managed settings may still override it. Connect
+detects the V1 `provider` and V2 `providers` schema and updates the matching
+Swobu model binding without changing V2's `websearch` provider, enablement, or
+first-use consent. Conflicting V1 and V2 schemas fail planning rather than
+guessing.
+
+OpenCode V1 gates Exa/Parallel-backed `websearch` for non-OpenCode providers on
+`OPENCODE_ENABLE_EXA` or `OPENCODE_ENABLE_PARALLEL`, read when OpenCode starts.
+Connect does not change process or shell environment; configure the relevant
+variable before launching OpenCode if that V1 search backend is selected.
 
 `swobu/default` is a route facade, so Connect does not advertise context or
 output limits when the selected route's concrete model limits are unavailable.

@@ -102,6 +102,11 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
+	var webSearch bool
+	webSearchExists, err := editor.Value(file.raw, keyPath{"web_search"}, &webSearch)
+	if err != nil {
+		return plannedMutation{}, kiloProblem(err)
+	}
 	changes := semanticChange("backend", model, modelExists, "swobu/default")
 	changes = append(changes, semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())...)
 	if !nameExists {
@@ -111,6 +116,11 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 		changes = append(changes, semanticChange("default model", "", false, "default")...)
 	}
 	changes = append(changes, semanticChange("tool calls", fmt.Sprint(toolCall), toolCallExists, "true")...)
+	webSearchBefore := ""
+	if webSearchExists {
+		webSearchBefore = fmt.Sprint(webSearch)
+	}
+	changes = append(changes, semanticChange("web search", webSearchBefore, webSearchExists, "true")...)
 	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
@@ -132,6 +142,12 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 	next, err = setJSONValue(editor, next, keyPath{"provider", "swobu", "models", "default", "tool_call"}, true)
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
+	}
+	if !webSearch {
+		next, err = setJSONValue(editor, next, keyPath{"web_search"}, true)
+		if err != nil {
+			return plannedMutation{}, kiloProblem(err)
+		}
 	}
 	return plannedMutation{plan: plan, apply: func(context.Context) error { return file.replace(next) }}, nil
 }

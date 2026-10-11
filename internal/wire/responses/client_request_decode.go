@@ -53,6 +53,10 @@ func (decoder ClientRequestDecoder) DecodeClientRequest(doc carrier.Document) (w
 		if err != nil {
 			return wire.ClientRequestResult{}, err
 		}
+		history.request, err = fingerprintResponsesWebSearchDeclarations(history.request, dto.Tools)
+		if err != nil {
+			return wire.ClientRequestResult{}, err
+		}
 		result := wire.ClientRequestResult{Request: request, Delivery: delivery, CacheLocality: locality, MCPAccess: access, RequestFingerprint: history.request}
 		if !explicit && history.previous != nil {
 			rebasedDTO := dto

@@ -73,6 +73,25 @@ func FingerprintRequest(scheme Scheme, material []byte) (Request, error) {
 	return Request{scheme: scheme, sum: leafSum(requestDomain, scheme, material)}, nil
 }
 
+// WithAdditionalMaterial derives a request fingerprint that also accounts for
+// one independently normalized request-owned semantic band.
+func (r Request) WithAdditionalMaterial(material []byte) (Request, error) {
+	if r.scheme == "" || r.sum == ([sha256.Size]byte{}) {
+		return Request{}, errors.New("history request fingerprint is invalid")
+	}
+	var framed bytes.Buffer
+	writeBytesFrame(&framed, r.sum[:])
+	writeBytesFrame(&framed, material)
+	return FingerprintRequest(r.scheme, framed.Bytes())
+}
+
+func writeBytesFrame(dst *bytes.Buffer, value []byte) {
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+	_, _ = dst.Write(size[:])
+	_, _ = dst.Write(value)
+}
+
 // FingerprintResponse hashes protocol-native response material under the
 // response leaf domain. Empty schemes are rejected.
 func FingerprintResponse(scheme Scheme, material []byte) (Response, error) {
