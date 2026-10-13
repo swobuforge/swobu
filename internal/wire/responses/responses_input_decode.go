@@ -13,26 +13,6 @@ import (
 	shared "github.com/swobuforge/swobu/internal/wire/shared"
 )
 
-// responsesLitePrefixEnd is the single positional classifier shared by input
-// decoding and history rebasing. Lite only owns the known Codex prefix; later
-// developer messages remain ordinary conversation items.
-func responsesLitePrefixEnd(lite bool, length int, itemAt func(int) (string, string)) int {
-	if !lite || length == 0 {
-		return 0
-	}
-	typeName, role := itemAt(0)
-	if strings.TrimSpace(typeName) != "additional_tools" || strings.TrimSpace(role) != "developer" {
-		return 0
-	}
-	if length > 1 {
-		typeName, role = itemAt(1)
-		if strings.TrimSpace(typeName) == "message" && strings.TrimSpace(role) == "developer" {
-			return 2
-		}
-	}
-	return 1
-}
-
 // swobu:lint ignore function-complexity because=responses input decoding keeps all acceptance branches in one protocol boundary helper.
 func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration, semantics clientRequestSemantics, changeLog *[]compat.Change, exchangeID string, imageLimits shared.ImageDecodeLimitPolicy, access *mcp.Access) ([]canonical.CanonicalItem, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw))) // swobu:io-string source=boundary
@@ -105,7 +85,7 @@ func decodeResponsesInput(raw json.RawMessage, tools []canonical.ToolDeclaration
 			if err != nil {
 				return nil, err
 			}
-			if idx < prefixEnd && idx == 1 && role == "developer" {
+			if idx == prefixEnd-1 && role == "developer" {
 				for _, part := range parts {
 					message, ok := part.Message()
 					if !ok {

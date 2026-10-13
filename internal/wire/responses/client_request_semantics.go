@@ -21,20 +21,33 @@ type clientRequestSemantics struct {
 	requestInputPrefixEnd int
 }
 
+// The marked Lite prefix contains optional tools and optional base instructions.
+// Codex rebuilds these request-owned items even for tool-less compaction prompts.
 func resolveClientRequestSemantics(dto responsesRequestDTO, marker bool) (clientRequestSemantics, error) {
 	if !marker {
 		return clientRequestSemantics{dialect: sourceDialectStandard}, nil
 	}
+	if len(dto.Instructions) != 0 {
+		var instructions string
+		if err := json.Unmarshal(dto.Instructions, &instructions); err != nil || instructions != "" || strings.TrimSpace(string(dto.Instructions)) == "null" {
+			return clientRequestSemantics{}, canonical.BadRequest("Responses Lite top-level instructions must be empty or absent")
+		}
+	}
+	semantics := clientRequestSemantics{dialect: sourceDialectCodexLite}
 	var items []responsesInputItemDTO
-	if err := json.Unmarshal(dto.Input, &items); err != nil || len(items) == 0 ||
-		strings.TrimSpace(items[0].Type) != "additional_tools" || strings.TrimSpace(items[0].Role) != "developer" {
-		return clientRequestSemantics{}, canonical.BadRequest("Codex Responses Lite marker requires an additional_tools developer prefix")
+	if err := json.Unmarshal(dto.Input, &items); err != nil {
+		// The ordinary input decoder validates strings and malformed input. Neither
+		// carries a request-owned prefix, but the marker still selects Lite semantics.
+		return semantics, nil
 	}
-	prefixEnd := 1
-	if len(items) > 1 && strings.TrimSpace(items[1].Type) == "message" && strings.TrimSpace(items[1].Role) == "developer" {
-		prefixEnd = 2
+	if len(items) > 0 && strings.TrimSpace(items[0].Type) == "additional_tools" && strings.TrimSpace(items[0].Role) == "developer" {
+		semantics.requestInputPrefixEnd = 1
 	}
-	return clientRequestSemantics{dialect: sourceDialectCodexLite, requestInputPrefixEnd: prefixEnd}, nil
+	index := semantics.requestInputPrefixEnd
+	if index < len(items) && strings.TrimSpace(items[index].Type) == "message" && strings.TrimSpace(items[index].Role) == "developer" {
+		semantics.requestInputPrefixEnd = index + 1
+	}
+	return semantics, nil
 }
 
 func (s clientRequestSemantics) isLite() bool { return s.dialect == sourceDialectCodexLite }

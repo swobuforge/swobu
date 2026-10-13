@@ -117,6 +117,9 @@ func (decoder ClientRequestDecoder) decodeClientRequestDTOWithChanges(dto respon
 	if err != nil {
 		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), err
 	}
+	if semantics.isLite() && supplied.Tools {
+		return canonical.CanonicalRequest{}, delivery.BufferedDelivery(), canonical.BadRequest("Responses Lite top-level tools must be absent")
+	}
 	logResponsesRawInput(dto.Input, strings.TrimSpace(dto.PreviousResponseWireID), exchangeID, decodeView) // swobu:io-string source=boundary
 	logResponsesInputStructure(dto.Input, exchangeID, decodeView)
 	streamRequested, err := core.DecodeRequestStreamFlag(raw, "responses")
