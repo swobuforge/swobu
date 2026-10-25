@@ -119,8 +119,49 @@ func (f foreignFile) replace(next []byte) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
+	if f.existed {
+		if err := backupForeignFile(f.physical, f.raw, f.mode); err != nil {
+			return fmt.Errorf("backup client configuration: %w", err)
+		}
+	}
 	if err := replaceForeignFile(tempPath, f.physical); err != nil {
 		return fmt.Errorf("replace client configuration: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func backupForeignFile(destination string, raw []byte, mode fs.FileMode) error {
+	backupPath := destination + ".swobu.bak"
+	temp, err := os.CreateTemp(filepath.Dir(backupPath), "."+filepath.Base(backupPath)+"-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	committed := false
+	defer func() {
+		_ = temp.Close()
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if mode == 0 {
+		mode = 0o600
+	}
+	if err := temp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := temp.Write(raw); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := replaceForeignFile(tempPath, backupPath); err != nil {
+		return fmt.Errorf("publish backup: %w", err)
 	}
 	committed = true
 	return nil

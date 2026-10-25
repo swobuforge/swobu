@@ -143,7 +143,7 @@ func TestOpenAICacheSensitiveRenderingIgnoresExecutionContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			project := func(exchangeID, locality string, d delivery.Delivery) []byte {
-				document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality)}, Canonical: request, Delivery: d})
+				document, _, err := backend.Codec.Encode(provider.Request{Attempt: provider.AttemptContext{CorrelationID: exchangeID, CacheLocality: cachelocality.Explicit(locality)}, Canonical: request, Delivery: d})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -312,7 +312,7 @@ func TestOfficialOpenAIRuntimeCapturesStoredResponsesContinuation(t *testing.T) 
 		Model: canonical.Specify("gpt-test"),
 		Items: []canonical.CanonicalItem{canonicaltest.Message(t, canonical.MessageRoleUser, "turn one")},
 	})
-	firstRequest := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "official-openai-capture"}, Canonical: turnOne, Delivery: delivery.BufferedDelivery()}
+	firstRequest := provider.Request{Attempt: provider.AttemptContext{CorrelationID: "official-openai-capture"}, Canonical: turnOne, Delivery: delivery.BufferedDelivery()}
 	firstDocument, _, err := backend.Codec.Encode(firstRequest)
 	if err != nil {
 		t.Fatal(err)

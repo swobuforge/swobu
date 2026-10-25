@@ -23,7 +23,7 @@ func TestMessagesClientReceivesImmediateStructuredResponsesError(t *testing.T) {
 	defer setDefaultLogger()
 	body := "event: error\ndata: {\"type\":\"error\",\"status_code\":429,\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\"},\"request_id\":\"req_provider\"}\n\n"
 	handler := terminalProjectionHandler(t, terminalProjectionTransport{body: body})
-	request := httptest.NewRequest(http.MethodPost, "/c/personal/messages", strings.NewReader(`{"model":"default","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/workspaces/personal/messages", strings.NewReader(`{"model":"terminal-route","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("anthropic-version", "2023-06-01")
 	request.Header.Set("X-Request-Id", "req_cross_family_error")
@@ -104,7 +104,7 @@ func (r terminalProjectionRuntime) ResolveBackend(target provider.TargetSnapshot
 
 func TestChatStreamingClientProjectsResponsesCompletedAsStop(t *testing.T) {
 	handler := terminalProjectionHandler(t, terminalProjectionTransport{})
-	request := httptest.NewRequest(http.MethodPost, "/c/personal/chat/completions", strings.NewReader(`{"model":"default","messages":[{"role":"user","content":"hello"}],"stream":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/workspaces/personal/chat/completions", strings.NewReader(`{"model":"terminal-route","messages":[{"role":"user","content":"hello"}],"stream":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_terminal_projection")
 	response := httptest.NewRecorder()
@@ -133,7 +133,7 @@ func TestChatStreamingClientProjectsPostIdentityResponsesFailureInStream(t *test
 	body := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_provider\",\"model\":\"responses-model\",\"status\":\"in_progress\"}}\n\n" +
 		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_provider\",\"model\":\"responses-model\",\"status\":\"failed\",\"error\":{\"code\":\"backend_failed\",\"message\":\"provider failed\"}}}\n\n"
 	handler := terminalProjectionHandler(t, terminalProjectionTransport{body: body})
-	request := httptest.NewRequest(http.MethodPost, "/c/personal/chat/completions", strings.NewReader(`{"model":"default","messages":[{"role":"user","content":"hello"}],"stream":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/workspaces/personal/chat/completions", strings.NewReader(`{"model":"terminal-route","messages":[{"role":"user","content":"hello"}],"stream":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_terminal_failure")
 	response := httptest.NewRecorder()
@@ -159,9 +159,9 @@ func terminalProjectionHandler(t *testing.T, transport terminalProjectionTranspo
 	ingress := exchange.NewIngress(
 		terminalProjectionWorkspaceLookup{workspace: workspace},
 		runtime,
-		exchange.RuntimePoliciesSpec{PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()}},
+		exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel, PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()}},
 	)
-	return localAuthorityTestHandler(NewHandler(ingress))
+	return localAuthorityTestHandler(NewWorkspaceDataHandler(ingress))
 }
 
 func terminalProjectionWorkspace(t *testing.T) routing.Workspace {
@@ -179,13 +179,13 @@ func terminalProjectionWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, registerHTTPModel(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tier, _ := routing.NewTier([]routing.Target{target})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

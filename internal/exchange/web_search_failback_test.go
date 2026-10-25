@@ -170,6 +170,7 @@ func TestSettledSearchHistoryReentersLocalTarget(t *testing.T) {
 
 func capabilityFallbackIngress(workspace routing.Workspace, store continuity.Store, runtime capabilityFallbackRuntime) RequestIngress {
 	return NewIngress(capabilityFallbackWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
+		ModelConnection: LookupModelFixture,
 		CheckpointStore: store,
 		ResponseIDs:     deterministicResponseIDGenerator{},
 	})
@@ -241,7 +242,7 @@ func capabilityFallbackWorkspace(t *testing.T, slugName string, tiers ...[]routi
 		t.Fatal(err)
 	}
 	slug, _ := routing.ParseWorkspaceSlug(slugName)
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +259,7 @@ func capabilityFallbackTarget(t *testing.T, id, protocolName string) routing.Tar
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, ModelFixtureConnection(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}

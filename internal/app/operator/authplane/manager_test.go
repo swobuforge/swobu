@@ -33,26 +33,8 @@ func (d driverStub) Cancel(ctx context.Context, sessionID string) error {
 	return d.cancelFn(ctx, sessionID)
 }
 
-type storeStub struct {
-	provider  string
-	subject   CredentialSubject
-	ref       string
-	returnRef string
-	err       error
-}
-
-func (s *storeStub) SetCredential(_ context.Context, subject CredentialSubject, credentialRef string) (string, error) {
-	s.subject = subject
-	s.ref = credentialRef
-	if s.err != nil {
-		return "", s.err
-	}
-	return s.returnRef, nil
-}
-
-func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
+func TestManagerStartAndPollSuccessReturnsDriverCredentialRef(t *testing.T) {
 	t.Parallel()
-	store := &storeStub{}
 	manager, err := NewAuthSessionManager(driverStub{
 		startFn: func(_ context.Context, in StartInput) (DriverStartResult, error) {
 			if in.ProviderSpec != "chatgpt" {
@@ -66,7 +48,7 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 			}
 			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "secret:chatgpt/default"}, nil
 		},
-	}, store)
+	})
 	if err != nil {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
@@ -89,40 +71,11 @@ func TestManagerStartAndPollSuccessPersistsCredentialRef(t *testing.T) {
 	if session.CredentialRef != "secret:chatgpt/default" {
 		t.Fatalf("session credential ref = %q", session.CredentialRef)
 	}
-	if store.subject.DraftSubject != "subject:acme" || store.ref != "secret:chatgpt/default" {
-		t.Fatalf("store write mismatch subject=%#v ref=%q", store.subject, store.ref)
-	}
-}
-
-func TestManagerPollUsesPersistedCredentialRefOverride(t *testing.T) {
-	t.Parallel()
-	store := &storeStub{returnRef: "memory:chatgpt/acme"}
-	manager, err := NewAuthSessionManager(driverStub{
-		startFn: func(_ context.Context, _ StartInput) (DriverStartResult, error) {
-			return DriverStartResult{SessionID: "sess-2"}, nil
-		},
-		pollFn: func(_ context.Context, _ string) (DriverPollResult, error) {
-			return DriverPollResult{State: SessionStateSucceeded, CredentialRef: "secret:chatgpt/default"}, nil
-		},
-	}, store)
-	if err != nil {
-		t.Fatalf("NewAuthSessionManager error: %v", err)
-	}
-	if _, err := manager.Start(context.Background(), StartInput{ProviderSpec: "chatgpt", DraftSubject: "subject:acme"}); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	session, err := manager.Poll(context.Background(), "sess-2")
-	if err != nil {
-		t.Fatalf("Poll error: %v", err)
-	}
-	if session.CredentialRef != "memory:chatgpt/acme" {
-		t.Fatalf("session credential ref = %q, want memory override", session.CredentialRef)
-	}
 }
 
 func TestManagerPollUnknownSessionFails(t *testing.T) {
 	t.Parallel()
-	manager, err := NewAuthSessionManager(driverStub{}, nil)
+	manager, err := NewAuthSessionManager(driverStub{})
 	if err != nil {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
@@ -139,7 +92,7 @@ func TestManagerCancelPropagatesDriverError(t *testing.T) {
 			return DriverStartResult{SessionID: "sess-1"}, nil
 		},
 		cancelFn: func(_ context.Context, _ string) error { return wantErr },
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("NewAuthSessionManager error: %v", err)
 	}
@@ -148,38 +101,5 @@ func TestManagerCancelPropagatesDriverError(t *testing.T) {
 	}
 	if err := manager.Cancel(context.Background(), "sess-1"); !errors.Is(err, wantErr) {
 		t.Fatalf("Cancel error = %v, want %v", err, wantErr)
-	}
-}
-
-func TestManagerRetryReusesStartInput(t *testing.T) {
-	t.Parallel()
-	var seen []StartInput
-	manager, err := NewAuthSessionManager(driverStub{
-		startFn: func(_ context.Context, in StartInput) (DriverStartResult, error) {
-			seen = append(seen, in)
-			if len(seen) == 1 {
-				return DriverStartResult{SessionID: "sess-1"}, nil
-			}
-			return DriverStartResult{SessionID: "sess-2"}, nil
-		},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewAuthSessionManager error: %v", err)
-	}
-	_, err = manager.Start(context.Background(), StartInput{
-		ProviderSpec: "chatgpt",
-		Workspace:    "main", Route: "chat", TargetID: "cfg-a",
-	})
-	if err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	if _, err := manager.Retry(context.Background(), "sess-1"); err != nil {
-		t.Fatalf("Retry error: %v", err)
-	}
-	if len(seen) != 2 {
-		t.Fatalf("start count = %d", len(seen))
-	}
-	if seen[1].ProviderSpec != "chatgpt" || seen[1].Workspace != "main" || seen[1].TargetID != "cfg-a" {
-		t.Fatalf("retry input lost fields: %#v", seen[1])
 	}
 }

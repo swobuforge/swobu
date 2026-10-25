@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
@@ -55,8 +54,8 @@ func TestRunner_InteractiveVersionNotice_ShowsUpdateCommandBeforeAttach(t *testi
 		"update: swobu update",
 		"hide: export " + platformconfig.EnvSkipVersionNotice + "=1",
 	})
-	if !strings.Contains(text, "press Enter to continue") {
-		t.Fatalf("missing continue prompt; stdout=%q", text)
+	if strings.Contains(text, "press Enter to continue") {
+		t.Fatalf("web launch must not wait for a terminal prompt: %q", text)
 	}
 }
 
@@ -237,7 +236,7 @@ func TestRunner_InteractiveVersionNotice_FetchErrorDoesNotBlockAttach(t *testing
 	}
 }
 
-func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttach(t *testing.T) {
+func TestRunner_WebVersionNoticeRequiresNoAcknowledgement(t *testing.T) {
 	originalFetch := fetchLatestVersion
 	originalCurrent := currentSwobuVersion
 	fetchLatestVersion = func() (string, error) { return "v999.0.0", nil }
@@ -262,8 +261,10 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 			attachCalled = true
 			return nil
 		},
-		LaunchInteractive: func(context.Context, io.Reader, io.Writer, io.Writer, string) error { return nil },
-		Sleep:             func(time.Duration) {},
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"launch_path":"/open#AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`))}, nil
+		})},
+		OpenBrowser: func(string) error { return nil },
 	}
 
 	exitCode := runner.Run(context.Background(), nil)
@@ -276,7 +277,7 @@ func TestRunner_InteractiveVersionNotice_MissingAcknowledgeInputContinuesToAttac
 	if stderr.String() != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "press Enter to continue") {
-		t.Fatalf("stdout missing continue prompt: %q", stdout.String())
+	if strings.Contains(stdout.String(), "press Enter to continue") {
+		t.Fatalf("web launch blocked on a terminal prompt: %q", stdout.String())
 	}
 }

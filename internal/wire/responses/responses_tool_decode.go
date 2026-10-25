@@ -175,13 +175,6 @@ func decodeResponsesWebSearchDetails(tool responsesToolDefinitionDTO, ctx respon
 	if strings.TrimSpace(tool.OutputFormat) != "" { // swobu:io-string source=boundary
 		return dropResponsesWebSearchOperation(ctx, feature, changeLog, exchangeID)
 	}
-	accessMode, err := decodeResponsesWebSearchAccessMode(tool)
-	if err != nil {
-		return canonical.ToolDeclaration{}, false, err
-	}
-	if tool.IndexedWebAccess != nil && tool.ExternalWebAccess != nil && !*tool.ExternalWebAccess {
-		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search access constraints are contradictory")
-	}
 	if tool.Filters != nil {
 		if len(tool.Filters.unknownFields) > 0 {
 			return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
@@ -196,8 +189,11 @@ func decodeResponsesWebSearchDetails(tool responsesToolDefinitionDTO, ctx respon
 				}
 			}
 			if len(values) > 0 {
-				return canonical.ToolDeclaration{}, false, canonical.NotImplemented(
-					"selected target cannot preserve responses web-search domain filters",
+				// The canonical declaration has no domain restriction. Reject at
+				// source admission before routing; no target was inspected.
+				return canonical.ToolDeclaration{}, false, canonical.ClientUnsupportedOperation(
+					"Swobu cannot represent responses web-search domain filters",
+					"Remove the domain filters and retry",
 				)
 			}
 		}
@@ -216,19 +212,16 @@ func decodeResponsesWebSearchDetails(tool responsesToolDefinitionDTO, ctx respon
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
-	if tool.IndexedWebAccess != nil && !*tool.IndexedWebAccess {
-		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses indexed web access must be true when specified")
-	}
 	if raw := strings.TrimSpace(tool.SearchContextSize); raw != "" { // swobu:io-string source=boundary
 		if err := appendResponsesOccurrenceChange(changeLog, exchangeID, feature, compat.Approximation, responsesToolFieldSubject(ctx, "search_context_size")); err != nil {
 			return canonical.ToolDeclaration{}, false, err
 		}
 	}
-	declaration, err := canonical.NewWebSearchDeclarationWithAccess(accessMode)
-	if err != nil {
-		return canonical.ToolDeclaration{}, false, canonical.BadRequest("responses web-search access mode is invalid")
-	}
-	return declaration, true, nil
+	// Codex versions send external_web_access and indexed_web_access on their
+	// hosted-search declaration. Those newer client hints are intentionally
+	// accepted at ingress and dropped before canonicalization; they are not a
+	// Swobu semantic or outbound provider field.
+	return canonical.NewWebSearchDeclaration(), true, nil
 }
 
 func decodeResponsesProviderWebSearchTool(tool responsesToolDefinitionDTO, ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {
@@ -266,19 +259,6 @@ func unknownResponsesWebSearchFields(tool responsesToolDefinitionDTO) []string {
 		}
 	}
 	return unknown
-}
-
-func decodeResponsesWebSearchAccessMode(tool responsesToolDefinitionDTO) (canonical.WebSearchAccessMode, error) {
-	if tool.IndexedWebAccess != nil && *tool.IndexedWebAccess {
-		return canonical.WebSearchAccessIndexed, nil
-	}
-	if tool.ExternalWebAccess != nil {
-		if !*tool.ExternalWebAccess {
-			return canonical.WebSearchAccessCached, nil
-		}
-		return canonical.WebSearchAccessLive, nil
-	}
-	return canonical.WebSearchAccessUnspecified, nil
 }
 
 func dropResponsesWebSearchOperation(ctx responsesToolNamespaceContext, feature canonical.CapabilityPath, changeLog *[]compat.Change, exchangeID string) (canonical.ToolDeclaration, bool, error) {

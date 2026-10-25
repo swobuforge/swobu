@@ -3,6 +3,7 @@ package bedrock
 import (
 	"context"
 	"errors"
+	providerdomain "github.com/swobuforge/swobu/internal/provider"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/routing"
@@ -26,7 +27,7 @@ func TestDeadSupportedCredentialReferencesNeverResolveAsReady(t *testing.T) {
 			if err != nil {
 				t.Fatalf("real credential grammar rejected supported ref: %v", err)
 			}
-			_, err = resolveBedrockAuth(context.Background(), resolutionCredentialProvider{err: errors.New("not found")}, connection.Credential().String(), region.String())
+			_, err = resolveBedrockAuth(context.Background(), resolutionCredentialProvider{err: errors.New("not found")}, providerdomain.TargetSnapshot{ProviderSpec: "bedrock", CredentialRef: connection.Credential().String()}, region.String())
 			if err == nil {
 				t.Fatal("dead credential reference became ready")
 			}
@@ -40,7 +41,7 @@ func (p resolutionCredentialProvider) ResolveCredential(context.Context, string,
 
 func TestResolveBedrockAuthRejectsDeadTargetReferenceBeforeAmbientFallback(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ambient-token")
-	_, err := resolveBedrockAuth(context.Background(), resolutionCredentialProvider{err: errors.New("missing")}, "env:MISSING", "eu-west-2")
+	_, err := resolveBedrockAuth(context.Background(), resolutionCredentialProvider{err: errors.New("missing")}, providerdomain.TargetSnapshot{ProviderSpec: "bedrock", CredentialRef: "env:MISSING"}, "eu-west-2")
 	if err == nil {
 		t.Fatal("dead target credential became usable evidence")
 	}
@@ -48,7 +49,7 @@ func TestResolveBedrockAuthRejectsDeadTargetReferenceBeforeAmbientFallback(t *te
 
 func TestResolveBedrockAuthCredentialReferenceSelectsBearer(t *testing.T) {
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ambient-token")
-	resolved, err := resolveBedrockAuth(context.Background(), resolutionCredentialProvider{value: "target-token"}, "secret:target", "eu-west-2")
+	resolved, err := resolveBedrockAuth(context.Background(), resolutionCredentialProvider{value: "target-token"}, providerdomain.TargetSnapshot{ProviderSpec: "bedrock", CredentialRef: "secret:target"}, "eu-west-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestResolveBedrockAuthCredentialReferenceSelectsBearer(t *testing.T) {
 
 func TestResolveBedrockAuthReloadsAWSConfiguration(t *testing.T) {
 	setStaticAWSCredentials(t, "first-access", "first-secret", "")
-	first, err := resolveBedrockAuth(context.Background(), nil, "", "eu-west-2")
+	first, err := resolveBedrockAuth(context.Background(), nil, providerdomain.TargetSnapshot{ProviderSpec: "bedrock"}, "eu-west-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestResolveBedrockAuthReloadsAWSConfiguration(t *testing.T) {
 	}
 	t.Setenv("AWS_ACCESS_KEY_ID", "second-access")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "second-secret")
-	second, err := resolveBedrockAuth(context.Background(), nil, "", "eu-west-2")
+	second, err := resolveBedrockAuth(context.Background(), nil, providerdomain.TargetSnapshot{ProviderSpec: "bedrock"}, "eu-west-2")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package chatgptlogin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -89,6 +90,9 @@ type LoginService struct {
 	callbackIdleTimer   *time.Timer
 	callbackIdleTTL     time.Duration
 	evictOnce           sync.Once
+	evictStop           chan struct{}
+	evictDone           chan struct{}
+	closed              bool
 }
 
 type sessionRecord struct {
@@ -170,6 +174,8 @@ func NewService(httpClient *http.Client, cfg ServiceConfig) *LoginService {
 		sessions:        map[string]*sessionRecord{},
 		sessionByState:  map[string]string{},
 		callbackIdleTTL: cfg.CallbackIdleTTL,
+		evictStop:       make(chan struct{}),
+		evictDone:       make(chan struct{}),
 	}
 	svc.startEvictionLoop()
 	return svc
@@ -179,13 +185,19 @@ func (s *LoginService) startEvictionLoop() {
 	s.evictOnce.Do(func() {
 		interval := s.config.SessionEvictEvery
 		go func() {
+			defer close(s.evictDone)
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			for range ticker.C {
-				now := s.config.Now()
-				s.mu.Lock()
-				s.evictExpiredLocked(now)
-				s.mu.Unlock()
+			for {
+				select {
+				case <-s.evictStop:
+					return
+				case <-ticker.C:
+					now := s.config.Now()
+					s.mu.Lock()
+					s.evictExpiredLocked(now)
+					s.mu.Unlock()
+				}
 			}
 		}()
 	})
@@ -198,6 +210,12 @@ func (s *LoginService) SetPublicBaseURL(raw string) {
 }
 
 func (s *LoginService) Start(ctx context.Context, in StartInput) (StartOutput, error) {
+	s.mu.RLock()
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed {
+		return StartOutput{}, fmt.Errorf("chatgpt login service is shut down")
+	}
 	authMode := canonicalAuthMode(in.AuthMode)
 	if authMode == "" {
 		return StartOutput{}, fmt.Errorf("chatgpt login auth mode is required (browser or device)")
@@ -255,6 +273,11 @@ func (s *LoginService) Start(ctx context.Context, in StartInput) (StartOutput, e
 	}
 
 	s.mu.Lock()
+	if s.closed {
+		s.closeCallbackServerIfIdleLocked()
+		s.mu.Unlock()
+		return StartOutput{}, fmt.Errorf("chatgpt login service is shut down")
+	}
 	if authMode == "browser" {
 		s.callbackActiveCount++
 		if s.callbackIdleTimer != nil {
@@ -276,6 +299,54 @@ func (s *LoginService) Start(ctx context.Context, in StartInput) (StartOutput, e
 		ExpiresAt:    rec.createdAt.Add(authSessionTTL).UTC(),
 		State:        SessionPending,
 	}, nil
+}
+
+// Shutdown retires the callback listener and in-flight browser handoffs after
+// the daemon has drained its HTTP requests. Pending sessions become canceled,
+// the listener is closed synchronously, and no later start can bind it again.
+func (s *LoginService) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		close(s.evictStop)
+		for _, rec := range s.sessions {
+			if !rec.terminal {
+				s.setTerminalStateLocked(rec, SessionCanceled, "daemon shut down")
+			}
+		}
+		if s.callbackIdleTimer != nil {
+			s.callbackIdleTimer.Stop()
+			s.callbackIdleTimer = nil
+		}
+	}
+	server := s.callbackServer
+	listener := s.callbackListener
+	s.callbackServer = nil
+	s.callbackListener = nil
+	s.mu.Unlock()
+	<-s.evictDone
+	if server == nil {
+		return nil
+	}
+	// Server.Shutdown closes listeners already registered by Serve. The
+	// listener is created before Serve starts in its goroutine, so shutdown can
+	// otherwise miss it and return while that goroutine still owns the socket.
+	// Close our owned listener first; Shutdown then drains any registered
+	// callback handlers and joins the server's normal listener teardown.
+	var listenerErr error
+	if listener != nil {
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			listenerErr = err
+		}
+	}
+	shutdownErr := server.Shutdown(ctx)
+	if errors.Is(shutdownErr, net.ErrClosed) {
+		shutdownErr = nil
+	}
+	return errors.Join(listenerErr, shutdownErr)
 }
 
 // Cancel marks a known auth session as canceled. Browser sessions decrement

@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> 제품은 웹 중심 구조로 전환 중입니다. 현재 제품 방향과 설치 안내는 [영문 README](README.md)를 참고하세요. 아래 화면 안내는 이전 버전을 설명합니다.
+
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · **한국어** · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code, Codex 및 다른 AI 에이전트를 하나의 엔드포인트에서 DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock 등으로 연결하고 자동 라우팅, 로드 밸런싱, 페일오버를 적용합니다.**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-설치 프로그램이 Swobu를 실행하고 터미널 UI인 **Cockpit**을 엽니다.
+설치 프로그램이 Swobu를 실행하고 브라우저에서 **Web Operator**를 엽니다.
 
 프로바이더를 추가하고 route를 만든 뒤 에이전트를 연결하세요.
 
 ### 에이전트 연결
 
-Cockpit이 지원되는 클라이언트를 설정할 수 있습니다.
+Web Operator에서 지원되는 클라이언트 설정을 진행할 수 있습니다.
 
 또는 CLI를 사용하세요.
 

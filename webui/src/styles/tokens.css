@@ -1,0 +1,8 @@
+:root {
+  color-scheme: light;
+  --nav: #071a35; --navline: #17365f; --paper: #f4f7fb; --surface: #fff;
+  --ink: #14213a; --ink2: #33415d; --muted: #61708c; --line: #d8e1ee;
+  --cobalt: #2855e7; --cyan: #12c9ec; --bluewash: #edf2ff;
+  --mono: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --sans: Inter, 'Segoe UI', system-ui, sans-serif;
+}

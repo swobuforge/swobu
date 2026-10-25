@@ -1,20 +1,17 @@
 // Runtime lane: daemon HTTP client behavior and transport orchestration.
 //
 // Shared HTTP client for the daemon operator control plane.
-// All operator clients (TUI, CLI, WebUI) should use this package
+// All typed operator clients should use this package
 // rather than issuing raw HTTP requests.
 package operatorclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-
-	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 )
 
 // Client talks to the daemon's semantic operator control plane.
@@ -29,6 +26,10 @@ func New(httpClient *http.Client, baseURL string) *Client {
 	return &Client{http: httpClient, baseURL: strings.TrimRight(baseURL, "/")}
 }
 
+func (c *Client) operatorPath(path string) string {
+	return "/api/v1" + path
+}
+
 // CheckClientAccess sends a minimal client-access probe through one endpoint.
 func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, modelID string) (AccessCheckResult, error) {
 	endpointName = strings.TrimSpace(endpointName) // swobu:io-string source=boundary
@@ -40,7 +41,7 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 		modelID = "healthcheck"
 	}
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"stream":false}`, modelID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/c/"+endpointName+"/chat/completions", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/workspaces/"+endpointName+"/chat/completions", strings.NewReader(body))
 	if err != nil {
 		return AccessCheckResult{}, fmt.Errorf("operator client: client access request could not be built")
 	}
@@ -67,9 +68,9 @@ func (c *Client) CheckClientAccess(ctx context.Context, endpointName string, mod
 	}, nil
 }
 
-// DaemonVersion returns the daemon's version from the /_swobu/status endpoint.
+// DaemonVersion reads canonical Node status without legacy-route fallback.
 func (c *Client) DaemonVersion(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/status", nil)
 	if err != nil {
 		return "", fmt.Errorf("operator client: status request could not be built")
 	}
@@ -90,55 +91,11 @@ func (c *Client) DaemonVersion(ctx context.Context) (string, error) {
 	return strings.TrimSpace(payload.SwobuVersion), nil
 }
 
-func (c *Client) StartAuthSession(ctx context.Context, providerSpec string, workspace string, route string, targetID string, draftSubject string, authMode string) (AuthSessionStartResult, error) {
-	body, err := json.Marshal(map[string]string{
-		"provider_spec": strings.TrimSpace(providerSpec), // swobu:io-string source=boundary
-		"workspace":     strings.TrimSpace(workspace), "route": strings.TrimSpace(route), "target_id": strings.TrimSpace(targetID), "draft_subject": strings.TrimSpace(draftSubject),
-		"auth_mode": strings.TrimSpace(authMode), // swobu:io-string source=boundary
-	})
-	if err != nil {
-		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session payload could not be encoded")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions", bytes.NewReader(body))
-	if err != nil {
-		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start request could not be built")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return AuthSessionStartResult{}, errorFromResponse(resp, "operator client: auth session start failed")
-	}
-	var doc struct {
-		ProviderSpec string `json:"provider_spec"`
-		SessionID    string `json:"session_id"`
-		AuthorizeURL string `json:"authorize_url"`
-		UserCode     string `json:"user_code"`
-		ExpiresAt    string `json:"expires_at"`
-		State        string `json:"state"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return AuthSessionStartResult{}, fmt.Errorf("operator client: auth session start response could not be decoded")
-	}
-	return AuthSessionStartResult{
-		ProviderSpec: strings.TrimSpace(doc.ProviderSpec), // swobu:io-string source=boundary
-		SessionID:    strings.TrimSpace(doc.SessionID),    // swobu:io-string source=boundary
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // swobu:io-string source=boundary
-		UserCode:     strings.TrimSpace(doc.UserCode),     // swobu:io-string source=boundary
-		ExpiresAt:    strings.TrimSpace(doc.ExpiresAt),    // swobu:io-string source=boundary
-		State:        strings.TrimSpace(doc.State),        // swobu:io-string source=boundary
-	}, nil
-}
-
 func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (AuthSessionStatusResult, error) {
-	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
-	if sessionID == "" {
+	if !validAuthSessionIdentifier(sessionID) {
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session id is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_swobu/auth/sessions/"+sessionID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/auth-sessions/"+sessionID, nil)
 	if err != nil {
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status request could not be built")
 	}
@@ -160,6 +117,9 @@ func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (Au
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return AuthSessionStatusResult{}, fmt.Errorf("operator client: auth session status response could not be decoded")
 	}
+	if doc.SessionID != sessionID || !validAuthSessionState(doc.State) || doc.State == "succeeded" && strings.TrimSpace(doc.CredentialRef) == "" || doc.State != "succeeded" && doc.CredentialRef != "" {
+		return AuthSessionStatusResult{}, fmt.Errorf("operator client: invalid auth session status acknowledgement")
+	}
 	return AuthSessionStatusResult{
 		ProviderSpec:  strings.TrimSpace(doc.ProviderSpec),  // swobu:io-string source=boundary
 		SessionID:     strings.TrimSpace(doc.SessionID),     // swobu:io-string source=boundary
@@ -170,11 +130,10 @@ func (c *Client) GetAuthSessionStatus(ctx context.Context, sessionID string) (Au
 }
 
 func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error {
-	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
-	if sessionID == "" {
+	if !validAuthSessionIdentifier(sessionID) {
 		return fmt.Errorf("operator client: auth session id is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/cancel", strings.NewReader("{}"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/auth-sessions/"+sessionID, nil)
 	if err != nil {
 		return fmt.Errorf("operator client: auth session cancel request could not be built")
 	}
@@ -187,80 +146,21 @@ func (c *Client) CancelAuthSession(ctx context.Context, sessionID string) error 
 	if resp.StatusCode != http.StatusOK {
 		return errorFromResponse(resp, "operator client: auth session cancel failed")
 	}
+	var acknowledgement struct {
+		SessionID string `json:"session_id"`
+		State     string `json:"state"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&acknowledgement) != nil || acknowledgement.SessionID != sessionID || acknowledgement.State != "canceled" {
+		return fmt.Errorf("operator client: auth session cancellation not acknowledged; inspect the original session")
+	}
 	return nil
 }
 
-func (c *Client) RetryAuthSession(ctx context.Context, sessionID string) (AuthSessionRetryResult, error) {
-	sessionID = strings.TrimSpace(sessionID) // swobu:io-string source=boundary
-	if sessionID == "" {
-		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session id is required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/auth/sessions/"+sessionID+"/retry", strings.NewReader("{}"))
-	if err != nil {
-		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry request could not be built")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return AuthSessionRetryResult{}, errorFromResponse(resp, "operator client: auth session retry failed")
-	}
-	var doc struct {
-		SessionID    string `json:"session_id"`
-		AuthorizeURL string `json:"authorize_url"`
-		UserCode     string `json:"user_code"`
-		ExpiresAt    string `json:"expires_at"`
-		State        string `json:"state"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return AuthSessionRetryResult{}, fmt.Errorf("operator client: auth session retry response could not be decoded")
-	}
-	return AuthSessionRetryResult{
-		SessionID:    strings.TrimSpace(doc.SessionID),    // swobu:io-string source=boundary
-		AuthorizeURL: strings.TrimSpace(doc.AuthorizeURL), // swobu:io-string source=boundary
-		UserCode:     strings.TrimSpace(doc.UserCode),     // swobu:io-string source=boundary
-		ExpiresAt:    strings.TrimSpace(doc.ExpiresAt),    // swobu:io-string source=boundary
-		State:        strings.TrimSpace(doc.State),        // swobu:io-string source=boundary
-	}, nil
-}
-
-func (c *Client) ProbeTarget(ctx context.Context, connection workspaceapi.Connection, providerProtocol string) (ModelCatalogResult, error) {
-	body, err := json.Marshal(struct {
-		Connection       workspaceapi.Connection `json:"connection"`
-		ProviderProtocol string                  `json:"provider_protocol,omitempty"`
-	}{Connection: connection, ProviderProtocol: strings.TrimSpace(providerProtocol)})
-	if err != nil {
-		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog payload could not be encoded")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/_swobu/target-probe", bytes.NewReader(body))
-	if err != nil {
-		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog request could not be built")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog is unavailable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return ModelCatalogResult{}, errorFromResponse(resp, "operator client: model catalog probe failed")
-	}
-	var result ModelCatalogResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return ModelCatalogResult{}, fmt.Errorf("operator client: model catalog response could not be decoded")
-	}
-	return result, nil
-}
-
 func errorFromResponse(resp *http.Response, fallback string) error {
-	// The daemon emits two canonical error shapes at this boundary. Workspace
-	// and credential commands marshal the typed workspaces.CommandError flat
-	// ({code,message}); the ChatGPT login flow normalizes remote OAuth errors
-	// nested ({error:{code,message}}). Decode both so every daemon command
-	// surfaces its real cause instead of collapsing to a status-code fallback.
+	// During the domain cutover, existing command errors retain their owning
+	// shapes. Canonical control problems carry detail/title instead of message.
+	// Remove retired error shapes with their handler migration, not by guessing
+	// at provider prose here.
 	var payload struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -268,6 +168,8 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 		} `json:"error"`
 		Code    string `json:"code"`
 		Message string `json:"message"`
+		Detail  string `json:"detail"`
+		Title   string `json:"title"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
 		code := strings.TrimSpace(payload.Error.Code)       // swobu:io-string source=boundary
@@ -277,6 +179,12 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 		}
 		if message == "" {
 			message = strings.TrimSpace(payload.Message) // swobu:io-string source=boundary
+		}
+		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/problem+json") {
+			message = strings.TrimSpace(payload.Detail) // swobu:io-string source=boundary
+			if message == "" {
+				message = strings.TrimSpace(payload.Title) // swobu:io-string source=boundary
+			}
 		}
 		if message != "" {
 			return &ResponseError{
@@ -290,5 +198,28 @@ func errorFromResponse(resp *http.Response, fallback string) error {
 	return &ResponseError{
 		StatusCode: resp.StatusCode,
 		Fallback:   fallback,
+	}
+}
+
+// Session identifiers are opaque single ASCII path segments, never normalized
+// locators or URLs. Invalid input must fail before Node contact.
+func validAuthSessionIdentifier(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, c := range id {
+		if c != '-' && c != '_' && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func validAuthSessionState(state string) bool {
+	switch state {
+	case "pending", "succeeded", "failed", "expired", "canceled":
+		return true
+	default:
+		return false
 	}
 }

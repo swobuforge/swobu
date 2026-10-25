@@ -17,6 +17,7 @@ type tomlStringLocation struct {
 	value                  string
 	exists                 bool
 	start, end, firstTable int
+	keyStart               int
 	parentExists, insert   bool
 	insertOffset           int
 }
@@ -64,6 +65,16 @@ func (tomlEditor) SetString(raw []byte, path keyPath, value string) ([]byte, err
 	out = append(out, line...)
 	out = append(out, raw[offset:]...)
 	return out, nil
+}
+
+// DeleteString removes one concrete assignment, retaining surrounding comments.
+func (tomlEditor) DeleteString(raw []byte, path keyPath) ([]byte, error) {
+	location, err := locateTOMLString(raw, path)
+	if err != nil || !location.exists {
+		return raw, err
+	}
+	out := append([]byte(nil), raw[:location.keyStart]...)
+	return append(out, raw[location.end:]...), nil
 }
 
 func locateTOMLString(raw []byte, path keyPath) (tomlStringLocation, error) {
@@ -129,6 +140,9 @@ func locateTOMLString(raw []byte, path keyPath) (tomlStringLocation, error) {
 		if value.Kind != unstable.String {
 			return tomlStringLocation{}, fmt.Errorf("%s is not a string", joinKeyPath(path))
 		}
+		keyIterator := node.Key()
+		keyIterator.Next()
+		location.keyStart = int(keyIterator.Node().Raw.Offset)
 		location.exists = true
 		location.value = string(value.Data)
 		location.start = int(value.Raw.Offset)

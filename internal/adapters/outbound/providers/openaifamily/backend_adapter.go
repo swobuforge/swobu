@@ -128,7 +128,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader(), target.ProtocolKind); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target, target.AuthHeader(), target.ProtocolKind); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
@@ -195,18 +195,18 @@ func requestsStreamingResponse(raw []byte) bool {
 
 // applyCredential keeps auth resolution at the provider edge so canonicals and
 // app orchestration never need to know provider token mechanics.
-func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string, authHeader string, kind protocolkind.ProtocolKind) error {
+func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, target provider.TargetSnapshot, authHeader string, kind protocolkind.ProtocolKind) error {
 	auth := AuthStrategyForHeader(authHeader, e.profile.AuthStrategy())
 	if auth.Style == AuthStyleNone {
 		return nil
 	}
-	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
+	if strings.TrimSpace(target.CredentialRef) == "" { // swobu:io-string source=boundary
 		return nil
 	}
 	if e.credentials == nil {
 		return canonical.BadEndpoint("credential resolver is not configured")
 	}
-	token, err := e.credentials.ResolveCredential(ctx, providerSpec, credentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, e.credentials, target)
 	if err != nil {
 		return canonical.BadEndpoint("credential reference could not be resolved")
 	}

@@ -57,7 +57,7 @@ func TestJSONEditorValueStandardizesSelectedJSONCSubtree(t *testing.T) {
 	raw := []byte(`{
   "models": [
     // Swobu facade
-    {"id": "default",},
+    {"id": "coding",},
   ],
   "compat": {
     // Pi compatibility
@@ -72,7 +72,7 @@ func TestJSONEditorValueStandardizesSelectedJSONCSubtree(t *testing.T) {
 }`)
 	editor := jsonEditor{allowComments: true}
 	var models []map[string]any
-	if exists, err := editor.Value(raw, keyPath{"models"}, &models); err != nil || !exists || len(models) != 1 || models[0]["id"] != "default" {
+	if exists, err := editor.Value(raw, keyPath{"models"}, &models); err != nil || !exists || len(models) != 1 || models[0]["id"] != "coding" {
 		t.Fatalf("models = %#v, exists=%v, error=%v", models, exists, err)
 	}
 	for _, path := range []keyPath{{"compat"}, {"modelOverrides"}} {

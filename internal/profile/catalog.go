@@ -736,20 +736,6 @@ func catalog() []Profile {
 			ProviderProtocols:   slices.Clone(providerProtocolsBaseten),
 		},
 		{
-			// Hyperbolic identifies managed serverless inference only. A user-run
-			// vLLM endpoint on rented Hyperbolic capacity remains provider vLLM.
-			ProviderID:          ProviderSpecHyperbolic,
-			ConnectionShape:     routing.ConnectionShapeStandard,
-			ModelDiscovery:      ModelDiscoveryModeNone,
-			ProviderDisplayName: "Hyperbolic",
-			SetupHint:           "API key",
-			SetupKeywords:       []string{"Hyperbolic", "serverless", "credential", "model", "Chat Completions"},
-			Locator:             LocatorSpec{Kind: LocatorFixed, Default: "https://api.hyperbolic.xyz/v1"},
-			Credential:          CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "HYPERBOLIC_API_KEY"},
-			VisibleInOperatorUI: true,
-			ProviderProtocols:   slices.Clone(providerProtocolsHyperbolic),
-		},
-		{
 			ProviderID:          ProviderSpecSiliconFlow,
 			ConnectionShape:     routing.ConnectionShapeStandard,
 			ModelDiscovery:      ModelDiscoveryModeAdvisory,

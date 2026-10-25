@@ -19,7 +19,7 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 
 	var statusCalls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_swobu/status" {
+		if r.URL.Path != "/api/v1/status" {
 			http.NotFound(w, r)
 			return
 		}
@@ -28,7 +28,7 @@ func TestAttachOrStart_StartupTranscriptOrder(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":10}`)
+		_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":11}`)
 	}))
 	defer srv.Close()
 
@@ -78,12 +78,12 @@ func TestAttachOrStart_AcceptsReachableDegradedState(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/_swobu/status" {
+		if r.URL.Path != "/api/v1/status" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"state":"degraded","workspace_count":1,"control_plane_protocol":10}`)
+		_, _ = io.WriteString(w, `{"state":"degraded","workspace_count":1,"control_plane_protocol":11}`)
 	}))
 	defer srv.Close()
 
@@ -131,10 +131,10 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 	var downRequested atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/_swobu/status":
+		case "/api/v1/status":
 			if downRequested.Load() && started.Load() {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":10}`)
+				_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":11}`)
 				return
 			}
 			if downRequested.Load() {
@@ -143,8 +143,8 @@ func TestRestart_DownThenAttachStartSucceeds(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":10}`)
-		case "/_swobu/down":
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":11}`)
+		case "/api/v1/daemon/shutdown":
 			if r.Header.Get("Content-Type") != "application/json" {
 				t.Errorf("down Content-Type = %q", r.Header.Get("Content-Type"))
 			}
@@ -191,10 +191,10 @@ func TestRestart_PropagatesDownFailure(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/_swobu/status":
+		case "/api/v1/status":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":10}`)
-		case "/_swobu/down":
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":11}`)
+		case "/api/v1/daemon/shutdown":
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
@@ -217,15 +217,15 @@ func TestRestart_PropagatesAttachStartFailureAfterDown(t *testing.T) {
 	downRequested := atomic.Bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/_swobu/status":
+		case "/api/v1/status":
 			if downRequested.Load() {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, `{"state":"down"}`)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":10}`)
-		case "/_swobu/down":
+			_, _ = io.WriteString(w, `{"state":"healthy","workspace_count":1,"control_plane_protocol":11}`)
+		case "/api/v1/daemon/shutdown":
 			downRequested.Store(true)
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -328,7 +328,7 @@ func TestAttachOrStart_StartupTimeoutRendersNextActions(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/_swobu/status" {
+		if r.URL.Path == "/api/v1/status" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}

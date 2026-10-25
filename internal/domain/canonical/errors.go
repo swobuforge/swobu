@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
@@ -13,17 +14,21 @@ type ErrorOrigin string
 type ErrorCode string
 
 const (
-	ErrorCodeInternal             ErrorCode = "INTERNAL_ERROR"
-	ErrorCodeUnsupportedEndpoint  ErrorCode = "UNSUPPORTED_ENDPOINT"
-	ErrorCodeUnsupportedOperation ErrorCode = "UNSUPPORTED_OPERATION"
-	ErrorCodeUnsupportedDelivery  ErrorCode = "UNSUPPORTED_DELIVERY_MODE"
-	ErrorCodeBadEndpoint          ErrorCode = "BAD_ENDPOINT"
-	ErrorCodeBadRequest           ErrorCode = "BAD_REQUEST"
-	ErrorCodeUnknownTarget        ErrorCode = "UNKNOWN_TARGET"
-	ErrorCodeNotImplemented       ErrorCode = "NOT_IMPLEMENTED"
-	ErrorCodeNoAvailableTarget    ErrorCode = "NO_AVAILABLE_TARGET"
-	ErrorCodeProviderTimeout      ErrorCode = "PROVIDER_TIMEOUT"
-	ErrorCodeProviderUnavailable  ErrorCode = "PROVIDER_UNAVAILABLE"
+	ErrorCodeInternal               ErrorCode = "INTERNAL_ERROR"
+	ErrorCodeUnsupportedEndpoint    ErrorCode = "UNSUPPORTED_ENDPOINT"
+	ErrorCodeUnsupportedOperation   ErrorCode = "UNSUPPORTED_OPERATION"
+	ErrorCodeUnsupportedDelivery    ErrorCode = "UNSUPPORTED_DELIVERY_MODE"
+	ErrorCodeBadEndpoint            ErrorCode = "BAD_ENDPOINT"
+	ErrorCodeBadRequest             ErrorCode = "BAD_REQUEST"
+	ErrorCodeUnknownTarget          ErrorCode = "UNKNOWN_TARGET"
+	ErrorCodeNotImplemented         ErrorCode = "NOT_IMPLEMENTED"
+	ErrorCodeNoAvailableTarget      ErrorCode = "NO_AVAILABLE_TARGET"
+	ErrorCodeProviderTimeout        ErrorCode = "PROVIDER_TIMEOUT"
+	ErrorCodeProviderUnavailable    ErrorCode = "PROVIDER_UNAVAILABLE"
+	ErrorCodeOperationNotConfigured ErrorCode = "OPERATION_NOT_CONFIGURED"
+	ErrorCodeCostUnavailable        ErrorCode = "COST_UNAVAILABLE"
+	ErrorCodeBudgetExceeded         ErrorCode = "BUDGET_EXCEEDED"
+	ErrorCodeRequestRateLimited     ErrorCode = "REQUEST_RATE_LIMITED"
 )
 
 const (
@@ -37,7 +42,7 @@ const (
 // itself a code; callers gate it separately.
 func ValidErrorCode(c ErrorCode) bool {
 	switch c {
-	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoAvailableTarget, ErrorCodeProviderTimeout, ErrorCodeProviderUnavailable:
+	case ErrorCodeInternal, ErrorCodeUnsupportedEndpoint, ErrorCodeUnsupportedOperation, ErrorCodeUnsupportedDelivery, ErrorCodeBadEndpoint, ErrorCodeBadRequest, ErrorCodeUnknownTarget, ErrorCodeNotImplemented, ErrorCodeNoAvailableTarget, ErrorCodeProviderTimeout, ErrorCodeProviderUnavailable, ErrorCodeOperationNotConfigured, ErrorCodeCostUnavailable, ErrorCodeBudgetExceeded, ErrorCodeRequestRateLimited:
 		return true
 	}
 	return false
@@ -49,6 +54,9 @@ type Error struct {
 	Origin          ErrorOrigin
 	Details         map[string]string
 	DiagnosticCause error
+	// RetryAfter is admission-owned delay, projected by the transport. It does
+	// not imply provider failure or durable usage accounting.
+	RetryAfter time.Duration
 }
 
 func (e Error) Unwrap() error { return e.DiagnosticCause }
@@ -156,6 +164,21 @@ func ProviderTimeout(message string) Error {
 // transport availability failure without a backend HTTP response.
 func ProviderUnavailable(message string) Error {
 	return newSwobuError(ErrorCodeProviderUnavailable, message)
+}
+
+// OperationNotConfigured reports a valid Workspace operation whose owning
+// feature has not been attached. It is distinct from an unknown endpoint and
+// must not enter provider selection or fabricate a default Route.
+func OperationNotConfigured(message string) Error {
+	return newSwobuError(ErrorCodeOperationNotConfigured, message)
+}
+
+func CostUnavailable(message string) Error { return newSwobuError(ErrorCodeCostUnavailable, message) }
+func BudgetExceeded(message string) Error  { return newSwobuError(ErrorCodeBudgetExceeded, message) }
+func RequestRateLimited(message string, retryAfter time.Duration) Error {
+	err := newSwobuError(ErrorCodeRequestRateLimited, message)
+	err.RetryAfter = retryAfter
+	return err
 }
 
 func UnknownTarget(message string) Error {

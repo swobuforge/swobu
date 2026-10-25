@@ -1,10 +1,11 @@
 # OpenCode
 
-Use Cockpit's workspace `endpoint` disclosure or run `swobu connect opencode`.
-Connect adds the `swobu` provider, selects `swobu/default`, and points OpenCode's
-Responses client at the selected workspace endpoint. Use `--workspace <name>`
-when workspace selection is ambiguous; replacing an owned value requires
-`--replace`.
+Use the Workspace Connect page in the Web Operator or the
+[reviewed Connect workflow](admin-mcp.md) with client `opencode`.
+Connect adds the `swobu` provider, selects `swobu/coding`, and points OpenCode's
+Responses client at the selected workspace endpoint. CLI apply requires an exact
+Workspace, private intent file and literal scoped confirmation, including
+replacement of an owned value.
 
 Swobu reads OpenCode's normal global configuration layers in their effective
 order:
@@ -34,7 +35,9 @@ OpenCode V1 gates Exa/Parallel-backed `websearch` for non-OpenCode providers on
 Connect does not change process or shell environment; configure the relevant
 variable before launching OpenCode if that V1 search backend is selected.
 
-`swobu/default` is a route facade, so Connect does not advertise context or
+`swobu/coding` is a route facade, so Connect does not advertise context or
 output limits when the selected route's concrete model limits are unavailable.
 An existing Swobu model limit remains operator-owned and is not replaced or
 validated.
+
+The `coding` ID in these examples is not reserved: Connect uses the concrete model ID selected for that Workspace, which must match one of its ordered route patterns.

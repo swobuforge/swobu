@@ -6,13 +6,12 @@ import (
 )
 
 var (
-	ErrInvalidConfig              = errors.New("invalid routing config")
-	ErrNotFound                   = errors.New("not found")
-	ErrConflict                   = errors.New("conflict")
-	ErrLastTarget                 = errors.New("last target")
-	ErrLastRoute                  = errors.New("last route")
-	ErrDefaultReplacementRequired = errors.New("default replacement required")
-	ErrEmptyRequestedRoute        = errors.New("requested route is empty")
+	ErrInvalidConfig       = errors.New("invalid routing config")
+	ErrNotFound            = errors.New("not found")
+	ErrConflict            = errors.New("conflict")
+	ErrLastTarget          = errors.New("last target")
+	ErrEmptyRequestedRoute = errors.New("requested route is empty")
+	ErrNoRoute             = errors.New("workspace has no configured route")
 )
 
 type InvariantError struct {

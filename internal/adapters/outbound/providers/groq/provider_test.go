@@ -264,12 +264,12 @@ func TestCapacityExceededIsPreExecutionOnlyForMarkedFlexDocument(t *testing.T) {
 		document string
 		marked   bool
 		failure  error
-		want     provider.ExecutionPossibility
+		want     provider.ExecutionDisposition
 	}{
-		{name: "marked documented capacity", document: `{"service_tier":"auto"}`, marked: true, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.ExecutionRejectedBeforeExecution},
-		{name: "unmarked capacity", document: `{"service_tier":"auto"}`, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.ExecutionMayHaveOccurred},
-		{name: "wrong carrier", document: `{}`, marked: true, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.ExecutionMayHaveOccurred},
-		{name: "other 498", document: `{"service_tier":"auto"}`, marked: true, failure: provider.AttemptMayHaveExecuted(canonical.NewBackendError("groq", 498, `{"error":{"code":"other"}}`, "")), want: provider.ExecutionMayHaveOccurred},
+		{name: "marked documented capacity", document: `{"service_tier":"auto"}`, marked: true, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.DispositionRejectedBeforeExecution},
+		{name: "unmarked capacity", document: `{"service_tier":"auto"}`, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.DispositionMayHaveOccurred},
+		{name: "wrong carrier", document: `{}`, marked: true, failure: provider.AttemptMayHaveExecuted(capacity), want: provider.DispositionMayHaveOccurred},
+		{name: "other 498", document: `{"service_tier":"auto"}`, marked: true, failure: provider.AttemptMayHaveExecuted(canonical.NewBackendError("groq", 498, `{"error":{"code":"other"}}`, "")), want: provider.DispositionMayHaveOccurred},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			transport := capacityTransport{standard: provider.TransportFunc(func(context.Context, carrier.Document) (provider.Ingress, error) {

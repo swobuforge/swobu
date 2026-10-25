@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	mcpruntime "github.com/swobuforge/swobu/internal/mcp"
@@ -53,6 +55,17 @@ func beginMCPCall(ctx context.Context, s exchangeState, phase callingMCPPhase) (
 	resource, err := executionevidence.NewMCPResource(source, tool)
 	if err != nil {
 		return reducerOutcome{}, canonical.InternalError("prepared MCP call has invalid execution identity")
+	}
+	if connectionID, connectionRevision, bound := prepared.ConnectionIdentity(); bound {
+		id, parseErr := connectionidentity.Parse(connectionID)
+		revision, revisionErr := strconv.ParseUint(connectionRevision, 10, 64)
+		if parseErr != nil || revisionErr != nil || revision == 0 {
+			return reducerOutcome{}, canonical.InternalError("prepared MCP call has invalid Connection identity")
+		}
+		resource, err = resource.BindConnection(id, revision)
+		if err != nil {
+			return reducerOutcome{}, canonical.InternalError("prepared MCP call could not bind Connection identity")
+		}
 	}
 	if exchangeID := s.inputExchangeID(); exchangeID.Valid() {
 		if s.invocationOrdinal != nil {
@@ -115,6 +128,9 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 	if phase.next < len(phase.calls) {
 		return beginMCPCall(ctx, s, phase)
 	}
+	if phase.handoff != nil {
+		return finishMixedToolHandoff(ctx, s, phase, runner)
+	}
 	next, replaceErr := continueAfterLocalResults(*s.prepared, phase.response, phase.results)
 	if replaceErr != nil {
 		s.phase = failedPhase{problem: canonical.InternalError("MCP tool loop produced invalid complete history: " + replaceErr.Error()), target: phase.target}
@@ -127,7 +143,7 @@ func reduceCallingMCP(ctx context.Context, s exchangeState, phase callingMCPPhas
 		s.phase = failedPhase{problem: err, target: target}
 		return reducerOutcome{nextState: s}, nil
 	}
-	return beginProviderCallAttempt(s, phase.selection, call, requestChanges)
+	return beginProviderCallAttempt(s, phase.selection, call, requestChanges, runner)
 }
 
 // classifyMCPResult keeps the canonical item-kind query separate from the

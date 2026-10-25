@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,9 @@ import (
 )
 
 func TestRunLocalCommandDoesNotWaitForDescendantOutputHandles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("descendant fixture requires a POSIX shell; cancellation is tested cross-platform")
+	}
 	started := time.Now()
 	stdout, exitCode, err := runLocalCommand(context.Background(), "sh", "-c", "(sleep 2) & printf ready")
 	if err != nil {

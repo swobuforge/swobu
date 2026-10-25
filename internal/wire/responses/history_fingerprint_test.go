@@ -621,7 +621,7 @@ func TestResponsesRequestFingerprintIgnoresUnknownKnownItemFields(t *testing.T) 
 	}
 }
 
-func TestResponsesRequestFingerprintIncludesBoundedWebSearchAccess(t *testing.T) {
+func TestResponsesRequestFingerprintDropsCodexWebSearchAccessHints(t *testing.T) {
 	decode := func(tool string) historyfingerprint.Request {
 		t.Helper()
 		raw := []byte(`{"model":"m","tools":[` + tool + `],"input":"search"}`)
@@ -631,14 +631,9 @@ func TestResponsesRequestFingerprintIncludesBoundedWebSearchAccess(t *testing.T)
 		}
 		return decoded.Request.RequestFingerprint
 	}
-	cached := decode(`{"type":"web_search","external_web_access":false}`)
-	live := decode(`{"type":"web_search","external_web_access":true}`)
-	unspecified := decode(`{"type":"web_search"}`)
-	if cached == live || cached == unspecified || live == unspecified {
-		t.Fatal("web-search access restriction did not participate in request identity")
-	}
-	if cached != decode(`{"external_web_access":false,"type":"web_search"}`) {
-		t.Fatal("member ordering changed normalized web-search request identity")
+	plain := decode(`{"type":"web_search"}`)
+	if plain != decode(`{"type":"web_search","external_web_access":false}`) || plain != decode(`{"type":"web_search","external_web_access":true,"indexed_web_access":true}`) {
+		t.Fatal("Codex web-search access hints changed request identity")
 	}
 }
 
@@ -652,13 +647,10 @@ func TestCachedSearchModeDoesNotAlterSettledHistoryPredecessor(t *testing.T) {
 		}
 		return decoded.Request
 	}
+	plain := decode(`{"type":"web_search"}`)
 	cached := decode(`{"type":"web_search","external_web_access":false}`)
-	live := decode(`{"type":"web_search","external_web_access":true}`)
-	if cached.RebasedRequest == nil || live.RebasedRequest == nil || cached.RebasedRequest.Previous != live.RebasedRequest.Previous {
-		t.Fatal("current search access mode changed the settled-history predecessor")
-	}
-	if cached.RequestFingerprint == live.RequestFingerprint {
-		t.Fatal("current search access mode was lost from the current request fingerprint")
+	if plain.RebasedRequest == nil || cached.RebasedRequest == nil || plain.RebasedRequest.Previous != cached.RebasedRequest.Previous || plain.RequestFingerprint != cached.RequestFingerprint {
+		t.Fatal("Codex web-search access hint changed settled history")
 	}
 }
 

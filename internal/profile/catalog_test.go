@@ -71,7 +71,7 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	if !SupportsSpec("fireworks") {
 		t.Fatal("Fireworks provider spec should be supported")
 	}
-	for _, spec := range []string{"novita", "baseten", "hyperbolic", "siliconflow"} {
+	for _, spec := range []string{"novita", "baseten", "siliconflow"} {
 		if !SupportsSpec(spec) {
 			t.Fatalf("%s provider spec should be supported", spec)
 		}
@@ -90,6 +90,9 @@ func TestCatalog_SpecSupport(t *testing.T) {
 	obsoleteIdentity := "openai_" + "compatible"
 	if SupportsSpec(obsoleteIdentity) {
 		t.Fatal("obsolete custom-endpoint provider identity must fail closed")
+	}
+	if SupportsSpec("hyperbolic") {
+		t.Fatal("retired Hyperbolic provider must not remain supported")
 	}
 }
 
@@ -125,8 +128,8 @@ func TestCatalog_MetaModelAPIIsDerivedStreamingResponses(t *testing.T) {
 
 func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.T) {
 	profiles := All()
-	if len(profiles) != 43 {
-		t.Fatalf("provider profile count = %d, want 43", len(profiles))
+	if len(profiles) != 42 {
+		t.Fatalf("provider profile count = %d, want 42", len(profiles))
 	}
 
 	seen := make(map[ProviderID]struct{}, len(profiles))
@@ -150,7 +153,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 		ProviderSpecGMI, ProviderSpecGroq, ProviderSpecFireworks,
 		ProviderSpecOpenRouter, ProviderSpecVercel, ProviderSpecZAI, ProviderSpecBedrock,
 		ProviderSpecAzure, ProviderSpecCustom,
-		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecHyperbolic, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope, ProviderSpecCompactifAI,
+		ProviderSpecNovita, ProviderSpecBaseten, ProviderSpecSiliconFlow, ProviderSpecOVHCloud, ProviderSpecModelScope, ProviderSpecCompactifAI,
 		ProviderSpecOpenCodeZen, ProviderSpecNous, ProviderSpecCommandCode, ProviderSpecVenice,
 	} {
 		if _, ok := seen[providerID]; !ok {
@@ -159,7 +162,7 @@ func TestCatalogPreservesCurrentProviderInventoryAndConnectionShapes(t *testing.
 	}
 
 	for shape, want := range map[routing.ConnectionShape]int{
-		routing.ConnectionShapeStandard: 40,
+		routing.ConnectionShapeStandard: 39,
 		routing.ConnectionShapeZAI:      1,
 		routing.ConnectionShapeBedrock:  1,
 		routing.ConnectionShapeCustom:   1,
@@ -625,7 +628,6 @@ func TestCatalog_ProviderAuthoringMatrix(t *testing.T) {
 		"custom":      {LocatorSpec{Kind: LocatorBaseURL, Label: "backend URL"}, CredentialSpec{Requirement: CredentialRequiredOutsideLoopback, Authoring: CredentialAuthoringReference}, "model"},
 		"novita":      {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://api.novita.ai/openai/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "NOVITA_API_KEY"}, "model"},
 		"baseten":     {LocatorSpec{Kind: LocatorBaseURL, Label: "base URL", Default: "https://inference.baseten.co/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "BASETEN_API_KEY"}, "model"},
-		"hyperbolic":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api.hyperbolic.xyz/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "HYPERBOLIC_API_KEY"}, "model"},
 		"siliconflow": {LocatorSpec{Kind: LocatorFixed, Default: "https://api.siliconflow.cn/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "SILICONFLOW_API_KEY"}, "model"},
 		"ovhcloud":    {LocatorSpec{Kind: LocatorFixed, Default: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"}, CredentialSpec{Requirement: CredentialOptional, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "OVH_AI_ENDPOINTS_ACCESS_TOKEN"}, "model"},
 		"modelscope":  {LocatorSpec{Kind: LocatorFixed, Default: "https://api-inference.modelscope.cn/v1"}, CredentialSpec{Requirement: CredentialRequired, Authoring: CredentialAuthoringReference, SuggestedEnvVar: "MODELSCOPE_TOKEN"}, "model"},

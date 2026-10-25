@@ -1,6 +1,6 @@
 # AWS Bedrock backend
 
-Configure AWS Bedrock Mantle in Swobu Cockpit by selecting a region and an API
+Configure AWS Bedrock Mantle in the Swobu Web Operator by selecting a region and an API
 URL. Use the complete Bedrock base URL shown by AWS for the selected model,
 including its `/v1`, `/openai/v1`, or `/anthropic/v1` namespace.
 

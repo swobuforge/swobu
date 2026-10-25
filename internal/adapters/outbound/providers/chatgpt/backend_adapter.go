@@ -97,6 +97,10 @@ func (e BackendAdapter) ResolveBackend(target provider.TargetSnapshot) (provider
 	backend := provider.Backend{
 		Target: target.Clone(), Codec: newBackendCodec(target.ProviderID()), Transport: provider.BindTransport(target, e.Send),
 	}
+	if _, _, bound := target.ConnectionIdentity(); bound {
+		captured := target.Clone()
+		backend.RefreshCredential = func(ctx context.Context) (string, error) { return e.RefreshConnectionBundle(ctx, captured) }
+	}
 	if err := backend.Validate(); err != nil {
 		return provider.Backend{}, err
 	}
@@ -131,7 +135,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		applyChatGPTAuthHeaders(httpReq, auth)
 		return httpReq, nil
 	}
-	auth, err := e.resolveAuthContext(ctx, target.ProviderID(), target.CredentialRef, false)
+	auth, err := e.resolveAuthContext(ctx, target, false)
 	if err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
@@ -150,12 +154,15 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 		return nil, provider.AttemptMayHaveExecuted(canonical.InternalError("backend response content encoding is unsupported or invalid"))
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		// A 401 is a positive pre-execution authentication rejection. Refreshing
-		// the credential and rebuilding this exact request is the sole
-		// transport-owned POST replay; it cannot duplicate provider work.
+		// Bound requests settle against the captured revision. Exchange owns
+		// refresh publication and a separately evidenced retry attempt.
+		// Unbound provider-owned sessions retain their existing transport policy.
 		backendErr := httpedge.ReadBackendHTTPError(resp, target.TargetID)
 		_ = resp.Body.Close()
-		recoveredAuth, refreshErr := e.resolveAuthContext(ctx, target.ProviderID(), target.CredentialRef, true)
+		if _, _, bound := target.ConnectionIdentity(); bound {
+			return nil, provider.AttemptRejectedBeforeExecution(backendErr)
+		}
+		recoveredAuth, refreshErr := e.resolveAuthContext(ctx, target, true)
 		if refreshErr != nil || strings.TrimSpace(recoveredAuth.AccessToken) == "" { // swobu:io-string source=boundary
 			return nil, provider.AttemptRejectedBeforeExecution(backendErr)
 		}
@@ -199,7 +206,34 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 
 var _ provider.BackendResolver = BackendAdapter{}
 
-func (e BackendAdapter) resolveAuthContext(ctx context.Context, providerSpec string, credentialRef string, forceRefresh bool) (chatGPTAuthContext, error) {
+func (e BackendAdapter) resolveAuthContext(ctx context.Context, target provider.TargetSnapshot, forceRefresh bool) (chatGPTAuthContext, error) {
+	providerSpec, credentialRef := target.ProviderID(), target.CredentialRef
+	if _, _, bound := target.ConnectionIdentity(); bound {
+		if forceRefresh {
+			// Bound refresh is available only through the backend operation that
+			// returns new material to the attempt owner for revisioned publication.
+			return chatGPTAuthContext{}, canonical.BadEndpoint("Connection credential requires revisioned refresh")
+		}
+		scope, err := target.ConnectionCredentialScope()
+		if err != nil {
+			return chatGPTAuthContext{}, canonical.BadEndpoint("credential reference could not be resolved")
+		}
+		kind := credentialref.Parse(credentialRef).Kind()
+		_, canonicalResolver := e.credentials.(outboundcredentials.CredentialSourceResolverRegistry)
+		if canonicalResolver && (kind == credentialref.KindSecret || kind == credentialref.KindSecretFile) {
+			raw, err := outboundcredentials.ResolveConnectionStoredBundle(scope.Identifier(), credentialRef)
+			if err != nil {
+				return chatGPTAuthContext{}, canonical.BadEndpoint("credential reference could not be resolved")
+			}
+			return chatGPTAuthContextFromStoredSnapshot(raw)
+		}
+		token, err := providersruntime.ResolveTargetCredential(ctx, e.credentials, target)
+		if err != nil || strings.TrimSpace(token) == "" {
+			return chatGPTAuthContext{}, canonical.BadEndpoint("credential reference could not be resolved")
+		}
+		return chatGPTAuthContext{AccessToken: token}, nil
+	}
+
 	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
 		return chatGPTAuthContext{}, canonical.BadEndpoint("chatgpt provider credential reference is required")
 	}
@@ -335,13 +369,13 @@ func requestChatGPTTokenRefresh(ctx context.Context, client *http.Client, refres
 }
 
 func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.TargetSnapshot) ([]profile.ModelAuthoringOption, error) {
-	auth, err := e.resolveAuthContext(ctx, target.ProviderID(), target.CredentialRef, false)
+	auth, err := e.resolveAuthContext(ctx, target, false)
 	if err != nil {
 		return nil, err
 	}
 	models, status, err := e.fetchModelCatalog(ctx, target, auth)
 	if status == http.StatusUnauthorized {
-		auth, err = e.resolveAuthContext(ctx, target.ProviderID(), target.CredentialRef, true)
+		auth, err = e.resolveAuthContext(ctx, target, true)
 		if err != nil {
 			logChatGPTCatalogOutcome(target, auth, status, "unauthorized", 0)
 			return nil, canonical.NewBackendError(target.TargetID, status, "chatgpt model catalog authentication failed", "")

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -93,7 +94,10 @@ func TestMuseCreatesFacadeConfiguration(t *testing.T) {
 		t.Fatalf("schema_version = %#v", got["schema_version"])
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v, %v", info.Mode().Perm(), err)
 	}
 }
@@ -146,14 +150,14 @@ func TestMusePreservesUnrelatedConfigurationAndPresentSchema(t *testing.T) {
 		}
 	}
 	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		t.Fatalf("existing Muse configuration mode changed: %o", info.Mode().Perm())
 	}
 }
 
 func TestMuseReplacesCatalogRowsWithUnownedFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	raw := []byte(`{"provider":"meta","model":"default","endpoint_transport":{"base_url":"http://127.0.0.1:7926/c/work/v1","auth":"none"},"model_catalog":[{"model_id":"default","provider_id":"meta","profile_id":"tbh","display_label":"Swobu","visibility":"visible","display_order":0,"is_default":true,"context_limit":1000000,"output_limit":64000,"description":"Muse Spark via Swobu","future":"must be removed"}],"schema_version":1}`)
+	raw := []byte(`{"provider":"meta","model":"coding","endpoint_transport":{"base_url":"http://127.0.0.1:7926/workspaces/work/v1","auth":"none"},"model_catalog":[{"model_id":"coding","provider_id":"meta","profile_id":"tbh","display_label":"Swobu","visibility":"visible","display_order":0,"is_default":true,"context_limit":1000000,"output_limit":64000,"description":"Swobu selected model","future":"must be removed"}],"schema_version":1}`)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -259,11 +263,11 @@ func readMuseSettings(t *testing.T, path string) map[string]any {
 
 func assertMuseOwnedState(t *testing.T, got map[string]any) {
 	t.Helper()
-	if got["provider"] != "meta" || got["model"] != "default" {
+	if got["provider"] != "meta" || got["model"] != "coding" {
 		t.Fatalf("Muse facade selection = %#v", got)
 	}
 	endpoint, ok := got["endpoint_transport"].(map[string]any)
-	if !ok || endpoint["base_url"] != testTarget(t).WorkspaceURL()+"/v1" || endpoint["auth"] != "none" {
+	if !ok || endpoint["base_url"] != testTarget(t).WorkspaceURL()+"/v1" || endpoint["auth"] != "bearer" {
 		t.Fatalf("Muse endpoint transport = %#v", got["endpoint_transport"])
 	}
 	catalog, ok := got["model_catalog"].([]any)
@@ -272,10 +276,10 @@ func assertMuseOwnedState(t *testing.T, got map[string]any) {
 	}
 	entry := catalog[0].(map[string]any)
 	for key, want := range map[string]any{
-		"model_id": "default", "provider_id": "meta", "profile_id": "tbh",
+		"model_id": "coding", "provider_id": "meta", "profile_id": "tbh",
 		"display_label": "Swobu", "visibility": "visible", "is_default": true,
 		"context_limit": float64(1000000), "output_limit": float64(64000),
-		"description": "Muse Spark via Swobu",
+		"description": "Swobu selected model",
 	} {
 		if entry[key] != want {
 			t.Fatalf("catalog %s = %#v, want %#v", key, entry[key], want)

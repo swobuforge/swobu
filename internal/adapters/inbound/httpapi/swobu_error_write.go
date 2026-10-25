@@ -3,6 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 )
@@ -32,13 +34,31 @@ func statusCodeForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusGatewayTimeout
 	case canonical.ErrorCodeProviderUnavailable:
 		return http.StatusServiceUnavailable
+	case canonical.ErrorCodeOperationNotConfigured:
+		return http.StatusBadRequest
+	case canonical.ErrorCodeRequestRateLimited:
+		return http.StatusTooManyRequests
+	case canonical.ErrorCodeCostUnavailable, canonical.ErrorCodeBudgetExceeded:
+		return http.StatusPaymentRequired
 	default:
 		return http.StatusInternalServerError
 	}
 }
 
 func writeSwobuError(w http.ResponseWriter, err canonical.Error) {
+	writeAdmissionRetryHeaders(w, err)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCodeForSwobuError(err.Code))
 	_ = json.NewEncoder(w).Encode(swobuErrorEnvelope{Error: swobuErrorBody{Code: string(err.Code), Message: err.Message}})
+}
+
+func writeAdmissionRetryHeaders(w http.ResponseWriter, err canonical.Error) {
+	if err.Code != canonical.ErrorCodeRequestRateLimited {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if err.RetryAfter > 0 {
+		seconds := (err.RetryAfter + time.Second - 1) / time.Second
+		w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
+	}
 }

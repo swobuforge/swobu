@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
@@ -43,19 +44,29 @@ type modelsHandler interface {
 type Handler struct {
 	requestIngress       requestIngress
 	executionObservation func(exchange.RequestOutput, delivery.Result, *observation.Timing)
+	pathPrefix           string
 }
 
-func NewHandler(requestIngress requestIngress) Handler {
-	return Handler{requestIngress: requestIngress}
+// NewWorkspaceDataHandler constructs the canonical Workspace data-plane
+// projection. It owns only protocol ingress; Node Control and Web routes are
+// never mounted in this handler.
+func NewWorkspaceDataHandler(requestIngress requestIngress) Handler {
+	return Handler{requestIngress: requestIngress, pathPrefix: "/workspaces/"}
 }
 
 func NewHandlerWithExecutionObservation(requestIngress requestIngress, observe func(exchange.RequestOutput, delivery.Result, *observation.Timing)) Handler {
-	return Handler{requestIngress: requestIngress, executionObservation: observe}
+	handler := NewWorkspaceDataHandler(requestIngress)
+	handler.executionObservation = observe
+	return handler
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writer := &committingResponseWriter{ResponseWriter: w}
-	endpointName, operationPath, err := splitProtocolPath(r.URL.Path)
+	if ambiguousWorkspacePath(r) {
+		writeSwobuError(writer, canonical.UnsupportedEndpoint("workspace path is ambiguous"))
+		return
+	}
+	endpointName, operationPath, err := splitProtocolPath(r.URL.Path, h.pathPrefix)
 	if err != nil {
 		writeSwobuError(writer, canonical.UnsupportedEndpoint("unsupported endpoint URL"))
 		return
@@ -179,6 +190,28 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.finalizeDelivery(out, &timing, deliveryResult, writer)
 }
 
+func ambiguousWorkspacePath(r *http.Request) bool {
+	// net/http has already decoded one layer. Residual escapes, backslashes
+	// and invalid UTF-8 cannot name a supported Workspace protocol operation;
+	// reject them before authority lookup, not after suffix normalization.
+	// Query values are deliberately outside this path-only boundary.
+	if !utf8.ValidString(r.URL.Path) || strings.ContainsAny(r.URL.Path, "%\\") {
+		return true
+	}
+	raw := r.URL.RawPath
+	if raw == "" {
+		raw = r.URL.RequestURI()
+		if index := strings.IndexByte(raw, '?'); index >= 0 {
+			raw = raw[:index]
+		}
+	}
+	lower := strings.ToLower(raw)
+	if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") || strings.Contains(lower, "%2e") {
+		return true
+	}
+	return strings.Contains(r.URL.Path, "//") || strings.Contains(r.URL.Path, "/./") || strings.Contains(r.URL.Path, "/../") || strings.HasSuffix(r.URL.Path, "/..") || strings.HasSuffix(r.URL.Path, "/.")
+}
+
 func logResponseWriteAfterCommitFailure(requestID, workspace string, family canonical.ClientFamily, normalizedPath canonical.NormalizedPath, targetID string, attemptCount int, err error) {
 	attrs := []any{
 		"component", "httpapi", "event", "response_write_after_commit_failed",
@@ -236,11 +269,15 @@ func (h Handler) serveModelsEndpoint(w http.ResponseWriter, r *http.Request, wor
 // This path split is intentionally small and local to the HTTP edge.
 // It parses endpoint-qualified protocol routes only; it is not a second
 // routing layer and must not absorb family-specific semantics.
-func splitProtocolPath(raw string) (string, string, error) {
-	if !strings.HasPrefix(raw, "/c/") {
-		return "", "", errors.New("missing /c/ prefix")
+func splitProtocolPath(raw, prefix string) (string, string, error) {
+	// URL.Path is decoded by net/http; reject encoded separators from RawPath
+	// before they can collapse two security-relevant segments into one.
+	// Callers pass the complete request path through this helper, so the raw
+	// escaped form is checked by ServeHTTP before dispatch below.
+	if !strings.HasPrefix(raw, prefix) {
+		return "", "", errors.New("missing workspace data prefix")
 	}
-	trimmed := strings.TrimPrefix(raw, "/c/")
+	trimmed := strings.TrimPrefix(raw, prefix)
 	if trimmed == "" {
 		return "", "", errors.New("missing endpoint name")
 	}
@@ -442,6 +479,7 @@ func writeExchangeError(w http.ResponseWriter, family canonical.ClientFamily, er
 			writeSwobuError(w, swobuErr)
 			return
 		}
+		writeAdmissionRetryHeaders(w, swobuErr)
 		writeProtocolError(w, family, statusCodeForSwobuError(swobuErr.Code), "swobu_error", string(swobuErr.Code), swobuErr.Message, "", "")
 		return
 	}

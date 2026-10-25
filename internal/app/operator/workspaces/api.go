@@ -6,7 +6,6 @@ package workspaces
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,14 +15,107 @@ import (
 )
 
 type Workspace struct {
-	Slug         string  `json:"slug"`
-	DefaultRoute string  `json:"default_route"`
-	Routes       []Route `json:"routes"`
+	DisplayName        string                `json:"display_name"`
+	ManagementETag     string                `json:"management_etag"`
+	ManagementRevision uint64                `json:"management_revision"`
+	Slug               string                `json:"slug"`
+	Routes             []Route               `json:"routes"`
+	Readiness          Readiness             `json:"readiness"`
+	MCPMounts          []MCPMount            `json:"mcp_mounts,omitempty"`
+	EnabledServices    []string              `json:"enabled_services"`
+	ServiceLimits      routing.ServiceLimits `json:"service_limits"`
+	// SearchConnectionID is the internal projection for the Search route handler.
+	SearchConnectionID string   `json:"-"`
+	SearchFallbackIDs  []string `json:"-"`
+}
+
+// ServiceState distinguishes an absent Service from one enabled but not yet
+// configured. Readiness is derived from actual typed children.
+type ServiceState struct {
+	Kind             string                   `json:"kind"`
+	Enabled          bool                     `json:"enabled"`
+	Configured       bool                     `json:"configured"`
+	ActivationReview *ServiceActivationReview `json:"activation_review,omitempty"`
+}
+
+// ServiceActivationReview is the immutable advisory impact returned by the
+// current Service query. Digest binds both other authority owners and the
+// Workspace ETag; only explicit caller confirmation permits expansion.
+type ServiceActivationReview struct {
+	Service              string                     `json:"service"`
+	WorkspaceETag        string                     `json:"workspace_etag"`
+	AccessRevision       string                     `json:"access_revision"`
+	PublicationRevision  string                     `json:"publication_revision"`
+	AffectedPrincipals   []ServiceAffectedPrincipal `json:"affected_principals"`
+	Published            bool                       `json:"published"`
+	RequiresConfirmation bool                       `json:"requires_confirmation"`
+	Warning              string                     `json:"warning,omitempty"`
+	Digest               string                     `json:"digest"`
+}
+
+type ServiceAffectedPrincipal struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type MCPMount struct {
+	Builtin      string   `json:"builtin,omitempty"`
+	Alias        string   `json:"alias"`
+	ConnectionID string   `json:"connection_id"`
+	AllowedTools []string `json:"allowed_tools"`
+}
+
+// MCPMountPreview is an advisory, exact-intent summary for a proposed mount.
+// ExecutionIdentity and PermissionSummary are disclosed as operator-declared
+// facts; this value does not independently authenticate the upstream account.
+type MCPMountPreview struct {
+	Builtin                   string              `json:"builtin,omitempty"`
+	Workspace                 string              `json:"workspace"`
+	Alias                     string              `json:"alias"`
+	ConnectionID              string              `json:"connection_id"`
+	Endpoint                  string              `json:"endpoint"`
+	ExecutionIdentity         string              `json:"execution_identity"`
+	IdentityVerified          bool                `json:"identity_verified"`
+	PermissionSummary         string              `json:"permission_summary"`
+	AllowedTools              []string            `json:"allowed_tools"`
+	PotentiallyEffectfulTools []string            `json:"potentially_effectful_tools"`
+	ExistingMount             *MCPMount           `json:"existing_mount"`
+	AffectedPrincipals        []MCPMountPrincipal `json:"affected_principals"`
+	Published                 bool                `json:"published"`
+	Revision                  string              `json:"revision"`
+	AccessRevision            string              `json:"access_revision"`
+	PublicationRevision       string              `json:"publication_revision"`
+	Digest                    string              `json:"digest"`
+	ConnectionRevision        string              `json:"connection_revision"`
+	ApprovalClass             string              `json:"approval_class"`
+	Warning                   string              `json:"warning"`
+}
+
+// MCPMountPrincipal identifies one current managed Workspace-use permission.
+type MCPMountPrincipal struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// MCPMountReviewRequest carries the exact reviewed apply contract. Digest binds
+// the server preview; revisions bind every authority owner represented there.
+type MCPMountReviewRequest struct {
+	WorkspaceETag       string `json:"workspace_etag"`
+	Digest              string `json:"digest"`
+	ConnectionRevision  string `json:"connection_revision"`
+	AccessRevision      string `json:"access_revision"`
+	PublicationRevision string `json:"publication_revision"`
+}
+
+type Readiness struct {
+	LLM    string  `json:"llm"`
+	MCP    string  `json:"mcp"`
+	Search *string `json:"search,omitempty"`
 }
 type WorkspaceSummary struct {
-	Slug         string `json:"slug"`
-	DefaultRoute string `json:"default_route"`
-	RouteCount   int    `json:"route_count"`
+	DisplayName string `json:"display_name"`
+	Slug        string `json:"slug"`
+	RouteCount  int    `json:"route_count"`
 }
 type Route struct {
 	Name  string `json:"name"`
@@ -43,250 +135,53 @@ type Tier struct {
 	Targets []Target `json:"targets"`
 }
 type Target struct {
-	ID         string     `json:"id"`
-	Model      string     `json:"model"`
-	Protocol   string     `json:"protocol"`
-	Provider   string     `json:"provider"`
-	Connection Connection `json:"connection"`
+	ID           string `json:"id"`
+	Model        string `json:"model"`
+	Protocol     string `json:"protocol"`
+	ConnectionID string `json:"connection_id"`
 }
 
-// TargetDraft is create-command input. Provider identity is derived solely
-// from the one populated provider-keyed connection document.
+// TargetDraft selects a reusable Models Connection and target-local fields.
 type TargetDraft struct {
-	ID         string     `json:"id"`
-	Model      string     `json:"model"`
-	Protocol   string     `json:"protocol"`
-	Connection Connection `json:"connection"`
-}
-
-// Connection preserves the public provider-keyed JSON shape while storing a
-// shape-oriented routing draft. Profile is the sole catalog-membership owner;
-// unknown keys and fields fail at this boundary rather than becoming maps in
-// routing state.
-type Connection struct{ draft routing.ConnectionDraft }
-
-type standardConnectionDTO struct {
-	BaseURL    string `json:"base_url,omitempty"`
-	Credential string `json:"credential,omitempty"`
-}
-type ZAIConnection struct {
-	Access     string `json:"access"`
-	Credential string `json:"credential"`
-}
-type azureProjectConnectionDTO struct {
-	ProjectEndpoint string `json:"project_endpoint"`
-	Credential      string `json:"credential"`
-}
-type BedrockConnection struct {
-	Region     string `json:"region"`
-	Endpoint   string `json:"endpoint,omitempty"`
-	Credential string `json:"credential,omitempty"`
-}
-type CustomConnection struct {
-	BaseURL string        `json:"base_url"`
-	Header  *CustomHeader `json:"header,omitempty"`
-}
-type CustomHeader struct {
-	Name       string `json:"name"`
-	Credential string `json:"credential"`
-}
-
-// StandardConnection returns a JSON connection document for a Standard-shape
-// provider. It is a construction helper for internal callers and tests; JSON
-// marshal still emits the existing provider-keyed public contract.
-func StandardConnection(provider, locator, credential string) Connection {
-	return Connection{draft: routing.ConnectionDraft{Provider: provider, Standard: &routing.StandardConnectionDraft{Locator: locator, Credential: credential}}}
-}
-
-// ZAIConnectionDocument returns a Z.AI provider-keyed connection document.
-func ZAIConnectionDocument(access, credential string) Connection {
-	return Connection{draft: routing.ConnectionDraft{Provider: string(profile.ProviderSpecZAI), ZAI: &routing.ZAIConnectionDraft{Access: access, Credential: credential}}}
-}
-
-// BedrockConnectionDocument returns a Bedrock provider-keyed connection
-// document. It permits an empty endpoint for the catalog-only probe flow;
-// durable target finalization still rejects it.
-func BedrockConnectionDocument(region, endpoint, credential string) Connection {
-	return Connection{draft: routing.ConnectionDraft{Provider: string(profile.ProviderSpecBedrock), Bedrock: &routing.BedrockConnectionDraft{Region: region, Endpoint: endpoint, Credential: credential}}}
-}
-
-// CustomConnectionDocument returns a custom-endpoint provider-keyed connection
-// document with the optional user-authored header behavior.
-func CustomConnectionDocument(baseURL string, header *CustomHeader) Connection {
-	draft := routing.ConnectionDraft{Provider: string(profile.ProviderSpecCustom), Custom: &routing.CustomConnectionDraft{BaseURL: baseURL}}
-	if header != nil {
-		draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name, Credential: header.Credential}
-	}
-	return Connection{draft: draft}
-}
-
-func (c Connection) MarshalJSON() ([]byte, error) {
-	provider := strings.TrimSpace(c.draft.Provider)
-	shape, ok := profile.ConnectionShapeForSpec(provider)
-	if !ok {
-		return nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
-	}
-	switch shape {
-	case routing.ConnectionShapeStandard:
-		if c.draft.Standard == nil {
-			return nil, fmt.Errorf("connection.%s: provider connection details are required", provider)
-		}
-		locator, _ := profile.LocatorSpecForProvider(provider)
-		if locator.Kind == profile.LocatorAzureProject {
-			return json.Marshal(map[string]any{provider: azureProjectConnectionDTO{ProjectEndpoint: c.draft.Standard.Locator, Credential: c.draft.Standard.Credential}})
-		}
-		if locator.Kind == profile.LocatorFixed {
-			return json.Marshal(map[string]any{provider: struct {
-				Credential string `json:"credential"`
-			}{Credential: c.draft.Standard.Credential}})
-		}
-		baseURL := c.draft.Standard.Locator
-		if provider == string(profile.ProviderSpecRunPod) {
-			// Operator JSON may be marshaled before routing finalization. Keep
-			// shorthand out of the public document here; durable construction
-			// remains owned by ValidateStandardConnection.
-			normalized, err := profile.NormalizeRunPodEndpoint(baseURL)
-			if err != nil {
-				return nil, fmt.Errorf("connection.%s.base_url: %w", provider, err)
-			}
-			baseURL = normalized
-		}
-		return json.Marshal(map[string]any{provider: standardConnectionDTO{BaseURL: baseURL, Credential: c.draft.Standard.Credential}})
-	case routing.ConnectionShapeZAI:
-		if c.draft.ZAI == nil {
-			return nil, fmt.Errorf("connection.%s: Z.AI payload is required", provider)
-		}
-		return json.Marshal(map[string]any{provider: ZAIConnection{Access: c.draft.ZAI.Access, Credential: c.draft.ZAI.Credential}})
-	case routing.ConnectionShapeBedrock:
-		if c.draft.Bedrock == nil {
-			return nil, fmt.Errorf("connection.%s: Bedrock payload is required", provider)
-		}
-		return json.Marshal(map[string]any{provider: BedrockConnection{Region: c.draft.Bedrock.Region, Endpoint: c.draft.Bedrock.Endpoint, Credential: c.draft.Bedrock.Credential}})
-	case routing.ConnectionShapeCustom:
-		if c.draft.Custom == nil {
-			return nil, fmt.Errorf("connection.%s: custom payload is required", provider)
-		}
-		encoded := CustomConnection{BaseURL: c.draft.Custom.BaseURL}
-		if header := c.draft.Custom.Header; header != nil {
-			encoded.Header = &CustomHeader{Name: header.Name, Credential: header.Credential}
-		}
-		return json.Marshal(map[string]any{provider: encoded})
-	default:
-		return nil, fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
-	}
-}
-
-func (c *Connection) UnmarshalJSON(raw []byte) error {
-	provider, payload, err := singleProviderJSON(raw)
-	if err != nil {
-		return err
-	}
-	shape, ok := profile.ConnectionShapeForSpec(provider)
-	if !ok {
-		return fmt.Errorf("connection.%s: provider is unsupported", provider)
-	}
-	draft := routing.ConnectionDraft{Provider: provider}
-	switch shape {
-	case routing.ConnectionShapeStandard:
-		locator, _ := profile.LocatorSpecForProvider(provider)
-		entry, _ := profile.ProfileForSpec(provider)
-		if locator.Kind == profile.LocatorAzureProject {
-			var encoded azureProjectConnectionDTO
-			if err := decodeStrictJSONObject(payload, &encoded); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			if err := validateStandardConnectionJSONKeys(payload, entry); err != nil {
-				return err
-			}
-			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.ProjectEndpoint, Credential: encoded.Credential}
-		} else {
-			var encoded standardConnectionDTO
-			if err := decodeStrictJSONObject(payload, &encoded); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			if err := validateStandardConnectionJSONKeys(payload, entry); err != nil {
-				return err
-			}
-			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.BaseURL, Credential: encoded.Credential}
-		}
-	case routing.ConnectionShapeZAI:
-		var encoded ZAIConnection
-		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: encoded.Access, Credential: encoded.Credential}
-	case routing.ConnectionShapeBedrock:
-		var encoded BedrockConnection
-		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: encoded.Region, Endpoint: encoded.Endpoint, Credential: encoded.Credential}
-	case routing.ConnectionShapeCustom:
-		var encoded CustomConnection
-		if err := decodeStrictJSONObject(payload, &encoded); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: encoded.BaseURL}
-		if encoded.Header != nil {
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: encoded.Header.Name, Credential: encoded.Header.Credential}
-		}
-	default:
-		return fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
-	}
-	c.draft = draft
-	return nil
-}
-
-func singleProviderJSON(raw []byte) (string, json.RawMessage, error) {
-	var object map[string]json.RawMessage
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if err := decoder.Decode(&object); err != nil {
-		return "", nil, errors.New("connection must be a JSON object")
-	}
-	if len(object) != 1 {
-		return "", nil, errors.New("connection must contain exactly one provider key")
-	}
-	for provider, payload := range object {
-		if !profile.SupportsSpec(provider) {
-			return "", nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
-		}
-		return provider, payload, nil
-	}
-	panic("one-key map had no key")
-}
-
-func decodeStrictJSONObject(raw []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	if decoder.More() {
-		return errors.New("connection payload has trailing data")
-	}
-	return nil
-}
-
-// validateStandardConnectionJSONKeys preserves strict public grammar by
-// inspecting authored keys, not their decoded values. In particular, an empty
-// fixed-provider base_url is still an unrecognized public field.
-func validateStandardConnectionJSONKeys(raw []byte, entry profile.Profile) error {
-	provider := string(entry.ProviderID)
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return fmt.Errorf("connection.%s: connection payload must be a JSON object", provider)
-	}
-	if _, present := fields["base_url"]; present && entry.Locator.Kind != profile.LocatorBaseURL {
-		return fmt.Errorf("connection.%s: field \"base_url\" is not recognized", provider)
-	}
-	if _, present := fields["credential"]; present && entry.Credential.Requirement == profile.CredentialUnsupported {
-		return fmt.Errorf("connection.%s: field \"credential\" is not recognized", provider)
-	}
-	return nil
+	ID           string `json:"id"`
+	Model        string `json:"model"`
+	Protocol     string `json:"protocol"`
+	ConnectionID string `json:"connection_id"`
 }
 
 func projectWorkspace(workspace routing.Workspace) Workspace {
-	out := Workspace{Slug: workspace.Slug().String(), DefaultRoute: workspace.DefaultRoute().String()}
+	llm := "disabled"
+	if workspace.HasService(routing.ServiceModels) {
+		llm = "ready"
+	}
+	if workspace.HasService(routing.ServiceModels) && len(workspace.Routes()) == 0 {
+		llm = "not_configured"
+	}
+	mcpReadiness := "disabled"
+	if workspace.HasService(routing.ServiceMCP) {
+		mcpReadiness = "not_configured"
+	}
+	if len(workspace.MCPMounts()) > 0 {
+		mcpReadiness = "configured"
+	}
+	var searchReadiness *string
+	if workspace.HasService(routing.ServiceSearch) {
+		value := "not_configured"
+		if workspace.SearchConnectionID() != "" {
+			value = "configured"
+		}
+		searchReadiness = &value
+	}
+	out := Workspace{ManagementETag: fmt.Sprintf("%s-%d", workspace.ManagementIncarnation(), workspace.ManagementRevision()), ManagementRevision: workspace.ManagementRevision(), Slug: workspace.Slug().String(), Readiness: Readiness{LLM: llm, MCP: mcpReadiness, Search: searchReadiness}, SearchConnectionID: workspace.SearchConnectionID(), SearchFallbackIDs: workspace.SearchFallbackIDs(), EnabledServices: make([]string, 0), Routes: make([]Route, 0)}
+	out.DisplayName = workspace.DisplayName()
+	out.ServiceLimits = workspace.ServiceLimits()
+	for _, kind := range workspace.EnabledServices() {
+		out.EnabledServices = append(out.EnabledServices, string(kind))
+	}
+	for alias, mount := range workspace.MCPMounts() {
+		out.MCPMounts = append(out.MCPMounts, MCPMount{Alias: alias, Builtin: mount.Builtin, ConnectionID: mount.ConnectionID, AllowedTools: append([]string(nil), mount.AllowedTools...)})
+	}
+	sort.Slice(out.MCPMounts, func(i, j int) bool { return out.MCPMounts[i].Alias < out.MCPMounts[j].Alias })
 	for _, route := range workspace.Routes() {
 		projected := Route{Name: route.Name().String()}
 		for _, tier := range route.Tiers() {
@@ -299,30 +194,18 @@ func projectWorkspace(workspace routing.Workspace) Workspace {
 		}
 		out.Routes = append(out.Routes, projected)
 	}
-	sort.Slice(out.Routes, func(i, j int) bool { return out.Routes[i].Name < out.Routes[j].Name })
 	return out
 }
 
 func projectTarget(target routing.Target) Target {
-	// Read models expose effective runtime truth. Single-protocol providers omit
-	// protocol from authoring and persisted config, but diagnostics and external
-	// operator clients still receive the effective routed protocol here.
-	out := Target{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), Provider: string(target.Provider())}
-	out.Connection = connectionFromRouting(target.Connection())
-	return out
+	return Target{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), ConnectionID: target.ConnectionID().String()}
 }
 
 func projectRouteSpec(route routing.Route) RouteSpec {
 	out := RouteSpec{Tiers: make([]TierSpec, len(route.Tiers()))}
-	for tierIndex, tier := range route.Tiers() {
+	for i, tier := range route.Tiers() {
 		for _, target := range tier.Targets() {
-			projected := projectTarget(target)
-			if _, derived := profile.DerivedProtocolForSpec(projected.Provider); derived {
-				projected.Protocol = ""
-			}
-			out.Tiers[tierIndex].Targets = append(out.Tiers[tierIndex].Targets, TargetDraft{
-				ID: projected.ID, Model: projected.Model, Protocol: projected.Protocol, Connection: projected.Connection,
-			})
+			out.Tiers[i].Targets = append(out.Tiers[i].Targets, TargetDraft{ID: target.ID().String(), Model: target.Model().String(), Protocol: target.Protocol().String(), ConnectionID: target.ConnectionID().String()})
 		}
 	}
 	return out
@@ -338,93 +221,55 @@ func (s RouteSpec) routingSpec() (routing.RouteSpec, error) {
 				return routing.RouteSpec{}, fmt.Errorf("tiers[%d].targets[%d]: %w", tierIndex, targetIndex, err)
 			}
 			out.Tiers[tierIndex].Targets[targetIndex] = routing.TargetSpec{
-				ID: target.ID(), Settings: routing.TargetSettings{Model: target.Model(), Protocol: target.Protocol(), Connection: target.Connection()},
+				ID: target.ID(), Settings: routing.TargetSettings{Model: target.Model(), Protocol: target.Protocol(), ConnectionID: target.ConnectionID()},
 			}
 		}
 	}
 	return out, nil
 }
 
-// ConnectionFromDraft wraps raw connection facts in the canonical provider-keyed
-// operator document. It is structural only; the daemon finalizes the draft at
-// command and probe boundaries.
-func ConnectionFromDraft(draft routing.ConnectionDraft) Connection {
-	return Connection{draft: cloneConnectionDraft(draft)}
-}
-
-func connectionFromRouting(connection routing.Connection) Connection {
-	draft, err := connectionDraftFromRouting(connection)
-	if err != nil {
-		panic(err)
-	}
-	return ConnectionFromDraft(draft)
-}
-
-// Draft returns an independent copy of the raw connection facts carried by the
-// operator document. Reading the document must not reinterpret daemon-owned
-// locators in the caller's environment.
-func (c Connection) Draft() routing.ConnectionDraft {
-	return cloneConnectionDraft(c.draft)
-}
-
-func cloneConnectionDraft(draft routing.ConnectionDraft) routing.ConnectionDraft {
-	cloned := routing.ConnectionDraft{Provider: draft.Provider}
-	if draft.Standard != nil {
-		value := *draft.Standard
-		cloned.Standard = &value
-	}
-	if draft.ZAI != nil {
-		value := *draft.ZAI
-		cloned.ZAI = &value
-	}
-	if draft.Bedrock != nil {
-		value := *draft.Bedrock
-		cloned.Bedrock = &value
-	}
-	if draft.Custom != nil {
-		value := *draft.Custom
-		if draft.Custom.Header != nil {
-			header := *draft.Custom.Header
-			value.Header = &header
-		}
-		cloned.Custom = &value
-	}
-	return cloned
-}
-
 func (t TargetDraft) routingTarget() (routing.Target, error) {
-	return finalizeTargetDraft(t.ID, t.Model, t.Protocol, t.Connection)
-}
-
-func finalizeTargetDraft(id, model, protocol string, connection Connection) (routing.Target, error) {
-	return routing.FinalizeTarget(routing.TargetDraft{
-		ID: id, Model: model, Protocol: protocol, Connection: connection.Draft(),
-	}, profile.RoutingConstructionFacts())
-}
-
-func connectionDraftFromRouting(connection routing.Connection) (routing.ConnectionDraft, error) {
-	draft := routing.ConnectionDraft{Provider: string(connection.Provider())}
-	switch connection := connection.(type) {
-	case routing.StandardConnection:
-		locator, _ := connection.Locator()
-		draft.Standard = &routing.StandardConnectionDraft{Locator: locator.String(), Credential: connection.Credential().String()}
-	case routing.ZAIConnection:
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: string(connection.Access()), Credential: connection.Credential().String()}
-	case routing.BedrockConnection:
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}
-	case routing.CustomConnection:
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: connection.BaseURL().String()}
-		if auth := connection.Auth(); auth != nil {
-			header, ok := auth.(routing.CustomHeaderAuth)
-			if !ok {
-				return routing.ConnectionDraft{}, fmt.Errorf("unsupported custom auth %T", auth)
-			}
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name(), Credential: header.Credential().String()}
-		}
-	default:
-		return routing.ConnectionDraft{}, fmt.Errorf("unsupported routing connection %T", connection)
-	}
-	return draft, nil
+	return routing.FinalizeTarget(routing.TargetDraft{ID: t.ID, Model: t.Model, Protocol: t.Protocol, ConnectionID: t.ConnectionID}, profile.RoutingConstructionFacts())
 }
 
 func normalize(raw string) string { return strings.TrimSpace(raw) }
+
+// MatchesRoute checks complete desired topology against effective readback using
+// the same provider/profile authoring rules as apply. Tier order is priority;
+// target order within one tier is immaterial. Versions never enter this contract.
+func (spec RouteSpec) MatchesRoute(route Route) bool {
+	if len(spec.Tiers) == 0 || len(spec.Tiers) != len(route.Tiers) {
+		return false
+	}
+	seen := make(map[string]bool)
+	for index, tier := range spec.Tiers {
+		if len(tier.Targets) == 0 || len(tier.Targets) != len(route.Tiers[index].Targets) {
+			return false
+		}
+		expected := make(map[string]Target)
+		for _, draft := range tier.Targets {
+			target, err := draft.routingTarget()
+			if err != nil || seen[draft.ID] {
+				return false
+			}
+			seen[draft.ID] = true
+			expected[draft.ID] = projectTarget(target)
+		}
+		for _, target := range route.Tiers[index].Targets {
+			wanted, exists := expected[target.ID]
+			if !exists {
+				return false
+			}
+			left, err := json.Marshal(wanted)
+			right, rightErr := json.Marshal(target)
+			if err != nil || rightErr != nil || !bytes.Equal(left, right) {
+				return false
+			}
+			delete(expected, target.ID)
+		}
+		if len(expected) != 0 {
+			return false
+		}
+	}
+	return true
+}

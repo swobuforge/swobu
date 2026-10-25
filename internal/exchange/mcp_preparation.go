@@ -32,6 +32,16 @@ func reducePreparingMCP(ctx context.Context, s exchangeState, event exchangeEven
 		s.phase = failedPhase{problem: prepared.err}
 		return reducerOutcome{nextState: s}, nil
 	}
+	var attachErr error
+	openedRun := prepared.run
+	prepared.run, attachErr = prepared.run.WithWorkspaceCalls(runner.selectedWorkspaceTools, runner.workspaceToolExecute)
+	if attachErr != nil {
+		if openedRun != nil {
+			_ = openedRun.Close()
+		}
+		s.phase = failedPhase{problem: attachErr}
+		return reducerOutcome{nextState: s}, nil
+	}
 	next, err := s.draft.Finalize(prepared.full)
 	if err != nil {
 		s.phase = failedPhase{problem: canonical.InternalError("MCP preparation changed resolved request layout: " + err.Error())}

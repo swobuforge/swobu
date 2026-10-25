@@ -3,4 +3,7 @@
 // Adapters encode, send, decode, and classify failures. Exchange orchestration
 // owns routing and recovery. A failure's availability classification alone
 // does not establish that retrying an issued request is safe.
+// Registry-backed TargetSnapshots freeze a Connection ID/revision separately
+// from TargetID/TargetVersion. Equality includes both; credential authority is
+// derived only from an explicit binding, never from provider or target labels.
 package provider

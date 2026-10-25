@@ -43,10 +43,10 @@ func planPiCurrent(_ context.Context, s *Service, target Target) (plannedMutatio
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
 	}
-	return planPi(settings, models, target)
+	return planPi(settings, models, target, s.getenv)
 }
 
-func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, error) {
+func planPi(settingsPath, modelsPath string, target Target, getenv func(string) string) (plannedMutation, error) {
 	settings, err := inspectForeignFile(settingsPath, []byte("{}\n"))
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
@@ -77,20 +77,24 @@ func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, er
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
 	}
+	if strings.HasPrefix(apiKey, "!") {
+		return plannedMutation{}, piProblem(fmt.Errorf("command-backed API keys require manual configuration; Connect preview does not execute credential commands"))
+	}
+	if value := getenv(apiKey); value != "" {
+		apiKey = value
+	}
 	var existingModels json.RawMessage
 	modelsExist, err := modelsEditor.Value(models.raw, keyPath{"providers", "swobu", "models"}, &existingModels)
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
 	}
-	canonicalModels, _ := json.Marshal([]map[string]string{{"id": "default", "name": "Swobu default"}})
-	changes := semanticChange("backend", provider+"/"+model, providerExists || modelExists, "swobu/default")
+	canonicalModels, _ := json.Marshal([]map[string]string{{"id": target.ModelID(), "name": target.ModelID()}})
+	changes := semanticChange("backend", provider+"/"+model, providerExists || modelExists, "swobu/"+target.ModelID())
 	changes = append(changes, semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())...)
 	changes = append(changes, semanticChange("protocol", api, apiExists, "openai-responses")...)
-	if !apiKeyExists || apiKey == "" {
-		changes = append(changes, semanticChange("API key placeholder", apiKey, apiKeyExists, "swobu")...)
-	}
+	changes = append(changes, credentialChange(apiKey, apiKeyExists, target)...)
 	changes = append(changes, semanticChange("model catalog", semanticJSON(existingModels), modelsExist, string(canonicalModels))...)
-	plan := Plan{ConfigPaths: []string{models.logical, settings.logical}, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: []string{models.logical, settings.logical}, Target: target, Changes: changes, credential: apiKey}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
@@ -102,8 +106,8 @@ func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, er
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
 	}
-	if !apiKeyExists || apiKey == "" {
-		nextModels, err = setJSONValue(modelsEditor, nextModels, keyPath{"providers", "swobu", "apiKey"}, "swobu")
+	if apiKey != target.bearer || target.bearer == "" {
+		nextModels, err = setJSONValue(modelsEditor, nextModels, keyPath{"providers", "swobu", "apiKey"}, target.bearer)
 		if err != nil {
 			return plannedMutation{}, piProblem(err)
 		}
@@ -113,7 +117,7 @@ func planPi(settingsPath, modelsPath string, target Target) (plannedMutation, er
 		return plannedMutation{}, piProblem(err)
 	}
 	nextSettings, err := setJSONStrings(settingsEditor, settings.raw,
-		jsonStringChange{keyPath{"defaultProvider"}, "swobu"}, jsonStringChange{keyPath{"defaultModel"}, "default"})
+		jsonStringChange{keyPath{"defaultProvider"}, "swobu"}, jsonStringChange{keyPath{"defaultModel"}, target.ModelID()})
 	if err != nil {
 		return plannedMutation{}, piProblem(err)
 	}

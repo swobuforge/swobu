@@ -76,8 +76,8 @@ func TestRegionOnlyBedrockTargetWithoutCredentialTerminatesAtSigV4AmbientAuth(t 
 		if !ok {
 			t.Fatalf("error = %T %v, want an AttemptFailure", err, err)
 		}
-		if failure.Execution() != provider.ExecutionNotDispatched {
-			t.Fatalf("execution = %v want ExecutionNotDispatched", failure.Execution())
+		if failure.Execution() != provider.DispositionNotDispatched {
+			t.Fatalf("execution = %v want DispositionNotDispatched", failure.Execution())
 		}
 		var badEndpoint canonical.Error
 		if !errors.As(err, &badEndpoint) {

@@ -2,32 +2,23 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
-	workspaceapi "github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/clientconnect"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
+	"github.com/swobuforge/swobu/internal/routing"
 )
-
-type connectOperations interface {
-	Plan(context.Context, clientconnect.ClientID, clientconnect.Target) (clientconnect.Plan, error)
-	Apply(context.Context, clientconnect.Plan) (clientconnect.Plan, error)
-}
-
-type connectWorkspaceLister interface {
-	ListWorkspaces(context.Context) ([]workspaceapi.WorkspaceSummary, error)
-}
 
 func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.Writer, args []string, runner Runner) ExitCode {
 	usage := func(out io.Writer, fs *flag.FlagSet) {
-		_, _ = fmt.Fprintln(out, "usage: swobu connect <client> [--workspace <name>] [--addr <host:port>] [--replace]")
+		_, _ = fmt.Fprintln(out, "usage: swobu connect <client> --workspace <slug> --principal <id> --model <model-id> [--addr <host:port>] [--dry-run [--json] | (--apply | --recover) --intent-file <absolute-private-file>]")
 		_, _ = fmt.Fprintln(out, "\nclients:")
 		for _, id := range clientconnect.AutomaticClientIDs() {
 			_, _ = fmt.Fprintf(out, "  %s\n", id)
@@ -55,8 +46,14 @@ func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.
 	fs.SetOutput(stderr)
 	fs.Usage = func() { usage(stderr, fs) }
 	workspace := fs.String("workspace", "", "workspace name")
-	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
-	replace := fs.Bool("replace", false, "replace existing client configuration")
+	principal := fs.String("principal", "", "existing Principal with Workspace Models permission")
+	modelID := fs.String("model", "", "concrete model ID matched by the Workspace route patterns")
+	addr := fs.String("addr", runner.Addr, fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	dryRun := fs.Bool("dry-run", false, "preview through local Node Control without applying or starting a daemon")
+	machine := fs.Bool("json", false, "emit typed preview JSON (requires --dry-run)")
+	applyReviewed := fs.Bool("apply", false, "apply canonical review after literal local confirmation")
+	recoverReviewed := fs.Bool("recover", false, "recover original private intent after fresh local confirmation")
+	intentFile := fs.String("intent-file", "", "absolute file in an existing local directory for original reviewed intent")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -66,129 +63,65 @@ func runConnect(ctx context.Context, httpClient *http.Client, stdout, stderr io.
 	if rejectUnexpectedPositionalArgs(fs, stderr) {
 		return ExitDown
 	}
-	ops := runner.ConnectOperations
-	if ops == nil {
-		ops = clientconnect.NewService()
-	}
-	startup, err := platformconfig.ResolveStartupConfig(*addr)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
+	if *modelID == "" {
+		fmt.Fprintln(stderr, "--model is required; select a model ID matched by a configured route.")
 		return ExitDown
 	}
-	attach := runner.ConnectAttach
-	if attach == nil {
-		attach = defaultAttachOrStart
+	if *applyReviewed || *recoverReviewed || *intentFile != "" {
+		if (*applyReviewed == *recoverReviewed) || *intentFile == "" || *dryRun || *machine {
+			fmt.Fprintln(stderr, "Use exactly one of --apply or --recover with --intent-file; do not combine with --dry-run, --json.")
+			return ExitDown
+		}
+		return runReviewedConnect(ctx, httpClient, stdout, stderr, runner, *workspace, string(clientID), *principal, *modelID, *addr, *intentFile, *recoverReviewed)
 	}
-	if err := attach(ctx, stdout, stderr, httpClient, startup.Addr, platformconfig.ResolveConfigPath(runner.ConfigPath)); err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
+	if *machine && !*dryRun {
+		fmt.Fprintln(stderr, "--json requires --dry-run.")
 		return ExitDown
 	}
-	lister := runner.ConnectWorkspaces
-	if lister == nil {
-		lister = operatorclient.New(httpClient, platformconfig.BaseURL(startup.Addr))
-	}
-	summaries, err := lister.ListWorkspaces(ctx)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	slug, err := resolveConnectWorkspace(summaries, *workspace)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	target, err := clientconnect.NewTarget(slug, platformconfig.BaseURL(startup.Addr)+"/c/"+slug)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	plan, err := ops.Plan(ctx, clientID, target)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		_, _ = fmt.Fprintln(stderr, "Nothing changed.")
-		return ExitDown
-	}
-	renderConnectPlan(stdout, plan, target)
-	if plan.AlreadyConfigured() {
-		_, _ = fmt.Fprintln(stdout, "configured")
+	if *dryRun {
+		slug, err := routing.ParseWorkspaceSlug(*workspace)
+		if err != nil || slug.String() != *workspace {
+			fmt.Fprintln(stderr, "Preview requires an exact --workspace slug.")
+			return ExitDown
+		}
+		startup, err := platformconfig.ResolveStartupConfig(*addr)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return ExitDown
+		}
+		if err := requireCompatibleControlPlane(ctx, httpClient, startup.Addr); err != nil {
+			fmt.Fprintln(stderr, err)
+			return ExitDown
+		}
+		api := operatorclient.New(httpClient, platformconfig.BaseURL(startup.Addr))
+		plan, err := api.PreviewClientConfiguration(ctx, *workspace, string(clientID), *principal, *modelID)
+		if err != nil {
+			fmt.Fprintf(stderr, "Configuration preview unavailable; nothing applied: %v\n", err)
+			return ExitDown
+		}
+		if *machine {
+			if err := json.NewEncoder(stdout).Encode(plan); err != nil {
+				fmt.Fprintln(stderr, "Preview output unavailable; nothing applied.")
+				return ExitDown
+			}
+			return ExitHealthy
+		}
+		var output strings.Builder
+		fmt.Fprintf(&output, "Preview only: %s in Workspace %s\n", plan.Client.Name, plan.Workspace)
+		fmt.Fprintf(&output, "Principal: %s; credential provisioning required: %t\n", plan.Authentication.Principal, plan.Authentication.IssueCredential)
+		for _, path := range plan.ConfigPaths {
+			fmt.Fprintf(&output, "File: %s\n", path)
+		}
+		for _, change := range plan.Changes {
+			fmt.Fprintf(&output, "%s: %q -> %q (previously present: %t)\n", change.Field, change.Before, change.After, change.BeforeExists)
+		}
+		fmt.Fprintf(&output, "Already configured: %t; replacement required: %t\nNothing applied. Preview is not approval. Before-values are private operator data.\n", plan.AlreadyConfigured, plan.RequiresReplace)
+		if _, err := io.WriteString(stdout, output.String()); err != nil {
+			fmt.Fprintln(stderr, "Preview output unavailable; nothing applied.")
+			return ExitDown
+		}
 		return ExitHealthy
 	}
-	if plan.RequiresReplace() && !*replace {
-		_, _ = fmt.Fprintln(stderr, "Existing client configuration would be replaced.\nRun again with --replace.")
-		return ExitDown
-	}
-	verified, err := ops.Apply(ctx, plan)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err.Error())
-		return ExitDown
-	}
-	if !verified.AlreadyConfigured() {
-		_, _ = fmt.Fprintln(stderr, "Client did not converge to the reviewed configuration.")
-		return ExitDown
-	}
-	_, _ = fmt.Fprintln(stdout, "configured")
-	if clientID == clientconnect.ClientAntigravity {
-		_, _ = fmt.Fprintln(stdout, "If this shell predates configuration, open a new terminal before running agy.")
-	}
-	return ExitHealthy
-}
-
-func resolveConnectWorkspace(summaries []workspaceapi.WorkspaceSummary, explicit string) (string, error) {
-	explicit = strings.TrimSpace(explicit)
-	slugs := make([]string, 0, len(summaries))
-	for _, summary := range summaries {
-		slugs = append(slugs, summary.Slug)
-	}
-	sort.Strings(slugs)
-	if explicit != "" {
-		if len(slugs) == 0 && explicit == "default" {
-			return explicit, nil
-		}
-		for _, slug := range slugs {
-			if slug == explicit {
-				return slug, nil
-			}
-		}
-		return "", fmt.Errorf("workspace %q is not configured", explicit)
-	}
-	switch len(slugs) {
-	case 0:
-		return "default", nil
-	case 1:
-		return slugs[0], nil
-	default:
-		return "", fmt.Errorf("Multiple workspaces are configured: %s.\nChoose one with --workspace.", strings.Join(slugs, ", "))
-	}
-}
-
-func renderConnectPlan(out io.Writer, plan clientconnect.Plan, target clientconnect.Target) {
-	if plan.AlreadyConfigured() {
-		_, _ = fmt.Fprintf(out, "%s → %s\n", plan.ClientName, target.WorkspaceSlug())
-		return
-	} else {
-		_, _ = fmt.Fprintln(out, plan.ClientName)
-	}
-	for _, change := range plan.Changes {
-		if !change.BeforeExists {
-			_, _ = fmt.Fprintf(out, "  %-9s → %s\n", change.Field, shortConnectValue(target, change.After))
-		} else {
-			_, _ = fmt.Fprintf(out, "  %-9s %s\n            → %s\n", change.Field, shortConnectValue(target, change.Before), shortConnectValue(target, change.After))
-		}
-	}
-	for i, path := range plan.ConfigPaths {
-		label := ""
-		if i == 0 {
-			label = "writes"
-		}
-		_, _ = fmt.Fprintf(out, "  %-9s %s\n", label, path)
-	}
-	_, _ = fmt.Fprintln(out)
-}
-
-func shortConnectValue(target clientconnect.Target, value string) string {
-	prefix := strings.TrimSuffix(target.WorkspaceURL(), "/c/"+target.WorkspaceSlug())
-	if strings.HasPrefix(value, prefix+"/c/") {
-		return strings.TrimPrefix(value, prefix)
-	}
-	return value
+	fmt.Fprintln(stderr, "Connect requires --dry-run, or confirmed --apply/--recover with --intent-file. No apply sent.")
+	return ExitDown
 }

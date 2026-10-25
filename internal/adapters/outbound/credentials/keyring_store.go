@@ -2,10 +2,10 @@ package credentials
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	keyringcommodity "github.com/zalando/go-keyring"
 )
 
@@ -13,11 +13,25 @@ var keyringSet = keyringcommodity.Set
 var keyringGet = keyringcommodity.Get
 
 func StoreMaterializedCredential(providerSpec string, keyName string, secret string, policy CredentialWritePolicy) (string, error) {
-	spec := strings.TrimSpace(providerSpec) // swobu:io-string source=boundary
-	name := strings.TrimSpace(keyName)      // swobu:io-string source=boundary
-	token := strings.TrimSpace(secret)      // swobu:io-string source=boundary
-	if spec == "" {
+	scope, err := credentialref.NewProviderScope(providerSpec)
+	if err != nil {
 		return "", fmt.Errorf("provider spec is required")
+	}
+	return storeMaterializedCredential(scope, keyName, secret, policy)
+}
+
+func storeMaterializedCredential(scope credentialref.Scope, keyName string, secret string, policy CredentialWritePolicy) (string, error) {
+	if !scope.Valid() {
+		return "", fmt.Errorf("credential scope is required")
+	}
+	name := strings.TrimSpace(keyName) // swobu:io-string source=boundary
+	token := strings.TrimSpace(secret) // swobu:io-string source=boundary
+	if scope.Kind() == credentialref.ScopeConnection {
+		if !validConnectionSlot(scope, name) {
+			return "", fmt.Errorf("credential is outside Connection scope")
+		}
+	} else if strings.HasPrefix(name, "connections/") {
+		return "", fmt.Errorf("Connection credentials require Connection scope")
 	}
 	if name == "" {
 		return "", fmt.Errorf("stored secret name is required")
@@ -36,29 +50,17 @@ func StoreMaterializedCredential(providerSpec string, keyName string, secret str
 		}
 		encoded = wrapped
 	}
-	selectedPolicy := NormalizeCredentialWritePolicy(string(policy))
+	selectedPolicy, err := ParseCredentialWritePolicy(string(policy))
+	if err != nil {
+		return "", err
+	}
 	if selectedPolicy == CredentialWritePolicyFile {
 		if err := (&secretFileStore{}).Store(name, encoded); err != nil {
 			return "", err
 		}
 		return "secretfile:" + name, nil
 	}
-	if selectedPolicy == CredentialWritePolicyAuto {
-		if err := keyringSet(KeyringScopeForProvider(spec), name, encoded); err == nil {
-			return "secret:" + name, nil
-		} else {
-			slog.Warn("keyring write failed, falling back to credential file store",
-				"component", "credentials",
-				"provider_spec", strings.ToLower(spec), // swobu:io-string source=boundary
-				"write_policy", string(selectedPolicy),
-			)
-		}
-		if err := (&secretFileStore{}).Store(name, encoded); err != nil {
-			return "", err
-		}
-		return "secretfile:" + name, nil
-	}
-	if err := keyringSet(KeyringScopeForProvider(spec), name, encoded); err != nil {
+	if err := keyringSet(KeyringScopeForCredential(scope), name, encoded); err != nil {
 		return "", fmt.Errorf("keyring write failed for %q: %w", name, err)
 	}
 	return "secret:" + name, nil
@@ -107,10 +109,16 @@ func parseStoredSecretRef(providerSpec string, credentialRef string) (name strin
 	ref := strings.TrimSpace(credentialRef)                                 // swobu:io-string source=boundary
 	if strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) { // swobu:io-string source=boundary
 		name, err := secretCredentialName(providerSpec, ref)
+		if err == nil && strings.HasPrefix(name, "connections/") {
+			return "", "", fmt.Errorf("Connection credentials require Connection scope")
+		}
 		return name, "secret", err
 	}
 	if strings.HasPrefix(strings.ToLower(ref), secretFileCredentialRefPrefix) { // swobu:io-string source=boundary
 		name, err := secretFileCredentialName(ref)
+		if err == nil && strings.HasPrefix(name, "connections/") {
+			return "", "", fmt.Errorf("Connection credentials require Connection scope")
+		}
 		return name, "secretfile", err
 	}
 	return "", "", fmt.Errorf("credential ref %q is not refreshable stored secret", ref)

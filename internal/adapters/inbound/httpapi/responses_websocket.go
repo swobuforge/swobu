@@ -7,13 +7,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
 
+	"github.com/swobuforge/swobu/internal/accessstate"
+	"github.com/swobuforge/swobu/internal/admission"
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
@@ -21,8 +24,6 @@ import (
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/routing"
 )
-
-const websocketRequestTypeResponseCreate = "response.create"
 
 var errResponsesWebsocketForbidden = errors.New("responses websocket access is forbidden")
 
@@ -48,27 +49,70 @@ func (h Handler) serveResponsesWebsocket(w http.ResponseWriter, r *http.Request,
 }
 
 func validateResponsesWebsocketAccess(request *http.Request) error {
+	// Public Workspace upgrades have already passed Workspace publication and bearer
+	// admission. Their authority must not depend on a loopback relay peer.
+	if workspace, err := meteredWorkspace(request); err == nil {
+		if identity, err := WorkspaceServiceAuthorityFromContext(request.Context(), workspace, routing.ServiceModels); err == nil && identity != accessidentity.Local {
+			return nil
+		}
+	}
 	if ValidateLocalAdmission(request) != nil {
 		return errResponsesWebsocketForbidden
 	}
 	return nil
 }
 
+// websocketConnectionWriter serializes output from concurrent named lanes.
+// The Responses codec already owns the event payload; only stream_id is a
+// WebSocket transport field and is attached here, after encoding.
+type websocketConnectionWriter struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (w *websocketConnectionWriter) send(lane string, frame []byte) error {
+	if lane != "" {
+		var event map[string]json.RawMessage
+		if err := json.Unmarshal(frame, &event); err != nil || event == nil {
+			return canonical.InternalError("WebSocket event is not a JSON object")
+		}
+		encodedLane, _ := json.Marshal(lane)
+		event["stream_id"] = encodedLane
+		var err error
+		frame, err = json.Marshal(event)
+		if err != nil {
+			return canonical.InternalError("WebSocket event could not be encoded")
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := websocket.Message.Send(w.conn, string(frame)); err != nil {
+		return canonical.InternalError("websocket response write failed")
+	}
+	return nil
+}
+
+type websocketCompleted struct {
+	lane string
+	err  error
+}
+
 func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, endpointName string, normalizedPath canonical.NormalizedPath) {
 	conn.MaxPayloadBytes = maxOperatorJSONBodyBytes
+	output := &websocketConnectionWriter{conn: conn}
 	if h.requestIngress == nil {
-		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.InternalError("exchange ingress is not configured"))))
+		_ = output.send("", websocketErrorEvent(canonical.InternalError("exchange ingress is not configured")))
 		return
 	}
 
 	parsedWorkspace, err := routing.ParseWorkspaceSlug(endpointName)
 	if err != nil {
-		_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadEndpoint("endpoint name is invalid"))))
+		_ = output.send("", websocketErrorEvent(canonical.BadEndpoint("endpoint name is invalid")))
 		return
 	}
 	transportHeaders, connectionThreadID, err := ingressTransportRequest(http.MethodPost, string(normalizedPath), parsedWorkspace.String(), canonical.ClientFamilyResponses, r.Header, nil)
 	if err != nil {
-		_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
+		_ = output.send("", websocketErrorEvent(err))
 		return
 	}
 
@@ -76,20 +120,23 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 	incoming := make(chan string, 1)
 	readErrors := make(chan error, 1)
 	readerDone := make(chan struct{})
+	completed := make(chan websocketCompleted, maxResponsesWebsocketActive)
+	var workers sync.WaitGroup
 	go func() {
 		defer close(readerDone)
 		for {
 			var message string
 			if err := websocket.Message.Receive(conn, &message); err != nil {
+				select {
+				case readErrors <- err:
+				case <-ctx.Done():
+				}
 				cancel()
-				readErrors <- err
 				return
 			}
 			select {
 			case incoming <- message:
-			default:
-				cancel()
-				readErrors <- canonical.BadRequest("websocket response.create requests must be processed serially")
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -98,60 +145,95 @@ func (h Handler) runResponsesWebsocket(conn *websocket.Conn, r *http.Request, en
 		cancel()
 		_ = conn.Close()
 		<-readerDone
+		workers.Wait()
 	}()
 
-	for {
-		var message string
-		select {
-		case message = <-incoming:
-		case err := <-readErrors:
-			if errors.Is(err, io.EOF) {
+	request := r.WithContext(ctx)
+	queue := &websocketLaneScheduler{}
+	startReady := func() {
+		for {
+			create, ok := queue.next()
+			if !ok {
 				return
 			}
-			if ctx.Err() == nil {
-				_ = websocket.Message.Send(conn, string(websocketErrorEvent(canonical.BadRequest("websocket payload could not be read"))))
+			workers.Add(1)
+			go func(create websocketCreate) {
+				defer workers.Done()
+				err := h.handleResponsesWebsocketCreate(output, create.lane, request, parsedWorkspace, normalizedPath, transportHeaders.Header, connectionThreadID, create.body)
+				select {
+				case completed <- websocketCompleted{lane: create.lane, err: err}:
+				case <-ctx.Done():
+				}
+			}(create)
+		}
+	}
+	for {
+		select {
+		case message := <-incoming:
+			create, err := parseWebsocketCreate([]byte(message))
+			if err != nil {
+				if errors.Is(err, errWebsocketEventUnsupported) || errors.Is(err, errWebsocketWarmupUnsupported) {
+					err = canonical.NotImplemented(err.Error())
+				} else {
+					err = canonical.BadRequest(err.Error())
+				}
+				if output.send(create.lane, websocketErrorEvent(err)) != nil {
+					return
+				}
+				continue
+			}
+			if err := queue.enqueue(create); err != nil {
+				if output.send(create.lane, websocketErrorEvent(canonical.BadRequest(err.Error()))) != nil {
+					return
+				}
+				continue
+			}
+			startReady()
+		case done := <-completed:
+			queue.finish(done.lane)
+			if done.err != nil && ctx.Err() == nil {
+				if output.send(done.lane, websocketErrorEvent(done.err)) != nil {
+					return
+				}
+			}
+			startReady()
+		case err := <-readErrors:
+			if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				_ = output.send("", websocketErrorEvent(canonical.BadRequest("websocket payload could not be read")))
 			}
 			return
 		case <-ctx.Done():
 			return
 		}
-
-		request := r.WithContext(ctx)
-		if err := h.handleResponsesWebsocketMessage(conn, request, parsedWorkspace, normalizedPath, transportHeaders.Header, connectionThreadID, []byte(message)); err != nil && ctx.Err() == nil {
-			_ = websocket.Message.Send(conn, string(websocketErrorEvent(err)))
-		}
 	}
 }
 
-func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, transportHeaders http.Header, executionAffinity executionaffinity.Key, raw []byte) error {
+// Each named lane uses precisely the existing exchange and admission path.
+// No session credentials, durable conversation cache or separate routing
+// authority are introduced by multiplexing.
+func (h Handler) handleResponsesWebsocketCreate(output *websocketConnectionWriter, lane string, r *http.Request, workspace routing.WorkspaceSlug, normalizedPath canonical.NormalizedPath, transportHeaders http.Header, executionAffinity executionaffinity.Key, payload []byte) error {
 	accessID, err := authorityFromRequest(r, workspace)
 	if err != nil {
 		return canonical.BadRequest("Access credential is no longer authorized for this Workspace")
 	}
-	if int64(len(raw)) > maxOperatorJSONBodyBytes {
+	if int64(len(payload)) > maxOperatorJSONBodyBytes {
 		return canonical.BadRequest("websocket request payload exceeds maximum allowed size")
 	}
-	trimmed := strings.TrimSpace(string(raw)) // swobu:io-string source=boundary
-	if trimmed == "" {
-		return canonical.BadRequest("websocket request payload is empty")
+	if retry, err := AdmitWorkspaceServiceOperation(r.Context(), workspace, routing.ServiceModels); err != nil {
+		if errors.Is(err, accessstate.ErrRequestRateLimited) {
+			return canonical.RequestRateLimited("Principal Models request limit exceeded", retry)
+		}
+		return canonical.BadRequest("Workspace authorization changed before WebSocket operation")
 	}
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
-		return canonical.BadRequest("websocket request body is invalid JSON")
+	release, retry, limitErr := AdmitWorkspaceOperationalOperation(r.Context(), workspace, routing.ServiceModels)
+	if limitErr != nil {
+		if errors.Is(limitErr, admission.ErrExhausted) {
+			return canonical.RequestRateLimited("Workspace Models operational limit exceeded", retry)
+		}
+		return canonical.InternalError("Workspace operational admission unavailable")
 	}
-	var requestType string
-	if t, ok := envelope["type"]; ok {
-		_ = json.Unmarshal(t, &requestType)
-	}
-	if strings.TrimSpace(requestType) != websocketRequestTypeResponseCreate { // swobu:io-string source=boundary
-		return canonical.NotImplemented("Swobu cannot yet process this Responses websocket request type")
-	}
+	defer release()
 	requestID := newRequestID()
-	delete(envelope, "type")
-	payload, err := json.Marshal(envelope)
-	if err != nil {
-		return canonical.BadRequest("websocket request body is invalid JSON")
-	}
 	timing := observation.NewUnknownTiming()
 	timing.MarkStarted(time.Now())
 	out, err := h.requestIngress.HandleRequest(r.Context(), exchange.RequestInput{
@@ -169,12 +251,12 @@ func (h Handler) handleResponsesWebsocketMessage(conn *websocket.Conn, r *http.R
 		h.finalizeDelivery(out, &timing, delivery.Result{Kind: delivery.ExchangeFailed, Err: err}, nil)
 		return err
 	}
-	result := writeResponsesWebsocketSuccess(r.Context(), conn, requestID, out.Response, &timing)
+	result := writeResponsesWebsocketSuccess(r.Context(), output, lane, requestID, out.Response, &timing)
 	h.finalizeDelivery(out, &timing, result, nil)
 	return result.Err
 }
 
-func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, requestID string, response exchange.ClientResponse, timing *observation.Timing) delivery.Result {
+func writeResponsesWebsocketSuccess(ctx context.Context, output *websocketConnectionWriter, lane, requestID string, response exchange.ClientResponse, timing *observation.Timing) delivery.Result {
 	streaming, ok := response.(exchange.MessageStreamingResponse)
 	if !ok {
 		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("websocket response is not message-oriented streaming output")}
@@ -186,7 +268,7 @@ func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, r
 	if transportResponse.Messages == nil {
 		return delivery.Result{Kind: delivery.ProviderStreamFailed, Err: canonical.InternalError("streaming client response is missing message stream")}
 	}
-	err := writeResponsesWebsocketStream(ctx, conn, requestID, transportResponse, timing)
+	err := writeResponsesWebsocketStream(ctx, output, lane, requestID, transportResponse, timing)
 	if err == nil {
 		return delivery.Result{Kind: delivery.Succeeded}
 	}
@@ -197,8 +279,8 @@ func writeResponsesWebsocketSuccess(ctx context.Context, conn *websocket.Conn, r
 	return classifyDeliveryFailure(ctx, nil, err, nil)
 }
 
-func writeResponsesWebsocketStream(ctx context.Context, conn *websocket.Conn, requestID string, response carrier.MessageTransportResponse, timing *observation.Timing) error {
-	stats, err := drainWebsocketMessagesWithStats(ctx, response.Messages, &websocketFrameSink{conn: conn, timing: timing})
+func writeResponsesWebsocketStream(ctx context.Context, output *websocketConnectionWriter, lane, requestID string, response carrier.MessageTransportResponse, timing *observation.Timing) error {
+	stats, err := drainWebsocketMessagesWithStats(ctx, response.Messages, &websocketFrameSink{write: func(frame []byte) error { return output.send(lane, frame) }, timing: timing})
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -248,7 +330,7 @@ func (e websocketFrameWriteError) Error() string { return e.err.Error() }
 func (e websocketFrameWriteError) Unwrap() error { return e.err }
 
 type websocketFrameSink struct {
-	conn      *websocket.Conn
+	write     func([]byte) error
 	timing    *observation.Timing
 	firstByte bool
 }
@@ -258,10 +340,7 @@ func (s *websocketFrameSink) WriteFrame(frame []byte) error {
 		s.timing.MarkFirstByte(time.Now())
 		s.firstByte = true
 	}
-	if err := websocket.Message.Send(s.conn, string(frame)); err != nil {
-		return canonical.InternalError("websocket response write failed")
-	}
-	return nil
+	return s.write(frame)
 }
 
 type responsesWebsocketErrorDTO struct {

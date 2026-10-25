@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> 产品正在迁移到以网页为主的新版本。当前产品方向和安装说明以 [英文 README](README.md) 为准；下文保留的是旧版界面说明。
+
+
 [English](README.md) · **简体中文** · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **一个端点，让 Claude Code、Codex 和其他 AI Agent 在 DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock 等模型与提供商之间自动路由、负载均衡和故障切换。**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-安装程序会启动 Swobu，并打开终端 UI **Cockpit**。
+安装程序会启动 Swobu，并在浏览器中打开 **Web Operator**。
 
 添加提供商、创建路由，然后连接你的 Agent。
 
 ### 连接 Agent
 
-Cockpit 可以自动配置受支持的客户端。
+Web Operator 可以帮助配置受支持的客户端。
 
 也可以直接使用 CLI：
 

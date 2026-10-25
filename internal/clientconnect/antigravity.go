@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 const ClientAntigravity ClientID = "antigravity"
@@ -59,7 +60,7 @@ func planAntigravity(path string, target Target, environment antigravityEnvironm
 	changes = append(changes, providerChanges...)
 	paths := append([]string(nil), environment.configPaths...)
 	paths = append(paths, file.logical)
-	plan := Plan{ConfigPaths: paths, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: paths, Target: target, Changes: changes, credential: environment.credential, PostApplyHint: fmt.Sprintf("Open a new terminal to load the endpoint and credential. Select model %q explicitly in Antigravity; this configuration does not set a model override.", target.ModelID())}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
@@ -89,12 +90,13 @@ func planAntigravity(path string, target Target, environment antigravityEnvironm
 type antigravityEnvironmentPlan struct {
 	configPaths []string
 	changes     []Change
+	credential  string
 	apply       func(context.Context) error
 }
 
-func antigravityProfileBlock(endpoint string) []byte {
+func antigravityProfileBlock(endpoint, credential string) []byte {
 	return []byte(antigravityProfileStart + "\n" +
-		`export GEMINI_API_KEY="${GEMINI_API_KEY:-swobu-local}"` + "\n" +
+		"export GEMINI_API_KEY='" + strings.ReplaceAll(credential, "'", "'\"'\"'") + "'" + "\n" +
 		"export GOOGLE_GEMINI_BASE_URL='" + endpoint + "'\n" +
 		antigravityProfileEnd + "\n")
 }

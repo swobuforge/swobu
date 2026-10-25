@@ -30,7 +30,7 @@ func (r Route) Spec() RouteSpec {
 		for targetIndex, target := range tier.targets {
 			spec.Tiers[tierIndex].Targets[targetIndex] = TargetSpec{
 				ID:       target.id,
-				Settings: TargetSettings{Model: target.model, Protocol: target.protocol, Connection: target.connection},
+				Settings: TargetSettings{Model: target.model, Protocol: target.protocol, ConnectionID: target.connectionID},
 			}
 		}
 	}
@@ -99,7 +99,7 @@ func applyRouteSpec(current Route, desired RouteSpec, history map[TargetID]Targe
 }
 
 func targetFromSpec(spec TargetSpec, current Target, highest TargetVersion) (Target, error) {
-	target, err := NewTarget(spec.ID, spec.Settings.Model, spec.Settings.Protocol, spec.Settings.Connection)
+	target, err := NewTarget(spec.ID, spec.Settings.Model, spec.Settings.Protocol, spec.Settings.ConnectionID)
 	if err != nil {
 		return Target{}, err
 	}
@@ -112,7 +112,7 @@ func targetFromSpec(spec TargetSpec, current Target, highest TargetVersion) (Tar
 		}
 		return target, nil
 	}
-	currentSettings := TargetSettings{Model: current.model, Protocol: current.protocol, Connection: current.connection}
+	currentSettings := TargetSettings{Model: current.model, Protocol: current.protocol, ConnectionID: current.connectionID}
 	if currentSettings.Equal(spec.Settings) {
 		target.version = current.version
 		return target, nil
@@ -127,20 +127,50 @@ func targetFromSpec(spec TargetSpec, current Target, highest TargetVersion) (Tar
 // ApplyRouteSpec replaces one route inside the immutable configuration.
 func (c Config) ApplyRouteSpec(slug WorkspaceSlug, routeName RouteName, desired RouteSpec) (Config, error) {
 	return c.editWorkspace(slug, func(workspace Workspace) (Workspace, error) {
-		current, ok := workspace.routes[routeName]
-		if !ok {
+		current, index := workspace.findRoute(routeName)
+		if index < 0 {
 			return Workspace{}, fmt.Errorf("%w: route %q", ErrNotFound, routeName.String())
 		}
 		nextRoute, err := applyRouteSpec(current.clone(), desired, workspace.generations)
 		if err != nil {
 			return Workspace{}, err
 		}
-		workspace.routes[routeName] = nextRoute
+		workspace.routes[index] = nextRoute
 		for _, tier := range nextRoute.tiers {
 			for _, target := range tier.targets {
 				workspace.generations[target.id] = target.version
 			}
 		}
-		return RestoreWorkspace(workspace.slug, workspace.defaultRoute, workspace.Routes(), workspace.generations)
+		return workspace, nil
+	})
+}
+
+// PutRouteSpec atomically creates or replaces a complete client-visible Model
+// route. An enabled empty Models Service accepts its first configured route.
+// Stable target IDs keep their generation semantics across edits and deletes.
+func (c Config) PutRouteSpec(slug WorkspaceSlug, routeName RouteName, desired RouteSpec) (Config, error) {
+	return c.editWorkspace(slug, func(workspace Workspace) (Workspace, error) {
+		if !workspace.HasService(ServiceModels) {
+			return Workspace{}, ErrServiceDisabled
+		}
+		current, index := workspace.findRoute(routeName)
+		if index < 0 {
+			current = Route{name: routeName}
+		}
+		nextRoute, err := applyRouteSpec(current.clone(), desired, workspace.generations)
+		if err != nil {
+			return Workspace{}, err
+		}
+		if index < 0 {
+			workspace.insertRoute(nextRoute)
+		} else {
+			workspace.routes[index] = nextRoute
+		}
+		for _, tier := range nextRoute.tiers {
+			for _, target := range tier.targets {
+				workspace.generations[target.id] = target.version
+			}
+		}
+		return workspace, nil
 	})
 }

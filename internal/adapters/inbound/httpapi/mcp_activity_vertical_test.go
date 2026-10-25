@@ -17,9 +17,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,23 +33,56 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
+	"github.com/swobuforge/swobu/internal/ledger"
 	"github.com/swobuforge/swobu/internal/provider"
 )
 
 // The proxy keeps the production remote-MCP direct-dial guard in place: the
 // fixture endpoint is a public-looking HTTPS authority, never a loopback URL.
-// Go caches ProxyFromEnvironment once per process, including across -count
-// repetitions, so the proxy and its certificate must have process lifetime.
+// Its subprocess starts with proxy settings before Go initializes the cache.
 var mcpAuditProxy struct {
-	once        sync.Once
 	proxy       *httptest.Server
 	certificate tls.Certificate
+	keyFile     string
 	certFile    string
 	tempDir     string
 	upstream    atomic.Pointer[httptest.Server]
 }
 
 func TestMain(m *testing.M) {
+	if os.Getenv("SWOBU_HTTPAPI_MCP_AUDIT_CHILD") == "1" {
+		var err error
+		mcpAuditProxy.certificate, err = tls.LoadX509KeyPair(os.Getenv("SWOBU_HTTPAPI_MCP_AUDIT_CERT_FILE"), os.Getenv("SWOBU_HTTPAPI_MCP_AUDIT_KEY_FILE"))
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "load MCP Activity certificate fixture:", err)
+			os.Exit(1)
+		}
+		// SSL_CERT_FILE is Unix-only. Confine the fixture root to this child
+		// process so Windows also verifies the real TLS handshake without
+		// installing a host certificate or bypassing hostname verification.
+		certificate, err := x509.ParseCertificate(mcpAuditProxy.certificate.Certificate[0])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "parse MCP Activity certificate fixture:", err)
+			os.Exit(1)
+		}
+		roots := x509.NewCertPool()
+		roots.AddCert(certificate)
+		if err := os.Setenv("GODEBUG", os.Getenv("GODEBUG")+",x509usefallbackroots=1"); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "configure MCP Activity fixture roots:", err)
+			os.Exit(1)
+		}
+		x509.SetFallbackRoots(roots)
+		proxyListener, err := net.Listen("tcp", os.Getenv("SWOBU_HTTPAPI_MCP_AUDIT_PROXY_ADDR"))
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "allocate MCP Activity proxy fixture:", err)
+			os.Exit(1)
+		}
+		if err := startMCPAuditProxy(proxyListener); err != nil {
+			_ = proxyListener.Close()
+			_, _ = fmt.Fprintln(os.Stderr, "initialize MCP Activity proxy fixture:", err)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	if mcpAuditProxy.proxy != nil {
 		mcpAuditProxy.proxy.Close()
@@ -62,30 +95,18 @@ func TestMain(m *testing.M) {
 
 func mcpAuditEndpoint(t *testing.T, handler http.Handler) string {
 	t.Helper()
-	mcpAuditProxy.once.Do(func() { initMCPAuditProxy(t) })
 	upstream := httptest.NewUnstartedServer(handler)
 	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{mcpAuditProxy.certificate}}
 	upstream.StartTLS()
 	mcpAuditProxy.upstream.Store(upstream)
 	t.Cleanup(upstream.Close)
-	t.Setenv("HTTPS_PROXY", mcpAuditProxy.proxy.URL)
-	t.Setenv("https_proxy", mcpAuditProxy.proxy.URL)
-	t.Setenv("NO_PROXY", "")
-	t.Setenv("no_proxy", "")
-	t.Setenv("SSL_CERT_FILE", mcpAuditProxy.certFile)
-	proxyRequest, _ := http.NewRequest(http.MethodGet, "https://mcp.example.test:443/mcp", nil)
-	selected, err := http.ProxyFromEnvironment(proxyRequest)
-	if err != nil || selected == nil || selected.String() != mcpAuditProxy.proxy.URL {
-		t.Fatalf("MCP fixture proxy selection = %v, %v; want %s", selected, err, mcpAuditProxy.proxy.URL)
-	}
 	return "https://mcp.example.test:443/mcp"
 }
 
-func initMCPAuditProxy(t *testing.T) {
-	t.Helper()
+func writeMCPAuditCertificate() error {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "mcp.example.test"},
@@ -99,27 +120,36 @@ func initMCPAuditProxy(t *testing.T) {
 		BasicConstraintsValid: true,
 	}, &key.PublicKey, key)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	privateKey, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	certificate, err := tls.X509KeyPair(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKey}))
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	mcpAuditProxy.certificate = certificate
 	mcpAuditProxy.tempDir, err = os.MkdirTemp("", "swobu-mcp-audit-")
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	certFile := filepath.Join(mcpAuditProxy.tempDir, "mcp-root.pem")
 	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	mcpAuditProxy.certFile = certFile
-	mcpAuditProxy.proxy = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	keyFile := filepath.Join(mcpAuditProxy.tempDir, "mcp-root-key.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKey}), 0600); err != nil {
+		return err
+	}
+	mcpAuditProxy.keyFile = keyFile
+	return nil
+}
+
+func startMCPAuditProxy(listener net.Listener) error {
+	mcpAuditProxy.proxy = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodConnect || r.Host != "mcp.example.test:443" {
 			http.Error(w, "unexpected CONNECT authority", http.StatusBadRequest)
 			return
@@ -144,6 +174,9 @@ func initMCPAuditProxy(t *testing.T) {
 		_, _ = io.Copy(client, conn)
 		_ = client.Close()
 	}))
+	mcpAuditProxy.proxy.Listener = listener
+	mcpAuditProxy.proxy.Start()
+	return nil
 }
 
 type mcpAuditTransport struct {
@@ -185,6 +218,47 @@ func (r mcpAuditRuntime) ResolveBackend(target provider.TargetSnapshot) (provide
 }
 
 func TestMCPCallTraversesExchangeEvidenceAndActivity(t *testing.T) {
+	const childMarker = "SWOBU_HTTPAPI_MCP_AUDIT_CHILD"
+	if os.Getenv(childMarker) != "1" {
+		if err := writeMCPAuditCertificate(); err != nil {
+			t.Fatal(err)
+		}
+		reserved, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		proxyAddress := reserved.Addr().String()
+		if err := reserved.Close(); err != nil {
+			t.Fatal(err)
+		}
+		command := exec.Command(os.Args[0], "-test.run=^TestMCPCallTraversesExchangeEvidenceAndActivity$", "-test.count=1")
+		command.Env = make([]string, 0, len(os.Environ())+7)
+		for _, value := range os.Environ() {
+			if !strings.HasPrefix(value, childMarker+"=") &&
+				!strings.HasPrefix(value, "SWOBU_HTTPAPI_MCP_AUDIT_PROXY_ADDR=") &&
+				!strings.HasPrefix(value, "SWOBU_HTTPAPI_MCP_AUDIT_CERT_FILE=") &&
+				!strings.HasPrefix(value, "SWOBU_HTTPAPI_MCP_AUDIT_KEY_FILE=") &&
+				!strings.HasPrefix(value, "HTTPS_PROXY=") && !strings.HasPrefix(value, "https_proxy=") &&
+				!strings.HasPrefix(value, "NO_PROXY=") && !strings.HasPrefix(value, "no_proxy=") {
+				command.Env = append(command.Env, value)
+			}
+		}
+		proxyURL := "http://" + proxyAddress
+		command.Env = append(command.Env,
+			childMarker+"=1",
+			"SWOBU_HTTPAPI_MCP_AUDIT_PROXY_ADDR="+proxyAddress,
+			"SWOBU_HTTPAPI_MCP_AUDIT_CERT_FILE="+mcpAuditProxy.certFile,
+			"SWOBU_HTTPAPI_MCP_AUDIT_KEY_FILE="+mcpAuditProxy.keyFile,
+			"HTTPS_PROXY="+proxyURL, "https_proxy="+proxyURL, "NO_PROXY=", "no_proxy=",
+		)
+		output, err := command.CombinedOutput()
+		_ = os.RemoveAll(mcpAuditProxy.tempDir)
+		if err != nil {
+			t.Fatalf("isolated MCP Activity proof failed: %v\n%s", err, output)
+		}
+		return
+	}
+
 	var toolCalls atomic.Int32
 	remote := sdk.NewServer(&sdk.Implementation{Name: "audit", Version: "1"}, nil)
 	remote.AddTool(&sdk.Tool{Name: "search", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -199,17 +273,17 @@ func TestMCPCallTraversesExchangeEvidenceAndActivity(t *testing.T) {
 	evidence := store.NewStore(store.Config{})
 	transport := &mcpAuditTransport{}
 	runtime := mcpAuditRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: transport}
-	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: cacheEvidenceWorkspace(t)}, runtime, exchange.RuntimePoliciesSpec{
+	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: cacheEvidenceWorkspace(t)}, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel,
 		PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()}, ExecutionEvidence: evidence,
 	})
 	mux := http.NewServeMux()
-	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress)))
-	mux.Handle("/_swobu/activity", NewActivityHandler(func(_ *http.Request, scope store.ProjectionScope) (store.ActivityProjection, error) {
+	mux.Handle("/workspaces/", localAuthorityTestHandler(NewWorkspaceDataHandler(ingress)))
+	mux.Handle("/api/v1/activity", NewActivityHandler(func(_ *http.Request, scope store.ProjectionScope, _ ledger.ActivityPageQuery) (store.ActivityProjection, error) {
 		return evidence.ProjectActivity(store.ProjectionInput{Scope: scope}), nil
 	}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	request, _ := http.NewRequest(http.MethodPost, server.URL+"/c/cache/responses", strings.NewReader(fmt.Sprintf(`{"model":"default","input":"find evidence","stream":false,"tools":[{"type":"mcp","server_label":"docs","server_url":%q,"require_approval":"never"}]}`, endpoint)))
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/workspaces/cache/responses", strings.NewReader(fmt.Sprintf(`{"model":"cache-route","input":"find evidence","stream":false,"tools":[{"type":"mcp","server_label":"docs","server_url":%q,"require_approval":"never"}]}`, endpoint)))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := server.Client().Do(request)
 	if err != nil {

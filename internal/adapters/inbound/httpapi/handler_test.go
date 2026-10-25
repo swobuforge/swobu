@@ -10,18 +10,22 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/net/websocket"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
 	chatcompletions "github.com/swobuforge/swobu/internal/wire/chatcompletions"
@@ -29,8 +33,133 @@ import (
 	responses "github.com/swobuforge/swobu/internal/wire/responses"
 )
 
+func TestWorkspaceDataHandlerRejectsAmbiguousWorkspacePaths(t *testing.T) {
+	handler := NewWorkspaceDataHandler(nil)
+	for _, raw := range []string{
+		"/workspaces/a%2Fb/v1/responses", "/workspaces/a%2fb/v1/responses",
+		"/workspaces/a%5Cb/v1/responses", "/workspaces/a//v1/responses",
+		"/workspaces/a/../api/v1/workspaces", "/workspaces/a/./v1/responses",
+		"/workspaces/%2e%2e/v1/responses", "/workspaces/a%252Fb/v1/responses",
+		"/workspaces/%252e%252e/v1/responses", "/workspaces/a%255Cb/v1/responses",
+		"/workspaces/%ff/v1/responses", "/workspaces/%c0%af/v1/responses",
+		"/workspaces/research/v1/%252fresponses",
+		"/workspaces/research/v1/%255cresponses",
+		"/workspaces/research/v1/%252e%252e/responses",
+		"/workspaces/research/v1/%ffresponses",
+		"/workspaces/research/v1/\\responses",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+raw, nil)
+		authorityCalls := 0
+		req = req.WithContext(context.WithValue(req.Context(), admissionContextKey{}, admittedAuthority(func(routing.WorkspaceSlug) (accessidentity.ID, error) {
+			authorityCalls++
+			return accessidentity.Local, nil
+		})))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != http.StatusNotFound && response.Code != http.StatusBadRequest {
+			t.Fatalf("path %q status=%d body=%s", raw, response.Code, response.Body.String())
+		}
+		if authorityCalls != 0 {
+			t.Fatalf("ambiguous path %q resolved authority", raw)
+		}
+	}
+}
+
+func TestWorkspaceDataHandlerNeverProjectsAdminSessions(t *testing.T) {
+	handler := NewWorkspaceDataHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/workspaces/research/api/v1/agent-sessions", strings.NewReader(`{"workspace":"research"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	if response.Code == http.StatusCreated || strings.Contains(response.Body.String(), "agent session") {
+		t.Fatalf("Workspace data plane exposed Admin session: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkspaceAmbiguityRejectedAcrossHTTPTransport(t *testing.T) {
+	var lookups atomic.Int64
+	handler := NewWorkspaceDataHandler(nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), admissionContextKey{}, admittedAuthority(func(routing.WorkspaceSlug) (accessidentity.ID, error) {
+			lookups.Add(1)
+			return accessidentity.Local, nil
+		}))
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	for _, suffix := range []string{"%252fresponses", "%255cresponses", "%252e%252e/responses", "%ffresponses", "%c0%afresponses", "../responses", "./responses", "/responses"} {
+		response, err := client.Get(server.URL + "/workspaces/research/v1/" + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound && response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("suffix %q status=%d", suffix, response.StatusCode)
+		}
+	}
+	if lookups.Load() != 0 {
+		t.Fatal("HTTP transport admitted an ambiguous operation suffix")
+	}
+	// Encoded query values do not change the path boundary. This positive
+	// control also proves the server really reaches the installed authority seam.
+	response, err := client.Get(server.URL + "/workspaces/research/v1/models?q=%252f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if lookups.Load() != 1 {
+		t.Fatal("canonical path did not reach authority exactly once")
+	}
+}
+
+func TestLocalAdmissionRejectsAmbiguousWorkspaceBeforeCredentialLookupAndMux(t *testing.T) {
+	state, err := openTestAccessState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextCalls := 0
+	handler := NewLocalAdmissionHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { nextCalls++ }), state, nil)
+	for _, path := range []string{"/workspaces/research/v1/%252fresponses", "/workspaces/research/../api/v1/status", "/workspaces/research//mcp", "/workspaces/research/%ff/search"} {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1"+path, nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		// Authentication would return 401 for this recognized invalid token.
+		// A path rejection instead proves the earlier ordering without a spy store.
+		req.Header.Set("Authorization", "Bearer swak_invalid_fixture")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != http.StatusNotFound || nextCalls != 0 {
+			t.Fatalf("path %q status=%d downstream calls=%d", path, response.Code, nextCalls)
+		}
+	}
+}
+
+func FuzzWorkspaceDoubleEncodedSuffixNeverResolvesAuthority(f *testing.F) {
+	for _, seed := range []string{"/responses", "\\responses", "../responses", "%2fresponses", string([]byte{0xff}), "a?b"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, suffix string) {
+		escaped := url.PathEscape(suffix)
+		if escaped == suffix {
+			t.Skip("no encoding layer to test")
+		}
+		path := "/workspaces/research/v1/" + url.PathEscape(escaped)
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+path, nil)
+		lookups := 0
+		ctx := context.WithValue(req.Context(), admissionContextKey{}, admittedAuthority(func(routing.WorkspaceSlug) (accessidentity.ID, error) {
+			lookups++
+			return accessidentity.Local, nil
+		}))
+		response := httptest.NewRecorder()
+		NewWorkspaceDataHandler(nil).ServeHTTP(response, req.WithContext(ctx))
+		if lookups != 0 || (response.Code != http.StatusNotFound && response.Code != http.StatusBadRequest) {
+			t.Fatal("double-encoded suffix crossed the pre-auth path boundary")
+		}
+	})
+}
+
 func newTestHandler(ingress requestIngress) http.Handler {
-	return localAuthorityTestHandler(NewHandler(ingress))
+	return localAuthorityTestHandler(NewWorkspaceDataHandler(ingress))
 }
 
 func TestLogRequestOutcomeUsesDeliveryOwnedClientCancellation(t *testing.T) {
@@ -76,7 +205,7 @@ func decodeHTTPLogEntries(t *testing.T, raw []byte) []map[string]any {
 func TestHandler_ForwardsCanonicalRequest(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("X-Request-Id", "req-123")
 	req.Header.Set("User-Agent", "Codex/1.2")
 	rec := httptest.NewRecorder()
@@ -102,7 +231,7 @@ func TestHandlerErasesGenerateContentAuthenticationBeforeExchange(t *testing.T) 
 	const secret = "real-looking-gemini-secret"
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/v1beta/models/gemini:generateContent?key="+secret, bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/v1beta/models/gemini:generateContent?key="+secret, bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
 	req.Header.Set("X-Goog-Api-Key", secret)
 	rec := httptest.NewRecorder()
 
@@ -119,7 +248,7 @@ func TestHandlerErasesGenerateContentAuthenticationBeforeExchange(t *testing.T) 
 func TestHandler_ThreadsTimingLifecycleThroughResponseCommit(t *testing.T) {
 	ingress := &timingCaptureIngress{}
 	handler := newTestHandler(ingress)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("User-Agent", "Codex/1.2")
 	rec := httptest.NewRecorder()
 
@@ -168,7 +297,7 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 			),
 		),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
 	req.Header.Set("X-Request-Id", "req_success")
 	rec := httptest.NewRecorder()
@@ -180,7 +309,7 @@ func TestHandler_LogsClientProvenanceOnSuccessAndError(t *testing.T) {
 	fail := newTestHandler(staticRequestIngress{
 		err: canonical.NewBackendError("openai", http.StatusBadGateway, `{"error":"provider failed"}`, ""),
 	})
-	reqFail := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	reqFail := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	reqFail.Header.Set("User-Agent", "Claude-Code/2.0")
 	reqFail.Header.Set("X-Request-Id", "req_fail")
 	recFail := httptest.NewRecorder()
@@ -228,8 +357,8 @@ func TestHandler_ProjectsProviderTimeoutAcrossClientFamilies(t *testing.T) {
 		path string
 		body string
 	}{
-		{name: "Messages", path: "/c/alpha/messages", body: `{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`},
-		{name: "Responses", path: "/c/alpha/responses", body: `{"model":"m","input":"hello"}`},
+		{name: "Messages", path: "/workspaces/alpha/messages", body: `{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`},
+		{name: "Responses", path: "/workspaces/alpha/responses", body: `{"model":"m","input":"hello"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			handler := newTestHandler(staticRequestIngress{err: canonical.ProviderTimeout("provider did not respond before the configured deadline")})
@@ -377,7 +506,7 @@ func TestHandler_LogsSwobuErrorDetailsOnFailure(t *testing.T) {
 			"Change the tool declaration to function or custom and retry",
 		),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
 	req.Header.Set("X-Request-Id", "req_swobu")
 	rec := httptest.NewRecorder()
@@ -423,7 +552,7 @@ func TestHandler_LogsResponsesToolReferenceDetailsOnFailure(t *testing.T) {
 			},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping","tools":[{"type":"function","name":"exec_command__bogus","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping","tools":[{"type":"function","name":"exec_command__bogus","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}]}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
 	req.Header.Set("X-Request-Id", "req_tool_ref")
 	rec := httptest.NewRecorder()
@@ -468,7 +597,7 @@ func TestHandler_ClassifiesUntypedInternalFailureAsInternalError(t *testing.T) {
 	const toolName = "exec_command__bogus"
 	untyped := errors.New("provider request preparation failed at tool=" + toolName + " token=" + secretFragment)
 	handler := newTestHandler(staticRequestIngress{err: untyped})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping"}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"ping"}`))
 	req.Header.Set("User-Agent", "Codex/1.0")
 	req.Header.Set("X-Request-Id", "req_untyped")
 	rec := httptest.NewRecorder()
@@ -514,14 +643,13 @@ func TestHandler_ClassifiesUntypedInternalFailureAsInternalError(t *testing.T) {
 func TestHandler_ServesEndpointModels(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
-			DefaultModelID: "custom:gpt-4o",
 			Models: []exchange.ModelOption{
 				{ID: "custom:gpt-4o"},
 				{ID: "custom:gpt-4.1"},
 			},
 		},
 	})
-	req := httptest.NewRequest(http.MethodGet, "/c/alpha/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/alpha/v1/models", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -539,22 +667,21 @@ func TestHandler_ServesEndpointModels(t *testing.T) {
 	if !strings.Contains(body, `"name":"custom:gpt-4o"`) {
 		t.Fatalf("body = %q, want model name", body)
 	}
-	if !strings.Contains(body, `"id":"default"`) || !strings.Contains(body, `"name":"default"`) {
-		t.Fatalf("body = %q, want public default-route model", body)
+	if strings.Contains(body, `"id":"default"`) {
+		t.Fatalf("body = %q, invented an unconfigured model", body)
 	}
 	if strings.Contains(body, `"swobu_model"`) || strings.Contains(body, `"swobu_default"`) || strings.Contains(body, `"swobu_backend"`) || strings.Contains(body, `"swobu_provider"`) {
 		t.Fatalf("body = %q, want OpenAI-shaped model entries without swobu_* fields", body)
 	}
 }
 
-func TestHandler_ServesDefaultThenLexicalModelsWithoutSchemaExpansion(t *testing.T) {
+func TestHandler_ServesConcreteModelsWithoutSchemaExpansion(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{modelsOut: exchange.ListModelsOutput{
-		DefaultModelID: "chat",
-		Models:         []exchange.ModelOption{{ID: "chat"}, {ID: "claude-fast"}},
+		Models: []exchange.ModelOption{{ID: "chat"}, {ID: "claude-fast"}},
 	}})
 	var previous string
 	for attempt := 0; attempt < 3; attempt++ {
-		req := httptest.NewRequest(http.MethodGet, "/c/alpha/v1/models?limit=1000", nil)
+		req := httptest.NewRequest(http.MethodGet, "/workspaces/alpha/v1/models?limit=1000", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -567,7 +694,7 @@ func TestHandler_ServesDefaultThenLexicalModelsWithoutSchemaExpansion(t *testing
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		wantIDs := []string{"default", "chat", "claude-fast"}
+		wantIDs := []string{"chat", "claude-fast"}
 		if body.Object != "list" || len(body.Data) != len(wantIDs) {
 			t.Fatalf("response = %#v, want list with %d entries", body, len(wantIDs))
 		}
@@ -596,12 +723,12 @@ func TestHandler_MissingWorkspaceRequestsAndModelsReturnSlugSpecificBadEndpoint(
 		ingress *modelsCapableHandler
 	}{
 		{
-			name: "request", method: http.MethodPost, path: "/c/default/responses",
+			name: "request", method: http.MethodPost, path: "/workspaces/default/responses",
 			body:    `{"model":"gpt-5.3-codex","input":"hi"}`,
 			ingress: &modelsCapableHandler{requestErr: missing},
 		},
 		{
-			name: "models", method: http.MethodGet, path: "/c/default/v1/models",
+			name: "models", method: http.MethodGet, path: "/workspaces/default/v1/models",
 			ingress: &modelsCapableHandler{modelsErr: missing},
 		},
 	} {
@@ -628,14 +755,41 @@ func TestHandler_MissingWorkspaceRequestsAndModelsReturnSlugSpecificBadEndpoint(
 	}
 }
 
+func TestHandlerDistinguishesWorkspaceAndProviderCapabilityFailures(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    canonical.Error
+		status int
+		code   canonical.ErrorCode
+	}{
+		{name: "operation not configured", err: canonical.OperationNotConfigured("LLM operation is not configured for this Workspace"), status: http.StatusBadRequest, code: canonical.ErrorCodeOperationNotConfigured},
+		{name: "provider unavailable", err: canonical.ProviderUnavailable("provider transport was unavailable"), status: http.StatusServiceUnavailable, code: canonical.ErrorCodeProviderUnavailable},
+		{name: "unknown target", err: canonical.UnknownTarget("requested route is not configured"), status: http.StatusNotFound, code: canonical.ErrorCodeUnknownTarget},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := newTestHandler(&modelsCapableHandler{requestErr: testCase.err})
+			request := httptest.NewRequest(http.MethodPost, "/workspaces/default/responses", strings.NewReader(`{"model":"default","input":"hi"}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != testCase.status {
+				t.Fatalf("status=%d, want %d; body=%s", response.Code, testCase.status, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"code":"`+string(testCase.code)+`"`) {
+				t.Fatalf("body=%s missing code %s", response.Body.String(), testCase.code)
+			}
+		})
+	}
+}
+
 func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{
 		modelsOut: exchange.ListModelsOutput{
-			DefaultModelID: "custom:gpt-4o",
-			Models:         []exchange.ModelOption{{ID: "custom:gpt-4o"}},
+			Models: []exchange.ModelOption{{ID: "custom:gpt-4o"}},
 		},
 	})
-	req := httptest.NewRequest(http.MethodGet, "/c/alpha/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/alpha/models", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -653,7 +807,7 @@ func TestHandler_ServesEndpointModelsAliasPath(t *testing.T) {
 
 func TestHandler_RejectsNonGETModelsRequests(t *testing.T) {
 	handler := newTestHandler(&modelsCapableHandler{})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/v1/models", bytes.NewBufferString(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/v1/models", bytes.NewBufferString(`{}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -678,7 +832,7 @@ func TestHandler_DoesNotExposeSwobuModelHeaders(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: resp,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}]}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -700,7 +854,7 @@ func TestHandler_DecodesCompressedRequestsAndPreservesStructuredAnthropicContent
 	gz := gzip.NewWriter(&encoded)
 	_, _ = gz.Write([]byte(`{"model":"m","tools":[{"name":"calc","description":"calculate","input_schema":{"type":"object"}}],"messages":[{"role":"assistant","content":[{"type":"text","text":"working"},{"type":"tool_use","id":"toolu_1","name":"calc","input":{"expr":"2+2"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"4"}]}]}`))
 	_ = gz.Close()
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewReader(encoded.Bytes()))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/messages", bytes.NewReader(encoded.Bytes()))
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Content-Encoding", "gzip")
 	rec := httptest.NewRecorder()
@@ -731,7 +885,7 @@ func TestHandler_RejectsOversizedRequestBody(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
 	oversized := bytes.Repeat([]byte("a"), int(maxCompressedRequestBodyBytes)+1)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewReader(oversized))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewReader(oversized))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -753,7 +907,7 @@ func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
 	_, _ = gz.Write(bytes.Repeat([]byte("x"), int(maxDecodedRequestBodyBytes)+1))
 	_ = gz.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewReader(encoded.Bytes()))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewReader(encoded.Bytes()))
 	req.Header.Set("Content-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 
@@ -770,7 +924,7 @@ func TestHandler_RejectsDecodedBodyOverLimit(t *testing.T) {
 func TestHandler_AcceptsUnexpectedTopLevelFieldInRequestBody(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"unexpected":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}],"unexpected":true}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -796,7 +950,7 @@ func TestHandler_AcceptsUnexpectedTopLevelFieldInRequestBody(t *testing.T) {
 func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","prompt_cache_key":"repo-alpha","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","call_id":"call_1","name":"grep","arguments":{"pattern":"TODO"}},{"type":"function_call_output","call_id":"call_1","output":"2 hits"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","prompt_cache_key":"repo-alpha","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","call_id":"call_1","name":"grep","arguments":{"pattern":"TODO"}},{"type":"function_call_output","call_id":"call_1","output":"2 hits"}]}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -823,7 +977,7 @@ func TestHandler_PreservesResponsesStateAndStructuredInput(t *testing.T) {
 func TestHandler_DecodesResponsesToolChoiceStrictIntoCanonicalToolPolicy(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tool_choice":"required","input":"continue"}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","tool_choice":"required","input":"continue"}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -842,7 +996,7 @@ func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *te
 	handler := newTestHandler(capturing)
 	functionTool := canonicaltest.MustFunctionTool(canonicaltest.MustRequestToolKey(canonical.ToolKindFunction, "grep"), "search text", canonicaltest.MustSchema(`{"type":"object","properties":{"pattern":{"type":"string"}}}`), canonical.Unspecified[bool]())
 	projectedFunctionName := providertest.ProjectedToolName(t, functionTool)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"`+projectedFunctionName+`","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"`+projectedFunctionName+`"},"input":"continue"}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","tools":[{"type":"function","name":"`+projectedFunctionName+`","description":"search text","parameters":{"type":"object","properties":{"pattern":{"type":"string"}}}}],"tool_choice":{"type":"function","name":"`+projectedFunctionName+`"},"input":"continue"}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -863,7 +1017,7 @@ func TestHandler_DecodesResponsesSpecificToolChoiceIntoCanonicalToolPolicy(t *te
 func TestHandler_RejectsResponsesRequestsWithBothPreviousResponseSelectors(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","conversation":"conv_123","input":"continue"}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","previous_response_id":"resp_123","conversation":"conv_123","input":"continue"}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -879,7 +1033,7 @@ func TestHandler_RejectsResponsesRequestsWithBothPreviousResponseSelectors(t *te
 func TestHandler_RejectsResponsesConversationSelector(t *testing.T) {
 	capturing := &capturingRequestIngress{}
 	handler := newTestHandler(capturing)
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","conversation":"conv_123","input":"continue"}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","conversation":"conv_123","input":"continue"}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -894,7 +1048,7 @@ func TestHandler_RejectsResponsesConversationSelector(t *testing.T) {
 
 func TestHandler_RejectsUnsupportedRequestContentEncoding(t *testing.T) {
 	handler := newTestHandler(&capturingRequestIngress{})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Encoding", "brotli")
 	rec := httptest.NewRecorder()
 
@@ -910,7 +1064,7 @@ func TestHandler_RejectsUnsupportedRequestContentEncoding(t *testing.T) {
 
 func TestHandler_RejectsWebSocketClientWithGuidance(t *testing.T) {
 	handler := newTestHandler(&capturingRequestIngress{})
-	req := httptest.NewRequest(http.MethodGet, "/c/alpha/chat/completions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/alpha/chat/completions", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	rec := httptest.NewRecorder()
@@ -936,7 +1090,7 @@ func TestHandler_AcceptsResponsesWebSocketClient(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/workspaces/alpha/responses"
 	cfg, err := websocket.NewConfig(wsURL, server.URL)
 	if err != nil {
 		t.Fatalf("NewConfig returned error: %v", err)
@@ -1005,7 +1159,7 @@ func TestHandler_ResponsesWebSocketRejectsUnsupportedMessageType(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/workspaces/alpha/responses"
 	cfg, err := websocket.NewConfig(wsURL, server.URL)
 	if err != nil {
 		t.Fatalf("NewConfig returned error: %v", err)
@@ -1036,7 +1190,7 @@ func TestHandler_ResponsesWebSocketRejectsUnsupportedMessageType(t *testing.T) {
 
 func TestHandler_RejectsNonPOSTCompatibilityFamilyOperations(t *testing.T) {
 	handler := newTestHandler(&capturingRequestIngress{})
-	req := httptest.NewRequest(http.MethodGet, "/c/alpha/responses", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/alpha/responses", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1055,7 +1209,7 @@ func TestHandler_RejectsNonPOSTCompatibilityFamilyOperations(t *testing.T) {
 
 func TestHandler_RejectsUnsupportedAnthropicMessagePartType(t *testing.T) {
 	handler := newTestHandler(&capturingRequestIngress{})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc"}}]}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/messages", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc"}}]}]}`))
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
 
@@ -1073,7 +1227,7 @@ func TestHandler_EncodesToolCallStreamingForResponses(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testStreamingToolResponse("resp_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TO`, `DO"}`}, "completed"),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","tools":[{"type":"function","name":"grep","parameters":{"type":"object"}}],"stream":true}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1097,7 +1251,7 @@ func TestHandler_EncodesTextStreamingLifecycleForResponses(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testStreamingTextResponse("resp_1", "m", "text_0", "ok", "completed"),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/responses", bytes.NewBufferString(`{"model":"m","input":"hi","stream":true}`))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1152,7 +1306,7 @@ func TestHandler_DoesNotLogAfterCommitOnStreamingDisconnect(t *testing.T) {
 			}},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	req = req.WithContext(ctx)
 	rec := &writeHeaderCountingResponseWriter{
 		cancelAfterWriteCount: 1,
@@ -1186,7 +1340,7 @@ func assertNoExchangeErrorAfterStreamingCommit(t *testing.T) {
 			}},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/chat/completions", bytes.NewBufferString(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	rec := &writeHeaderCountingResponseWriter{}
 
 	handler.ServeHTTP(rec, req)
@@ -1203,7 +1357,7 @@ func TestHandler_EncodesToolCallStreamingForMessages(t *testing.T) {
 	handler := newTestHandler(staticRequestIngress{
 		envelope: testStreamingToolResponse("msg_1", "m", "tool_0", "call_1", "grep", []string{`{"pattern":"TODO"}`}, "tool_use"),
 	})
-	req := httptest.NewRequest(http.MethodPost, "/c/alpha/messages", bytes.NewBufferString(`{"model":"m","tools":[{"name":"grep","description":"search","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/alpha/messages", bytes.NewBufferString(`{"model":"m","tools":[{"name":"grep","description":"search","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
 

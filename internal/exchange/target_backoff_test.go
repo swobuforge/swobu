@@ -22,7 +22,7 @@ func TestTargetBackoffSkipsUnavailableTargetAcrossExchanges(t *testing.T) {
 	routeName, _ := routing.ParseRouteName("a")
 	tier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "a"), requestpathTarget(t, "b")})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

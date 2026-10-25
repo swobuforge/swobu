@@ -156,12 +156,6 @@ func DefaultToolLowering() ToolLowering {
 		}), nil, nil
 	}
 	omit := func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
-		mode, _ := tool.WebSearchAccessMode()
-		if mode != canonical.WebSearchAccessUnspecified {
-			return ToolProjection{}, nil, canonical.NotImplemented(
-				"selected Chat Completions target cannot preserve the requested web-search access restriction",
-			)
-		}
 		return ToolProjection{}, []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
 	}
 	return ToolLowering{Function: function, Custom: custom, WebSearch: omit, Discovery: discovery}

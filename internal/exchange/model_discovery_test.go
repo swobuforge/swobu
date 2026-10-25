@@ -14,7 +14,7 @@ func (l modelDiscoveryWorkspaceLookup) GetWorkspace(context.Context, routing.Wor
 	return l.workspace, nil
 }
 
-func TestListModelsReturnsRouteIDsLexicographically(t *testing.T) {
+func TestListModelsFollowsModelRoutePriority(t *testing.T) {
 	slug, _ := routing.ParseWorkspaceSlug("dev")
 	var routes []routing.Route
 	for index, raw := range []string{"claude-fast", "chat", "alpha"} {
@@ -23,14 +23,13 @@ func TestListModelsReturnsRouteIDsLexicographically(t *testing.T) {
 		route, _ := routing.NewRoute(name, []routing.Tier{tier})
 		routes = append(routes, route)
 	}
-	defaultRoute, _ := routing.ParseRouteName("chat")
-	workspace, err := routing.NewWorkspace(slug, defaultRoute, routes)
+	workspace, err := routing.NewWorkspace(slug, routes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ingress := NewIngress(modelDiscoveryWorkspaceLookup{workspace: workspace}, nil, RuntimePoliciesSpec{})
 
-	want := []string{"alpha", "chat", "claude-fast"}
+	want := []string{"claude-fast", "chat", "alpha"}
 	for attempt := 0; attempt < 20; attempt++ {
 		out, err := ingress.ListModels(context.Background(), ListModelsInput{Workspace: slug})
 		if err != nil {
@@ -40,8 +39,28 @@ func TestListModelsReturnsRouteIDsLexicographically(t *testing.T) {
 		for _, model := range out.Models {
 			got = append(got, model.ID)
 		}
-		if out.DefaultModelID != "chat" || !slices.Equal(got, want) {
-			t.Fatalf("attempt %d: default/models = %q/%v, want chat/%v", attempt, out.DefaultModelID, got, want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("attempt %d: models = %v, want %v", attempt, got, want)
 		}
+	}
+}
+
+func TestGlobRoutesAreNotAdvertisedAsClientModelIDs(t *testing.T) {
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	var routes []routing.Route
+	for index, pattern := range []string{"claude-*", "chat", "deepseek/*", "*"} {
+		name, _ := routing.ParseRouteName(pattern)
+		target := requestpathTarget(t, "catalog-glob-"+string(rune('a'+index)))
+		tier, _ := routing.NewTier([]routing.Target{target})
+		route, _ := routing.NewRoute(name, []routing.Tier{tier})
+		routes = append(routes, route)
+	}
+	workspace, err := routing.NewWorkspace(slug, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := ListModelsWithWorkspace(workspace)
+	if len(models.Models) != 1 || models.Models[0].ID != "chat" {
+		t.Fatalf("wildcard advertised as concrete model: %+v", models)
 	}
 }

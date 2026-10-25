@@ -1,5 +1,5 @@
-// Package routebindings serializes Share binding commits against destructive
-// workspace and route identity mutations.
+// Package routebindings serializes Access grant/credential changes with destructive
+// Workspace and route identity mutations.
 package routebindings
 
 import "sync"

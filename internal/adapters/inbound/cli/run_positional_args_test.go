@@ -113,3 +113,14 @@ func TestRunner_TelemetryStatusRejectsUnexpectedPositionalArg(t *testing.T) {
 		t.Fatalf("stderr missing rejection message; stderr=%q", got)
 	}
 }
+
+func TestRunner_AssistIsNotACommand(t *testing.T) {
+	var stderr strings.Builder
+	runner := Runner{Stderr: &stderr}
+	if got := runner.Run(context.Background(), []string{"assist"}); got != ExitDown {
+		t.Fatalf("retired assistance command exit = %d, want %d", got, ExitDown)
+	}
+	if got := stderr.String(); !strings.Contains(got, `unknown subcommand "assist"`) {
+		t.Fatalf("retired assistance command still exposed: %q", got)
+	}
+}

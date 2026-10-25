@@ -16,9 +16,6 @@ var (
 		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
 		streamingProtocol("messages_stream", protocolkind.Messages),
 	}
-	providerProtocolsHyperbolic = []ProviderProtocolSpec{
-		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
-	}
 	providerProtocolsSiliconFlow = []ProviderProtocolSpec{
 		streamingProtocol("chat_completions_stream", protocolkind.ChatCompletions),
 		streamingProtocol("messages_stream", protocolkind.Messages),
@@ -89,6 +86,18 @@ func SupportsProviderProtocolForSpec(spec string, providerProtocol string) bool 
 	}
 	_, err := NormalizeProviderProtocolForSpec(spec, normalized)
 	return err == nil
+}
+
+// IsKnownProviderProtocol reports whether a token is a catalog protocol for
+// any provider. It lets dependent reference admission distinguish a malformed
+// protocol token from a valid token selected for the wrong provider.
+func IsKnownProviderProtocol(providerProtocol string) bool {
+	for _, spec := range SupportedSpecs() {
+		if SupportsProviderProtocolForSpec(spec, providerProtocol) {
+			return true
+		}
+	}
+	return false
 }
 
 // ProviderProtocolSpecForSpec resolves one exact concrete provider contract.

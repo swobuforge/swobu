@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -17,12 +18,29 @@ import (
 
 type Invocation struct {
 	Kind                                                       string
+	ConnectionID, ConnectionRevision                           string
 	Route, Target, Version, Provider, Protocol, Model, Purpose string
 	SourceTool, Tool                                           string
 	Input, Output, Reasoning, CacheRead, CacheWrite            *int64
 }
 
 func (r Invocation) Validate() error {
+	if (r.ConnectionID == "") != (r.ConnectionRevision == "") {
+		return errors.New("persisted Connection identity is incomplete")
+	}
+	if r.ConnectionID != "" {
+		if r.Kind != "model" && r.Kind != "mcp_tool" {
+			return errors.New("Connection binding requires model or MCP invocation")
+		}
+		if _, err := connectionidentity.Parse(r.ConnectionID); err != nil {
+			return errors.New("persisted Connection identity is invalid")
+		}
+		revision, err := strconv.ParseUint(r.ConnectionRevision, 10, 64)
+		if err != nil || revision == 0 || strconv.FormatUint(revision, 10) != r.ConnectionRevision {
+			return errors.New("persisted Connection revision is invalid")
+		}
+	}
+
 	switch r.Kind {
 	case "model":
 		if r.Target == "" || r.Version == "" || r.Provider == "" || r.Protocol == "" || r.Model == "" || r.Purpose == "" || r.SourceTool != "" || r.Tool != "" {
@@ -74,6 +92,15 @@ func (r Invocation) Restore(id execution.InvocationID, startedAt, settledAt time
 		if err != nil {
 			return executionevidence.InvocationLifecycle{}, err
 		}
+
+		if r.ConnectionID != "" {
+			connectionID, _ := connectionidentity.Parse(r.ConnectionID)
+			revision, _ := strconv.ParseUint(r.ConnectionRevision, 10, 64)
+			resource, err = resource.BindConnection(connectionID, revision)
+			if err != nil {
+				return executionevidence.InvocationLifecycle{}, err
+			}
+		}
 		start, err := executionevidence.NewModelInvocationStarted(id, startedAt, resource)
 		if err != nil {
 			return executionevidence.InvocationLifecycle{}, err
@@ -99,6 +126,14 @@ func (r Invocation) Restore(id execution.InvocationID, startedAt, settledAt time
 		resource, err := executionevidence.NewMCPResource(source, tool)
 		if err != nil {
 			return executionevidence.InvocationLifecycle{}, err
+		}
+		if r.ConnectionID != "" {
+			connectionID, _ := connectionidentity.Parse(r.ConnectionID)
+			revision, _ := strconv.ParseUint(r.ConnectionRevision, 10, 64)
+			resource, err = resource.BindConnection(connectionID, revision)
+			if err != nil {
+				return executionevidence.InvocationLifecycle{}, err
+			}
 		}
 		start, err := executionevidence.NewMCPInvocationStarted(id, startedAt, resource)
 		if err != nil {

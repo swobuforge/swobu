@@ -88,17 +88,21 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
+	credential, credentialExists, err := editor.String(file.raw, keyPath{"provider", "swobu", "options", "apiKey"})
+	if err != nil {
+		return plannedMutation{}, kiloProblem(err)
+	}
 	_, nameExists, err := editor.String(file.raw, keyPath{"provider", "swobu", "name"})
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
 	var defaultModel map[string]any
-	defaultModelExists, err := editor.Value(file.raw, keyPath{"provider", "swobu", "models", "default"}, &defaultModel)
+	defaultModelExists, err := editor.Value(file.raw, keyPath{"provider", "swobu", "models", target.ModelID()}, &defaultModel)
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
 	var toolCall bool
-	toolCallExists, err := editor.Value(file.raw, keyPath{"provider", "swobu", "models", "default", "tool_call"}, &toolCall)
+	toolCallExists, err := editor.Value(file.raw, keyPath{"provider", "swobu", "models", target.ModelID(), "tool_call"}, &toolCall)
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
@@ -107,13 +111,13 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
-	changes := semanticChange("backend", model, modelExists, "swobu/default")
+	changes := semanticChange("backend", model, modelExists, "swobu/"+target.ModelID())
 	changes = append(changes, semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())...)
 	if !nameExists {
 		changes = append(changes, semanticChange("provider name", "", false, "Swobu")...)
 	}
 	if !defaultModelExists {
-		changes = append(changes, semanticChange("default model", "", false, "default")...)
+		changes = append(changes, semanticChange("selected model", "", false, target.ModelID())...)
 	}
 	changes = append(changes, semanticChange("tool calls", fmt.Sprint(toolCall), toolCallExists, "true")...)
 	webSearchBefore := ""
@@ -121,25 +125,27 @@ func planKilo(path string, target Target) (plannedMutation, error) {
 		webSearchBefore = fmt.Sprint(webSearch)
 	}
 	changes = append(changes, semanticChange("web search", webSearchBefore, webSearchExists, "true")...)
-	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
+	changes = append(changes, credentialChange(credential, credentialExists, target)...)
+	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes, credential: credential}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
 	stringChanges := []jsonStringChange{
+		{keyPath{"provider", "swobu", "options", "apiKey"}, target.bearer},
 		jsonStringChange{keyPath{"provider", "swobu", "options", "baseURL"}, target.WorkspaceURL()},
-		jsonStringChange{keyPath{"model"}, "swobu/default"},
+		jsonStringChange{keyPath{"model"}, "swobu/" + target.ModelID()},
 	}
 	if !nameExists {
 		stringChanges = append(stringChanges, jsonStringChange{keyPath{"provider", "swobu", "name"}, "Swobu"})
 	}
 	if !defaultModelExists {
-		stringChanges = append(stringChanges, jsonStringChange{keyPath{"provider", "swobu", "models", "default", "name"}, "Swobu default"})
+		stringChanges = append(stringChanges, jsonStringChange{keyPath{"provider", "swobu", "models", target.ModelID(), "name"}, target.ModelID()})
 	}
 	next, err := setJSONStrings(editor, file.raw, stringChanges...)
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}
-	next, err = setJSONValue(editor, next, keyPath{"provider", "swobu", "models", "default", "tool_call"}, true)
+	next, err = setJSONValue(editor, next, keyPath{"provider", "swobu", "models", target.ModelID(), "tool_call"}, true)
 	if err != nil {
 		return plannedMutation{}, kiloProblem(err)
 	}

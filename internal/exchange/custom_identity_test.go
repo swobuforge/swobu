@@ -138,7 +138,7 @@ func TestProviderTargetFromNebiusConnectionPreservesPublicAndDedicatedFacts(t *t
 
 func TestProviderTargetProjectionCarriesRoutingIdentityAndVersion(t *testing.T) {
 	target := requestpathTarget(t, "custom-a")
-	snapshot, err := toProviderTarget(target)
+	snapshot, err := toProviderTarget(target, LookupModelFixture)
 	if err != nil {
 		t.Fatal(err)
 	}

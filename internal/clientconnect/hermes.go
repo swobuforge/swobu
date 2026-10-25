@@ -28,13 +28,14 @@ func planHermesCurrent(ctx context.Context, s *Service, target Target) (plannedM
 		return plannedMutation{}, hermesProblem(err)
 	}
 	model := hermesPersistedModel(file.raw)
-	changes := semanticChange("backend", model.provider.value+"/"+model.selected.value, model.provider.exists || model.selected.exists, "custom/default")
+	changes := semanticChange("backend", model.provider.value+"/"+model.selected.value, model.provider.exists || model.selected.exists, "custom/"+target.ModelID())
 	changes = append(changes, semanticChange("endpoint", model.base.value, model.base.exists, target.WorkspaceURL())...)
-	plan := Plan{ConfigPaths: []string{locus}, Target: target, Changes: changes}
+	changes = append(changes, credentialChange(model.credential.value, model.credential.exists, target)...)
+	plan := Plan{ConfigPaths: []string{locus}, Target: target, Changes: changes, credential: model.credential.value}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
-	next, err := replaceHermesModel(file.raw, target.WorkspaceURL())
+	next, err := replaceHermesModel(file.raw, target.WorkspaceURL(), target.bearer, target.ModelID())
 	if err != nil {
 		return plannedMutation{}, hermesProblem(err)
 	}
@@ -47,9 +48,10 @@ type hermesPersistedScalar struct {
 }
 
 type hermesPersistedModelState struct {
-	provider hermesPersistedScalar
-	selected hermesPersistedScalar
-	base     hermesPersistedScalar
+	provider   hermesPersistedScalar
+	selected   hermesPersistedScalar
+	base       hermesPersistedScalar
+	credential hermesPersistedScalar
 }
 
 func hermesPersistedModel(raw []byte) hermesPersistedModelState {
@@ -69,9 +71,10 @@ func hermesPersistedModel(raw []byte) hermesPersistedModelState {
 		return hermesPersistedModelState{}
 	}
 	return hermesPersistedModelState{
-		provider: hermesPersistedScalarAt(model, "provider"),
-		selected: hermesPersistedScalarAt(model, "default"),
-		base:     hermesPersistedScalarAt(model, "base_url"),
+		provider:   hermesPersistedScalarAt(model, "provider"),
+		selected:   hermesPersistedScalarAt(model, "default"),
+		base:       hermesPersistedScalarAt(model, "base_url"),
+		credential: hermesPersistedScalarAt(model, "api_key"),
 	}
 }
 
@@ -87,16 +90,16 @@ func hermesPersistedScalarAt(model *yaml.Node, key string) hermesPersistedScalar
 // no sequence of model leaf writes has harmless committed prefixes. YAML is
 // parsed only to establish structural and line authority; unrelated source is
 // never serialized by Swobu.
-func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
+func replaceHermesModel(raw []byte, endpoint, credential, modelID string) ([]byte, error) {
 	if len(raw) == 0 {
-		return []byte(hermesModelBlock(endpoint)), nil
+		return []byte(hermesModelBlock(endpoint, credential, modelID)), nil
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(raw, &document); err != nil {
 		return nil, fmt.Errorf("config.yaml is invalid: %w", err)
 	}
 	if len(document.Content) == 0 {
-		return appendHermesModelBlock(raw, endpoint)
+		return appendHermesModelBlock(raw, endpoint, credential, modelID)
 	}
 	root := document.Content[0]
 	if root.Kind != yaml.MappingNode {
@@ -107,7 +110,7 @@ func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
 		if root.Style&yaml.FlowStyle != 0 {
 			return nil, fmt.Errorf("config.yaml root is not a block-style object")
 		}
-		return appendHermesModelBlock(raw, endpoint)
+		return appendHermesModelBlock(raw, endpoint, credential, modelID)
 	}
 	if modelCount != 1 {
 		return nil, fmt.Errorf("model config is duplicated")
@@ -128,10 +131,10 @@ func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
 	if len(model.Content) >= 2 && model.Content[0].Column > 1 {
 		indent = strings.Repeat(" ", model.Content[0].Column-1)
 	}
-	values := map[string]string{"provider": "custom", "default": "default", "base_url": endpoint}
+	values := map[string]string{"provider": "custom", "default": modelID, "base_url": endpoint, "api_key": credential}
 	missing := []string(nil)
 	ownedLines := map[int]string{}
-	for _, key := range []string{"provider", "default", "base_url"} {
+	for _, key := range []string{"provider", "default", "base_url", "api_key"} {
 		keyNode, valueNode, count := yamlMappingPair(model, key)
 		if count == 0 {
 			missing = append(missing, key)
@@ -168,20 +171,24 @@ func replaceHermesModel(raw []byte, endpoint string) ([]byte, error) {
 			lines[blockEnd-1] += ending
 		}
 		for _, key := range missing {
-			insert = append(insert, indent+key+": "+values[key]+ending)
+			value := values[key]
+			if key == "api_key" {
+				value = strconv.Quote(value)
+			}
+			insert = append(insert, indent+key+": "+value+ending)
 		}
 		lines = append(lines[:blockEnd], append(insert, lines[blockEnd:]...)...)
 	}
 	return []byte(strings.Join(lines, "")), nil
 }
 
-func appendHermesModelBlock(raw []byte, endpoint string) ([]byte, error) {
+func appendHermesModelBlock(raw []byte, endpoint, credential, modelID string) ([]byte, error) {
 	ending := preferredLineEnding(raw)
 	next := append([]byte(nil), raw...)
 	if len(next) > 0 && !strings.HasSuffix(string(next), "\n") {
 		next = append(next, ending...)
 	}
-	next = append(next, hermesModelBlockWithEnding(endpoint, ending)...)
+	next = append(next, hermesModelBlockWithEnding(endpoint, credential, modelID, ending)...)
 	var documents []yaml.Node
 	decoder := yaml.NewDecoder(strings.NewReader(string(next)))
 	for {
@@ -203,15 +210,16 @@ func appendHermesModelBlock(raw []byte, endpoint string) ([]byte, error) {
 	return next, nil
 }
 
-func hermesModelBlock(endpoint string) string {
-	return hermesModelBlockWithEnding(endpoint, "\n")
+func hermesModelBlock(endpoint, credential, modelID string) string {
+	return hermesModelBlockWithEnding(endpoint, credential, modelID, "\n")
 }
 
-func hermesModelBlockWithEnding(endpoint, ending string) string {
+func hermesModelBlockWithEnding(endpoint, credential, modelID, ending string) string {
 	return "model:" + ending +
 		"  provider: custom" + ending +
-		"  default: default" + ending +
-		"  base_url: " + endpoint + ending
+		"  default: " + strconv.Quote(modelID) + ending +
+		"  base_url: " + endpoint + ending +
+		"  api_key: " + strconv.Quote(credential) + ending
 }
 
 func yamlMappingPair(mapping *yaml.Node, key string) (keyNode, valueNode *yaml.Node, count int) {

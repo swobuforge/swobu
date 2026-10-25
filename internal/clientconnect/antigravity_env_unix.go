@@ -37,11 +37,12 @@ func inspectAntigravityEnvironment(s *Service, target Target) (antigravityEnviro
 	if len(startLines) > 1 || len(endLines) > 1 || len(startLines) != len(endLines) {
 		return antigravityEnvironmentPlan{}, fmt.Errorf("Antigravity profile contains malformed or duplicated Swobu markers")
 	}
-	desiredBlock := antigravityProfileBlock(target.WorkspaceURL())
+	desiredBlock := antigravityProfileBlock(target.WorkspaceURL(), target.bearer)
 	foreign := append([]byte(nil), profile.raw...)
 	currentEndpoint := ""
 	endpointExists := false
-	fallbackExists := false
+	credential := ""
+	credentialExists := false
 	// A semantically correct block is still incomplete when later shell source
 	// can override it. Moving the owned block last gives the binding precedence.
 	precedenceFinal := true
@@ -52,7 +53,13 @@ func inspectAntigravityEnvironment(s *Service, target Target) (antigravityEnviro
 			return antigravityEnvironmentPlan{}, fmt.Errorf("Antigravity profile contains malformed Swobu markers")
 		}
 		block := string(profile.raw[start:end])
-		fallbackExists = strings.Contains(block, `export GEMINI_API_KEY="${GEMINI_API_KEY:-swobu-local}"`)
+		const keyPrefix = "export GEMINI_API_KEY='"
+		if at := strings.Index(block, keyPrefix); at >= 0 {
+			rest := block[at+len(keyPrefix):]
+			if close := strings.IndexByte(rest, '\''); close >= 0 {
+				credential, credentialExists = rest[:close], true
+			}
+		}
 		const endpointPrefix = "export GOOGLE_GEMINI_BASE_URL='"
 		if at := strings.Index(block, endpointPrefix); at >= 0 {
 			rest := block[at+len(endpointPrefix):]
@@ -69,9 +76,7 @@ func inspectAntigravityEnvironment(s *Service, target Target) (antigravityEnviro
 		}
 	}
 	changes := semanticChange("endpoint", currentEndpoint, endpointExists, target.WorkspaceURL())
-	if !fallbackExists {
-		changes = append(changes, Change{Field: "API key fallback", After: "swobu-local"})
-	}
+	changes = append(changes, credentialChange(credential, credentialExists, target)...)
 	if !precedenceFinal {
 		changes = append(changes, Change{Field: "profile precedence", Before: "non-final", BeforeExists: true, After: "final"})
 	}
@@ -79,7 +84,7 @@ func inspectAntigravityEnvironment(s *Service, target Target) (antigravityEnviro
 	if !bytes.Equal(profile.raw, next) && len(changes) == 0 {
 		changes = append(changes, Change{Field: "profile block", After: "managed"})
 	}
-	plan := antigravityEnvironmentPlan{configPaths: []string{profile.logical}, changes: changes}
+	plan := antigravityEnvironmentPlan{configPaths: []string{profile.logical}, changes: changes, credential: credential}
 	if !bytes.Equal(profile.raw, next) {
 		plan.apply = func(context.Context) error { return profile.replace(next) }
 	}

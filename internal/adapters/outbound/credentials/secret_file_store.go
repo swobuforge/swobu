@@ -8,12 +8,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/swobuforge/swobu/internal/platform/atomicfile"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
 )
 
-type secretFileStore struct {
-	mu sync.Mutex
-}
+// All adapter instances share one process-owned credential document.
+var secretFileMu sync.Mutex
+
+type secretFileStore struct{}
 
 type secretFileDoc struct {
 	Credentials map[string]string `json:"credentials"`
@@ -29,8 +31,8 @@ func (s *secretFileStore) Store(keyName string, secret string) error {
 		return fmt.Errorf("credential file key value is required")
 	}
 	path := platformconfig.DefaultAuthCredentialFilePath()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	secretFileMu.Lock()
+	defer secretFileMu.Unlock()
 	doc, err := readSecretFileDoc(path)
 	if err != nil {
 		return err
@@ -60,8 +62,8 @@ func (s *secretFileStore) ResolveRaw(keyName string) (string, error) {
 		return "", fmt.Errorf("credential file key name is required")
 	}
 	path := platformconfig.DefaultAuthCredentialFilePath()
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	secretFileMu.Lock()
+	defer secretFileMu.Unlock()
 	doc, err := readSecretFileDoc(path)
 	if err != nil {
 		return "", err
@@ -103,8 +105,25 @@ func writeSecretFileDoc(path string, doc secretFileDoc) error {
 		return fmt.Errorf("credential file encode failed: %w", err)
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	if err := atomicfile.Replace(path, raw, 0o600); err != nil {
 		return fmt.Errorf("credential file write failed: %w", err)
 	}
 	return nil
+}
+
+// Delete updates the same private document atomically as Store. The caller must
+// establish slot ownership and exclude live consumers before removal.
+func (s *secretFileStore) Delete(name string) error {
+	secretFileMu.Lock()
+	defer secretFileMu.Unlock()
+	path := platformconfig.DefaultAuthCredentialFilePath()
+	doc, err := readSecretFileDoc(path)
+	if err != nil {
+		return err
+	}
+	if _, exists := doc.Credentials[name]; !exists {
+		return nil
+	}
+	delete(doc.Credentials, name)
+	return writeSecretFileDoc(path, doc)
 }

@@ -3,19 +3,29 @@ package providers
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	openaiadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers/openai"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
+	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/connections"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/cachelocality"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/routing"
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/testkit/providertest"
 )
@@ -137,6 +147,14 @@ func assertAdvertisedProviderProjection(t *testing.T, registry ProviderRegistry,
 			name := string(manifest.ProviderID) + "/" + protocol.Name
 			t.Run(name, func(t *testing.T) {
 				target := advertisedProtocolTarget(manifest.ProviderID, protocol)
+				connectionID, err := connectionidentity.Parse("shared-account")
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, err = target.BindConnection(connectionID, 3)
+				if err != nil {
+					t.Fatal(err)
+				}
 				backend, err := registry.ResolveBackend(target)
 				if err != nil {
 					t.Fatalf("resolve advertised backend: %v", err)
@@ -147,7 +165,7 @@ func assertAdvertisedProviderProjection(t *testing.T, registry ProviderRegistry,
 						t.Fatalf("build attempt tool names: %v", err)
 					}
 					document, changes, err := backend.Codec.Encode(provider.Request{
-						Attempt: provider.AttemptContext{ExchangeID: exchangeID, CacheLocality: cachelocality.Explicit(locality), ExecutionAffinity: executionAffinity}, Canonical: request,
+						Attempt: provider.AttemptContext{CorrelationID: exchangeID, CacheLocality: cachelocality.Explicit(locality), ExecutionAffinity: executionAffinity}, Canonical: request,
 						Delivery: mode, ToolNames: names,
 						EncodeContext: provider.EncodeContext{Context: context.Background(), ResolveImage: func(context.Context, canonical.URLImage) (provider.InspectedImage, error) {
 							return provider.InspectedImage{MediaType: canonical.ImageMediaPNG, Bytes: []byte("PNG"), Width: 1, Height: 1}, nil
@@ -208,4 +226,123 @@ func alternateAdvertisedDelivery(manifest profile.Profile, protocol profile.Prov
 		}
 	}
 	return delivery.Delivery{}, false
+}
+
+type connectionCredentialRecorder struct {
+	calls int
+	wrong bool
+}
+
+func (r *connectionCredentialRecorder) ResolveCredential(context.Context, string, string) (string, error) {
+	r.wrong = true
+	return "", fmt.Errorf("provider owner forbidden")
+}
+func (r *connectionCredentialRecorder) ResolveScopedCredential(_ context.Context, scope credentialref.Scope, ref string) (string, error) {
+	r.calls++
+	if scope.Kind() != credentialref.ScopeConnection || scope.Identifier() != "cn_transport" || ref != "env:FIXTURE" {
+		r.wrong = true
+		return "", fmt.Errorf("incorrect owner")
+	}
+	return "fixture-token", nil
+}
+
+type connectionTransportRecorder struct {
+	calls     int
+	anonymous bool
+}
+
+func (r *connectionTransportRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.calls++
+	if !r.anonymous && req.Header.Get("Authorization") != "Bearer fixture-token" && req.Header.Get("x-api-key") != "fixture-token" && req.Header.Get("api-key") != "fixture-token" && req.Header.Get("x-goog-api-key") != "fixture-token" && req.URL.Query().Get("key") != "fixture-token" {
+		return nil, fmt.Errorf("captured credential was not applied")
+	}
+	return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"fixture-rejection"}`)), Request: req}, nil
+}
+
+func TestEveryAdvertisedTransportUsesCapturedConnectionOwner(t *testing.T) {
+	for _, manifest := range profile.All() {
+		for _, protocol := range manifest.ProviderProtocols {
+			t.Run(string(manifest.ProviderID)+"/"+protocol.Name, func(t *testing.T) {
+				credentials := &connectionCredentialRecorder{}
+				transport := &connectionTransportRecorder{anonymous: manifest.ProviderID == profile.ProviderSpecOllama}
+				registry := mustProviderRegistry(t, &http.Client{Transport: transport}, credentials)
+				target := advertisedProtocolTarget(manifest.ProviderID, protocol)
+				target.CredentialRef = "env:FIXTURE"
+				if manifest.ProviderID == profile.ProviderSpecBedrock && protocol.Kind == protocolkind.Messages {
+					target.BaseURL = "https://bedrock-mantle.eu-west-2.api.aws/anthropic/v1"
+				}
+				id, _ := connectionidentity.Parse("cn_transport")
+				target, err := target.BindConnection(id, 5)
+				if err != nil {
+					t.Fatal(err)
+				}
+				backend, err := registry.ResolveBackend(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ingress, err := backend.Transport.Send(t.Context(), carrier.NewDocument(protocol.Kind, "application/json", nil, []byte(`{"model":"model","messages":[]}`), carrier.Meta{}))
+				if ingress != nil {
+					t.Fatal("rejected fixture produced ingress")
+				}
+				wantCalls := 1
+				if manifest.ProviderID == profile.ProviderSpecOllama {
+					wantCalls = 0
+				}
+				if err == nil || credentials.wrong || credentials.calls != wantCalls || transport.calls != 1 {
+					t.Fatalf("owner/dispatch mismatch: scoped=%d wrong=%v http=%d err=%v", credentials.calls, credentials.wrong, transport.calls, err)
+				}
+			})
+		}
+	}
+}
+
+var requestPathModelFixtures sync.Map
+
+func registerRequestPathModel(t *testing.T, upstream routing.Connection) connectionidentity.ID {
+	t.Helper()
+	id, err := connectionidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := connections.NewModelSpec(upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := connections.New(id, "Synthetic provider account", spec, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPathModelFixtures.Store(id, value)
+	t.Cleanup(func() { requestPathModelFixtures.Delete(id) })
+	return id
+}
+
+func lookupRequestPathModel(id connectionidentity.ID) (connections.Connection, error) {
+	value, ok := requestPathModelFixtures.Load(id)
+	if !ok {
+		return connections.Connection{}, fmt.Errorf("unregistered synthetic account")
+	}
+	return value.(connections.Connection), nil
+}
+
+// Bound request-path tests resolve only the exact registered account/ref pair.
+type requestPathCredentialResolver struct{}
+
+func (requestPathCredentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
+	return "", fmt.Errorf("provider-only resolution forbidden")
+}
+func (requestPathCredentialResolver) ResolveScopedCredential(_ context.Context, scope credentialref.Scope, ref string) (string, error) {
+	id, err := connectionidentity.Parse(scope.Identifier())
+	if err != nil || scope.Kind() != credentialref.ScopeConnection {
+		return "", fmt.Errorf("invalid synthetic owner")
+	}
+	value, err := lookupRequestPathModel(id)
+	if err != nil {
+		return "", err
+	}
+	refs := value.CredentialRefs()
+	if len(refs) != 1 || refs[0].String() != ref {
+		return "", fmt.Errorf("wrong synthetic credential binding")
+	}
+	return "test-token", nil
 }

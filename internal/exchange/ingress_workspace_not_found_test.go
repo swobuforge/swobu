@@ -35,7 +35,7 @@ func TestIngressMissingWorkspaceUsesSlugSpecificBadEndpointForRequestsAndModels(
 			assertMissingWorkspaceError(t, requestErr, slugText)
 			models, modelsErr := ingress.ListModels(context.Background(), ListModelsInput{Workspace: slug})
 			assertMissingWorkspaceError(t, modelsErr, slugText)
-			if models.DefaultModelID != "" || len(models.Models) != 0 {
+			if len(models.Models) != 0 {
 				t.Fatalf("missing workspace synthesized models: %#v", models)
 			}
 			if lookup.calls != 2 || lookup.got != slug {

@@ -1,4 +1,4 @@
-// Package atomicfile owns private-file replacement primitives shared by local
+// Package atomicfile owns atomic local-state replacement primitives shared by
 // persistence adapters.
 package atomicfile
 
@@ -28,7 +28,7 @@ func DefaultOperations() Operations {
 				return err
 			}
 			defer dir.Close()
-			return dir.Sync()
+			return SyncDirectory(dir)
 		},
 	}
 }
@@ -37,13 +37,13 @@ func Replace(path string, raw []byte, mode os.FileMode) error {
 	return ReplaceWith(path, raw, mode, DefaultOperations())
 }
 
+// ReplaceWith atomically publishes local state. Directories are created with
+// mode 0700 and the replacement receives the caller-supplied file mode. No
+// separate ACL validation or permission-repair lifecycle is performed.
 func ReplaceWith(path string, raw []byte, mode os.FileMode, operations Operations) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create private directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("secure private directory: %w", err)
+		return fmt.Errorf("create state directory: %w", err)
 	}
 	temp, err := operations.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -58,7 +58,7 @@ func ReplaceWith(path string, raw []byte, mode os.FileMode, operations Operation
 		}
 	}()
 	if err := temp.Chmod(mode); err != nil {
-		return fmt.Errorf("secure private temp: %w", err)
+		return fmt.Errorf("set temporary-file mode: %w", err)
 	}
 	written, err := operations.Write(temp, raw)
 	if err != nil {

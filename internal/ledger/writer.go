@@ -22,12 +22,19 @@ const (
 	DefaultMaintenanceInterval = time.Minute
 )
 
+type historyRecord struct {
+	exchange  executionevidence.CompletedExchange
+	mcp       executionevidence.CompletedMCPOperation
+	isMCP     bool
+	committed bool
+}
+
 // Writer is the bounded asynchronous Ledger runtime. Offer never blocks the
 // caller and never performs synchronous fallback I/O. One worker owns Store
 // writes, so the Store remains deterministic and directly testable.
 type Writer struct {
 	store    Store
-	worker   *outputruntime.Worker[executionevidence.CompletedExchange]
+	worker   *outputruntime.Worker[historyRecord]
 	capacity int
 	now      func() time.Time
 
@@ -42,6 +49,9 @@ type Writer struct {
 	offered                   atomic.Uint64
 	committed                 atomic.Uint64
 	dropped                   atomic.Uint64
+	mcpOffered                atomic.Uint64
+	mcpCommitted              atomic.Uint64
+	mcpDropped                atomic.Uint64
 	maintenanceInterval       time.Duration
 	lastMaintenance           time.Time
 	retentionFailed           bool
@@ -64,13 +74,16 @@ type WriterConfig struct {
 
 // Health is a content-free runtime projection suitable for operator status.
 type Health struct {
-	State                   State     `json:"state"`
-	LastError               ErrorCode `json:"last_error,omitempty"`
-	QueueDepth              int       `json:"queue_depth"`
-	QueueCapacity           int       `json:"queue_capacity"`
-	OfferedExchangesTotal   uint64    `json:"offered_exchanges_total"`
-	CommittedExchangesTotal uint64    `json:"committed_exchanges_total"`
-	DroppedExchangesTotal   uint64    `json:"dropped_exchanges_total"`
+	State                       State     `json:"state"`
+	LastError                   ErrorCode `json:"last_error,omitempty"`
+	QueueDepth                  int       `json:"queue_depth"`
+	QueueCapacity               int       `json:"queue_capacity"`
+	OfferedExchangesTotal       uint64    `json:"offered_exchanges_total"`
+	CommittedExchangesTotal     uint64    `json:"committed_exchanges_total"`
+	DroppedExchangesTotal       uint64    `json:"dropped_exchanges_total"`
+	OfferedMCPOperationsTotal   uint64    `json:"offered_mcp_operations_total"`
+	CommittedMCPOperationsTotal uint64    `json:"committed_mcp_operations_total"`
+	DroppedMCPOperationsTotal   uint64    `json:"dropped_mcp_operations_total"`
 }
 
 // NewWriter starts one worker and returns a bounded Ledger runtime.
@@ -103,16 +116,25 @@ func NewWriter(store Store, cfg WriterConfig) (*Writer, error) {
 		cfg.MaintenanceInterval = DefaultMaintenanceInterval
 	}
 	w := &Writer{store: store, capacity: cfg.QueueCapacity, now: cfg.Now, sleep: cfg.Sleep, rand: cfg.Rand, onHealth: cfg.OnHealth, state: StateHealthy, maintenanceInterval: cfg.MaintenanceInterval, lastMaintenance: cfg.Now()}
-	worker, err := outputruntime.NewWorker(outputruntime.WorkerConfig[executionevidence.CompletedExchange]{
+	worker, err := outputruntime.NewWorker(outputruntime.WorkerConfig[historyRecord]{
 		Capacity: cfg.QueueCapacity, Batch: cfg.BatchSize, BatchWait: cfg.BatchWait, Drain: cfg.DrainBudget,
-		Handle: func(ctx context.Context, batch []executionevidence.CompletedExchange) error {
+		Handle: func(ctx context.Context, batch []historyRecord) error {
 			if !w.writeBatch(ctx, batch) {
 				return errors.New("ledger write failed")
 			}
 			return nil
 		},
-		OnDrop: func(batch []executionevidence.CompletedExchange, _ outputruntime.DropReason) {
-			w.dropped.Add(uint64(len(batch)))
+		OnDrop: func(batch []historyRecord, _ outputruntime.DropReason) {
+			for _, record := range batch {
+				if record.committed {
+					continue
+				}
+				if record.isMCP {
+					w.mcpDropped.Add(1)
+				} else {
+					w.dropped.Add(1)
+				}
+			}
 			w.mu.Lock()
 			w.state = StateDegraded
 			w.lastError = ErrorShutdownTimeout
@@ -132,8 +154,23 @@ func NewWriter(store Store, cfg WriterConfig) (*Writer, error) {
 // the newest lifecycle and marks history incomplete through health.
 func (w *Writer) Offer(exchange executionevidence.CompletedExchange) bool {
 	w.offered.Add(1)
-	if !w.worker.Offer(exchange) {
+	if !w.worker.Offer(historyRecord{exchange: exchange}) {
 		w.dropped.Add(1)
+		w.mu.Lock()
+		w.state = StateDegraded
+		w.lastError = ErrorHistoryIncomplete
+		w.mu.Unlock()
+		w.publishHealth()
+		return false
+	}
+	w.publishHealth()
+	return true
+}
+
+func (w *Writer) OfferMCP(operation executionevidence.CompletedMCPOperation) bool {
+	w.mcpOffered.Add(1)
+	if operation.Validate() != nil || !w.worker.Offer(historyRecord{mcp: operation, isMCP: true}) {
+		w.mcpDropped.Add(1)
 		w.mu.Lock()
 		w.state = StateDegraded
 		w.lastError = ErrorHistoryIncomplete
@@ -155,18 +192,53 @@ func (w *Writer) Close() error {
 // Health returns a snapshot of content-free runtime counters.
 func (w *Writer) Health() Health { return w.health() }
 
-func (w *Writer) writeBatch(ctx context.Context, batch []executionevidence.CompletedExchange) bool {
+func (w *Writer) writeBatch(ctx context.Context, batch []historyRecord) bool {
 	if len(batch) == 0 {
 		return true
 	}
+	exchanges := make([]executionevidence.CompletedExchange, 0, len(batch))
+	operations := make([]executionevidence.CompletedMCPOperation, 0, len(batch))
+	for _, record := range batch {
+		if record.committed {
+			continue
+		}
+		if record.isMCP {
+			operations = append(operations, record.mcp)
+		} else {
+			exchanges = append(exchanges, record.exchange)
+		}
+	}
 	for attempt := 0; ; attempt++ {
-		if err := w.store.WriteBatch(ctx, batch); err == nil {
-			w.committed.Add(uint64(len(batch)))
+		var err error
+		if len(exchanges) > 0 {
+			err = w.store.WriteBatch(ctx, exchanges)
+			if err == nil {
+				w.committed.Add(uint64(len(exchanges)))
+				for index := range batch {
+					if !batch[index].isMCP {
+						batch[index].committed = true
+					}
+				}
+				exchanges = nil
+			}
+		}
+		if err == nil && len(operations) > 0 {
+			err = w.store.WriteMCPOperations(ctx, operations)
+			if err == nil {
+				w.mcpCommitted.Add(uint64(len(operations)))
+				for index := range batch {
+					if batch[index].isMCP {
+						batch[index].committed = true
+					}
+				}
+				operations = nil
+			}
+		}
+		if err == nil {
 			w.mu.Lock()
 			w.committedSinceMaintenance += uint64(len(batch))
 			if !w.retentionFailed {
-				w.state = StateHealthy
-				w.lastError = ""
+				w.restoreHealthLocked()
 			}
 			w.mu.Unlock()
 			w.publishHealth()
@@ -186,8 +258,7 @@ func (w *Writer) writeBatch(ctx context.Context, batch []executionevidence.Compl
 					w.lastMaintenance = w.now()
 					w.committedSinceMaintenance = 0
 					w.retentionFailed = false
-					w.state = StateHealthy
-					w.lastError = ""
+					w.restoreHealthLocked()
 					w.mu.Unlock()
 					w.publishHealth()
 				}
@@ -219,7 +290,15 @@ func (w *Writer) health() Health {
 	if w.worker != nil {
 		depth = w.worker.Depth()
 	}
-	return Health{State: w.state, LastError: w.lastError, QueueDepth: depth, QueueCapacity: w.capacity, OfferedExchangesTotal: w.offered.Load(), CommittedExchangesTotal: w.committed.Load(), DroppedExchangesTotal: w.dropped.Load()}
+	return Health{State: w.state, LastError: w.lastError, QueueDepth: depth, QueueCapacity: w.capacity, OfferedExchangesTotal: w.offered.Load(), CommittedExchangesTotal: w.committed.Load(), DroppedExchangesTotal: w.dropped.Load(), OfferedMCPOperationsTotal: w.mcpOffered.Load(), CommittedMCPOperationsTotal: w.mcpCommitted.Load(), DroppedMCPOperationsTotal: w.mcpDropped.Load()}
+}
+
+func (w *Writer) restoreHealthLocked() {
+	if w.dropped.Load() > 0 || w.mcpDropped.Load() > 0 {
+		w.state, w.lastError = StateDegraded, ErrorHistoryIncomplete
+	} else {
+		w.state, w.lastError = StateHealthy, ""
+	}
 }
 func (w *Writer) publishHealth() {
 	if w.onHealth != nil {

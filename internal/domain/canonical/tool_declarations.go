@@ -15,20 +15,8 @@ type ToolDeclaration struct {
 	mcp       *MCPToolSource
 	// builtIn discriminates only payload-free built-ins. Function and custom
 	// identity is derived from the branch that already owns their payload.
-	builtIn             ToolKind
-	webSearchAccessMode WebSearchAccessMode
+	builtIn ToolKind
 }
-
-// WebSearchAccessMode is the bounded privacy mode of one hosted web-search
-// declaration. Unspecified preserves the historical unrestricted declaration.
-type WebSearchAccessMode uint8
-
-const (
-	WebSearchAccessUnspecified WebSearchAccessMode = iota
-	WebSearchAccessCached
-	WebSearchAccessIndexed
-	WebSearchAccessLive
-)
 
 // DiscoveryExecutor identifies who executes a discovery call.
 type DiscoveryExecutor uint8
@@ -112,24 +100,6 @@ func NewCustomTool(key ToolKey, description string, format ToolFormat) (ToolDecl
 // NewWebSearchDeclaration constructs the single fixed-key web-search declaration.
 func NewWebSearchDeclaration() ToolDeclaration {
 	return ToolDeclaration{builtIn: ToolKindWebSearch}
-}
-
-// NewWebSearchDeclarationWithAccess constructs hosted search with its exact
-// Responses access restriction. Invalid modes cannot enter canonical state.
-func NewWebSearchDeclarationWithAccess(mode WebSearchAccessMode) (ToolDeclaration, error) {
-	if mode > WebSearchAccessLive {
-		return ToolDeclaration{}, fmt.Errorf("canonical web-search access mode is invalid")
-	}
-	return ToolDeclaration{builtIn: ToolKindWebSearch, webSearchAccessMode: mode}, nil
-}
-
-// WebSearchAccessMode returns this declaration's explicit access mode. A
-// missing declaration is distinguishable from the unrestricted legacy mode.
-func (d ToolDeclaration) WebSearchAccessMode() (WebSearchAccessMode, bool) {
-	if d.Kind() != ToolKindWebSearch {
-		return WebSearchAccessUnspecified, false
-	}
-	return d.webSearchAccessMode, true
 }
 
 func NewToolDiscoveryTool(description string, inputSchema ToolSchema, executor DiscoveryExecutor) (ToolDeclaration, error) {
@@ -270,7 +240,7 @@ func (d ToolDeclaration) Clone() ToolDeclaration {
 		return ToolDeclaration{custom: &c}
 	}
 	if d.Kind() == ToolKindWebSearch {
-		return ToolDeclaration{builtIn: ToolKindWebSearch, webSearchAccessMode: d.webSearchAccessMode}
+		return ToolDeclaration{builtIn: ToolKindWebSearch}
 	}
 	if namespace, ok := d.Namespace(); ok {
 		return ToolDeclaration{namespace: &namespace}
@@ -337,7 +307,7 @@ func (d ToolDeclaration) Equivalent(other ToolDeclaration) bool {
 		}
 		return true
 	}
-	return d.Kind() == ToolKindWebSearch && d.webSearchAccessMode == other.webSearchAccessMode
+	return d.Kind() == ToolKindWebSearch
 }
 
 func (n ToolNamespace) Key() ToolKey             { return n.key.Clone() }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,7 +104,7 @@ func TestResponsesWebsocket_PreHandoffFailureEmitsExactlyOneErrorFrame(t *testin
 	ingress := staticRequestIngress{err: canonical.NewStructuredBackendError("target-a", protocolkind.Responses, 429, canonical.BackendErrorDetail{Code: "quota", Message: "slow down"}, "")}
 	server := httptest.NewServer(newTestHandler(ingress))
 	defer server.CloseClientConnections()
-	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/c/alpha/responses", "", server.URL)
+	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/workspaces/alpha/responses", "", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestResponsesWebsocket_AllocatesDistinctExchangeIdentityPerCreate(t *testin
 	ingress := &recordingWebsocketIngress{}
 	server := httptest.NewServer(newTestHandler(ingress))
 	defer server.Close()
-	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/c/alpha/responses", server.URL)
+	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/workspaces/alpha/responses", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func TestResponsesWebsocket_DisconnectCancelsActiveExchange(t *testing.T) {
 	ingress := cancellationWebsocketIngress{started: make(chan struct{}), canceled: make(chan struct{})}
 	server := httptest.NewServer(newTestHandler(ingress))
 	defer server.CloseClientConnections()
-	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/c/alpha/responses", "", server.URL)
+	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/workspaces/alpha/responses", "", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +227,7 @@ func TestResponsesWebsocket_ProcessesQueuedCreatesSerially(t *testing.T) {
 	ingress := &serialWebsocketIngress{}
 	server := httptest.NewServer(newTestHandler(ingress))
 	defer server.CloseClientConnections()
-	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/c/alpha/responses", "", server.URL)
+	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/workspaces/alpha/responses", "", server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ func TestResponsesWebsocket_RejectsCrossOriginBeforeIngress(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/c/alpha/responses", nil)
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/workspaces/alpha/responses", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +298,7 @@ func TestResponsesWebsocket_AcceptsExactLoopbackOrigin(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/workspaces/alpha/responses"
 	conn, err := websocket.Dial(wsURL, "", server.URL)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
@@ -319,7 +320,7 @@ func TestResponsesWebsocket_RejectsOversizedPayload(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/c/alpha/responses"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/workspaces/alpha/responses"
 	conn, err := websocket.Dial(wsURL, "", server.URL)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
@@ -374,7 +375,7 @@ func TestValidateResponsesWebsocketAccess(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/c/alpha/responses", nil)
+			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/workspaces/alpha/responses", nil)
 			request.RemoteAddr = test.remoteAddr
 			request.Host = test.host
 			request.Header.Del("Origin")
@@ -392,5 +393,254 @@ func TestValidateResponsesWebsocketAccess(t *testing.T) {
 				t.Fatal("validateResponsesWebsocketAccess() succeeded, want rejection")
 			}
 		})
+	}
+}
+
+// These integration checks exercise the assembled WebSocket upgrade and
+// request pipeline; the scheduler's state machine has independent tests.
+type namedLaneWebsocketIngress struct {
+	started   chan struct{}
+	release   chan struct{}
+	mu        sync.Mutex
+	active    int
+	maxActive int
+}
+
+func (i *namedLaneWebsocketIngress) HandleRequest(ctx context.Context, in exchange.RequestInput) (exchange.RequestOutput, error) {
+	i.mu.Lock()
+	i.active++
+	if i.active > i.maxActive {
+		i.maxActive = i.active
+	}
+	i.mu.Unlock()
+	defer func() {
+		i.mu.Lock()
+		i.active--
+		i.mu.Unlock()
+	}()
+	select {
+	case i.started <- struct{}{}:
+	case <-ctx.Done():
+		return exchange.RequestOutput{}, ctx.Err()
+	}
+	select {
+	case <-i.release:
+	case <-ctx.Done():
+		return exchange.RequestOutput{}, ctx.Err()
+	}
+	return synthesizeRequestOutputFromEnvelope(ctx, in, testStreamingTextResponse("resp", "m", "text", "ok", "completed"))
+}
+
+func dialNamedLaneFixture(t *testing.T, ingress *namedLaneWebsocketIngress) (*websocket.Conn, func()) {
+	t.Helper()
+	server := httptest.NewServer(newTestHandler(ingress))
+	conn, err := websocket.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/workspaces/alpha/v1/responses", "", server.URL)
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	return conn, func() { _ = conn.Close(); server.CloseClientConnections(); server.Close() }
+}
+
+func awaitStartedNamedLane(t *testing.T, ingress *namedLaneWebsocketIngress) {
+	t.Helper()
+	select {
+	case <-ingress.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WebSocket lane never reached Exchange")
+	}
+}
+
+func readNamedLaneCompletions(t *testing.T, conn *websocket.Conn, count int) []string {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	lanes := make([]string, 0, count)
+	for len(lanes) < count {
+		var raw string
+		if err := websocket.Message.Receive(conn, &raw); err != nil {
+			t.Fatalf("read completion: %v; got=%v", err, lanes)
+		}
+		var event struct {
+			Type     string `json:"type"`
+			StreamID string `json:"stream_id"`
+		}
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			t.Fatalf("bad event: %v %s", err, raw)
+		}
+		if event.Type == "error" {
+			t.Fatalf("unexpected lane error: %s", raw)
+		}
+		if event.Type == "response.completed" {
+			lanes = append(lanes, event.StreamID)
+		}
+	}
+	return lanes
+}
+
+func TestResponsesWebsocket_NamedLanesExecuteConcurrently(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 4), release: make(chan struct{}, 4)}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	for _, lane := range []string{"planner", "research"} {
+		if err := websocket.Message.Send(conn, `{"type":"response.create","stream_id":"`+lane+`","model":"m","input":"hi"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	awaitStartedNamedLane(t, ingress)
+	awaitStartedNamedLane(t, ingress) // must start before either is released
+	ingress.mu.Lock()
+	concurrent := ingress.maxActive
+	ingress.mu.Unlock()
+	if concurrent != 2 {
+		t.Fatalf("different streams serialized: max active=%d", concurrent)
+	}
+	ingress.release <- struct{}{}
+	ingress.release <- struct{}{}
+	lanes := readNamedLaneCompletions(t, conn, 2)
+	if lanes[0] == lanes[1] || (lanes[0] != "planner" && lanes[1] != "planner") || (lanes[0] != "research" && lanes[1] != "research") {
+		t.Fatalf("response stream ID lost: %v", lanes)
+	}
+}
+
+func TestResponsesWebsocket_SameLaneIsFIFO(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 3), release: make(chan struct{}, 3)}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	for range 2 {
+		if err := websocket.Message.Send(conn, `{"type":"response.create","stream_id":"main","model":"m","input":"hi"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	awaitStartedNamedLane(t, ingress)
+	select {
+	case <-ingress.started:
+		t.Fatal("second request in one lane ran before the first completed")
+	case <-time.After(75 * time.Millisecond):
+	}
+	ingress.release <- struct{}{}
+	if lanes := readNamedLaneCompletions(t, conn, 1); len(lanes) != 1 || lanes[0] != "main" {
+		t.Fatalf("first completion=%v", lanes)
+	}
+	awaitStartedNamedLane(t, ingress)
+	ingress.release <- struct{}{}
+	if lanes := readNamedLaneCompletions(t, conn, 1); len(lanes) != 1 || lanes[0] != "main" {
+		t.Fatalf("second completion=%v", lanes)
+	}
+	ingress.mu.Lock()
+	peak := ingress.maxActive
+	ingress.mu.Unlock()
+	if peak != 1 {
+		t.Fatalf("same lane overlapped, max=%d", peak)
+	}
+}
+
+func TestResponsesWebsocket_InvalidEventDoesNotPoisonOtherLanes(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 1), release: make(chan struct{}, 1)}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	if err := websocket.Message.Send(conn, `{"type":"response.steer","stream_id":"planner","input":"hi"}`); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var raw string
+	if err := websocket.Message.Receive(conn, &raw); err != nil || !strings.Contains(raw, `"type":"error"`) || !strings.Contains(raw, `"stream_id":"planner"`) {
+		t.Fatalf("unscoped unsupported event error=%q err=%v", raw, err)
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	if err := websocket.Message.Send(conn, `{"type":"response.create","stream_id":"research","model":"m","input":"hi"}`); err != nil {
+		t.Fatal(err)
+	}
+	awaitStartedNamedLane(t, ingress)
+	ingress.release <- struct{}{}
+	if lanes := readNamedLaneCompletions(t, conn, 1); len(lanes) != 1 || lanes[0] != "research" {
+		t.Fatalf("valid lane was poisoned: %v", lanes)
+	}
+}
+
+func TestResponsesWebsocket_WarmupDoesNotStartModel(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 1), release: make(chan struct{}, 1)}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	if err := websocket.Message.Send(conn, `{"type":"response.create","stream_id":"warmup","generate":false,"model":"m"}`); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var raw string
+	if err := websocket.Message.Receive(conn, &raw); err != nil || !strings.Contains(raw, `"type":"error"`) || !strings.Contains(raw, `"stream_id":"warmup"`) {
+		t.Fatalf("warmup did not fail explicitly: %q %v", raw, err)
+	}
+	select {
+	case <-ingress.started:
+		t.Fatal("unsupported warmup consumed inference")
+	default:
+	}
+}
+
+func TestResponsesWebsocket_DisconnectCancelsEveryActiveLane(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 2), release: make(chan struct{})}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	for _, lane := range []string{"a", "b"} {
+		if err := websocket.Message.Send(conn, `{"type":"response.create","stream_id":"`+lane+`","model":"m","input":"hi"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	awaitStartedNamedLane(t, ingress)
+	awaitStartedNamedLane(t, ingress)
+	_ = conn.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ingress.mu.Lock()
+		active := ingress.active
+		ingress.mu.Unlock()
+		if active == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("disconnect did not cancel all active stream requests")
+}
+
+func TestResponsesWebsocket_QueuePressureDoesNotPoisonAcceptedLanes(t *testing.T) {
+	ingress := &namedLaneWebsocketIngress{started: make(chan struct{}, 80), release: make(chan struct{})}
+	conn, done := dialNamedLaneFixture(t, ingress)
+	defer done()
+	send := func(lane string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"type": "response.create", "stream_id": lane, "model": "m", "input": "hi"})
+		if err := websocket.Message.Send(conn, string(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 32; i++ {
+		send(fmt.Sprintf("lane_%d", i))
+	}
+	for i := 0; i < 16; i++ {
+		awaitStartedNamedLane(t, ingress)
+	}
+	send("extra")
+	assertWebsocketLaneError(t, conn, "extra", 400)
+	send("invalid/name")
+	assertWebsocketLaneError(t, conn, "", 400)
+	// Sixteen creates are waiting for slots; fill the remaining queue capacity.
+	for i := 0; i < 48; i++ {
+		send("lane_0")
+	}
+	send("lane_0")
+	assertWebsocketLaneError(t, conn, "lane_0", 400)
+	close(ingress.release)
+	lanes := readNamedLaneCompletions(t, conn, 80)
+	counts := make(map[string]int)
+	for _, lane := range lanes {
+		counts[lane]++
+	}
+	if counts["lane_0"] != 49 || len(counts) != 32 {
+		t.Fatalf("accepted requests lost: %v", counts)
+	}
+	ingress.mu.Lock()
+	peak := ingress.maxActive
+	ingress.mu.Unlock()
+	if peak > 16 {
+		t.Fatalf("socket active bound exceeded: %d", peak)
 	}
 }

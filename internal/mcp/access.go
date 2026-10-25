@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -10,8 +11,9 @@ import (
 // SourceAccess is one request-private MCP credential/header projection.
 // Callers must keep it attempt-local and must never persist or log its values.
 type SourceAccess struct {
-	Authorization string
-	Headers       map[string]string
+	Authorization        string
+	Headers              map[string]string
+	ResolveAuthorization func(context.Context) (string, error)
 }
 
 type accessSecrets struct {
@@ -102,7 +104,7 @@ func (a Access) ForSource(source canonical.ToolKey) SourceAccess {
 }
 
 func cloneSourceAccess(value SourceAccess) SourceAccess {
-	cloned := SourceAccess{Authorization: value.Authorization}
+	cloned := SourceAccess{Authorization: value.Authorization, ResolveAuthorization: value.ResolveAuthorization}
 	if value.Headers != nil {
 		cloned.Headers = make(map[string]string, len(value.Headers))
 		for name, headerValue := range value.Headers {

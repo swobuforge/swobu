@@ -15,6 +15,8 @@ These docs contain practical setup recipes and troubleshooting references that a
 - [Continue](./clients/continue.md)
 - [OpenAI-compatible clients](./clients/openai-compatible.md)
 - [Anthropic-compatible clients](./clients/anthropic-compatible.md)
+- [Workspace MCP support](./clients/workspace-mcp.md)
+- [Workspace Admin MCP](./clients/admin-mcp.md)
 
 ## Backend recipes
 
@@ -32,4 +34,7 @@ These docs contain practical setup recipes and troubleshooting references that a
 ## Operations
 
 - [Workspace configuration](./configuration.md)
+- [Local trust and privacy boundaries](./local-trust-and-privacy.md)
+- [Workspace estimated spend](./pricing.md)
+- [Retained Activity and exports](./activity.md)
 - [Troubleshooting](./troubleshooting.md)

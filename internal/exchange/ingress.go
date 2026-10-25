@@ -2,24 +2,28 @@ package exchange
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/accounting"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/connections"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/productprojection"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -37,12 +41,23 @@ type RequestIngress struct {
 }
 
 type RuntimePoliciesSpec struct {
-	ObservationStore  observation.Store
-	ExecutionEvidence observation.ExecutionEvidenceSink
-	CheckpointStore   continuity.Store
-	ResponseIDs       ResponseIDGenerator
-	ImageFetcher      provider.ImageFetcher
-	PolicyResolver    WorkspacePolicyResolver
+	ModelConnection func(connectionidentity.ID) (connections.Connection, error)
+	// PublishRefreshedCredential stages immutable material and compares the
+	// captured Connection revision before publishing a replacement binding.
+	PublishRefreshedCredential func(context.Context, provider.TargetSnapshot, string) error
+
+	Accounting           *accounting.Store
+	PriceEstimator       PriceEstimator
+	ObservationStore     observation.Store
+	ExecutionEvidence    observation.ExecutionEvidenceSink
+	CheckpointStore      continuity.Store
+	ResponseIDs          ResponseIDGenerator
+	ImageFetcher         provider.ImageFetcher
+	PolicyResolver       WorkspacePolicyResolver
+	WorkspaceToolCatalog func(context.Context, routing.Workspace) ([]mcp.CatalogTool, error)
+	// WorkspaceToolCall must reauthorize the principal and validate current
+	// Workspace/catalog state immediately before the frozen selected effect.
+	WorkspaceToolCall func(context.Context, accessidentity.ID, routing.Workspace, mcp.CatalogTool, canonical.ToolCallItem) (canonical.CanonicalItem, error)
 }
 
 // WorkspacePolicy is resolved once after workspace selection and then
@@ -104,14 +119,20 @@ func NewIngress(workspaces WorkspaceLookup, runtime ExecutionRuntime, policies R
 	return RequestIngress{
 		workspaces: workspaces,
 		runner: runtimeBundle{
-			Runtime:           runtime,
-			ExecutionEvidence: policies.ExecutionEvidence,
-			CheckpointStore:   policies.CheckpointStore,
-			ResponseIDs:       policies.ResponseIDs,
-			ImageFetcher:      policies.ImageFetcher,
-			PolicyResolver:    policyResolver,
-			TargetBackoff:     newTargetBackoffLedger(),
-			TargetExceptions:  newTargetExceptions(),
+			Runtime:                    runtime,
+			ModelConnection:            policies.ModelConnection,
+			PublishRefreshedCredential: policies.PublishRefreshedCredential,
+			ExecutionEvidence:          policies.ExecutionEvidence,
+			CheckpointStore:            policies.CheckpointStore,
+			ResponseIDs:                policies.ResponseIDs,
+			ImageFetcher:               policies.ImageFetcher,
+			PolicyResolver:             policyResolver,
+			Accounting:                 policies.Accounting,
+			PriceEstimator:             policies.PriceEstimator,
+			TargetBackoff:              newTargetBackoffLedger(),
+			TargetExceptions:           newTargetExceptions(),
+			WorkspaceToolCatalog:       policies.WorkspaceToolCatalog,
+			WorkspaceToolCall:          policies.WorkspaceToolCall,
 		},
 	}
 }
@@ -139,8 +160,9 @@ type RequestOutput struct {
 	// It lets the terminal HTTP log prove a rejected request never contacted a target.
 	AttemptCount int
 	// FinalizeExecutionEvidence is owned by the inbound delivery boundary.
-	// Exchange execution is semantically complete before this function runs;
-	// the delivery owner supplies the actual terminal result exactly once.
+	// The delivery owner supplies the actual terminal result exactly once. With
+	// executable local-tool streaming this also joins the still-active reducer
+	// and completes its product observation projection before telemetry reads it.
 	FinalizeExecutionEvidence func(delivery.Result)
 }
 
@@ -191,6 +213,9 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	if !in.AccessID.Valid() {
 		return RequestOutput{}, canonical.InternalError("access ID is required")
 	}
+	if len(workspace.Routes()) == 0 {
+		return RequestOutput{}, canonical.OperationNotConfigured("LLM operation is not configured for this Workspace")
+	}
 	operation := in.Operation
 	if operation.Family == "" {
 		return RequestOutput{}, canonical.InternalError("client operation is not configured")
@@ -232,6 +257,42 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 	}
 	request := decodeResult.Request.Request
 	decodedDelivery := decodeResult.Request.Delivery
+	// Freeze the exact catalog used for projection in this request-local runner.
+	// Do not consult a second snapshot or recover selected authority from history.
+	projectionIngress := h
+	var projectedCatalog []mcp.CatalogTool
+	if h.runner.WorkspaceToolCatalog != nil {
+		projectionIngress.runner.WorkspaceToolCatalog = func(ctx context.Context, ws routing.Workspace) ([]mcp.CatalogTool, error) {
+			catalog, err := h.runner.WorkspaceToolCatalog(ctx, ws)
+			projectedCatalog = catalog
+			return catalog, err
+		}
+	}
+	request, err = projectionIngress.applyWorkspaceToolOptIn(ctx, workspace, request, requestDoc.RawBytes())
+	if err != nil {
+		return RequestOutput{}, err
+	}
+	if len(projectedCatalog) > 0 {
+		var selection struct {
+			Swobu struct {
+				Tools []string `json:"tools"`
+			} `json:"swobu"`
+		}
+		if err := json.Unmarshal(requestDoc.RawBytes(), &selection); err != nil {
+			return RequestOutput{}, canonical.BadRequest("Workspace tool selection is invalid")
+		}
+		runner.selectedWorkspaceTools, err = mcp.SelectCatalog(projectedCatalog, selection.Swobu.Tools)
+		if err != nil {
+			return RequestOutput{}, canonical.BadRequest("Workspace tool selection is invalid")
+		}
+		if runner.WorkspaceToolCall == nil {
+			return RequestOutput{}, canonical.OperationNotConfigured("Workspace tool execution is unavailable")
+		}
+		runner.workspaceToolExecute = func(ctx context.Context, tool mcp.CatalogTool, call canonical.ToolCallItem) (canonical.CanonicalItem, error) {
+			return runner.WorkspaceToolCall(ctx, in.AccessID, workspace, tool, call)
+		}
+	}
+	decodeResult.Request.Request = request
 	if strings.TrimSpace(request.Model()) == "" { // swobu:io-string source=domain
 		return RequestOutput{}, canonical.BadRequest("canonical request is required")
 	}
@@ -260,6 +321,94 @@ func (h RequestIngress) runExchangeResponse(ctx context.Context, workspace routi
 		return out, err
 	}
 	return out, nil
+}
+
+// applyWorkspaceToolOptIn is the Exchange-owned bridge from an extensible
+// client request to the trusted Workspace catalog. The client supplies only
+// published names; declarations, schemas, source identity and credentials are
+// always projected from the catalog resolver.
+func (h RequestIngress) applyWorkspaceToolOptIn(ctx context.Context, workspace routing.Workspace, request canonical.CanonicalRequest, raw []byte) (canonical.CanonicalRequest, error) {
+	var envelope struct {
+		Swobu json.RawMessage `json:"swobu"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in is invalid")
+	}
+	if len(envelope.Swobu) == 0 {
+		return request, nil
+	}
+	if string(envelope.Swobu) == "null" {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in is invalid")
+	}
+	var selection struct {
+		Tools json.RawMessage `json:"tools"`
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Swobu, &members); err != nil || members == nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in is invalid")
+	}
+	for name := range members {
+		if name != "tools" {
+			return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in is invalid")
+		}
+	}
+	if err := json.Unmarshal(envelope.Swobu, &selection); err != nil || len(selection.Tools) == 0 || string(selection.Tools) == "null" {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in requires tools")
+	}
+	var names []string
+	if err := json.Unmarshal(selection.Tools, &names); err != nil || len(names) == 0 {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("request tool opt-in requires a non-empty tools list")
+	}
+	if h.runner.WorkspaceToolCatalog == nil {
+		return canonical.CanonicalRequest{}, canonical.OperationNotConfigured("Workspace tool opt-in is not configured")
+	}
+	catalog, err := h.runner.WorkspaceToolCatalog(ctx, workspace)
+	if err != nil {
+		return canonical.CanonicalRequest{}, canonical.OperationNotConfigured("Workspace tool catalog is unavailable")
+	}
+	declarations, err := mcp.ProjectSelectedDeclarations(catalog, names)
+	if err != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("Workspace tool opt-in is invalid")
+	}
+	// A caller-owned declaration may not shadow an authorized published name;
+	// otherwise provider-facing resolution could select the wrong schema/owner.
+	existing, err := canonical.EffectiveTools(request)
+	if err != nil {
+		return canonical.CanonicalRequest{}, err
+	}
+	for _, selected := range declarations {
+		selectedFunction, _ := selected.Function()
+		if workspaceToolNameConflicts(existing.Declarations(), selectedFunction.Key().Name()) {
+			return canonical.CanonicalRequest{}, canonical.BadRequest("Workspace tool opt-in conflicts with a client-owned tool")
+		}
+	}
+	set, err := canonical.NewToolSet(declarations)
+	if err != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("Workspace tool opt-in is invalid")
+	}
+	item, err := canonical.NewToolDeclarationsItem(set, canonical.ContextScopeRequest)
+	if err != nil {
+		return canonical.CanonicalRequest{}, canonical.BadRequest("Workspace tool opt-in is invalid")
+	}
+	items := append([]canonical.CanonicalItem{item}, request.Items()...)
+	return request.WithItems(items), nil
+}
+
+// Provider codecs flatten callable contributions, so collision checking must
+// traverse the same semantic containers rather than only top-level functions.
+func workspaceToolNameConflicts(declarations []canonical.ToolDeclaration, name string) bool {
+	for _, declaration := range declarations {
+		if declaration.Key().Name() == name {
+			return true
+		}
+		if namespace, ok := declaration.Namespace(); ok && workspaceToolNameConflicts(namespace.Tools(), name) {
+			return true
+		}
+		if source, ok := declaration.MCP(); ok && workspaceToolNameConflicts(source.Tools(), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func BuildProductObservation(evidence *ProductObservationInputData, result delivery.Result) *productprojection.Observation {
@@ -367,6 +516,10 @@ func requestOutcomeStatusForSwobuError(code canonical.ErrorCode) int {
 		return http.StatusGatewayTimeout
 	case canonical.ErrorCodeProviderUnavailable:
 		return http.StatusServiceUnavailable
+	case canonical.ErrorCodeOperationNotConfigured:
+		return http.StatusBadRequest
+	case canonical.ErrorCodeCostUnavailable, canonical.ErrorCodeBudgetExceeded:
+		return http.StatusPaymentRequired
 	default:
 		return http.StatusInternalServerError
 	}
@@ -426,8 +579,7 @@ type ModelOption struct {
 }
 
 type ListModelsOutput struct {
-	DefaultModelID string
-	Models         []ModelOption
+	Models []ModelOption
 }
 
 func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (ListModelsOutput, error) {
@@ -450,14 +602,13 @@ func (h RequestIngress) ListModels(ctx context.Context, in ListModelsInput) (Lis
 // ListModelsWithWorkspace projects the normal client-visible route surface
 // from already-resolved routing truth.
 func ListModelsWithWorkspace(workspace routing.Workspace) ListModelsOutput {
-	out := ListModelsOutput{
-		DefaultModelID: workspace.DefaultRoute().String(),
-		Models:         make([]ModelOption, 0, len(workspace.Routes())),
-	}
+	out := ListModelsOutput{Models: make([]ModelOption, 0, len(workspace.Routes()))}
+	// A wildcard is routing policy, never an advertised concrete model ID.
 	for _, route := range workspace.Routes() {
-		out.Models = append(out.Models, ModelOption{ID: route.Name().String()})
+		if id, exact := route.Name().ExactModelID(); exact {
+			out.Models = append(out.Models, ModelOption{ID: id})
+		}
 	}
-	sort.Slice(out.Models, func(i, j int) bool { return out.Models[i].ID < out.Models[j].ID })
 	return out
 }
 

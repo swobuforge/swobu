@@ -39,13 +39,13 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 	}))
 	defer upstream.Close()
 
-	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), testCredentialResolver{})
+	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), requestPathCredentialResolver{})
 	runtime := reasoningRequestPathRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		ProviderRegistry:     registry,
 	}
 	workspace := zaiReasoningWorkspace(t)
-	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
+	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupRequestPathModel})
 
 	raw := []byte(`{
 		"model":"reasoning-route",
@@ -55,7 +55,7 @@ func TestMessagesReasoningBudgetCompletesThroughZAIWithApproximation(t *testing.
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		AccessID:        accessidentity.Local,
-		ExchangeID:      "zai-reasoning-budget",
+		ClientRequestID: "zai-reasoning-budget",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/messages", nil, raw),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyMessages, NormalizedPath: canonical.NormalizedPathMessages},
 		ResponseFraming: delivery.FramingSSE,
@@ -131,12 +131,12 @@ func TestResponsesExplicitEffortCompletesThroughZAIExactly(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), testCredentialResolver{})
+	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), requestPathCredentialResolver{})
 	runtime := reasoningRequestPathRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		ProviderRegistry:     registry,
 	}
-	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
+	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupRequestPathModel})
 	raw := []byte(`{
 		"model":"reasoning-route",
 		"input":"hi",
@@ -145,7 +145,7 @@ func TestResponsesExplicitEffortCompletesThroughZAIExactly(t *testing.T) {
 	}`)
 	out, err := ingress.HandleRequestWithWorkspace(context.Background(), zaiReasoningWorkspace(t), exchange.RequestInput{
 		AccessID:        accessidentity.Local,
-		ExchangeID:      "zai-responses-explicit-effort",
+		ClientRequestID: "zai-responses-explicit-effort",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, raw),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
@@ -194,12 +194,12 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), testCredentialResolver{})
+	registry := mustProviderRegistry(t, rewritingClientForServer(t, upstream), requestPathCredentialResolver{})
 	runtime := reasoningRequestPathRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		ProviderRegistry:     registry,
 	}
-	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
+	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupRequestPathModel})
 	workspace := zaiReasoningWorkspace(t)
 
 	first := []byte(`{
@@ -212,7 +212,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 	}`)
 	firstOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		AccessID:        accessidentity.Local,
-		ExchangeID:      "zai-responses-function-call",
+		ClientRequestID: "zai-responses-function-call",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, first),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
@@ -239,7 +239,7 @@ func TestResponsesFunctionResultCompletesThroughZAIChatBridge(t *testing.T) {
 	}`)
 	secondOut, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 		AccessID:        accessidentity.Local,
-		ExchangeID:      "zai-responses-function-result",
+		ClientRequestID: "zai-responses-function-result",
 		Request:         exchange.NewTransportRequest(http.MethodPost, "/responses", nil, second),
 		Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyResponses, NormalizedPath: canonical.NormalizedPathResponses},
 		ResponseFraming: delivery.FramingSSE,
@@ -367,7 +367,7 @@ func zaiReasoningWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, registerRequestPathModel(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func zaiReasoningWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

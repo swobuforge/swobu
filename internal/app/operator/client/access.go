@@ -3,6 +3,8 @@ package operatorclient
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,28 +13,49 @@ import (
 	accessapp "github.com/swobuforge/swobu/internal/app/operator/access"
 )
 
-func (c *Client) ListAccess(ctx context.Context) ([]accessapp.Access, error) {
-	var out []accessapp.Access
-	err := c.accessRequest(ctx, http.MethodGet, "/_swobu/access", nil, http.StatusOK, &out)
-	return out, err
-}
-func (c *Client) CreateAccess(ctx context.Context, name, workspace string) (accessapp.IssueResult, error) {
-	var out accessapp.IssueResult
-	err := c.accessRequest(ctx, http.MethodPost, "/_swobu/access", map[string]string{"name": name, "workspace": workspace}, http.StatusCreated, &out)
-	return out, err
-}
 func (c *Client) IssueAccessCredential(ctx context.Context, accessID, workspace string) (accessapp.IssueResult, error) {
-	var out accessapp.IssueResult
-	err := c.accessRequest(ctx, http.MethodPost, "/_swobu/access/"+url.PathEscape(accessID)+"/credentials", map[string]string{"workspace": workspace}, http.StatusCreated, &out)
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return accessapp.IssueResult{}, fmt.Errorf("operator client: issuance retry key could not be generated")
+	}
+	intent, err := RestoreCredentialIssuanceIntent(accessID, workspace, hex.EncodeToString(key[:]))
+	if err != nil {
+		return accessapp.IssueResult{}, err
+	}
+	out, err := c.ApplyCredentialIssuance(ctx, intent)
+	if err != nil {
+		return accessapp.IssueResult{}, fmt.Errorf("%w; retain original Principal %s, Workspace %s and retry key %s for separately confirmed recovery", err, accessID, workspace, intent.key)
+	}
+	return out, nil
+}
+
+// ListPrincipals returns the versioned ontology projection. It is available
+// only from the Node Control client; the legacy client has no such route.
+func (c *Client) ListPrincipals(ctx context.Context) ([]accessapp.Principal, error) {
+	var out []accessapp.Principal
+	err := c.accessRequest(ctx, http.MethodGet, c.operatorPath("/principals"), nil, http.StatusOK, &out)
 	return out, err
 }
-func (c *Client) RevokeAccessCredential(ctx context.Context, accessID, credentialID string) error {
-	return c.accessRequest(ctx, http.MethodDelete, "/_swobu/access/"+url.PathEscape(accessID)+"/credentials/"+url.PathEscape(credentialID), struct{}{}, http.StatusNoContent, nil)
+
+// GetPrincipal inspects canonical identity metadata, including revoked identity
+// attribution. It never falls back to the legacy credential-bearing collection.
+func (c *Client) GetPrincipal(ctx context.Context, id string) (accessapp.Principal, error) {
+	var out accessapp.Principal
+	err := c.accessRequest(ctx, http.MethodGet, "/api/v1/principals/"+url.PathEscape(id), nil, http.StatusOK, &out)
+	return out, err
 }
-func (c *Client) RevokeAccess(ctx context.Context, accessID string) error {
-	return c.accessRequest(ctx, http.MethodPost, "/_swobu/access/"+url.PathEscape(accessID)+"/revoke", struct{}{}, http.StatusNoContent, nil)
+
+// ListCredentials reads canonical metadata without recovering a one-shot secret
+// or issuing a replacement. Missing canonical endpoints remain failures.
+func (c *Client) ListCredentials(ctx context.Context, id string) ([]accessapp.Credential, error) {
+	var out []accessapp.Credential
+	err := c.accessRequest(ctx, http.MethodGet, "/api/v1/principals/"+url.PathEscape(id)+"/credentials", nil, http.StatusOK, &out)
+	return out, err
 }
 func (c *Client) accessRequest(ctx context.Context, method, path string, body any, want int, out any) error {
+	return c.accessRequestWithHeaders(ctx, method, path, body, want, out, nil)
+}
+func (c *Client) accessRequestWithHeaders(ctx context.Context, method, path string, body any, want int, out any, headers map[string]string) error {
 	var raw []byte
 	var err error
 	if body != nil {
@@ -47,6 +70,11 @@ func (c *Client) accessRequest(ctx context.Context, method, path string, body an
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		if value != "" {
+			req.Header.Set(key, value)
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

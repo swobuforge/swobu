@@ -206,12 +206,12 @@ func TestNVIDIAHostedResponsesAndMessagesIngressLowerToSharedStreamingChat(t *te
 	}))
 	defer server.Close()
 
-	registry := mustProviderRegistry(t, rewritingClientForServer(t, server), testCredentialResolver{})
+	registry := mustProviderRegistry(t, rewritingClientForServer(t, server), requestPathCredentialResolver{})
 	runtime := nvidiaRequestPathRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		ProviderRegistry:     registry,
 	}
-	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
+	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupRequestPathModel})
 	workspace := nvidiaWorkspace(t)
 
 	cases := []struct {
@@ -246,7 +246,7 @@ func TestNVIDIAHostedResponsesAndMessagesIngressLowerToSharedStreamingChat(t *te
 			}
 			out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 				AccessID:        accessidentity.Local,
-				ExchangeID:      "nvidia-" + tc.name,
+				ClientRequestID: "nvidia-" + tc.name,
 				Request:         exchange.NewTransportRequest(http.MethodPost, tc.path, nil, []byte(tc.body)),
 				Operation:       canonical.ClientOperation{Family: tc.family, NormalizedPath: normalizedPath},
 				ResponseFraming: delivery.FramingSSE,
@@ -287,12 +287,12 @@ func TestNVIDIAHostedClientIdentityDoesNotChangeProviderRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	registry := mustProviderRegistry(t, rewritingClientForServer(t, server), testCredentialResolver{})
+	registry := mustProviderRegistry(t, rewritingClientForServer(t, server), requestPathCredentialResolver{})
 	runtime := nvidiaRequestPathRuntime{
 		RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(),
 		ProviderRegistry:     registry,
 	}
-	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{})
+	ingress := exchange.NewIngress(nil, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupRequestPathModel})
 	workspace := nvidiaWorkspace(t)
 	for _, userAgent := range []string{"ResponsesClient/1.0", "MessagesClient/1.0", ""} {
 		header := http.Header{}
@@ -301,7 +301,7 @@ func TestNVIDIAHostedClientIdentityDoesNotChangeProviderRequest(t *testing.T) {
 		}
 		out, err := ingress.HandleRequestWithWorkspace(context.Background(), workspace, exchange.RequestInput{
 			AccessID:        accessidentity.Local,
-			ExchangeID:      "nvidia-client-" + userAgent,
+			ClientRequestID: "nvidia-client-" + userAgent,
 			Request:         exchange.NewTransportRequest(http.MethodPost, "/chat/completions", header, []byte(`{"model":"nvidia-route","messages":[{"role":"user","content":"hello"}],"stream":true}`)),
 			Operation:       canonical.ClientOperation{Family: canonical.ClientFamilyChatCompletions, NormalizedPath: canonical.NormalizedPathChatCompletions},
 			ResponseFraming: delivery.FramingSSE,
@@ -346,7 +346,7 @@ func nvidiaWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatalf("NVIDIA derived protocol: %v", err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, registerRequestPathModel(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func nvidiaWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -64,18 +64,17 @@ func inspectAntigravityEnvironment(_ *Service, target Target) (antigravityEnviro
 				if valueErr != nil && !errors.Is(valueErr, registry.ErrNotExist) {
 					return antigravityEnvironmentPlan{}, valueErr
 				}
-				apiKeyExists = valueErr == nil && machineAPIKey != ""
+				apiKey, apiKeyExists = machineAPIKey, valueErr == nil && machineAPIKey != ""
 			}
 		}
 	}
 	endpointChanges := semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())
 	changes := append([]Change(nil), endpointChanges...)
-	if !apiKeyExists {
-		changes = append(changes, Change{Field: "API key fallback", After: "swobu-local"})
-	}
+	changes = append(changes, credentialChange(apiKey, apiKeyExists, target)...)
 	plan := antigravityEnvironmentPlan{
 		configPaths: []string{`HKCU\Environment`},
 		changes:     changes,
+		credential:  apiKey,
 	}
 	if len(changes) == 0 {
 		return plan, nil
@@ -86,15 +85,16 @@ func inspectAntigravityEnvironment(_ *Service, target Target) (antigravityEnviro
 			return err
 		}
 		defer key.Close()
-		if !apiKeyExists {
-			if err := key.SetStringValue("GEMINI_API_KEY", "swobu-local"); err != nil {
-				return err
-			}
+		// Withhold authentication until its destination has been published. An
+		// interrupted registry update must not send the new token to the old URL.
+		if err := key.SetStringValue("GEMINI_API_KEY", ""); err != nil {
+			return err
 		}
-		if len(endpointChanges) != 0 {
-			if err := key.SetStringValue("GOOGLE_GEMINI_BASE_URL", target.WorkspaceURL()); err != nil {
-				return err
-			}
+		if err := key.SetStringValue("GOOGLE_GEMINI_BASE_URL", target.WorkspaceURL()); err != nil {
+			return err
+		}
+		if err := key.SetStringValue("GEMINI_API_KEY", target.bearer); err != nil {
+			return err
 		}
 		return broadcastAntigravityEnvironmentChange()
 	}

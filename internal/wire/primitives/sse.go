@@ -21,8 +21,14 @@ type SSEReaderCloser struct {
 }
 
 func NewSSEReader(body io.ReadCloser) *SSEReaderCloser {
+	return NewBoundedSSEReader(body, 1024*1024)
+}
+
+// NewBoundedSSEReader uses the caller's protocol-specific maximum line size.
+// Callers remain responsible for bounding the aggregate response body.
+func NewBoundedSSEReader(body io.ReadCloser, maxLineBytes int) *SSEReaderCloser {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 	return &SSEReaderCloser{
 		scanner: scanner,
 		body:    body,

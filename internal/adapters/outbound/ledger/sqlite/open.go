@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	schemaVersion    = 1
+	schemaVersion    = 3
 	journalSizeLimit = 64 * 1024 * 1024
 )
 
@@ -42,10 +42,11 @@ func (e *OpenError) Unwrap() error { return e.Cause }
 // DB owns the bounded pool and its dedicated writer connection. The writer is
 // the only connection used for writes, migrations, and retention maintenance.
 type DB struct {
-	path      string
-	pool      *sql.DB
-	writer    *sql.Conn
-	retention ledger.RetentionConfig
+	path         string
+	pool         *sql.DB
+	writer       *sql.Conn
+	retention    ledger.RetentionConfig
+	bytePressure bool
 }
 
 var _ ledger.Store = (*DB)(nil)
@@ -131,7 +132,13 @@ func createPrivateFile(path string) (bool, error) {
 }
 
 func sqliteDSN(path string) string {
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	uriPath := filepath.ToSlash(path)
+	// A Windows drive is part of the path, never the URI authority. Without
+	// this slash url.URL emits file://C:/..., which SQLite rejects as a host.
+	if filepath.VolumeName(path) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	query := u.Query()
 	for _, pragma := range []string{
 		"foreign_keys(1)",
@@ -171,10 +178,26 @@ func (db *DB) initializeOrValidate(ctx context.Context, createdBy string) error 
 	if version > schemaVersion {
 		return openError(ledger.ErrorSchemaNewer, fmt.Errorf("schema version %d is newer than supported version %d", version, schemaVersion))
 	}
-	if version != schemaVersion {
+	if version != 1 && version != 2 && version != schemaVersion {
 		return openError(ledger.ErrorSchemaInvalid, fmt.Errorf("unsupported schema version %d", version))
 	}
 	if err := validateSchemaV1(ctx, db.writer); err != nil {
+		return openError(ledger.ErrorSchemaInvalid, err)
+	}
+	if version == 1 {
+		if err := migrateMCPHistory(ctx, db.writer); err != nil {
+			return openError(ledger.ErrorMigrationFailed, err)
+		}
+	}
+	if version < 3 {
+		if err := migrateConnectionIdentity(ctx, db.writer); err != nil {
+			return openError(ledger.ErrorMigrationFailed, err)
+		}
+	}
+	if err := validateConnectionIdentity(ctx, db.writer); err != nil {
+		return openError(ledger.ErrorSchemaInvalid, err)
+	}
+	if err := validateMCPHistory(ctx, db.writer); err != nil {
 		return openError(ledger.ErrorSchemaInvalid, err)
 	}
 	return nil

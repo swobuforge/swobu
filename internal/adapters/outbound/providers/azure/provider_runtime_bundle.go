@@ -198,7 +198,7 @@ func (c azureProviderModelCatalogClient) applyCredential(ctx context.Context, re
 	if c.credentials == nil {
 		return canonical.BadEndpoint("credential resolver is not configured")
 	}
-	token, err := c.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, c.credentials, target)
 	if err != nil {
 		return canonical.BadEndpoint("credential reference could not be resolved")
 	}

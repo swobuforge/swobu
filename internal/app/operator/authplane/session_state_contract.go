@@ -21,13 +21,6 @@ type StartInput struct {
 	AuthMode     string
 }
 
-type CredentialSubject struct {
-	Workspace    string
-	Route        string
-	TargetID     string
-	DraftSubject string
-}
-
 type StartOutput struct {
 	SessionID    string
 	State        SessionState
@@ -61,8 +54,4 @@ type AuthMethodDriver interface {
 	Start(ctx context.Context, in StartInput) (DriverStartResult, error)
 	Poll(ctx context.Context, sessionID string) (DriverPollResult, error)
 	Cancel(ctx context.Context, sessionID string) error
-}
-
-type CredentialStore interface {
-	SetCredential(ctx context.Context, subject CredentialSubject, credentialRef string) (string, error)
 }

@@ -743,12 +743,6 @@ func geminiTools(request canonical.CanonicalRequest, names wire.ToolNames, chang
 	lowered := wire.LoweredToolSet{Records: make([]wire.LoweredToolRecord, 0, len(flat.Declarations))}
 	for _, declaration := range flat.Declarations {
 		if declaration.Kind() == canonical.ToolKindWebSearch {
-			mode, _ := declaration.WebSearchAccessMode()
-			if mode != canonical.WebSearchAccessUnspecified {
-				return nil, wire.LoweredToolSet{}, changes, canonical.NotImplemented(
-					"selected Gemini target cannot preserve the requested web-search access restriction",
-				)
-			}
 			// Canonical owns web search only. Explicitly selecting the provider's
 			// web mode avoids silently enabling image or enterprise search.
 			tools = append(tools, interactionTool{Type: "google_search", SearchTypes: []string{"web_search"}})

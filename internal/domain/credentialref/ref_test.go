@@ -47,3 +47,22 @@ func TestIsEmptyFileSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialScopeKeepsProviderAndConnectionIdentityDistinct(t *testing.T) {
+	providerScope, err := credentialref.NewProviderScope("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionScope, err := credentialref.NewConnectionScope("cn_docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerScope.Kind() != credentialref.ScopeProvider || providerScope.Identifier() != "openai" ||
+		connectionScope.Kind() != credentialref.ScopeConnection || connectionScope.Identifier() != "cn_docs" ||
+		providerScope == connectionScope {
+		t.Fatalf("provider scope=%+v Connection scope=%+v", providerScope, connectionScope)
+	}
+	if _, err := credentialref.NewConnectionScope("../docs"); err == nil {
+		t.Fatal("invalid Connection identity entered a credential scope")
+	}
+}

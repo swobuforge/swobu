@@ -58,19 +58,25 @@ func planClaude(path string, target Target) (plannedMutation, error) {
 	if err != nil {
 		return plannedMutation{}, claudeProblem(err)
 	}
+	credential, credentialExists, err := editor.String(file.raw, keyPath{"env", "ANTHROPIC_AUTH_TOKEN"})
+	if err != nil {
+		return plannedMutation{}, claudeProblem(err)
+	}
 	discovery, discoveryExists, err := editor.String(file.raw, claudeDiscoveryPath)
 	if err != nil {
 		return plannedMutation{}, claudeProblem(err)
 	}
 	changes := semanticChange("endpoint", endpoint, endpointExists, target.WorkspaceURL())
 	changes = append(changes, semanticChange("model discovery", discovery, discoveryExists, "1")...)
-	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes}
+	changes = append(changes, credentialChange(credential, credentialExists, target)...)
+	plan := Plan{ConfigPaths: []string{file.logical}, Target: target, Changes: changes, credential: credential, PostApplyHint: fmt.Sprintf("Connect configures the endpoint and model discovery. Select model %q explicitly in Claude Code; this configuration does not set a model override.", target.ModelID())}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
 	// Both client-owned leaves commit together so replacement approval and
 	// freshness protect an explicitly disabled discovery setting.
 	next, err := setJSONStrings(editor, file.raw,
+		jsonStringChange{path: keyPath{"env", "ANTHROPIC_AUTH_TOKEN"}, value: target.bearer},
 		jsonStringChange{path: claudeEndpointPath, value: target.WorkspaceURL()},
 		jsonStringChange{path: claudeDiscoveryPath, value: "1"},
 	)

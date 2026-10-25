@@ -95,7 +95,7 @@ func TestOVHCloudSharedRuntimeSupportsAnonymousAndBearerStreamingChat(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh"}, Canonical: request}, ingress)
+			decoded, err := backend.Codec.Decode(context.Background(), provider.Request{Attempt: provider.AttemptContext{CorrelationID: "ex_ovh"}, Canonical: request}, ingress)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +156,7 @@ func TestOVHCloudSharedRuntimeDecodesFragmentedToolCallAndReplaysResult(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh_tool_1"}, Canonical: base, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+	first := provider.Request{Attempt: provider.AttemptContext{CorrelationID: "ex_ovh_tool_1"}, Canonical: base, ToolNames: toolNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
 	document, _, err := backend.Codec.Encode(first)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestOVHCloudSharedRuntimeDecodesFragmentedToolCallAndReplaysResult(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := provider.Request{Attempt: provider.AttemptContext{ExchangeID: "ex_ovh_tool_2"}, Canonical: secondCanonical, ToolNames: secondNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
+	second := provider.Request{Attempt: provider.AttemptContext{CorrelationID: "ex_ovh_tool_2"}, Canonical: secondCanonical, ToolNames: secondNames, Delivery: delivery.StreamingDelivery(delivery.FramingSSE)}
 	document, _, err = backend.Codec.Encode(second)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestOVHCloudSharedRuntimeDecodesFragmentedToolCallAndReplaysResult(t *testi
 	}
 }
 
-func TestBasetenAndHyperbolicProfilesPreserveTheirDifferentAuthoringContracts(t *testing.T) {
+func TestBasetenProfilePreservesItsAuthoringContract(t *testing.T) {
 	baseten, ok := profile.ProfileForSpec(string(profile.ProviderSpecBaseten))
 	if !ok {
 		t.Fatal("Baseten profile is missing")
@@ -232,17 +232,6 @@ func TestBasetenAndHyperbolicProfilesPreserveTheirDifferentAuthoringContracts(t 
 	}
 	if got := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecBaseten)); !reflect.DeepEqual(got, []string{"chat_completions_stream", "messages_stream"}) {
 		t.Fatalf("Baseten protocols = %v", got)
-	}
-
-	hyperbolic, ok := profile.ProfileForSpec(string(profile.ProviderSpecHyperbolic))
-	if !ok {
-		t.Fatal("Hyperbolic profile is missing")
-	}
-	if hyperbolic.ProviderDisplayName != "Hyperbolic" || hyperbolic.Locator.Kind != profile.LocatorFixed || hyperbolic.Locator.Default != "https://api.hyperbolic.xyz/v1" || hyperbolic.ModelDiscovery != profile.ModelDiscoveryModeNone {
-		t.Fatalf("Hyperbolic profile = %#v", hyperbolic)
-	}
-	if got := profile.ConcreteProviderProtocolsForSpec(string(profile.ProviderSpecHyperbolic)); !reflect.DeepEqual(got, []string{"chat_completions_stream"}) {
-		t.Fatalf("Hyperbolic protocols = %v", got)
 	}
 }
 
@@ -336,7 +325,6 @@ func TestCommodityChatTargetsBridgeResponsesAndMessagesIngress(t *testing.T) {
 		resolver provider.BackendResolver
 	}{
 		{name: "baseten", resolver: NewRuntime(nil, commodityCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecBaseten)).BackendResolver},
-		{name: "hyperbolic", resolver: NewRuntime(nil, commodityCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecHyperbolic)).BackendResolver},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := provider.NewTargetSnapshot(tc.name, tc.name, "https://example.test/v1", "env:API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
@@ -364,26 +352,6 @@ func TestCommodityChatTargetsBridgeResponsesAndMessagesIngress(t *testing.T) {
 	}
 }
 
-func TestHyperbolicManualRuntimeDoesNotProbeOrAddProtocolFamilies(t *testing.T) {
-	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-	defer server.Close()
-	bundle := NewRuntime(server.Client(), commodityCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecHyperbolic))
-	target := provider.NewTargetSnapshot("hyperbolic", "hyperbolic", server.URL+"/v1", "env:HYPERBOLIC_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
-	target.Model = "provider/exact-model"
-	result, err := bundle.Discovery.ProbeTarget(context.Background(), target)
-	if err == nil || len(result.Options) != 0 || called {
-		t.Fatalf("manual discovery = %#v, err=%v, called=%v", result, err, called)
-	}
-	for _, kind := range []protocolkind.ProtocolKind{protocolkind.Responses, protocolkind.Messages} {
-		invalid := target.Clone()
-		invalid.ProtocolKind = kind
-		if _, err := bundle.BackendResolver.ResolveBackend(invalid); err == nil {
-			t.Fatalf("Hyperbolic resolved unsupported protocol %s", kind)
-		}
-	}
-}
-
 func TestCommodityProvidersDispatchUnsupportedOptionalCombination(t *testing.T) {
 	dispatched := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -395,8 +363,8 @@ func TestCommodityProvidersDispatchUnsupportedOptionalCombination(t *testing.T) 
 		_, _ = w.Write([]byte(`{"error":{"message":"selected model rejects this combination"}}`))
 	}))
 	defer server.Close()
-	bundle := NewRuntime(server.Client(), commodityCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecHyperbolic))
-	target := provider.NewTargetSnapshot("hyperbolic", "hyperbolic", server.URL+"/v1", "env:HYPERBOLIC_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
+	bundle := NewRuntime(server.Client(), commodityCredentialResolver{}, StandardBearerPolicy(profile.ProviderSpecBaseten))
+	target := provider.NewTargetSnapshot("baseten", "baseten", server.URL+"/v1", "env:BASETEN_API_KEY", protocolkind.ChatCompletions, "chat_completions", delivery.BufferedDelivery())
 	target.Model = "unknown/exact-model"
 	backend, err := bundle.BackendResolver.ResolveBackend(target)
 	if err != nil {

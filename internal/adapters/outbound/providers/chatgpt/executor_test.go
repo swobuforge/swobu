@@ -20,6 +20,8 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/profile"
@@ -810,5 +812,71 @@ func TestExecute_StreamingReturnsTransportStream(t *testing.T) {
 	streamBody := streamIngress.Stream
 	if closeErr := streamBody.Body.Close(); closeErr != nil {
 		t.Fatalf("close stream: %v", closeErr)
+	}
+}
+
+func TestConnectionBoundCatalogUsesOwnedBundleWithoutRefresh(t *testing.T) {
+	t.Setenv("SWOBU_HOME", t.TempDir())
+	raw, err := outboundcredentials.EncodeTokenBundle(outboundcredentials.TokenBundle{
+		AccessToken: "fixture-access", RefreshToken: "fixture-refresh",
+		IDToken: "a." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account"}}`)) + ".c",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := outboundcredentials.StoreConnectionCredential("cn_catalog", raw, outboundcredentials.CredentialWritePolicyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "Bearer fixture-access" || r.Header.Get(chatGPTAccountIDHeaderKey) != "fixture-account" {
+			t.Error("Connection bundle routing was lost")
+		}
+		if calls > 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"models":[{"slug":"fixture-model","visibility":"list","priority":1}]}`)
+	}))
+	defer srv.Close()
+	id, _ := connectionidentity.Parse("cn_catalog")
+	target, err := provider.NewTargetSnapshot("target", "chatgpt", srv.URL, ref, protocolkind.Responses, "responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)).BindConnection(id, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := NewExecutor(srv.Client(), outboundcredentials.NewResolver())
+	if _, err := NewExecutor(srv.Client(), stubCredentialResolver{}).ListDeployments(t.Context(), target); err == nil || calls != 0 {
+		t.Fatal("provider-only resolver acquired Connection authority")
+	}
+	models, err := executor.ListDeployments(t.Context(), target)
+	if err != nil || len(models) != 1 {
+		t.Fatalf("owned catalog: models=%d err=%v", len(models), err)
+	}
+	refreshCalls := 0
+	refresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer refresh.Close()
+	prior := chatGPTRefreshTokenURL
+	chatGPTRefreshTokenURL = refresh.URL
+	t.Cleanup(func() { chatGPTRefreshTokenURL = prior })
+	if _, err := executor.ListDeployments(t.Context(), target); err == nil {
+		t.Fatal("unauthorized catalog succeeded")
+	}
+	if refreshCalls != 0 || calls != 2 {
+		t.Fatal("immutable Connection attempted refresh or retry")
+	}
+	other, _ := connectionidentity.Parse("cn_other")
+	foreign, _ := provider.NewTargetSnapshot("target", "chatgpt", srv.URL, ref, protocolkind.Responses, "responses_stream", delivery.StreamingDelivery(delivery.FramingSSE)).BindConnection(other, 1)
+	if _, err := executor.ListDeployments(t.Context(), foreign); err == nil || calls != 2 {
+		t.Fatal("foreign Connection reached provider")
+	}
+	scope, _ := credentialref.NewConnectionScope("cn_catalog")
+	token, err := outboundcredentials.NewResolver().ResolveScopedCredential(t.Context(), scope, ref)
+	if err != nil || token != "fixture-access" {
+		t.Fatal("bound material changed")
 	}
 }

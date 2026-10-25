@@ -166,7 +166,7 @@ func mediaCachePreparationFixture(t *testing.T, modes []mediaEncodingMode, resol
 	for index, mode := range modes {
 		id := "media-" + string(rune('a'+index))
 		state.route.targets[index] = requestpathTarget(t, id)
-		path, err := resolveProviderPath(state.route.targets[index])
+		path, err := resolveProviderPath(state.route.targets[index], LookupModelFixture)
 		if err != nil {
 			t.Fatal(err)
 		}

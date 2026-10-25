@@ -9,6 +9,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -132,6 +133,11 @@ func completedModelExchangeWithStart(t *testing.T, exchangeStart executioneviden
 	if err != nil {
 		t.Fatal(err)
 	}
+	connectionID, _ := connectionidentity.Parse("cn_retained")
+	resource, err = resource.BindConnection(connectionID, ^uint64(0))
+	if err != nil {
+		t.Fatal(err)
+	}
 	started, err := executionevidence.NewModelInvocationStarted(id, exchangeStart.StartedAt().Add(time.Millisecond), resource)
 	if err != nil {
 		t.Fatal(err)
@@ -170,5 +176,34 @@ func TestWriteBatchRollsBackWholeLifecycleOnSubtypeFailure(t *testing.T) {
 	var count int
 	if err := db.writer.QueryRowContext(ctx, `SELECT count(*) FROM swobu_ledger_exchanges`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("partial lifecycle committed: count=%d err=%v", count, err)
+	}
+}
+
+func TestConnectionEvidenceSurvivesReopen(t *testing.T) {
+	cfg := testConfig(t)
+	db, err := Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exchange := completedModelExchange(t, executionevidence.FailureTimeout)
+	if err := db.WriteBatch(t.Context(), []executionevidence.CompletedExchange{exchange}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	actual, found, err := reopened.GetExchange(t.Context(), exchange.ID())
+	if err != nil || !found {
+		t.Fatal("retained evidence missing", err)
+	}
+	model := actual.Invocations()[0].Started().(executionevidence.ModelInvocationStarted).Model()
+	id, revision, bound := model.ConnectionIdentity()
+	if !bound || id.String() != "cn_retained" || revision != ^uint64(0) || model.Version() != 1 {
+		t.Fatal("reopen lost composite identity")
 	}
 }

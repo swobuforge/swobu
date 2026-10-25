@@ -247,7 +247,7 @@ func responseHandoffFallbackFixture(t *testing.T, failAfter int) (Runner, routin
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

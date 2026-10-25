@@ -2,6 +2,7 @@ package routing
 
 import (
 	"errors"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"reflect"
 	"testing"
 )
@@ -81,20 +82,17 @@ func TestApplyRouteSpecBackendIdentityMembersIncrementExactlyOnce(t *testing.T) 
 	base := current.Spec()
 	baseTarget := base.Tiers[0].Targets[0]
 	replacement := testTarget(t, "replacement")
-	changedConnection, err := NewStandardConnection(baseTarget.Settings.Connection.Provider(), "", "env:OTHER_API_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
+	changedConnection, _ := connectionidentity.Parse("cn_other")
 	cases := map[string]func(*TargetSpec){
 		"model": func(s *TargetSpec) { s.Settings.Model = replacement.Model() },
 		"protocol": func(s *TargetSpec) {
-			provider := s.Settings.Connection.Provider()
+			provider := Provider("openai")
 			s.Settings.Protocol, _ = ParseProtocol("chat_completions", provider, func(Provider, string) bool { return true })
 		},
-		"connection": func(s *TargetSpec) { s.Settings.Connection = changedConnection },
+		"connection": func(s *TargetSpec) { s.Settings.ConnectionID = changedConnection },
 		"multiple fields": func(s *TargetSpec) {
 			s.Settings.Model = replacement.Model()
-			s.Settings.Connection = changedConnection
+			s.Settings.ConnectionID = changedConnection
 		},
 	}
 	for name, change := range cases {
@@ -119,7 +117,7 @@ func TestApplyRouteSpecAddsRemovesAndCombinesChangesAtomically(t *testing.T) {
 	newTarget := testTarget(t, "c")
 	desired.Tiers[0].Targets[0].Settings.Model = testTarget(t, "changed").Model()
 	desired.Tiers = append(desired.Tiers, TierSpec{Targets: []TargetSpec{{
-		ID: newTarget.ID(), Settings: TargetSettings{Model: newTarget.Model(), Protocol: newTarget.Protocol(), Connection: newTarget.Connection()},
+		ID: newTarget.ID(), Settings: TargetSettings{Model: newTarget.Model(), Protocol: newTarget.Protocol(), ConnectionID: newTarget.ConnectionID()},
 	}}})
 	next, err := ApplyRouteSpec(current, desired)
 	if err != nil {
@@ -249,7 +247,7 @@ func TestConfigApplyRouteSpecRejectsExhaustedAbsentGenerationAtomically(t *testi
 	config.workspaces[slug] = workspace
 	current, _ := workspace.Route(routeName)
 	desired := current.Spec()
-	desired.Tiers = append(desired.Tiers, TierSpec{Targets: []TargetSpec{{ID: x.id, Settings: TargetSettings{Model: x.model, Protocol: x.protocol, Connection: x.connection}}}})
+	desired.Tiers = append(desired.Tiers, TierSpec{Targets: []TargetSpec{{ID: x.id, Settings: TargetSettings{Model: x.model, Protocol: x.protocol, ConnectionID: x.connectionID}}}})
 
 	if _, err := config.ApplyRouteSpec(slug, routeName, desired); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("error = %v, want invalid config", err)
@@ -257,5 +255,85 @@ func TestConfigApplyRouteSpecRejectsExhaustedAbsentGenerationAtomically(t *testi
 	unchanged, _ := config.Workspace(slug)
 	if _, found := unchanged.Route(routeName); !found || unchanged.TargetGenerations()[x.id] != ^TargetVersion(0) {
 		t.Fatalf("source config mutated: %#v", unchanged)
+	}
+}
+
+// A canonical Models PUT is the entire desired route, not a second staging
+// resource. Empty-enabled and existing routes must share one transition path.
+func TestPutRouteSpecCreatesAndReplacesAgainstEnabledService(t *testing.T) {
+	slug, _ := ParseWorkspaceSlug("research")
+	name, _ := ParseRouteName("coding")
+	config, _ := NewConfig(nil)
+	var err error
+	config, err = config.CreateEmptyWorkspace(EmptyWorkspaceSeed{Slug: slug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := testTarget(t, "stable")
+	desired := RouteSpec{Tiers: []TierSpec{{Targets: []TargetSpec{{ID: original.ID(), Settings: TargetSettings{Model: original.Model(), Protocol: original.Protocol(), ConnectionID: original.ConnectionID()}}}}}}
+	if _, err := config.PutRouteSpec(slug, name, desired); !errors.Is(err, ErrServiceDisabled) {
+		t.Fatalf("disabled Models accepted route: %v", err)
+	}
+	config, err = config.SetServiceEnabled(slug, ServiceModels, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err = config.PutRouteSpec(slug, name, desired)
+	if err != nil {
+		t.Fatalf("creating first route: %v", err)
+	}
+	ws, _ := config.Workspace(slug)
+	if len(ws.Routes()) != 1 || ws.Routes()[0].Name() != name {
+		t.Fatal("first route not configured")
+	}
+	route, _ := ws.Route(name)
+	if got := targetVersions(route)["stable"]; got != 1 {
+		t.Fatalf("first target generation %d", got)
+	}
+	config, err = config.PutRouteSpec(slug, name, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _ = config.Workspace(slug)
+	route, _ = ws.Route(name)
+	if got := targetVersions(route)["stable"]; got != 1 {
+		t.Fatalf("no-op changed generation %d", got)
+	}
+	alternate := testTarget(t, "other")
+	desired.Tiers[0].Targets[0].Settings.Model = alternate.Model()
+	config, err = config.PutRouteSpec(slug, name, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _ = config.Workspace(slug)
+	route, _ = ws.Route(name)
+	if got := targetVersions(route)["stable"]; got != 2 {
+		t.Fatalf("effective backend change generation %d, want 2", got)
+	}
+	invalid := RouteSpec{Tiers: []TierSpec{{Targets: nil}}}
+	if _, err := config.PutRouteSpec(slug, name, invalid); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("invalid route error %v", err)
+	}
+	ws, _ = config.Workspace(slug)
+	route, _ = ws.Route(name)
+	if got := targetVersions(route)["stable"]; got != 2 {
+		t.Fatal("rejected request mutated existing route")
+	}
+	second, _ := ParseRouteName("fast")
+	config, err = config.PutRouteSpec(slug, second, RouteSpec{Tiers: []TierSpec{{Targets: []TargetSpec{{ID: testTarget(t, "fast").ID(), Settings: desired.Tiers[0].Targets[0].Settings}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _ = config.Workspace(slug)
+	if len(ws.Routes()) != 2 {
+		t.Fatal("second route not configured")
+	}
+	config, err = config.DeleteRoute(slug, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, _ = config.Workspace(slug)
+	if len(ws.Routes()) != 1 || ws.Routes()[0].Name() != second {
+		t.Fatal("route delete retained wrong route")
 	}
 }

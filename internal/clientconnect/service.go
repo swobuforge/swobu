@@ -99,6 +99,9 @@ func (s *Service) Discover(ctx context.Context, target Target) []Client {
 
 // Plan inspects current foreign state and returns its exact semantic delta.
 func (s *Service) Plan(ctx context.Context, client ClientID, target Target) (Plan, error) {
+	if target.ModelID() == "" {
+		return Plan{}, fmt.Errorf("select a concrete model ID that matches a Workspace route")
+	}
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
@@ -132,6 +135,9 @@ func (s *Service) Apply(ctx context.Context, reviewed Plan) (Plan, error) {
 	if err := reviewed.Target.validateLocal(); err != nil {
 		return Plan{}, err
 	}
+	if reviewed.Target.principal == "" || reviewed.Target.bearer == "" {
+		return Plan{}, errors.New("authenticated client apply requires an existing Principal and credential")
+	}
 	current, err := adapter.planCurrent(ctx, s, reviewed.Target)
 	if err != nil {
 		return Plan{}, err
@@ -141,7 +147,7 @@ func (s *Service) Apply(ctx context.Context, reviewed Plan) (Plan, error) {
 		return current.plan, nil
 	}
 	if !current.plan.equal(reviewed) {
-		return current.plan, fmt.Errorf("Client configuration changed. Open Connect again to review the current value.")
+		return current.plan, planChangedError{}
 	}
 	if current.apply == nil {
 		return current.plan, fmt.Errorf("client configuration plan has no mutation operation")

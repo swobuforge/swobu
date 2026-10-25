@@ -4,7 +4,7 @@
 
 1. `swobu status`
 2. Verify client points to Swobu local endpoint.
-3. Verify backend auth and model selection in cockpit.
+3. Verify backend auth and model selection in the Web Operator.
 
 ## Installer
 

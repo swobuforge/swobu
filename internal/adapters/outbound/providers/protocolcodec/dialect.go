@@ -115,14 +115,6 @@ func ResponsesHostedSearchTool(spelling string, supportsSourceInclude bool) resp
 	}
 }
 
-// ResponsesHostedSearchWithAccessTool adds Codex's bounded access mode only
-// for targets whose hosted Responses contract accepts those exact fields.
-func ResponsesHostedSearchWithAccessTool(spelling string, supportsSourceInclude bool) responses.ToolTransformer {
-	return responses.HostedSearchWithAccessProjection(
-		responses.ProviderRequestTool{Type: spelling}, supportsSourceInclude,
-	)
-}
-
 // ResponsesCustomAsFunction lowers one canonical Custom declaration through
 // the ordinary Responses function carrier. Exact targets may opt into this
 // rule only after their native and wrapper history carriers are characterized.

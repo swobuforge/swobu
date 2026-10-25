@@ -2,22 +2,29 @@ package workspaces
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
 	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/connections"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/routing"
-	"github.com/swobuforge/swobu/internal/sharestate"
+	"github.com/swobuforge/swobu/internal/testkit/connectionfixture"
 )
+
+// Routing publication cannot roll back independently committed revocations.
+// Recovery retries the semantic edit, never resurrects old bearer authority.
+
+// Exact-target directory obstruction forces config rename failure after
+// the before-commit revocation boundary, independent of permission bits.
 
 func testService(t *testing.T) (Service, *configstore.Store, string) {
 	t.Helper()
@@ -26,7 +33,7 @@ func testService(t *testing.T) (Service, *configstore.Store, string) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "swobu.yaml")
-	if err := os.WriteFile(path, []byte("schema_version: 1\nworkspaces: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := configstore.Open(path)
@@ -34,231 +41,26 @@ func testService(t *testing.T) (Service, *configstore.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := NewService(store)
+	service, err := NewService(store, Dependencies{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return service, store, path
 }
 func openAITarget(id string) TargetDraft {
-	return TargetDraft{ID: id, Model: "gpt-5", Protocol: "responses", Connection: StandardConnection("openai", "", "env:OPENAI_API_KEY")}
-}
-
-// TestConnectionJSONRoundTripCoversEveryProfile proves that the public
-// provider-keyed JSON contract is dynamic at the profile boundary. Each known
-// provider keeps its key and strict child grammar without adding a DTO field or
-// marshal arm for catalog membership.
-func TestConnectionJSONRoundTripCoversEveryProfile(t *testing.T) {
-	for _, entry := range profile.All() {
-		t.Run(string(entry.ProviderID), func(t *testing.T) {
-			source := operatorConnectionForProfile(t, entry)
-			raw, err := json.Marshal(source)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-
-			var decoded Connection
-			if err := json.Unmarshal(raw, &decoded); err != nil {
-				t.Fatalf("unmarshal: %v\n%s", err, raw)
-			}
-			roundTripped, err := json.Marshal(decoded)
-			if err != nil {
-				t.Fatalf("re-marshal: %v", err)
-			}
-			if string(roundTripped) != string(raw) {
-				t.Fatalf("provider connection changed during JSON round trip:\nfirst:  %s\nsecond: %s", raw, roundTripped)
-			}
-
-			var document map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &document); err != nil {
-				t.Fatalf("decode public JSON: %v", err)
-			}
-			if len(document) != 1 || document[string(entry.ProviderID)] == nil {
-				t.Fatalf("public JSON = %s; want exactly the %q provider key", raw, entry.ProviderID)
-			}
-
-			var child map[string]json.RawMessage
-			if err := json.Unmarshal(document[string(entry.ProviderID)], &child); err != nil {
-				t.Fatalf("decode provider payload: %v", err)
-			}
-			child["future_field"] = json.RawMessage(`true`)
-			document[string(entry.ProviderID)], err = json.Marshal(child)
-			if err != nil {
-				t.Fatalf("encode unknown-field payload: %v", err)
-			}
-			unknownFieldJSON, err := json.Marshal(document)
-			if err != nil {
-				t.Fatalf("encode unknown-field document: %v", err)
-			}
-			var rejected Connection
-			if err := json.Unmarshal(unknownFieldJSON, &rejected); err == nil || !strings.Contains(err.Error(), "unknown field") {
-				t.Fatalf("unknown child field error = %v, want strict rejection", err)
-			}
-		})
-	}
-}
-
-func TestRunPodOperatorJSONAndDaemonProjectionExposeNormalizedEndpoint(t *testing.T) {
-	var connection Connection
-	if err := json.Unmarshal([]byte(`{"runpod":{"base_url":"abc123","credential":"env:RUNPOD_API_KEY"}}`), &connection); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(connection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"runpod":{"base_url":"https://api.runpod.ai/v2/abc123/openai/v1","credential":"env:RUNPOD_API_KEY"}}`
-	if string(raw) != want {
-		t.Fatalf("Runpod JSON = %s, want %s", raw, want)
-	}
-
-	finalized, err := routing.FinalizeTarget(routing.TargetDraft{
-		ID: "runpod", Model: "model", Protocol: "responses", Connection: connection.Draft(),
-	}, profile.RoutingConstructionFacts())
-	if err != nil {
-		t.Fatal(err)
-	}
-	projected := projectTarget(finalized)
-	projectedDraft := projected.Connection.Draft()
-	if projectedDraft.Standard == nil || projectedDraft.Standard.Locator != "https://api.runpod.ai/v2/abc123/openai/v1" {
-		t.Fatalf("daemon-projected RunPod connection = %#v", projectedDraft)
-	}
-}
-
-// TestConnectionDocumentCarriesOnlyShapeDraft guards the operator JSON N+1
-// boundary. The public document stays provider-keyed at the wire edge, while
-// its Go value has one shape-oriented draft rather than one field per provider.
-func TestConnectionDocumentCarriesOnlyShapeDraft(t *testing.T) {
-	typeOfConnection := reflect.TypeOf(Connection{})
-	if typeOfConnection.NumField() != 1 {
-		t.Fatalf("Connection field count = %d, want one shape draft", typeOfConnection.NumField())
-	}
-	field := typeOfConnection.Field(0)
-	if field.Name != "draft" || field.Type != reflect.TypeOf(routing.ConnectionDraft{}) {
-		t.Fatalf("Connection field = %s %s, want draft %s", field.Name, field.Type, reflect.TypeOf(routing.ConnectionDraft{}))
-	}
-}
-
-func TestFixedStandardProvidersRejectBaseURLKeyByPresence(t *testing.T) {
-	for _, entry := range profile.All() {
-		if entry.ConnectionShape != routing.ConnectionShapeStandard || entry.Locator.Kind != profile.LocatorFixed {
-			continue
-		}
-		for _, baseURL := range []string{"", "https://override.example/v1"} {
-			t.Run(string(entry.ProviderID)+"/base_url="+baseURL, func(t *testing.T) {
-				raw := fmt.Sprintf(`{"%s":{"base_url":%q,"credential":"env:TEST_TOKEN"}}`, entry.ProviderID, baseURL)
-				var connection Connection
-				if err := json.Unmarshal([]byte(raw), &connection); err == nil || !strings.Contains(err.Error(), `field "base_url" is not recognized`) {
-					t.Fatalf("fixed-provider base_url error = %v", err)
-				}
-			})
-		}
-	}
-}
-
-func TestCredentialUnsupportedStandardProvidersRejectCredentialKey(t *testing.T) {
-	for _, entry := range profile.All() {
-		if entry.ConnectionShape != routing.ConnectionShapeStandard || entry.Credential.Requirement != profile.CredentialUnsupported {
-			continue
-		}
-		t.Run(string(entry.ProviderID), func(t *testing.T) {
-			raw := fmt.Sprintf(`{"%s":{"base_url":"https://provider.example/v1","credential":"env:UNSUPPORTED_TOKEN"}}`, entry.ProviderID)
-			var connection Connection
-			if err := json.Unmarshal([]byte(raw), &connection); err == nil || !strings.Contains(err.Error(), `field "credential" is not recognized`) {
-				t.Fatalf("unsupported credential key error = %v", err)
-			}
-		})
-	}
-}
-
-func TestFuturecloudFixedLocatorJSONGrammarNeedsNoOperatorDTOField(t *testing.T) {
-	future := profile.Profile{
-		ProviderID:      "futurecloud",
-		ConnectionShape: routing.ConnectionShapeStandard,
-		Locator:         profile.LocatorSpec{Kind: profile.LocatorFixed, Default: "https://api.futurecloud.example/v1"},
-		Credential:      profile.CredentialSpec{Requirement: profile.CredentialRequired, Authoring: profile.CredentialAuthoringReference},
-	}
-	for _, raw := range []string{
-		`{"base_url":"","credential":"env:FUTURECLOUD_API_KEY"}`,
-		`{"base_url":"https://override.example/v1","credential":"env:FUTURECLOUD_API_KEY"}`,
-	} {
-		if err := validateStandardConnectionJSONKeys([]byte(raw), future); err == nil || !strings.Contains(err.Error(), `connection.futurecloud: field "base_url" is not recognized`) {
-			t.Fatalf("futurecloud fixed base_url error = %v", err)
-		}
-	}
-}
-
-func operatorConnectionForProfile(t *testing.T, entry profile.Profile) Connection {
-	t.Helper()
-	provider := string(entry.ProviderID)
-	switch entry.ConnectionShape {
-	case routing.ConnectionShapeStandard:
-		switch entry.Locator.Kind {
-		case profile.LocatorFixed:
-			return StandardConnection(provider, "", operatorCredentialForProfile(entry))
-		case profile.LocatorBaseURL:
-			return StandardConnection(provider, "https://futurecloud.example/v1", operatorCredentialForProfile(entry))
-		case profile.LocatorAzureProject:
-			return StandardConnection(provider, "https://futurecloud.services.ai.azure.com/api/projects/demo", operatorCredentialForProfile(entry))
-		default:
-			t.Fatalf("standard provider %q has unsupported locator kind %d", provider, entry.Locator.Kind)
-		}
-	case routing.ConnectionShapeZAI:
-		return ZAIConnectionDocument("coding_plan", "env:TEST_TOKEN")
-	case routing.ConnectionShapeBedrock:
-		return BedrockConnectionDocument("us-east-1", "https://bedrock-mantle.us-east-1.api.aws/openai/v1", "env:TEST_TOKEN")
-	case routing.ConnectionShapeCustom:
-		return CustomConnectionDocument("https://futurecloud.example/v1", &CustomHeader{Name: "Authorization", Credential: "env:TEST_TOKEN"})
-	default:
-		t.Fatalf("provider %q has unsupported connection shape %d", provider, entry.ConnectionShape)
-	}
-	return Connection{}
-}
-
-func operatorCredentialForProfile(entry profile.Profile) string {
-	if entry.Credential.Requirement == profile.CredentialUnsupported {
-		return ""
-	}
-	return "env:TEST_TOKEN"
+	return TargetDraft{ID: id, Model: "gpt-5", Protocol: "responses", ConnectionID: "cn_openai"}
 }
 
 func TestNewServiceRejectsNilStore(t *testing.T) {
-	if _, err := NewService(nil); err == nil {
-		t.Fatal("NewService(nil) unexpectedly succeeded")
-	}
-}
-
-func TestServiceFinalizesFileCredentialsInDaemonEnvironment(t *testing.T) {
-	native := "file:/home/operator/key"
-	foreign := "file:C:\\Users\\operator\\key"
-	if runtime.GOOS == "windows" {
-		native, foreign = foreign, native
-	}
-	for _, test := range []struct {
-		name       string
-		credential string
-		wantErr    bool
-	}{
-		{"native", native, false},
-		{"foreign", foreign, true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			service, _, _ := testService(t)
-			_, err := service.CreateWorkspace(context.Background(), CreateWorkspace{
-				Slug: "dev", InitialRoute: "chat",
-				Target: TargetDraft{ID: "target", Model: "model", Protocol: "responses", Connection: StandardConnection("openai", "", test.credential)},
-			})
-			if (err != nil) != test.wantErr {
-				t.Fatalf("CreateWorkspace(%q) error = %v, wantErr %t", test.credential, err, test.wantErr)
-			}
-		})
+	if _, err := NewService(nil, Dependencies{}); err == nil {
+		t.Fatal("NewService(nil, Dependencies{}) unexpectedly succeeded")
 	}
 }
 
 func TestRouteSpecRoundTripIsSemanticNoOpAndPreservesEveryVersion(t *testing.T) {
 	service, store, _ := testService(t)
 	ctx := context.Background()
-	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture-operator", "fixture-17405", func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	before := routeVersions(t, store.Config(), "dev", "chat")
@@ -266,7 +68,7 @@ func TestRouteSpecRoundTripIsSemanticNoOpAndPreservesEveryVersion(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	after := routeVersions(t, store.Config(), "dev", "chat")
@@ -275,11 +77,11 @@ func TestRouteSpecRoundTripIsSemanticNoOpAndPreservesEveryVersion(t *testing.T) 
 	}
 }
 
-func TestDerivedProtocolRouteSpecRoundTripOmitsDaemonDerivedField(t *testing.T) {
+func TestConcreteProtocolRouteSpecRoundTripPreservesField(t *testing.T) {
 	service, store, _ := testService(t)
 	ctx := context.Background()
-	target := TargetDraft{ID: "chatgpt", Model: "gpt-5", Connection: StandardConnection("chatgpt", "", "secretfile:chatgpt/default")}
-	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: target}); err != nil {
+	target := TargetDraft{ID: "chatgpt", Model: "gpt-5", Protocol: "responses", ConnectionID: "cn_chatgpt"}
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: target}, "fixture-operator", "fixture-18295", func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	before := routeVersions(t, store.Config(), "dev", "chat")
@@ -287,54 +89,52 @@ func TestDerivedProtocolRouteSpecRoundTripOmitsDaemonDerivedField(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := spec.Tiers[0].Targets[0].Protocol; got != "" {
-		t.Fatalf("editable derived protocol = %q, want omitted", got)
+	if got := spec.Tiers[0].Targets[0].Protocol; got != "responses" {
+		t.Fatalf("editable protocol = %q, want responses", got)
 	}
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	if after := routeVersions(t, store.Config(), "dev", "chat"); !reflect.DeepEqual(after, before) {
-		t.Fatalf("versions after derived round trip = %#v, want %#v", after, before)
+		t.Fatalf("versions after concrete protocol round trip = %#v, want %#v", after, before)
 	}
 }
 
-func TestRouteReplacementIsLastValidWriteWinsForStaleSpecifications(t *testing.T) {
+func TestModelRouteWriteRejectsStaleSpecification(t *testing.T) {
 	service, _, _ := testService(t)
-	ctx := context.Background()
-	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+	ctx := t.Context()
+	reviewed, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture", "create", func(context.Context) error { return nil })
+	if err != nil {
 		t.Fatal(err)
 	}
 	first, _ := service.GetRoute(ctx, "dev", "chat")
 	stale, _ := service.GetRoute(ctx, "dev", "chat")
 	first.Tiers[0].Targets[0].Model = "first-writer"
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: first}); err != nil {
+	if _, err := service.PutModelRouteChecked(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: first}, reviewed.ManagementETag, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	stale.Tiers[0].Targets[0].Model = "last-writer"
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: stale}); err != nil {
-		t.Fatal(err)
+	if _, err := service.PutModelRouteChecked(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: stale}, reviewed.ManagementETag, func(context.Context) error { return nil }); err == nil {
+		t.Fatal("stale specification accepted")
 	}
 	committed, err := service.GetRoute(ctx, "dev", "chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := committed.Tiers[0].Targets[0].Model; got != "last-writer" {
-		t.Fatalf("committed stale-write model = %q, want last-writer", got)
+	if err != nil || committed.Tiers[0].Targets[0].Model != "first-writer" {
+		t.Fatal("stale write changed topology", err)
 	}
 }
 
 func TestReplaceRouteRejectsOneInvalidTargetWithoutPublishingOtherChanges(t *testing.T) {
 	service, store, path := testService(t)
 	ctx := context.Background()
-	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}); err != nil {
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture-operator", "fixture-20182", func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	beforeDisk, _ := os.ReadFile(path)
 	before := routeVersions(t, store.Config(), "dev", "chat")
 	spec, _ := service.GetRoute(ctx, "dev", "chat")
 	spec.Tiers[0].Targets[0].Model = "changed"
-	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{{ID: "broken", Model: "", Protocol: "responses", Connection: StandardConnection("openai", "", "env:KEY")}}})
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err == nil {
+	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{{ID: "broken", Model: "", Protocol: "responses", ConnectionID: "cn_openai"}}})
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err == nil {
 		t.Fatal("ReplaceRoute unexpectedly succeeded")
 	}
 	afterDisk, _ := os.ReadFile(path)
@@ -364,61 +164,9 @@ func routeVersions(t *testing.T, config routing.Config, rawWorkspace, rawRoute s
 	return out
 }
 
-func TestOperatorTargetDraftFinalizesEveryConnectionArm(t *testing.T) {
-	for name, test := range map[string]struct {
-		protocol   string
-		connection Connection
-		provider   routing.Provider
-	}{
-		"openai":     {"responses", StandardConnection("openai", "", "env:OPENAI_API_KEY"), routing.Provider("openai")},
-		"anthropic":  {"messages", StandardConnection("anthropic", "", "env:ANTHROPIC_API_KEY"), routing.Provider("anthropic")},
-		"deepseek":   {"", StandardConnection("deepseek", "", "env:DEEPSEEK_API_KEY"), routing.Provider("deepseek")},
-		"kimi":       {"", StandardConnection("kimi", "", "env:MOONSHOT_API_KEY"), routing.Provider("kimi")},
-		"together":   {"", StandardConnection("together", "", "env:TOGETHER_API_KEY"), routing.Provider("together")},
-		"deepinfra":  {"", StandardConnection("deepinfra", "", "env:DEEPINFRA_TOKEN"), routing.Provider("deepinfra")},
-		"scaleway":   {"responses_stream", StandardConnection("scaleway", "https://dedicated.example/v1", ""), routing.Provider("scaleway")},
-		"sambanova":  {"messages_stream", StandardConnection("sambanova", "https://stack.example/v1", "env:SAMBANOVA_API_KEY"), routing.Provider("sambanova")},
-		"stepfun":    {"chat_completions_stream", StandardConnection("stepfun", "https://api.stepfun.com/step_plan/v1", "env:STEP_API_KEY"), routing.Provider("stepfun")},
-		"friendli":   {"messages_stream", StandardConnection("friendli", "https://friendli-gateway.example/v1", ""), routing.Provider("friendli")},
-		"llm7":       {"", StandardConnection("llm7", "", ""), routing.Provider("llm7")},
-		"ovhcloud":   {"", StandardConnection("ovhcloud", "", ""), routing.Provider("ovhcloud")},
-		"modelscope": {"", StandardConnection("modelscope", "", "env:MODELSCOPE_TOKEN"), routing.Provider("modelscope")},
-		"runpod":     {"responses", StandardConnection("runpod", "abc123", "env:RUNPOD_API_KEY"), routing.Provider("runpod")},
-		"nebius":     {"responses", StandardConnection("nebius", "", "env:NEBIUS_API_KEY"), routing.Provider("nebius")},
-		"gmi":        {"messages", StandardConnection("gmi", "", "env:GMI_API_KEY"), routing.Provider("gmi")},
-		"groq":       {"responses_stream", StandardConnection("groq", "", "env:GROQ_API_KEY"), routing.Provider("groq")},
-		"fireworks":  {"responses", StandardConnection("fireworks", "https://direct.example/v1", "env:FIREWORKS_API_KEY"), routing.Provider("fireworks")},
-		"openrouter": {"chat_completions", StandardConnection("openrouter", "", "env:OPENROUTER_API_KEY"), routing.Provider("openrouter")},
-		"zai":        {"", ZAIConnectionDocument("coding_plan", "env:ZAI_API_KEY"), routing.Provider("zai")},
-		"chatgpt":    {"", StandardConnection("chatgpt", "", "secretfile:chatgpt/default"), routing.Provider("chatgpt")},
-		"ollama":     {"chat_completions", StandardConnection("ollama", "", ""), routing.Provider("ollama")},
-		"lmstudio":   {"responses", StandardConnection("lmstudio", "", "env:LM_API_TOKEN"), routing.Provider("lmstudio")},
-		"vllm":       {"responses", StandardConnection("vllm", "", "env:VLLM_API_KEY"), routing.Provider("vllm")},
-		"azure":      {"responses", StandardConnection("azure", "https://example.services.ai.azure.com/api/projects/prod", "env:AZURE_KEY"), routing.Provider("azure")},
-		"bedrock":    {"responses", BedrockConnectionDocument("eu-west-2", "https://bedrock-mantle.eu-west-2.api.aws/v1", ""), routing.Provider("bedrock")},
-		"custom":     {"chat_completions", CustomConnectionDocument("https://example.test/v1", &CustomHeader{Name: "Authorization", Credential: "env:CUSTOM_KEY"}), routing.Provider("custom")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			target, err := (TargetDraft{ID: "target", Model: "model", Protocol: test.protocol, Connection: test.connection}).routingTarget()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if target.Provider() != test.provider {
-				t.Fatalf("provider = %q, want %q", target.Provider(), test.provider)
-			}
-			if test.provider == routing.Provider("zai") && target.Protocol().String() != routing.ZAIProviderProtocol {
-				t.Fatalf("derived Z.AI protocol = %q", target.Protocol().String())
-			}
-			if want, derived := profile.DerivedProtocolForSpec(string(test.provider)); derived && target.Protocol().String() != want {
-				t.Fatalf("derived protocol = %q, want %q", target.Protocol().String(), want)
-			}
-		})
-	}
-}
-
 func TestOperatorTargetDraftRejectsEmptyConnection(t *testing.T) {
-	_, err := finalizeTargetDraft("ambiguous", "model", "responses", Connection{})
-	if err == nil || !strings.Contains(err.Error(), "provider is unsupported") {
+	_, err := (TargetDraft{ID: "ambiguous", Model: "model", Protocol: "responses"}).routingTarget()
+	if err == nil || !strings.Contains(err.Error(), "Connection ID is required") {
 		t.Fatalf("finalize error = %v, want empty connection rejection", err)
 	}
 }
@@ -446,7 +194,7 @@ func TestProjectTargetPreservesEffectiveDerivedProtocol(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := routing.NewTarget(id, model, protocol, test.connection)
+			target, err := routing.NewTarget(id, model, protocol, mustConnectionID(t, "cn_shared"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -487,19 +235,19 @@ func mustKimiConnection(t *testing.T) routing.Connection {
 	return connection
 }
 
-func TestServiceRouteReplacementReturnsCommittedHierarchy(t *testing.T) {
+func TestModelRouteWriteReturnsCommittedHierarchy(t *testing.T) {
 	service, _, _ := testService(t)
 	ctx := context.Background()
-	workspace, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")})
+	workspace, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture-operator", "fixture-28442", func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workspace.DefaultRoute != "chat" || len(workspace.Routes) != 1 || len(workspace.Routes[0].Tiers) != 1 {
+	if len(workspace.Routes) != 1 || len(workspace.Routes[0].Tiers) != 1 {
 		t.Fatalf("workspace = %#v", workspace)
 	}
 	spec, _ := service.GetRoute(ctx, "dev", "chat")
 	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{openAITarget("b")}})
-	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec})
+	_, err = applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +256,7 @@ func TestServiceRouteReplacementReturnsCommittedHierarchy(t *testing.T) {
 		t.Fatalf("tiers = %#v", committed.Tiers)
 	}
 	committed.Tiers[1].Targets = append(committed.Tiers[1].Targets, openAITarget("c"))
-	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
+	_, err = applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +264,7 @@ func TestServiceRouteReplacementReturnsCommittedHierarchy(t *testing.T) {
 		t.Fatalf("balanced tiers = %#v", committed.Tiers)
 	}
 	committed.Tiers = committed.Tiers[1:]
-	_, err = service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
+	_, err = applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: committed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,25 +274,89 @@ func TestServiceRouteReplacementReturnsCommittedHierarchy(t *testing.T) {
 	}
 }
 
-func TestServiceSetCredentialPreservesTargetFactsAcrossRestart(t *testing.T) {
-	service, store, path := testService(t)
+func TestConnectionRebindPreservesRouteTierDefaultAndTargetIdentity(t *testing.T) {
+	service, store, _ := testService(t)
 	ctx := context.Background()
-	_, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")})
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{
+		Slug: "dev", InitialRoute: "chat", Target: openAITarget("primary"),
+	}, "fixture-operator", "fixture-provider-switch", func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := service.GetRoute(ctx, "dev", "chat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := service.ApplyCredentialReference(ctx, ApplyCredentialReference{Workspace: "dev", Route: "chat", TargetID: "a", Credential: "env:ROTATED"})
+	initial.Tiers = append(initial.Tiers, TierSpec{Targets: []TargetDraft{{
+		ID: "fallback", Model: "claude-sonnet", Protocol: "responses",
+		ConnectionID: "cn_bedrock",
+	}}})
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: initial}); err != nil {
+		t.Fatal(err)
+	}
+	withBedrock, err := service.GetWorkspace(ctx, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withBedrock.Routes) != 1 || len(withBedrock.Routes[0].Tiers) != 2 {
+		t.Fatalf("Bedrock route topology = %#v", withBedrock)
+	}
+	bedrock := withBedrock.Routes[0].Tiers[1].Targets[0]
+	if bedrock.ID != "fallback" || bedrock.ConnectionID != "cn_bedrock" || bedrock.Protocol != "responses" {
+		t.Fatalf("Bedrock target = %#v", bedrock)
+	}
+	bedrockVersion := routeVersions(t, store.Config(), "dev", "chat")["fallback"]
+
+	initial.Tiers[1].Targets[0] = TargetDraft{
+		ID: "fallback", Model: "openrouter/claude-sonnet", Protocol: "chat_completions",
+		ConnectionID: "cn_openrouter",
+	}
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: initial}); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := service.GetWorkspace(ctx, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(committed.Routes) != 1 || len(committed.Routes[0].Tiers) != 2 {
+		t.Fatalf("switched route topology = %#v", committed)
+	}
+	primary := committed.Routes[0].Tiers[0].Targets[0]
+	fallback := committed.Routes[0].Tiers[1].Targets[0]
+	if primary.ID != "primary" || primary.ConnectionID != "cn_openai" || fallback.ID != "fallback" || fallback.ConnectionID != "cn_openrouter" || fallback.Protocol != "chat_completions" {
+		t.Fatalf("Connection rebind targets = primary %#v fallback %#v", primary, fallback)
+	}
+	if got := routeVersions(t, store.Config(), "dev", "chat")["fallback"]; got != bedrockVersion+1 {
+		t.Fatalf("switched target generation = %d, want %d", got, bedrockVersion+1)
+	}
+}
+
+func TestRetainedRouteConnectionRebindPreservesTargetFactsAcrossRestart(t *testing.T) {
+	service, store, path := testService(t)
+	ctx := context.Background()
+	_, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture-operator", "fixture-29999", func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed, err := service.GetWorkspace(ctx, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := service.GetRoute(ctx, "dev", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalVersion := routeVersions(t, store.Config(), "dev", "chat")["a"]
+	spec.Tiers[0].Targets[0].ConnectionID = "cn_rebound"
+	workspace, err := service.PutModelRouteChecked(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}, reviewed.ManagementETag, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := workspace.Routes[0].Tiers[0].Targets[0]
-	connection, err := routing.FinalizeConnection(target.Connection.Draft(), profile.RoutingConstructionFacts())
-	standard, ok := connection.(routing.StandardConnection)
-	if err != nil || !ok || target.Model != "gpt-5" || target.Protocol != "responses" || target.Provider != "openai" || standard.Credential().String() != "env:ROTATED" {
+	if target.Model != "gpt-5" || target.Protocol != "responses" || target.ConnectionID != "cn_rebound" {
 		t.Fatalf("target = %#v", target)
 	}
 	if len(workspace.Routes[0].Tiers) != 1 || len(workspace.Routes[0].Tiers[0].Targets) != 1 {
-		t.Fatalf("credential update changed tier placement: %#v", workspace.Routes[0].Tiers)
+		t.Fatalf("Connection rebind changed tier placement: %#v", workspace.Routes[0].Tiers)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -557,66 +369,26 @@ func TestServiceSetCredentialPreservesTargetFactsAcrossRestart(t *testing.T) {
 	persisted, _ := reopened.Config().Workspace(mustSlug(t, "dev"))
 	route, _ := persisted.Route(mustRoute(t, "chat"))
 	actual := route.Tiers()[0].Targets()[0]
-	persistedConnection, ok := actual.Connection().(routing.StandardConnection)
-	if actual.Model().String() != "gpt-5" || actual.Protocol().String() != "responses" || actual.Provider() != routing.Provider("openai") || !ok || persistedConnection.Credential().String() != "env:ROTATED" {
+	if actual.ID().String() != "a" || actual.Version() != originalVersion+1 || actual.Model().String() != "gpt-5" || actual.Protocol().String() != "responses" || actual.ConnectionID().String() != "cn_rebound" {
 		t.Fatalf("persisted target = %#v", actual)
 	}
 }
 
-func TestServiceSetCredentialRevalidatesProfileConnectionContract(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		target TargetDraft
-		value  string
-		want   string
-	}{
-		{
-			name:   "required OpenAI credential cannot be cleared",
-			target: openAITarget("openai"),
-			value:  "",
-			want:   "connection.openai.credential: is required",
-		},
-		{
-			name: "unsupported Ollama credential cannot be added",
-			target: TargetDraft{
-				ID:         "ollama",
-				Model:      "qwen",
-				Protocol:   "chat_completions",
-				Connection: StandardConnection("ollama", "", ""),
-			},
-			value: "env:OLLAMA_TOKEN",
-			want:  "connection.ollama.credential: is not authorable",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			service, _, _ := testService(t)
-			ctx := context.Background()
-			if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: test.target}); err != nil {
-				t.Fatalf("create workspace: %v", err)
-			}
-
-			_, err := service.ApplyCredentialReference(ctx, ApplyCredentialReference{Workspace: "dev", Route: "chat", TargetID: test.target.ID, Credential: test.value})
-			var command CommandError
-			if !errors.As(err, &command) || command.Code != InvalidArgument || !strings.Contains(command.Message, test.want) {
-				t.Fatalf("ApplyCredentialReference error = %#v, want INVALID_ARGUMENT containing %q", err, test.want)
-			}
-		})
-	}
-}
-
+// Credential policies are enforced when constructing the reusable Connection;
+// route replacement carries only the stable reference and cannot edit auth.
 func TestServiceDeletePrimaryPromotesFallbackAcrossRestart(t *testing.T) {
 	service, store, path := testService(t)
 	ctx := context.Background()
-	if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("primary")}); err != nil {
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("primary")}, "fixture-operator", "fixture-33155", func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	spec, _ := service.GetRoute(ctx, "dev", "chat")
 	spec.Tiers = append(spec.Tiers, TierSpec{Targets: []TargetDraft{openAITarget("fallback")}})
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	spec.Tiers = spec.Tiers[1:]
-	if _, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
+	if _, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -660,8 +432,10 @@ func mustRoute(t *testing.T, raw string) routing.RouteName {
 func TestServiceMapsEmptyDesiredRouteAsInvalidArgument(t *testing.T) {
 	service, _, _ := testService(t)
 	ctx := context.Background()
-	_, _ = service.CreateWorkspace(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")})
-	_, err := service.ReplaceRoute(ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: RouteSpec{}})
+	if _, _, err := service.CreateWorkspaceChecked(ctx, CreateWorkspace{Slug: "dev", InitialRoute: "chat", Target: openAITarget("a")}, "fixture-operator", "fixture-34814", func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	_, err := applyReviewedRouteForTest(t, service, ctx, ReplaceRoute{Workspace: "dev", Route: "chat", Spec: RouteSpec{}})
 	var command CommandError
 	if !errors.As(err, &command) || command.Code != InvalidArgument {
 		t.Fatalf("error = %#v", err)
@@ -672,8 +446,6 @@ func TestCommandErrorCollapsesDomainConflictSentinels(t *testing.T) {
 	for _, sentinel := range []error{
 		routing.ErrConflict,
 		routing.ErrLastTarget,
-		routing.ErrLastRoute,
-		routing.ErrDefaultReplacementRequired,
 	} {
 		var command CommandError
 		if err := commandError(fmt.Errorf("%w: specific reason", sentinel)); !errors.As(err, &command) || command.Code != Conflict || !strings.Contains(command.Message, "specific reason") {
@@ -682,81 +454,128 @@ func TestCommandErrorCollapsesDomainConflictSentinels(t *testing.T) {
 	}
 }
 
-func TestDeleteAndRenamePermanentlyRevokeOldRouteBindings(t *testing.T) {
-	for _, operation := range []string{"delete", "rename"} {
-		t.Run(operation, func(t *testing.T) {
-			service, configStore, _ := testService(t)
-			ctx := context.Background()
-			if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "personal", InitialRoute: "coding", Target: openAITarget("a")}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "other", Target: openAITarget("other")}); err != nil {
-				t.Fatal(err)
-			}
-			shareStore, err := sharestate.Open(filepath.Join(t.TempDir(), "share.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := shareStore.EnsureEndpoint(); err != nil {
-				t.Fatal(err)
-			}
-			workspace, _ := routing.ParseWorkspaceSlug("personal")
-			route, _ := routing.ParseRouteName("coding")
-			grant, err := shareStore.Issue(workspace, route, sharestate.ExpiryNever)
-			if err != nil {
-				t.Fatal(err)
-			}
-			coordinator := &routebindings.Coordinator{}
-			service, _ = NewService(configStore, shareStore, coordinator)
-			if operation == "delete" {
-				if _, err := service.DeleteRoute(ctx, DeleteRoute{Workspace: "personal", Route: "coding", Replacement: "other"}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "coding", Target: openAITarget("b")}); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if _, err := service.RenameRoute(ctx, RenameRoute{Workspace: "personal", Route: "coding", NewName: "renamed"}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := service.CreateRoute(ctx, CreateRoute{Workspace: "personal", Name: "coding", Target: openAITarget("b")}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := shareStore.Authenticate(grant.Bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
-				t.Fatalf("old bearer revived: %v", err)
-			}
-		})
+// applyReviewedRouteForTest supplies fresh explicit review for sequential semantic
+// reconciliation proofs. Stale-review/replay proofs call the retained seam directly.
+func applyReviewedRouteForTest(t *testing.T, service Service, ctx context.Context, command ReplaceRoute) (Workspace, error) {
+	t.Helper()
+	reviewed, err := service.GetWorkspace(ctx, command.Workspace)
+	if err != nil {
+		return Workspace{}, err
 	}
+	result, err := service.PutModelRouteChecked(ctx, command, reviewed.ManagementETag, func(context.Context) error { return nil })
+	return result, err
 }
 
-func TestWorkspaceIdentityDestructionRevokesAllBindings(t *testing.T) {
-	for _, operation := range []string{"delete", "rename"} {
-		t.Run(operation, func(t *testing.T) {
-			service, configStore, _ := testService(t)
-			ctx := context.Background()
-			if _, err := service.CreateWorkspace(ctx, CreateWorkspace{Slug: "personal", InitialRoute: "coding", Target: openAITarget("a")}); err != nil {
-				t.Fatal(err)
-			}
-			shareStore, _ := sharestate.Open(filepath.Join(t.TempDir(), "share.json"))
-			_ = shareStore.EnsureEndpoint()
-			workspace, _ := routing.ParseWorkspaceSlug("personal")
-			route, _ := routing.ParseRouteName("coding")
-			grant, _ := shareStore.Issue(workspace, route, sharestate.ExpiryNever)
-			coordinator := &routebindings.Coordinator{}
-			service, _ = NewService(configStore, shareStore, coordinator)
-			if operation == "delete" {
-				if err := service.DeleteWorkspace(ctx, "personal"); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if _, err := service.RenameWorkspace(ctx, RenameWorkspace{Slug: "personal", NewSlug: "renamed"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := shareStore.Authenticate(grant.Bearer); !errors.Is(err, sharestate.ErrUnauthorized) {
-				t.Fatalf("old bearer remained valid: %v", err)
-			}
-		})
+func mustConnectionID(t *testing.T, raw string) connectionidentity.ID {
+	t.Helper()
+	id, err := connectionidentity.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// Invalid source names are not an alternate Workspace attachment format.
+// The registry is required even in application commands issued without HTTP.
+func TestWorkspaceAttachmentsRequireRealConnections(t *testing.T) {
+	service, store, _ := testService(t)
+	assertReference := func(raw string, kind connections.Kind, want ErrorCode) {
+		t.Helper()
+		err := service.validateConnectionReference(raw, kind)
+		if want == "" && err == nil {
+			return
+		}
+		var typed CommandError
+		if !errors.As(err, &typed) || typed.Code != want {
+			t.Fatalf("reference %q as %s = %v, want %s", raw, kind, err, want)
+		}
+	}
+
+	assertReference("", connections.Search, InvalidArgument)
+	assertReference("legacy-source", connections.Search, InvalidArgument)
+	assertReference("cn_search", connections.Search, Unavailable)
+
+	registry, err := connectionfixture.Open(filepath.Join(t.TempDir(), "swobu.yaml"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := connections.ParseEndpoint("https://search.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchSpec, err := connections.NewSearchSpec("brave", endpoint, credentialref.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpSpec, err := connections.NewMCPHTTPSpec(endpoint, credentialref.Ref{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct {
+		id   string
+		name string
+		spec connections.Spec
+	}{{"cn_search", "Search", searchSpec}, {"cn_mcp", "MCP", mcpSpec}} {
+		id, err := connectionidentity.Parse(entry.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := connections.New(id, entry.name, entry.spec, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := registry.Publish(value, connections.Revision{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service.connections = registry
+	assertReference("cn_search", connections.Search, "")
+	assertReference("cn_mcp", connections.MCP, "")
+	assertReference("cn_search", connections.MCP, InvalidArgument)
+	assertReference("cn_mcp", connections.Search, InvalidArgument)
+	assertReference("cn_missing", connections.Search, NotFound)
+	assertReference("cn_NOT_LOWERCASE", connections.Search, InvalidArgument)
+	assertReference(" cn_search ", connections.Search, InvalidArgument)
+
+	created, _, err := service.CreateWorkspaceChecked(t.Context(), CreateWorkspace{Slug: "research"}, "operator", "create-research", func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSearch, err := service.SetServiceChecked(t.Context(), "research", "search", true, created.ManagementETag, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"legacy-source", "cn_missing", "cn_mcp", "cn_NOT_LOWERCASE", " cn_search ", " "} {
+		_, err := service.ChangeSearchRouteChecked(t.Context(), "research", invalid, nil, withSearch.ManagementETag, func(context.Context) error { return nil })
+		if err == nil {
+			t.Fatalf("invalid Search reference %q published", invalid)
+		}
+		current, err := store.GetWorkspace(t.Context(), mustSlug(t, "research"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.SearchConnectionID() != "" || current.ManagementRevision() != withSearch.ManagementRevision {
+			t.Fatalf("invalid Search attachment mutated Workspace: %+v", current)
+		}
+	}
+	for _, invalid := range []string{"", " ", "legacy-source", "cn_missing", "cn_search", "cn_NOT_LOWERCASE", " cn_mcp "} {
+		draft := MCPMountDraft{Workspace: "research", Alias: "docs", ConnectionID: invalid, SelectedTools: []string{"read_file"}}
+		if _, err := service.PreviewMCPMount(t.Context(), draft); err == nil {
+			t.Fatalf("invalid MCP reference %q previewed", invalid)
+		}
+		if _, err := service.ApplyMCPMountChecked(t.Context(), draft, MCPMountReviewRequest{}, func(context.Context) error { return nil }); err == nil {
+			t.Fatalf("invalid MCP reference %q published", invalid)
+		}
+		current, err := store.GetWorkspace(t.Context(), mustSlug(t, "research"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(current.MCPMounts()) != 0 || current.ManagementRevision() != withSearch.ManagementRevision {
+			t.Fatalf("invalid MCP attachment mutated Workspace: %+v", current)
+		}
+	}
+	attached, err := service.ChangeSearchRouteChecked(t.Context(), "research", "cn_search", nil, withSearch.ManagementETag, func(context.Context) error { return nil })
+	if err != nil || attached.SearchConnectionID != "cn_search" {
+		t.Fatalf("canonical Search Connection attach = %+v, %v", attached, err)
 	}
 }

@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/swobuforge/swobu/internal/carrier"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/connections"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/executionaffinity"
 	"github.com/swobuforge/swobu/internal/domain/historyfingerprint"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -164,7 +167,7 @@ func mustResumeSession(
 	target routing.Target,
 ) continuity.ResolvedRequest {
 	t.Helper()
-	path, err := resolveProviderPath(target)
+	path, err := resolveProviderPath(target, LookupModelFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +335,7 @@ func withRuntime(providerTransport testProviderTransport) Runner {
 	// codecresolver.RuntimeCodecResolver; ClientFamily alone does not replace
 	// this fake codec.
 	return Runner{
+		ModelConnection: LookupModelFixture,
 		Runtime: testExecutionRuntime{
 			testRuntimeResolver: testRuntimeResolver{},
 			providerTransport:   providerTransport,
@@ -659,4 +663,36 @@ func stubResponseEventReader(exchangeID string) canonical.ResponseStream {
 		},
 	}
 	return canonical.NewSliceEventReader(events)
+}
+
+// ModelFixtureConnection explicitly registers one immutable synthetic account.
+// Unique identities isolate parallel tests; cleanup bounds fixture lifetime.
+func ModelFixtureConnection(t *testing.T, upstream routing.Connection) connectionidentity.ID {
+	t.Helper()
+	id, err := connectionidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := connections.NewModelSpec(upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := connections.New(id, "Synthetic account", spec, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelFixtureConnections.Store(id, value)
+	t.Cleanup(func() { modelFixtureConnections.Delete(id) })
+	return id
+}
+
+var modelFixtureConnections sync.Map
+
+// LookupModelFixture resolves only accounts explicitly registered by a fixture.
+func LookupModelFixture(id connectionidentity.ID) (connections.Connection, error) {
+	value, ok := modelFixtureConnections.Load(id)
+	if !ok {
+		return connections.Connection{}, errors.New("synthetic Model Connection not registered")
+	}
+	return value.(connections.Connection), nil
 }

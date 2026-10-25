@@ -69,8 +69,12 @@ func insertInvocations(ctx context.Context, tx *sql.Tx, exchange executioneviden
 			return fmt.Errorf("unsupported Invocation %T", settled)
 		}
 		values := []any{start.ID().String(), exchange.ID().String(), start.Ordinal(), kind, unixNano(start.StartedAt()), unixNano(settled.SettledAt()), inv.Duration().Nanoseconds(), settled.Outcome(), settled.Occurrence(), nullableString(failure), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+		values = append(values, nil, nil)
 		switch typed := start.(type) {
 		case executionevidence.ModelInvocationStarted:
+			if id, revision, bound := typed.Model().ConnectionIdentity(); bound {
+				values[24], values[25] = id.String(), strconv.FormatUint(revision, 10)
+			}
 			terminal := settled.(executionevidence.ModelInvocationSettled)
 			usage := terminal.Usage()
 			values[10] = nullableString(typed.Model().Route().String())
@@ -86,10 +90,13 @@ func insertInvocations(ctx context.Context, tx *sql.Tx, exchange executioneviden
 			values[20] = tokenValue(usage.CacheReadTokens())
 			values[21] = tokenValue(usage.CacheWriteTokens())
 		case executionevidence.MCPInvocationStarted:
+			if id, revision, bound := typed.MCP().ConnectionIdentity(); bound {
+				values[24], values[25] = id.String(), strconv.FormatUint(revision, 10)
+			}
 			values[22] = typed.MCP().Source().String()
 			values[23] = typed.MCP().Tool().String()
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_invocations(invocation_id,exchange_id,ordinal,kind,started_at_ns,settled_at_ns,duration_ns,outcome,execution_state,failure_class,route_name,target_id,target_version_dec,provider_spec,provider_protocol,provider_model,purpose,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,source_tool_key,tool_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`, values...); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_invocations(invocation_id,exchange_id,ordinal,kind,started_at_ns,settled_at_ns,duration_ns,outcome,execution_state,failure_class,route_name,target_id,target_version_dec,provider_spec,provider_protocol,provider_model,purpose,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,source_tool_key,tool_key,connection_id,connection_revision_dec) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`, values...); err != nil {
 			return err
 		}
 	}

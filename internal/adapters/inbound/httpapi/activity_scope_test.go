@@ -19,7 +19,7 @@ func TestActivityScopeUsesWorkspaceSlugGrammar(t *testing.T) {
 		{"valid-workspace", store.ProjectionScopeWorkspace, "valid-workspace", true},
 		{"INVALID WORKSPACE", "", "", false},
 	} {
-		request := httptest.NewRequest("GET", "/_swobu/activity?workspace="+url.QueryEscape(test.workspace), nil)
+		request := httptest.NewRequest("GET", "/api/v1/activity?workspace="+url.QueryEscape(test.workspace), nil)
 		scope, err := parseActivityScope(request)
 		if (err == nil) != test.valid || (test.valid && (scope.Kind != test.wantKind || scope.Workspace != test.wantSlug)) {
 			t.Fatalf("workspace=%q scope=%#v err=%v", test.workspace, scope, err)

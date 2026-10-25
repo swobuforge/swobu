@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
@@ -40,16 +42,45 @@ type targetOptions struct {
 // post-construction mutation. It carries no workspace, route, fallback, or
 // attempt state.
 type TargetSnapshot struct {
-	TargetID         string
-	TargetVersion    uint64
-	ProviderSpec     string
-	BaseURL          string
-	CredentialRef    string
-	options          targetOptions
-	Model            string
-	ProtocolKind     protocolkind.ProtocolKind
-	ProviderProtocol string
-	ProviderDelivery delivery.Delivery
+	connectionID       connectionidentity.ID
+	connectionRevision uint64
+	TargetID           string
+	TargetVersion      uint64
+	ProviderSpec       string
+	BaseURL            string
+	CredentialRef      string
+	options            targetOptions
+	Model              string
+	ProtocolKind       protocolkind.ProtocolKind
+	ProviderProtocol   string
+	ProviderDelivery   delivery.Delivery
+}
+
+// BindConnection freezes the reusable identity inspected for this attempt.
+// Rebinding an existing snapshot is rejected: rotations require a fresh
+// projection, so an in-flight attempt cannot silently acquire newer authority.
+func (t TargetSnapshot) BindConnection(id connectionidentity.ID, revision uint64) (TargetSnapshot, error) {
+	if id.String() == "" || revision == 0 || t.connectionID.String() != "" {
+		return TargetSnapshot{}, fmt.Errorf("exact unbound Connection snapshot required")
+	}
+	t.connectionID, t.connectionRevision = id, revision
+	return t, nil
+}
+
+// ConnectionIdentity identifies the upstream configuration frozen for this
+// attempt. Absence is explicit for historical/unmigrated execution projections.
+func (t TargetSnapshot) ConnectionIdentity() (connectionidentity.ID, uint64, bool) {
+	return t.connectionID, t.connectionRevision, t.connectionID.String() != "" && t.connectionRevision != 0
+}
+
+// ConnectionCredentialScope refuses inference from provider or target labels.
+// A consumer must bind a registry snapshot before resolving Connection slots.
+func (t TargetSnapshot) ConnectionCredentialScope() (credentialref.Scope, error) {
+	id, _, ok := t.ConnectionIdentity()
+	if !ok {
+		return credentialref.Scope{}, fmt.Errorf("Connection identity is required for credential resolution")
+	}
+	return credentialref.NewConnectionScope(id.String())
 }
 
 // AuthHeader returns the custom-endpoint auth header name. It is empty unless

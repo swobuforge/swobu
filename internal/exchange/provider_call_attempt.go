@@ -1,9 +1,13 @@
 package exchange
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 
+	"github.com/swobuforge/swobu/internal/accounting"
 	"github.com/swobuforge/swobu/internal/compat"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/provider"
 )
@@ -28,6 +32,7 @@ type providerCallFailure struct {
 // candidate index addresses the immutable route plan; the active phase alone
 // retains executable machinery and command correlation identity.
 type providerCallAttempt struct {
+	credentialRetry        bool
 	candidateIndex         int
 	target                 provider.TargetSnapshot
 	requestChoice          providerRequestChoice
@@ -36,6 +41,9 @@ type providerCallAttempt struct {
 	targetGeneration       targetExceptionGeneration
 	factReads              map[provider.TargetFact]bool
 	requestChanges         []compat.Change
+	accountingOperation    string
+	accountingAmountCents  int64
+	accountingWindow       string
 	status                 providerCallAttemptStatus
 	executionInvocationID  execution.InvocationID
 	failure                *providerCallFailure
@@ -93,14 +101,15 @@ func completeProviderCallAttempt(s exchangeState, id providerCallAttemptID) (exc
 	return s, nil
 }
 
-func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, call providerCall, requestChanges []compat.Change) (reducerOutcome, error) {
+func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, call providerCall, requestChanges []compat.Change, runner runtimeBundle) (reducerOutcome, error) {
 	if err := compat.ValidateChanges(requestChanges); err != nil {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider request changes are invalid: %w", err)
 	}
 	for _, prior := range s.providerCallAttempts {
 		if prior.candidateIndex == selection.candidateIndex &&
 			prior.requestChoice == selection.requestChoice &&
-			prior.providerRound == call.providerRound {
+			prior.providerRound == call.providerRound &&
+			prior.credentialRetry == selection.credentialRetry {
 			return reducerOutcome{}, fmt.Errorf(
 				"exchange invariant: provider call operation was already consumed for candidate %d choice %d round %d",
 				selection.candidateIndex, selection.requestChoice, call.providerRound,
@@ -108,14 +117,60 @@ func beginProviderCallAttempt(s exchangeState, selection providerCallSelection, 
 		}
 	}
 	attemptID := providerCallAttemptID(len(s.providerCallAttempts) + 1)
+	var attemptAccountingOperation string
+	var attemptAccountingAmount int64
+	var attemptAccountingWindow string
+	if runner.Accounting != nil {
+		quote, known := accounting.Quote{}, false
+		if runner.PriceEstimator != nil {
+			quote, known = runner.PriceEstimator.Estimate(call.backend.Target, call.request.Canonical)
+		}
+		identity := s.correlationID()
+		if identity == "" {
+			identity = s.input.canonicalExchangeID.String()
+		}
+		operation := identity + ":" + call.backend.Target.TargetID + ":" + strconv.Itoa(call.providerRound) + ":" + strconv.Itoa(int(selection.requestChoice))
+		if selection.credentialRetry {
+			operation += ":credential-retry:" + strconv.Itoa(int(attemptID))
+		}
+		var reservation accounting.Reservation
+		var err error
+		if known {
+			if quote.Validate() != nil || quote.TargetID != call.backend.Target.TargetID || quote.TargetVersion != call.backend.Target.TargetVersion || quote.Price.Provider != call.backend.Target.ProviderSpec || quote.Price.ExternalID != call.backend.Target.Model {
+				err = accounting.ErrUnknownPrice
+			} else {
+				reservation, err = runner.Accounting.ReserveQuote(s.input.workspace.Slug().String(), operation, quote)
+			}
+		} else {
+			reservation, err = runner.Accounting.Reserve(s.input.workspace.Slug().String(), operation, 0, false)
+		}
+		if err != nil {
+			problem := canonical.InternalError(err.Error())
+			if errors.Is(err, accounting.ErrUnknownPrice) {
+				problem = canonical.CostUnavailable("provider operation price is unavailable")
+			}
+			if errors.Is(err, accounting.ErrBudgetExceeded) {
+				problem = canonical.BudgetExceeded("workspace estimated spend limit exceeded")
+			}
+			s.phase = failedPhase{problem: problem, target: call.backend.Target}
+			return reducerOutcome{nextState: s}, nil
+		}
+		attemptAccountingOperation = operation
+		attemptAccountingAmount = reservation.AmountCents
+		attemptAccountingWindow = reservation.WindowKey
+	}
 	attempt := providerCallAttempt{
-		candidateIndex: selection.candidateIndex, target: call.backend.Target,
+		credentialRetry: selection.credentialRetry,
+		candidateIndex:  selection.candidateIndex, target: call.backend.Target,
 		requestChoice: selection.requestChoice, providerRound: call.providerRound,
 		nativePreviousResponse: nativePreviousResponseSent(call.request),
 		targetGeneration:       call.targetGeneration,
 		factReads:              cloneFactReads(call.factReads),
 		requestChanges:         compat.CloneChanges(requestChanges),
 		status:                 providerCallAttemptCalling,
+		accountingOperation:    attemptAccountingOperation,
+		accountingAmountCents:  attemptAccountingAmount,
+		accountingWindow:       attemptAccountingWindow,
 	}
 	s.providerCallAttempts = append(append([]providerCallAttempt(nil), s.providerCallAttempts...), attempt)
 	s.phase = callingProviderPhase{attemptID: attemptID, call: call}

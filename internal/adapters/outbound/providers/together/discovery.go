@@ -100,7 +100,7 @@ func (d discovery) get(ctx context.Context, target provider.TargetSnapshot, requ
 	if strings.TrimSpace(target.CredentialRef) == "" || d.credentials == nil {
 		return canonical.BadEndpoint("together provider credential reference is required")
 	}
-	token, err := d.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, d.credentials, target)
 	if err != nil || strings.TrimSpace(token) == "" {
 		return canonical.BadEndpoint("Together AI credential reference could not be resolved")
 	}

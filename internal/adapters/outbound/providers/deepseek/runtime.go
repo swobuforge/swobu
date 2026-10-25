@@ -48,7 +48,7 @@ func (d Discovery) ListDeployments(ctx context.Context, target provider.TargetSn
 	if d.credentials == nil {
 		return nil, canonical.BadEndpoint("credential resolver is not configured")
 	}
-	token, err := d.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, d.credentials, target)
 	if err != nil {
 		return nil, canonical.BadEndpoint("credential reference could not be resolved")
 	}

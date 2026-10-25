@@ -4,7 +4,15 @@
 
 **Pool LLM capacity you already have.**
 
-Put provider accounts, cloud regions, hosted endpoints, and local GPUs behind stable model names. Your agents keep one endpoint; Swobu handles routing, runtime fallback, and protocol translation underneath.
+Put provider accounts, cloud regions, hosted endpoints, and local GPUs behind
+stable model names. Your agents keep one endpoint while Swobu handles routing,
+runtime fallback, and protocol translation.
+
+Workspaces expose Models, MCP, and Search through reusable Connections.
+Principals receive the Services they need; publishing a Workspace makes those
+Services reachable with their existing credentials and limits. Activity shows
+what actually ran. The source tree uses the Web Operator; the install below
+uses the current published release.
 
 [Documentation](https://swobu.com/docs/) · [Quickstart](https://swobu.com/docs/start/first-route/) · [VS Code](https://marketplace.visualstudio.com/items?itemName=swobu.swobu&utm_source=swobu_docs&utm_medium=referral&utm_campaign=vscode_extension) · [Releases](https://github.com/swobuforge/swobu/releases)
 
@@ -37,14 +45,17 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-Cockpit opens after install. Add a provider, create a route, then connect an agent.
+After installation, configure a Workspace and model route, then preview the
+application configuration before applying it. Use `swobu principal list` (or
+`swobu principal list --json` for automation) to find an existing Principal
+with Models access to the Workspace, then replace `<principal-id>` below.
 
 ```bash
-swobu connect claude
-swobu connect codex
+swobu connect claude --dry-run --workspace coding --model coding --principal '<principal-id>'
+swobu connect codex --dry-run --workspace coding --model coding --principal '<principal-id>'
 ```
 
-Muse, pi, Kilo, and Hermes are also supported. Certified with Antigravity CLI 1.2.3: run `swobu connect antigravity --workspace <name>`, open a new terminal, then run ordinary `agy`.
+These commands preview without writing. Use the [reviewed Connect workflow](docs/clients/admin-mcp.md) to apply with a private intent file and local confirmation. Muse, pi, Kilo, and Hermes are also supported. Antigravity CLI 1.2.3 compatibility is separately qualified; after confirmed Connect apply, open a new terminal and run ordinary `agy`.
 
 [Build your first route in five minutes →](https://swobu.com/docs/start/first-route/)
 
@@ -79,17 +90,15 @@ advance to the next target in the route.
 
 ---
 
-## Share a route without sharing provider credentials
+## Publish a Workspace with controlled access
 
-```text
-swobu share dev/coding
-```
+Open the Workspace’s Connect page in the local Web Operator and select
+**Publish via relay**. Remote clients use that Workspace’s address and
+credential. Its current Service permissions and limits still apply; provider
+credentials and application TLS keys stay on your Node.
 
-A Share gives the remote client an HTTPS endpoint and bearer. Provider keys remain on the machine running Swobu. You can change what backs the route without changing the remote configuration, then revoke access when you are done.
-
-Application TLS terminates on the owner machine running Swobu; the relay forwards encrypted application traffic and does not terminate that TLS.
-
-[Workspace and Route Share →](https://swobu.com/docs/concepts/sharing/)
+Select **Unpublish** to remove public reachability, or revoke a credential to
+withdraw that client’s access. [Publish a Workspace →](https://swobu.com/docs/concepts/sharing/)
 
 ---
 

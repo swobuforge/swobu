@@ -1,11 +1,11 @@
-// Package cli implements the operator-facing entrypoint and daemon namespace.
+// Package cli owns local shell operations and projects validated Node and
+// Workspace management through the same checked domain commands used by the
+// Web Operator. Share and Exposure commands do not exist.
 //
-// It owns argument parsing, startup notices, interactive-vs-noninteractive
-// dispatch, machine-readable status output, and graceful lifecycle command
-// behavior. It renders startup/version/telemetry copy directly and hands off
-// to Cockpit without retained session plumbing. Human notice boxes clamp to
-// the output terminal and wrap complete commands inside their borders; machine
-// output remains undecorated. The connect leaf owns workspace selection and
-// semantic presentation while clientconnect owns every foreign-file effect.
-// It does not own runtime truth, provider wiring, or domain mutation semantics.
+// Destructive commands require original revision-bound intent and explicit
+// user confirmation; partial acknowledgements are never inferred as success.
+// Local Node selection prefers a leaf --addr, then Runner.Addr, then the
+// environment/default, with loopback validation before contacting Control.
+// Daemon config selection follows the same precedence through Runner.ConfigPath.
+// The binary enumerates commands; this package owns their argument parsing.
 package cli

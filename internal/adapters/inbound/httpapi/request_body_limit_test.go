@@ -3,9 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
@@ -16,45 +17,49 @@ func TestOperatorJSONHandlersRejectOversizeBeforeApplicationBehavior(t *testing.
 	padding := bytes.Repeat([]byte(" "), int(maxOperatorJSONBodyBytes)+1)
 
 	t.Run("workspace command", func(t *testing.T) {
-		body := append([]byte(`{"slug":"dev","initial_route":"chat","target":{"id":"a","model":"gpt-5","protocol":"responses","connection":{"openai":{"credential":"env:OPENAI_API_KEY"}}}}`), padding...)
+		body := append([]byte(`{"slug":"dev","initial_route":"chat","target":{"id":"a","model":"gpt-5","protocol":"responses","connection_id":"cn_account"}}`), padding...)
 		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/_swobu/workspaces", bytes.NewReader(body))
+		request := permissionOperatorRequest(httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewReader(body)))
+		request.Header.Set("Idempotency-Key", "oversize-fixture")
 		request.Header.Set("Content-Type", "application/json")
-		NewWorkspaceControlHandler(workspaceapi.Service{}).ServeHTTP(recorder, request)
+		NewNodeControlAPIHandler(workspaceapi.Service{}).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("status=%d, want bounded rejection", recorder.Code)
 		}
 	})
 
 	t.Run("auth session", func(t *testing.T) {
-		called := false
-		handler := NewAuthSessionHandler(func(context.Context, authplane.StartInput) (authplane.StartOutput, error) {
-			called = true
-			return authplane.StartOutput{}, nil
-		}, nil, nil, nil)
-		body := append([]byte(`{"provider_spec":"chatgpt","auth_mode":"browser"}`), padding...)
-		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", bytes.NewReader(body))
-		request.Header.Set("Content-Type", "application/json")
-		handler.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusBadRequest || called {
-			t.Fatalf("status=%d application_called=%t, want bounded rejection", recorder.Code, called)
-		}
-	})
-
-	t.Run("target probe", func(t *testing.T) {
-		stub := &stubTargetProber{}
-		raw, err := json.Marshal(targetProbeRequest{Connection: workspaceapi.StandardConnection("openai", "", "env:OPENAI_API_KEY"), ProviderProtocol: "responses"})
+		manager, err := authplane.NewAuthSessionManager(testAuthMethodDriver{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := append(raw, padding...)
+		directory := filepath.Join(t.TempDir(), "auth-attempts")
+		if err := os.Mkdir(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		attempts, err := authplane.OpenStartAttempts(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler := NewAuthSessionHandler(manager.Poll, manager.Cancel).WithStartAttempts(manager, attempts)
+		body := append([]byte(`{"provider_spec":"chatgpt","auth_mode":"browser"}`), padding...)
 		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/_swobu/target-probe", bytes.NewReader(body))
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth-sessions", bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		NewTargetProbeHandler(stub).ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusBadRequest || len(stub.attempts) != 0 {
-			t.Fatalf("status=%d provider_attempts=%d, want bounded rejection", recorder.Code, len(stub.attempts))
+		localAuthorityTestHandler(handler).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d, want bounded rejection", recorder.Code)
 		}
 	})
+
 }
+
+type testAuthMethodDriver struct{}
+
+func (testAuthMethodDriver) Start(context.Context, authplane.StartInput) (authplane.DriverStartResult, error) {
+	return authplane.DriverStartResult{}, nil
+}
+func (testAuthMethodDriver) Poll(context.Context, string) (authplane.DriverPollResult, error) {
+	return authplane.DriverPollResult{}, nil
+}
+func (testAuthMethodDriver) Cancel(context.Context, string) error { return nil }

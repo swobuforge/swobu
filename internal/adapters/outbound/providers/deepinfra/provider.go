@@ -110,7 +110,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 	if strings.TrimSpace(target.CredentialRef) == "" || d.credentials == nil {
 		return provider.TargetProbeResult{}, canonical.BadEndpoint("DeepInfra credential reference is required")
 	}
-	token, err := d.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, d.credentials, target)
 	if err != nil || strings.TrimSpace(token) == "" {
 		return provider.TargetProbeResult{}, canonical.BadEndpoint("DeepInfra credential reference could not be resolved")
 	}

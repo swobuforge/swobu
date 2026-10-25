@@ -1,8 +1,71 @@
 package credentialref
 
-import "strings"
+import (
+	"errors"
+	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+)
+
+// ScopeKind identifies the owner whose credential reference is being resolved.
+// Storage kind (secret, secretfile, env, or file) remains a separate decision.
+type ScopeKind string
+
+const (
+	ScopeConnection ScopeKind = "connection"
+	ScopeProvider   ScopeKind = "provider"
+)
+
+// Scope binds a credential reference to one runtime owner. Its fields stay
+// private so provider and Connection identities cannot be interchanged.
+type Scope struct {
+	kind       ScopeKind
+	identifier string
+}
 
 type Kind string
+
+var ErrInvalidScopeSelection = errors.New("credential scope selection is invalid")
+
+// NewProviderScope validates and binds a provider-owned credential reference.
+func NewProviderScope(providerSpec string) (Scope, error) {
+	providerSpec = strings.TrimSpace(providerSpec)
+	if providerSpec == "" || strings.ContainsAny(providerSpec, "\r\n") {
+		return Scope{}, errors.New("provider credential scope is required")
+	}
+	if strings.EqualFold(providerSpec, "mcp") {
+		return Scope{}, errors.New("MCP credentials belong to Connections")
+	}
+	return Scope{kind: ScopeProvider, identifier: providerSpec}, nil
+}
+
+// NewConnectionScope binds material to one reusable upstream identity. It is
+// distinct from provider ownership even when protocols coincide.
+func NewConnectionScope(id string) (Scope, error) {
+	if _, err := connectionidentity.Parse(id); err != nil {
+		return Scope{}, errors.New("Connection credential scope is invalid")
+	}
+	return Scope{kind: ScopeConnection, identifier: id}, nil
+}
+
+// Kind identifies which credential owner controls the reference.
+func (s Scope) Kind() ScopeKind { return s.kind }
+
+// Identifier returns the validated owner identity.
+func (s Scope) Identifier() string { return s.identifier }
+
+// Valid reports whether the scope was constructed for a supported owner.
+func (s Scope) Valid() bool {
+	switch s.kind {
+	case ScopeConnection:
+		_, err := connectionidentity.Parse(s.identifier)
+		return err == nil
+	case ScopeProvider:
+		return s.identifier != "" && !strings.ContainsAny(s.identifier, "\r\n")
+	default:
+		return false
+	}
+}
 
 const (
 	KindEmpty      Kind = "empty"

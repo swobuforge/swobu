@@ -15,6 +15,7 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
@@ -38,6 +39,11 @@ func TestProjectProducesContentFreeHistoricalTraceShape(t *testing.T) {
 	providerID, _ := routing.ParseProvider("openai", func(string) bool { return true })
 	model, _ := routing.ParseUpstreamModel("gpt-test")
 	modelResource, _ := executionevidence.NewModelResource(route, target, routing.TargetVersion(42), providerID, protocolkind.Responses, model, executionevidence.ExchangeAttempt)
+	connectionID, _ := connectionidentity.Parse("cn_trace")
+	modelResource, err = modelResource.BindConnection(connectionID, ^uint64(0))
+	if err != nil {
+		t.Fatal(err)
+	}
 	modelID, _ := execution.NewInvocationID(exchangeID, 1)
 	modelStart, _ := executionevidence.NewModelInvocationStarted(modelID, time.Unix(101, 1), modelResource)
 	modelSettle, _ := executionevidence.NewModelInvocationSettled(modelID, time.Unix(102, 2), execution.Failed, execution.Occurred, executionevidence.FailureTimeout, canonical.NewUnknownTokenUsage())
@@ -63,6 +69,19 @@ func TestProjectProducesContentFreeHistoricalTraceShape(t *testing.T) {
 	spans := recorder.Ended()
 	if len(spans) != 3 {
 		t.Fatalf("ended spans = %d, want root plus two children", len(spans))
+	}
+	bindingFound := false
+	for _, span := range spans {
+		values := map[string]string{}
+		for _, attr := range span.Attributes() {
+			values[string(attr.Key)] = attr.Value.AsString()
+		}
+		if values["swobu.connection.id"] == "cn_trace" {
+			bindingFound = values["swobu.connection.revision"] == "18446744073709551615"
+		}
+	}
+	if !bindingFound {
+		t.Fatal("trace lost exact Connection revision")
 	}
 	var root sdktrace.ReadOnlySpan
 	for _, span := range spans {

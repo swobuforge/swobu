@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/swobuforge/swobu/internal/ledger"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,7 +73,7 @@ func fallbackEvidenceWorkspace(t *testing.T) routing.Workspace {
 		if err != nil {
 			t.Fatal(err)
 		}
-		target, err := routing.NewTarget(id, model, protocol, connection)
+		target, err := routing.NewTarget(id, model, protocol, registerHTTPModel(t, connection))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +87,7 @@ func fallbackEvidenceWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := routing.NewWorkspace(slug, name, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,13 +99,13 @@ func TestFallbackInvocationsTraverseHTTPStoreAndActivity(t *testing.T) {
 	evidenceStore := store.NewStore(store.Config{})
 	transport := &fallbackEvidenceTransport{}
 	runtime := fallbackEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: transport}
-	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
+	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel,
 		PolicyResolver:    exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		ExecutionEvidence: evidenceStore,
 	})
 	mux := http.NewServeMux()
-	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress)))
-	mux.Handle("/_swobu/activity", NewActivityHandler(func(_ *http.Request, scope store.ProjectionScope) (store.ActivityProjection, error) {
+	mux.Handle("/workspaces/", localAuthorityTestHandler(NewWorkspaceDataHandler(ingress)))
+	mux.Handle("/api/v1/activity", NewActivityHandler(func(_ *http.Request, scope store.ProjectionScope, _ ledger.ActivityPageQuery) (store.ActivityProjection, error) {
 		return evidenceStore.ProjectActivity(store.ProjectionInput{Scope: scope}), nil
 	}))
 	server := httptest.NewServer(mux)

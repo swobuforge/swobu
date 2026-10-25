@@ -39,7 +39,7 @@ func (d discovery) ProbeTarget(ctx context.Context, target provider.TargetSnapsh
 		if d.credentials == nil {
 			return provider.TargetProbeResult{}, canonical.BadEndpoint("credential resolver is not configured")
 		}
-		token, resolveErr := d.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+		token, resolveErr := providersruntime.ResolveTargetCredential(ctx, d.credentials, target)
 		if resolveErr != nil || strings.TrimSpace(token) == "" {
 			return provider.TargetProbeResult{}, canonical.BadEndpoint("LLM7 credential reference could not be resolved")
 		}

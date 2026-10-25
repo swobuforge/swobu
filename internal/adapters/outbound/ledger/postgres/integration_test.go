@@ -26,7 +26,7 @@ func TestPostgresStoreConformance(t *testing.T) {
 		if err != nil {
 			tb.Fatal(err)
 		}
-		if _, err := store.writer.ExecContext(context.Background(), `TRUNCATE TABLE swobu_ledger_invocations, swobu_ledger_exchanges`); err != nil {
+		if _, err := store.writer.ExecContext(context.Background(), `TRUNCATE TABLE swobu_ledger_invocations, swobu_ledger_exchanges, swobu_ledger_mcp_operations`); err != nil {
 			tb.Fatal(err)
 		}
 		tb.Cleanup(func() { _ = store.Close() })

@@ -523,7 +523,7 @@ func TestSendProviderRequest_ClassifiesTransportFailureWithoutConfigurationError
 		t.Fatalf("error type = %T, want provider.UnavailableError", err)
 	}
 	failure, ok := provider.AsAttemptFailure(err)
-	if !ok || failure.Execution() != provider.ExecutionMayHaveOccurred {
+	if !ok || failure.Execution() != provider.DispositionMayHaveOccurred {
 		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 
@@ -588,7 +588,7 @@ func TestSendProviderRequest_ClassifiesConfirmedUnsupportedResponseAsRejected(t 
 		t.Fatalf("error = %T, want provider.RejectedError", err)
 	}
 	failure, ok := provider.AsAttemptFailure(err)
-	if !ok || failure.Execution() != provider.ExecutionRejectedBeforeExecution {
+	if !ok || failure.Execution() != provider.DispositionRejectedBeforeExecution {
 		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 }
@@ -614,7 +614,7 @@ func TestSendProviderRequest_PromotesOrdinaryOpenAIHTTPError(t *testing.T) {
 	}
 }
 
-// An unclassified 4xx defaults to RejectedError with ExecutionMayHaveOccurred.
+// An unclassified 4xx defaults to RejectedError with DispositionMayHaveOccurred.
 // This owns the adapter's fallback for unclassified rejection, not permanent
 // ignorance of any provider's vocabulary: the prose is deliberately opaque so
 // that adding narrower recognition later can only narrow, never break, this
@@ -635,8 +635,8 @@ func TestSendProviderRequest_Unclassified4xxDefaultsToRejectedAndMayHaveExecuted
 		t.Fatalf("error = %T, want provider.RejectedError", err)
 	}
 	failure, ok := provider.AsAttemptFailure(err)
-	if !ok || failure.Execution() != provider.ExecutionMayHaveOccurred {
-		t.Fatalf("attempt failure = %#v, %t, want ExecutionMayHaveOccurred", failure, ok)
+	if !ok || failure.Execution() != provider.DispositionMayHaveOccurred {
+		t.Fatalf("attempt failure = %#v, %t, want DispositionMayHaveOccurred", failure, ok)
 	}
 }
 
@@ -659,7 +659,7 @@ func TestSendProviderRequest_MarksPreDispatchValidation(t *testing.T) {
 
 	_, err := exec.Send(context.Background(), target, doc)
 	failure, ok := provider.AsAttemptFailure(err)
-	if !ok || failure.Execution() != provider.ExecutionNotDispatched {
+	if !ok || failure.Execution() != provider.DispositionNotDispatched {
 		t.Fatalf("attempt failure = %#v, %t", failure, ok)
 	}
 }

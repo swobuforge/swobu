@@ -237,12 +237,17 @@ func newResolvedRequest(request canonical.CanonicalRequest, previous *previousHi
 // truth: a checkpoint restores conversation state, never request configuration.
 func resolveTurnContinuation(checkpoint Checkpoint, current canonical.CanonicalRequest) (canonical.CanonicalRequest, error) {
 	pendingSet := make(map[canonical.ToolCallID]canonical.ToolKind)
-	for _, item := range checkpoint.Response.Items() {
-		call, ok := item.ToolCall()
-		if !ok {
-			continue
+	var matcher canonical.ToolEffectMatcher
+	// Local effects belong to request history, not provider response items.
+	// Match the complete checkpoint so settled IDs cannot regain pending authority.
+	items := append(checkpoint.Request.Items(), checkpoint.Response.Items()...)
+	for index, item := range items {
+		if _, err := matcher.Accept(index, item); err != nil {
+			return canonical.CanonicalRequest{}, fmt.Errorf("invalid checkpoint tool effects: %w", err)
 		}
-		pendingSet[call.CallID()] = call.Tool().Kind()
+	}
+	for _, effect := range matcher.Pending() {
+		pendingSet[effect.CallID] = effect.Kind
 	}
 	matched := make(map[canonical.ToolCallID]struct{}, len(pendingSet))
 	for _, item := range current.Items() {

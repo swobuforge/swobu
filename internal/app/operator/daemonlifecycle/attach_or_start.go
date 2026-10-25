@@ -96,7 +96,7 @@ const (
 )
 
 func FetchStatus(ctx context.Context, client *http.Client, addr string) (StatusPayload, StatusClass) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(addr)+"/_swobu/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(addr)+"/api/v1/status", nil)
 	if err != nil {
 		return StatusPayload{State: string(StatusClassDown)}, StatusClassDown
 	}
@@ -232,7 +232,7 @@ func Down(ctx context.Context, in DownInput) (DownResult, error) {
 		return DownResultAlreadyStopped, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, platformconfig.BaseURL(addr)+"/_swobu/down", bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, platformconfig.BaseURL(addr)+"/api/v1/daemon/shutdown", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", err
 	}

@@ -53,6 +53,62 @@ func runExchange(
 	requestPath canonical.NormalizedPath,
 	explicitExecutionAffinity executionaffinity.Key,
 ) (out RequestOutput, err error) {
+	if clientDelivery.Mode == delivery.Streaming && runner.localToolDelivery == nil {
+		workerCtx, cancel := context.WithCancel(ctx)
+		bridge := newLocalToolDelivery(cancel)
+		runner.localToolDelivery = bridge
+		type result struct {
+			out RequestOutput
+			err error
+		}
+		completed := make(chan result, 1)
+		go func() {
+			out, err := runExchange(workerCtx, runner, accessID, exchangeID, canonicalExchangeID, clientProduct, clientFamily, clientDelivery, decoded, ingressChanges, workspace, timing, requestPath, explicitExecutionAffinity)
+			if bridge.response != nil && err != nil {
+				select {
+				case bridge.events <- localToolDeliveryEvent{err: err}:
+				case <-workerCtx.Done():
+				}
+			}
+			close(bridge.events)
+			completed <- result{out, err}
+		}()
+		select {
+		case early := <-bridge.ready:
+			early.ProductObservationInput = &ProductObservationInputData{}
+			var once sync.Once
+			early.FinalizeExecutionEvidence = func(result delivery.Result) {
+				once.Do(func() {
+					cancel()
+					terminal := <-completed
+					if terminal.out.ProductObservationInput != nil {
+						*early.ProductObservationInput = *terminal.out.ProductObservationInput
+					}
+					if terminal.out.FinalizeExecutionEvidence != nil {
+						terminal.out.FinalizeExecutionEvidence(result)
+					}
+				})
+			}
+			return early, nil
+		case terminal := <-completed:
+			if terminal.err != nil {
+				cancel()
+			} else {
+				finalize := terminal.out.FinalizeExecutionEvidence
+				terminal.out.FinalizeExecutionEvidence = func(result delivery.Result) {
+					cancel()
+					if finalize != nil {
+						finalize(result)
+					}
+				}
+			}
+			return terminal.out, terminal.err
+		case <-ctx.Done():
+			cancel()
+			terminal := <-completed
+			return terminal.out, ctx.Err()
+		}
+	}
 	var invocationOrdinal uint64
 	var finalizeOnce sync.Once
 	finalize := func(result delivery.Result) {
@@ -81,6 +137,9 @@ func runExchange(
 	if err != nil {
 		// No ExchangeSettled is emitted here: delivery owns finalization.
 		return RequestOutput{}, err
+	}
+	if runner.localToolDelivery != nil {
+		runner.localToolDelivery.projection = newLocalToolClientProjection(responseID)
 	}
 	var rebased *wire.RebasedRequest
 	if decoded.RebasedRequest != nil {
@@ -156,11 +215,34 @@ func runExchange(
 			emitProviderInvocationTransportSettlement(runner.ExecutionEvidence, s, call, current)
 			logProviderAttemptCommandResult(s, call, current, time.Since(started))
 			runner.TargetBackoff.observe(observation, current)
+			settleAccountingAttempt(runner, s, call, current)
 		}
 	}
 	err = canonical.InternalError("exchange transition limit reached")
 	// No ExchangeSettled is emitted here: delivery owns finalization.
 	return RequestOutput{}, err
+}
+
+func settleAccountingAttempt(runner runtimeBundle, state exchangeState, call callProviderCommand, event exchangeEvent) {
+	if runner.Accounting == nil {
+		return
+	}
+	attempt, ok := findProviderCallAttempt(state, call.attemptID)
+	if !ok || attempt.accountingOperation == "" {
+		return
+	}
+	if _, received := event.(providerIngressReceived); received {
+		return
+	}
+	uncertain := false
+	if failed, ok := event.(providerCallFailed); ok {
+		uncertain = failed.failure.Execution() == provider.DispositionMayHaveOccurred
+	}
+	if attempt.accountingWindow != "" {
+		_ = runner.Accounting.SettleReservation(state.input.workspace.Slug().String(), attempt.accountingWindow, attempt.accountingOperation, attempt.accountingAmountCents, uncertain)
+	} else {
+		_ = runner.Accounting.Settle(state.input.workspace.Slug().String(), attempt.accountingOperation, attempt.accountingAmountCents, uncertain)
+	}
 }
 
 func startModelInvocation(state *exchangeState, call callProviderCommand, sink observation.ExecutionEvidenceSink, at time.Time) (execution.InvocationID, error) {
@@ -207,7 +289,14 @@ func modelInvocationResource(call callProviderCommand) (evidence.ModelResource, 
 	if err != nil {
 		return evidence.ModelResource{}, err
 	}
-	return evidence.NewModelResource(call.route, target, routing.TargetVersion(call.backend.Target.TargetVersion), provider, call.backend.Target.ProtocolKind, model, evidence.ExchangeAttempt)
+	resource, err := evidence.NewModelResource(call.route, target, routing.TargetVersion(call.backend.Target.TargetVersion), provider, call.backend.Target.ProtocolKind, model, evidence.ExchangeAttempt)
+	if err != nil {
+		return evidence.ModelResource{}, err
+	}
+	if id, revision, bound := call.backend.Target.ConnectionIdentity(); bound {
+		return resource.BindConnection(id, revision)
+	}
+	return resource, nil
 }
 
 func settleExecutionEvidence(sink observation.ExecutionEvidenceSink, id execution.ExchangeID, result delivery.Result) {
@@ -528,6 +617,16 @@ func executeCommand(ctx context.Context, cmd command) exchangeEvent {
 			return providerCallFailed{attemptID: c.attemptID, failure: failure}
 		}
 		return providerIngressReceived{attemptID: c.attemptID, ingress: ingress}
+	case refreshCredentialCommand:
+		err := ctx.Err()
+		var material string
+		if err == nil {
+			material, err = c.refresh(ctx)
+		}
+		if err == nil {
+			err = c.publish(ctx, c.target, material)
+		}
+		return credentialRefreshed{attemptID: c.attemptID, err: err}
 	case characterizeTargetFactsCommand:
 		resolutions := make(map[provider.TargetFact]bool, len(c.facts))
 		for _, fact := range c.facts {
@@ -585,6 +684,11 @@ func (t *characterizationTransport) Send(ctx context.Context, document carrier.D
 		return ingress, sendErr
 	}
 	resource, err := evidence.NewModelResource(t.route, targetID, routing.TargetVersion(t.target.TargetVersion), providerID, t.target.ProtocolKind, model, evidence.TargetCharacterization)
+	if err == nil {
+		if id, revision, bound := t.target.ConnectionIdentity(); bound {
+			resource, err = resource.BindConnection(id, revision)
+		}
+	}
 	if err != nil {
 		return ingress, sendErr
 	}

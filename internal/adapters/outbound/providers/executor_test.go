@@ -13,6 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/compat"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -22,6 +23,10 @@ import (
 type testCredentialResolver struct{}
 
 func (testCredentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
+	return "token_test", nil
+}
+
+func (testCredentialResolver) ResolveScopedCredential(context.Context, credentialref.Scope, string) (string, error) {
 	return "token_test", nil
 }
 

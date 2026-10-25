@@ -200,7 +200,7 @@ func sendAndProject(t *testing.T, backend provider.Backend, target provider.Targ
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt := provider.Request{Attempt: provider.AttemptContext{ExchangeID: exchangeID}, Canonical: request, ToolNames: toolNames, Delivery: target.ProviderDelivery}
+	attempt := provider.Request{Attempt: provider.AttemptContext{CorrelationID: exchangeID}, Canonical: request, ToolNames: toolNames, Delivery: target.ProviderDelivery}
 	document, _, err := backend.Codec.Encode(attempt)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -238,7 +239,7 @@ func TestKiloCreatesMissingGlobalConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"model":"swobu/default"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"tool_call":true`} {
+	for _, want := range []string{`"model":"swobu/coding"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"tool_call":true`} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("missing %q in %s", want, raw)
 		}
@@ -247,7 +248,7 @@ func TestKiloCreatesMissingGlobalConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %o", info.Mode().Perm())
 	}
 	second, err := service.Plan(context.Background(), ClientKilo, testTarget(t))
@@ -364,7 +365,7 @@ func TestPlanHasOneReviewedSemanticChangeTruth(t *testing.T) {
 			return p
 		},
 		"target": func(p Plan) Plan {
-			p.Target, _ = NewTarget("other", "http://127.0.0.1:7926/c/other")
+			p.Target, _ = NewTarget("other", "http://127.0.0.1:7926/workspaces/other")
 			return p
 		},
 	}
@@ -427,7 +428,7 @@ func TestKiloDeclaresSwobuBackendAndPreservesForeignProviders(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	text := string(got)
-	for _, want := range []string{`"model": "swobu/default"`, `"baseURL":"http://127.0.0.1:7926/c/work"`, `"name":"Swobu"`, `"name":"Swobu default"`, `"tool_call":true`, `"web_search":true`, `"baseURL": "https://old"`, `"baseURL": "https://leave"`, `"mcp": {"keep": true}`} {
+	for _, want := range []string{`"model": "swobu/coding"`, `"baseURL":"http://127.0.0.1:7926/workspaces/work"`, `"name":"Swobu"`, `"name":"coding"`, `"tool_call":true`, `"web_search":true`, `"baseURL": "https://old"`, `"baseURL": "https://leave"`, `"mcp": {"keep": true}`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}
@@ -496,7 +497,7 @@ func TestKiloWebSearchOptInUsesReviewedChangeAndConverges(t *testing.T) {
 func TestKiloReusesExistingSwobuPresentationAndMetadata(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kilo.jsonc")
-	original := []byte(`{"model":"other/model","provider":{"swobu":{"name":"My gateway","metadata":{"owner":"human"},"options":{"baseURL":"http://127.0.0.1:7926/c/old"},"models":{"default":{"name":"My default","temperature":0.2,"tool_call":false}}}}}`)
+	original := []byte(`{"model":"other/model","provider":{"swobu":{"name":"My gateway","metadata":{"owner":"human"},"options":{"baseURL":"http://127.0.0.1:7926/workspaces/old"},"models":{"coding":{"name":"My default","temperature":0.2,"tool_call":false}}}}}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +514,7 @@ func TestKiloReusesExistingSwobuPresentationAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
-	for _, want := range []string{`"name":"My gateway"`, `"name":"My default"`, `"owner":"human"`, `"temperature":0.2`, `"tool_call":true`, `"baseURL":"http://127.0.0.1:7926/c/work"`} {
+	for _, want := range []string{`"name":"My gateway"`, `"name":"My default"`, `"owner":"human"`, `"temperature":0.2`, `"tool_call":true`, `"baseURL":"http://127.0.0.1:7926/workspaces/work"`} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -537,7 +538,7 @@ func TestKiloAddsMissingObjectLevelsAndRejectsStructuralConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 		got, _ := os.ReadFile(path)
-		if !strings.Contains(string(got), `"model":"swobu/default"`) || !strings.Contains(string(got), `"baseURL":"http://127.0.0.1:7926/c/work"`) {
+		if !strings.Contains(string(got), `"model":"swobu/coding"`) || !strings.Contains(string(got), `"baseURL":"http://127.0.0.1:7926/workspaces/work"`) {
 			t.Fatalf("%s next: %s", provider, got)
 		}
 	}
@@ -631,13 +632,13 @@ func TestPiDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 	}
 	got, _ := os.ReadFile(models)
 	text := string(got)
-	for _, want := range []string{`"swobu"`, `"baseUrl":"http://127.0.0.1:7926/c/work"`, `"api":"openai-responses"`, `"apiKey":"swobu"`, `"id":"default"`, `"baseUrl": "https://old"`, `"other": {"models": [1,2,3]}`} {
+	for _, want := range []string{`"swobu"`, `"baseUrl":"http://127.0.0.1:7926/workspaces/work"`, `"api":"openai-responses"`, `"apiKey":"test-workspace-credential"`, `"id":"coding"`, `"baseUrl": "https://old"`, `"other": {"models": [1,2,3]}`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}
 	}
 	settingsRaw, _ := os.ReadFile(settings)
-	if !strings.Contains(string(settingsRaw), `"defaultProvider":"swobu"`) || !strings.Contains(string(settingsRaw), `"defaultModel":"default"`) {
+	if !strings.Contains(string(settingsRaw), `"defaultProvider":"swobu"`) || !strings.Contains(string(settingsRaw), `"defaultModel":"coding"`) {
 		t.Fatalf("settings=%s", settingsRaw)
 	}
 }
@@ -668,14 +669,14 @@ func TestPiCreatesMissingGlobalConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(settings), `"defaultProvider":"swobu"`) || !strings.Contains(string(settings), `"defaultModel":"default"`) {
+	if !strings.Contains(string(settings), `"defaultProvider":"swobu"`) || !strings.Contains(string(settings), `"defaultModel":"coding"`) {
 		t.Fatalf("settings=%s", settings)
 	}
 	models, err := os.ReadFile(filepath.Join(dir, "models.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"swobu"`, `"baseUrl":"` + testTarget(t).WorkspaceURL() + `"`, `"api":"openai-responses"`, `"id":"default"`, `"name":"Swobu default"`} {
+	for _, want := range []string{`"swobu"`, `"baseUrl":"` + testTarget(t).WorkspaceURL() + `"`, `"api":"openai-responses"`, `"id":"coding"`, `"name":"coding"`} {
 		if !strings.Contains(string(models), want) {
 			t.Fatalf("missing %q in models=%s", want, models)
 		}
@@ -685,7 +686,7 @@ func TestPiCreatesMissingGlobalConfiguration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 {
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
 		}
 	}
@@ -698,15 +699,15 @@ func TestPiCreatesMissingGlobalConfiguration(t *testing.T) {
 func TestPiNormalizesOwnedHistoricalStateUnderReplacement(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-completions","apiKey":"user-managed","authHeader":false,"compat":{"supportsDeveloperRole":false},"modelOverrides":{"default":{"maxTokens":1000000}},"models":[{"id":"gpt-4.1-mini"},{"id":"default","maxTokens":1000000}]}}}`), 0o600)
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-completions","apiKey":"user-managed","authHeader":false,"compat":{"supportsDeveloperRole":false},"modelOverrides":{"coding":{"maxTokens":1000000}},"models":[{"id":"gpt-4.1-mini"},{"id":"coding","maxTokens":1000000}]}}}`), 0o600)
 	service := &Service{getenv: func(key string) string {
 		if key == "PI_CODING_AGENT_DIR" {
 			return dir
 		}
 		return ""
 	}}
-	plan, err := service.Plan(context.Background(), ClientPi, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientPi, testTarget(t).WithAuthentication("test-principal", "user-managed"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +724,7 @@ func TestPiNormalizesOwnedHistoricalStateUnderReplacement(t *testing.T) {
 		t.Fatalf("verified = %#v, error = %v", verified.Changes, err)
 	}
 	raw, _ := os.ReadFile(models)
-	for _, preserved := range []string{`"apiKey":"user-managed"`, `"authHeader":false`, `"compat":{"supportsDeveloperRole":false}`, `"modelOverrides":{"default":{"maxTokens":1000000}}`} {
+	for _, preserved := range []string{`"apiKey":"user-managed"`, `"authHeader":false`, `"compat":{"supportsDeveloperRole":false}`, `"modelOverrides":{"coding":{"maxTokens":1000000}}`} {
 		if !strings.Contains(string(raw), preserved) {
 			t.Fatalf("missing preserved %q in %s", preserved, raw)
 		}
@@ -738,10 +739,10 @@ func TestPiNormalizesOwnedHistoricalStateUnderReplacement(t *testing.T) {
 func TestPiPreservesJSONCOutsideOwnedLeaves(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	original := []byte("{\n  // before providers\n  \"providers\": {\n    \"other\": {\n      // other provider comment\n      \"opaque\": 9007199254740993123456789,\n    },\n    \"swobu\": {\n      // retained provider metadata comment\n      \"metadata\": {\"owner\": \"human\"},\n      \"api\": \"openai-completions\",\n      \"models\": [{\"id\": \"default\", \"maxTokens\": 1000000}],\n    },\n  },\n}\n")
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	original := []byte("{\n  // before providers\n  \"providers\": {\n    \"other\": {\n      // other provider comment\n      \"opaque\": 9007199254740993123456789,\n    },\n    \"swobu\": {\n      // retained provider metadata comment\n      \"metadata\": {\"owner\": \"human\"},\n      \"api\": \"openai-completions\",\n      \"models\": [{\"id\": \"coding\", \"maxTokens\": 1000000}],\n    },\n  },\n}\n")
 	_ = os.WriteFile(models, original, 0o600)
-	mutation, err := planPi(settings, models, testTarget(t))
+	mutation, err := planPi(settings, models, testTarget(t), os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,15 +763,15 @@ func TestPiPreservesJSONCOutsideOwnedLeaves(t *testing.T) {
 func TestPiDecodesJSONCInsideOwnedModelsAndPreservesCustomizations(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
 	raw := []byte(`{
   "providers": {"swobu": {
-    "baseUrl": "http://127.0.0.1:7926/c/work",
+    "baseUrl": "http://127.0.0.1:7926/workspaces/work",
     "api": "openai-responses",
     "apiKey": "swobu",
     "models": [
       // facade model
-      {"id":"default", "name":"Swobu default", "reasoning":false, "input":["text"], "contextWindow":65536, "maxTokens":32000},
+      {"id":"coding", "name":"coding", "reasoning":false, "input":["text"], "contextWindow":65536, "maxTokens":32000},
     ],
     "compat": {
       // stale provider override
@@ -783,7 +784,7 @@ func TestPiDecodesJSONCInsideOwnedModelsAndPreservesCustomizations(t *testing.T)
   }}
 }`)
 	_ = os.WriteFile(models, raw, 0o600)
-	mutation, err := planPi(settings, models, testTarget(t))
+	mutation, err := planPi(settings, models, testTarget(t), os.Getenv)
 	if err != nil {
 		t.Fatalf("JSONC inside owned subtrees was rejected: %v", err)
 	}
@@ -804,9 +805,9 @@ func TestPiDecodesJSONCInsideOwnedModelsAndPreservesCustomizations(t *testing.T)
 func TestPiCanonicalModelKeyOrderIsSemantic(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-responses","apiKey":"swobu","models":[{"name":"Swobu default","id":"default"}]}}}`), 0o600)
-	mutation, err := planPi(settings, models, testTarget(t))
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-responses","apiKey":"test-workspace-credential","models":[{"name":"coding","id":"coding"}]}}}`), 0o600)
+	mutation, err := planPi(settings, models, testTarget(t), os.Getenv)
 	if err != nil || !mutation.plan.AlreadyConfigured() {
 		t.Fatalf("reordered canonical model = %#v, error = %v", mutation.plan.Changes, err)
 	}
@@ -815,8 +816,8 @@ func TestPiCanonicalModelKeyOrderIsSemantic(t *testing.T) {
 func TestPiApplyRejectsConcurrentOwnedModelChange(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-responses","apiKey":"swobu","models":[{"id":"default","maxTokens":1000}]}}}`), 0o600)
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-responses","apiKey":"test-workspace-credential","models":[{"id":"coding","maxTokens":1000}]}}}`), 0o600)
 	service := &Service{getenv: func(key string) string {
 		if key == "PI_CODING_AGENT_DIR" {
 			return dir
@@ -827,7 +828,7 @@ func TestPiApplyRejectsConcurrentOwnedModelChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-responses","apiKey":"swobu","models":[{"id":"default","maxTokens":2000}]}}}`)
+	changed := []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-responses","apiKey":"test-workspace-credential","models":[{"id":"coding","maxTokens":2000}]}}}`)
 	_ = os.WriteFile(models, changed, 0o600)
 	if _, err := service.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "configuration changed") {
 		t.Fatalf("error = %v", err)
@@ -849,9 +850,9 @@ func TestPiRepairsRecoverableOwnedModelValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-			_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
+			_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
 			_ = os.WriteFile(models, []byte(tc.raw), 0o600)
-			mutation, err := planPi(settings, models, testTarget(t))
+			mutation, err := planPi(settings, models, testTarget(t), os.Getenv)
 			if err != nil || !mutation.plan.RequiresReplace() {
 				t.Fatalf("plan = %#v, error = %v", mutation.plan.Changes, err)
 			}
@@ -859,7 +860,7 @@ func TestPiRepairsRecoverableOwnedModelValues(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := os.ReadFile(models)
-			if !strings.Contains(string(got), `"models":[{"id":"default","name":"Swobu default"}]`) {
+			if !strings.Contains(string(got), `"models":[{"id":"coding","name":"coding"}]`) {
 				t.Fatalf("owned models did not converge: %s", got)
 			}
 		})
@@ -869,9 +870,9 @@ func TestPiRepairsRecoverableOwnedModelValues(t *testing.T) {
 func TestPiDoesNotPoliceDuplicateKeysInsideOwnedModels(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-responses","apiKey":"swobu","models":[{"id":"default","id":"default","name":"Swobu default"}]}}}`), 0o600)
-	if _, err := planPi(settings, models, testTarget(t)); err != nil {
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-responses","apiKey":"test-workspace-credential","models":[{"id":"coding","id":"coding","name":"coding"}]}}}`), 0o600)
+	if _, err := planPi(settings, models, testTarget(t), os.Getenv); err != nil {
 		t.Fatalf("duplicate key inside wholly owned models was rejected: %v", err)
 	}
 }
@@ -885,9 +886,9 @@ func TestPiRejectsInvalidOwnedPathOrDocumentShape(t *testing.T) {
 	} {
 		dir := t.TempDir()
 		settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-		_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
+		_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
 		_ = os.WriteFile(models, []byte(raw), 0o600)
-		if _, err := planPi(settings, models, testTarget(t)); err == nil {
+		if _, err := planPi(settings, models, testTarget(t), os.Getenv); err == nil {
 			t.Fatalf("accepted ambiguous or invalid Pi document: %s", raw)
 		}
 	}
@@ -898,7 +899,7 @@ func TestPiSettingsMustBeStrictJSON(t *testing.T) {
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
 	_ = os.WriteFile(settings, []byte("{// invalid for Pi\n\"defaultProvider\":\"swobu\"}\n"), 0o600)
 	_ = os.WriteFile(models, []byte(`{"providers":{}}`), 0o600)
-	if _, err := planPi(settings, models, testTarget(t)); err == nil || !strings.Contains(err.Error(), "strict JSON") {
+	if _, err := planPi(settings, models, testTarget(t), os.Getenv); err == nil || !strings.Contains(err.Error(), "strict JSON") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -906,14 +907,14 @@ func TestPiSettingsMustBeStrictJSON(t *testing.T) {
 func TestPiExistingEmptyAPIKeyRequiresReplacement(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
-	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"default"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-responses","apiKey":"","models":[{"id":"default","name":"Swobu default"}]}}}`), 0o600)
-	mutation, err := planPi(settings, models, testTarget(t))
+	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"swobu","defaultModel":"coding"}`), 0o600)
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-responses","apiKey":"","models":[{"id":"coding","name":"coding"}]}}}`), 0o600)
+	mutation, err := planPi(settings, models, testTarget(t), os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !mutation.plan.RequiresReplace() || !slices.ContainsFunc(mutation.plan.Changes, func(change Change) bool {
-		return change.Field == "API key placeholder" && change.BeforeExists
+		return change.Field == "authentication" && change.BeforeExists
 	}) {
 		t.Fatalf("empty existing API key was not replacement-gated: %#v", mutation.plan.Changes)
 	}
@@ -945,7 +946,12 @@ func TestFileAdaptersReconcileFreshProfiles(t *testing.T) {
 				t.Fatalf("plan = %#v, error = %v", plan, err)
 			}
 			wantPath := filepath.Join(configDir, tc.path)
-			if !slices.Equal(plan.ConfigPaths, []string{wantPath}) {
+			if !slices.Equal(plan.ConfigPaths, func() []string {
+				if tc.client == ClientMuse {
+					return []string{wantPath, filepath.Join(filepath.Dir(wantPath), "auth.json")}
+				}
+				return []string{wantPath}
+			}()) {
 				t.Fatalf("config paths = %v, want %v", plan.ConfigPaths, []string{wantPath})
 			}
 			verified, err := service.Apply(context.Background(), plan)
@@ -963,13 +969,13 @@ func TestPiPreservesCredentialAndProviderMetadata(t *testing.T) {
 	dir := t.TempDir()
 	settings, models := filepath.Join(dir, "settings.json"), filepath.Join(dir, "models.json")
 	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"other","defaultModel":"old"}`), 0o600)
-	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/c/old","api":"legacy","apiKey":"user-managed","metadata":{"owner":"human"},"models":[{"id":"default","name":"My route","capabilities":{"custom":true}}]}}}`), 0o600)
-	mutation, err := planPi(settings, models, testTarget(t))
+	_ = os.WriteFile(models, []byte(`{"providers":{"swobu":{"baseUrl":"http://127.0.0.1:7926/workspaces/old","api":"legacy","apiKey":"user-managed","metadata":{"owner":"human"},"models":[{"id":"coding","name":"My route","capabilities":{"custom":true}}]}}}`), 0o600)
+	mutation, err := planPi(settings, models, testTarget(t).WithAuthentication("test-principal", "user-managed"), os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, change := range mutation.plan.Changes {
-		if change.Field == "API key placeholder" {
+		if change.Field == "authentication" {
 			t.Fatalf("existing credential was over-owned: %#v", mutation.plan.Changes)
 		}
 	}
@@ -977,7 +983,7 @@ func TestPiPreservesCredentialAndProviderMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(models)
-	for _, want := range []string{`"apiKey":"user-managed"`, `"owner":"human"`, `"baseUrl":"http://127.0.0.1:7926/c/work"`, `"api":"openai-responses"`} {
+	for _, want := range []string{`"apiKey":"user-managed"`, `"owner":"human"`, `"baseUrl":"http://127.0.0.1:7926/workspaces/work"`, `"api":"openai-responses"`} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -1011,7 +1017,7 @@ func TestPiCreatesMinimalSwobuProviderFromAnySelection(t *testing.T) {
 	dir := t.TempDir()
 	settings := filepath.Join(dir, "settings.json")
 	_ = os.WriteFile(settings, []byte(`{"defaultProvider":"openai-codex"}`), 0o600)
-	if _, err := planPi(settings, filepath.Join(dir, "models.json"), testTarget(t)); err != nil {
+	if _, err := planPi(settings, filepath.Join(dir, "models.json"), testTarget(t), os.Getenv); err != nil {
 		t.Fatalf("existing selection should not gate Swobu backend: %v", err)
 	}
 }
@@ -1061,7 +1067,7 @@ func TestPiApplyMergesUnrelatedModelCatalogEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(models)
-	for _, want := range []string{`"owner":"after"`, `"id":"default"`} {
+	for _, want := range []string{`"owner":"after"`, `"id":"coding"`} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -1071,7 +1077,7 @@ func TestPiApplyMergesUnrelatedModelCatalogEdit(t *testing.T) {
 func TestSameBackendWithOldEndpointRequiresReplace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kilo.json")
-	_ = os.WriteFile(path, []byte(`{"model":"swobu/default","web_search":true,"provider":{"swobu":{"name":"Swobu","options":{"baseURL":"http://127.0.0.1:7926/c/old"},"models":{"default":{"name":"Swobu default","tool_call":true}}}}}`), 0o600)
+	_ = os.WriteFile(path, []byte(`{"model":"swobu/coding","web_search":true,"provider":{"swobu":{"name":"Swobu","options":{"apiKey":"test-workspace-credential","baseURL":"http://127.0.0.1:7926/workspaces/old"},"models":{"coding":{"name":"coding","tool_call":true}}}}}`), 0o600)
 	mutation, err := planKilo(path, testTarget(t))
 	if err != nil {
 		t.Fatal(err)

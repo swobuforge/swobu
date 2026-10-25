@@ -2,11 +2,23 @@ package clientconnect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 )
 
-// ClientID is the closed automatic-wiring client set shared by Cockpit and CLI.
+// ErrPlanChanged classifies a stale reviewed plan without changing the
+// caller's ability to inspect the current plan and retry deliberately.
+var ErrPlanChanged = errors.New("client configuration changed after review")
+
+type planChangedError struct{}
+
+func (planChangedError) Error() string {
+	return "Client configuration changed. Open Connect again to review the current value."
+}
+func (planChangedError) Is(target error) bool { return target == ErrPlanChanged }
+
+// ClientID is the closed automatic-wiring client set shared by Web Operator and CLI.
 type ClientID string
 
 // AutomaticClientIDs returns the canonical CLI spellings in presentation
@@ -46,11 +58,13 @@ type Change struct {
 // Changes is the sole mutation truth used by preview, replacement admission,
 // freshness comparison, and Apply.
 type Plan struct {
-	ClientID    ClientID
-	ClientName  string
-	ConfigPaths []string
-	Target      Target
-	Changes     []Change
+	ClientID      ClientID
+	ClientName    string
+	ConfigPaths   []string
+	Target        Target
+	Changes       []Change
+	PostApplyHint string
+	credential    string
 }
 
 func semanticChange(field, before string, exists bool, after string) []Change {

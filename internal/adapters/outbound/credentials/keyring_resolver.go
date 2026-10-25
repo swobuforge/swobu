@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	keyringcommodity "github.com/zalando/go-keyring"
 )
 
@@ -30,8 +31,8 @@ func (OSKeyringClient) Get(scope, user string) (string, error) {
 }
 
 // StoredSecretResolver resolves secret references against the OS keyring only.
-// Reference kind is the storage authority; fallback selection occurs only while
-// creating a new materialized credential and returns the actual selected kind.
+// Reference kind is the storage authority; file-backed references are handled
+// by FileResolver and never fall through to this backend.
 type StoredSecretResolver struct {
 	client KeyringClient
 }
@@ -45,20 +46,33 @@ func NewStoredSecretResolver(client KeyringClient) StoredSecretResolver {
 
 // ResolveCredential returns the access token stored behind a keyring reference.
 func (r StoredSecretResolver) ResolveCredential(ctx context.Context, providerSpec string, credentialRef string) (string, error) {
+	scope, err := credentialref.NewProviderScope(providerSpec)
+	if err != nil {
+		return "", err
+	}
+	return r.ResolveScopedCredential(ctx, scope, credentialRef)
+}
+
+// ResolveScopedCredential maps stored references through the owner-specific
+// keyring scope while preserving each selected reference's backend authority.
+func (r StoredSecretResolver) ResolveScopedCredential(ctx context.Context, scope credentialref.Scope, credentialRef string) (string, error) {
 	_ = ctx
+	if !scope.Valid() {
+		return "", fmt.Errorf("credential scope is invalid")
+	}
 	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
-	keyName, parseErr := secretCredentialName(providerSpec, ref)
+	keyName, parseErr := scopedSecretCredentialName(scope, ref)
 	if parseErr != nil {
 		return "", parseErr
 	}
-	scope := KeyringScopeForProvider(providerSpec)
+	keyringScope := KeyringScopeForCredential(scope)
 	type lookupResult struct {
 		token string
 		err   error
 	}
 	ch := make(chan lookupResult, 1)
 	go func() {
-		token, err := r.client.Get(scope, keyName)
+		token, err := r.client.Get(keyringScope, keyName)
 		ch <- lookupResult{token: token, err: err}
 	}()
 	var token string
@@ -98,6 +112,55 @@ func KeyringScopeForProvider(providerSpec string) string {
 		spec = "provider"
 	}
 	return keyringNamespace + "/" + spec
+}
+
+// KeyringScopeForCredential maps an explicit owner scope to its storage
+// namespace. Provider scopes retain the historical keyring service names.
+func KeyringScopeForCredential(scope credentialref.Scope) string {
+	if !scope.Valid() {
+		return ""
+	}
+	switch scope.Kind() {
+	case credentialref.ScopeConnection:
+		return keyringNamespace + "/connections/" + scope.Identifier()
+	case credentialref.ScopeProvider:
+		return KeyringScopeForProvider(scope.Identifier())
+	default:
+		return ""
+	}
+}
+
+func scopedSecretCredentialName(scope credentialref.Scope, credentialRef string) (string, error) {
+	if !scope.Valid() {
+		return "", fmt.Errorf("credential scope is invalid")
+	}
+	if scope.Kind() == credentialref.ScopeConnection {
+		name, err := secretCredentialName("", credentialRef)
+		if err != nil || !validConnectionSlot(scope, name) {
+			return "", fmt.Errorf("credential is outside Connection scope")
+		}
+		return name, nil
+	}
+	if scope.Kind() == credentialref.ScopeProvider {
+		name, err := secretCredentialName(scope.Identifier(), credentialRef)
+		if err == nil && strings.HasPrefix(name, "connections/") {
+			return "", fmt.Errorf("Connection credentials require Connection scope")
+		}
+		return name, err
+	}
+	ref := strings.TrimSpace(credentialRef) // swobu:io-string source=boundary
+	if ref != "secret" && !strings.HasPrefix(strings.ToLower(ref), secretCredentialRefPrefix) {
+		return "", fmt.Errorf("keyring resolver does not support credential ref %q", ref)
+	}
+	name, err := secretCredentialName("mcp", ref)
+	if err != nil {
+		return "", err
+	}
+	expected := "mcp/" + scope.Identifier()
+	if name != expected {
+		return "", fmt.Errorf("MCP source credential reference must be scoped to its source ID")
+	}
+	return name, nil
 }
 
 func CanonicalStoredSecretName(providerSpec string) string {

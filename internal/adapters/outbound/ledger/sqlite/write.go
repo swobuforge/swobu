@@ -63,8 +63,12 @@ func insertInvocations(ctx context.Context, tx *sql.Tx, exchange executioneviden
 			return fmt.Errorf("unsupported completed Invocation settlement %T", settled)
 		}
 		values := []any{started.ID().String(), exchange.ID().String(), started.Ordinal(), kind, unixNano(started.StartedAt()), unixNano(settled.SettledAt()), invocation.Duration().Nanoseconds(), settled.Outcome(), settled.Occurrence(), nullableString(failure), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}
+		values = append(values, nil, nil)
 		switch start := started.(type) {
 		case executionevidence.ModelInvocationStarted:
+			if id, revision, bound := start.Model().ConnectionIdentity(); bound {
+				values[24], values[25] = id.String(), strconv.FormatUint(revision, 10)
+			}
 			terminal := settled.(executionevidence.ModelInvocationSettled)
 			usage := terminal.Usage()
 			values[10] = nullableString(start.Model().Route().String())
@@ -80,12 +84,15 @@ func insertInvocations(ctx context.Context, tx *sql.Tx, exchange executioneviden
 			values[20] = tokenValue(usage.CacheReadTokens())
 			values[21] = tokenValue(usage.CacheWriteTokens())
 		case executionevidence.MCPInvocationStarted:
+			if id, revision, bound := start.MCP().ConnectionIdentity(); bound {
+				values[24], values[25] = id.String(), strconv.FormatUint(revision, 10)
+			}
 			values[22] = start.MCP().Source().String()
 			values[23] = start.MCP().Tool().String()
 		default:
 			return fmt.Errorf("unsupported completed Invocation start %T", started)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_invocations(invocation_id,exchange_id,ordinal,kind,started_at_ns,settled_at_ns,duration_ns,outcome,execution_state,failure_class,route_name,target_id,target_version_dec,provider_spec,provider_protocol,provider_model,purpose,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,source_tool_key,tool_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values...); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_invocations(invocation_id,exchange_id,ordinal,kind,started_at_ns,settled_at_ns,duration_ns,outcome,execution_state,failure_class,route_name,target_id,target_version_dec,provider_spec,provider_protocol,provider_model,purpose,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,source_tool_key,tool_key,connection_id,connection_revision_dec) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values...); err != nil {
 			return err
 		}
 	}

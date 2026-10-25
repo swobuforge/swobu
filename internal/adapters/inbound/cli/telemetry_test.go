@@ -71,7 +71,7 @@ func TestRunner_TelemetryCommand_UltraLeanFlow(t *testing.T) {
 func TestRunner_TelemetryInspectPrintsDaemonReport(t *testing.T) {
 	report := `{"schema":1,"install_id":"0123456789abcdef0123456789abcdef","runtime":{"version":"0.1.0","os":"linux","arch":"amd64"},"installation_age_bucket":"1_7d","traffic":[],"overflow_count":1}`
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/_swobu/telemetry-report" || request.Method != http.MethodGet {
+		if request.URL.Path != "/api/v1/telemetry/report" || request.Method != http.MethodGet {
 			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
 		}
 		_, _ = response.Write([]byte(report))

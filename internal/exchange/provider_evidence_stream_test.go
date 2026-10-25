@@ -3,10 +3,12 @@ package exchange
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/swobuforge/swobu/internal/accounting"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/execution"
@@ -15,6 +17,41 @@ import (
 type failingAfterTerminalStream struct {
 	events []canonical.Event
 	index  int
+}
+
+func TestProviderTerminalUsageSettlesPinnedQuoteBeforeClientClose(t *testing.T) {
+	store, err := accounting.Open(filepath.Join(t.TempDir(), "accounting.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote := accounting.Quote{Price: accounting.PriceSnapshot{Provider: "seller", ExternalID: "model", Tariff: "standard", EffectiveAt: 100, Currency: "USD", InputPerMillion: "1", OutputPerMillion: "2"}, TargetID: "target", TargetVersion: 1, AmountCents: 5, InputTokens: 1000000, OutputTokens: 100, QuantityCoverage: "partial"}
+	reservation, err := store.ReserveQuote("coding", "attempt", quote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, output, zero := 1000000, 1000000, 0
+	usage, err := canonical.NewTokenUsage(canonical.TokenUsageParams{InputTokens: &input, OutputTokens: &output, CacheReadTokens: &zero, CacheWriteTokens: &zero, ReasoningTokens: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := canonical.SynthesizeResponseEnvelopeEvents("exchange", canonical.ResponseRef{SwobuID: "response"}, "model", nil, canonical.Completed("stop"), usage)
+	stream := newProviderEvidenceStream(&failingAfterTerminalStream{events: events}, func(outcome execution.Outcome, observed canonical.TokenUsage) {
+		if err := store.SettleUsage("coding", reservation.WindowKey, "attempt", observed, outcome == execution.Succeeded); err != nil {
+			t.Error(err)
+		}
+	})
+	for range events {
+		if _, err := stream.Next(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stream.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	settled := store.Reservations("coding")
+	if len(settled) != 1 || settled[0].AmountCents != 300 || settled[0].State != "settled" || len(store.SettlementCorrections("coding")) != 0 {
+		t.Fatal("client close rewrote provider-observed accounting truth")
+	}
 }
 
 type closeUnblocksNextStream struct {

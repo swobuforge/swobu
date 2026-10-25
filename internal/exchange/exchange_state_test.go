@@ -5,10 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/accounting"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/bedrock"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	"github.com/swobuforge/swobu/internal/carrier"
@@ -25,6 +27,32 @@ import (
 	"github.com/swobuforge/swobu/internal/testkit/canonicaltest"
 	"github.com/swobuforge/swobu/internal/wire"
 )
+
+type fixedPriceEstimator struct{ cents int64 }
+
+func (e fixedPriceEstimator) Estimate(target provider.TargetSnapshot, _ canonical.CanonicalRequest) (accounting.Quote, bool) {
+	return priceQuoteForTarget(target, e.cents), true
+}
+
+type targetPriceEstimator map[string]int64
+
+type quoteEstimatorFunc func(provider.TargetSnapshot, canonical.CanonicalRequest) (accounting.Quote, bool)
+
+func (estimate quoteEstimatorFunc) Estimate(target provider.TargetSnapshot, request canonical.CanonicalRequest) (accounting.Quote, bool) {
+	return estimate(target, request)
+}
+
+func (e targetPriceEstimator) Estimate(target provider.TargetSnapshot, _ canonical.CanonicalRequest) (accounting.Quote, bool) {
+	cents, ok := e[target.TargetID]
+	return priceQuoteForTarget(target, cents), ok
+}
+
+func priceQuoteForTarget(target provider.TargetSnapshot, cents int64) accounting.Quote {
+	return accounting.Quote{
+		Price:    accounting.PriceSnapshot{Provider: target.ProviderSpec, ExternalID: target.Model, Tariff: "standard", EffectiveAt: 100, Currency: "USD", InputPerMillion: "1", OutputPerMillion: "2"},
+		TargetID: target.TargetID, TargetVersion: target.TargetVersion, AmountCents: cents, InputTokens: 100, OutputTokens: 100, QuantityCoverage: "partial",
+	}
+}
 
 type candidateSelectiveRuntime struct {
 	testRuntimeResolver
@@ -326,6 +354,230 @@ func TestReducerAdvancesWithoutRepeatingUnavailableOperation(t *testing.T) {
 	}
 	if next.candidateIndex != 1 || cmd.backend.Target.TargetID != "retry-b" || next.id != active.id+1 {
 		t.Fatalf("fallback attempts = %#v target=%q", tr.nextState.providerCallAttempts, cmd.backend.Target.TargetID)
+	}
+}
+
+func TestProviderFallbackReservesEachAttemptIndependently(t *testing.T) {
+	accountingPath := filepath.Join(t.TempDir(), "accounting.json")
+	accountingStore, err := accounting.Open(accountingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := accountingStore.SetLimit("dev", accounting.Limit{Currency: "USD", AmountCents: 10, Window: "day", Mode: accounting.ModeStopNewBillableWork, UnknownPrice: "reject"}); err != nil {
+		t.Fatal(err)
+	}
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{
+		requestpathTarget(t, "bedrock-primary"),
+		requestpathTarget(t, "openrouter-fallback"),
+	}}
+	prepared := mustBeginContinuity(t, s.input.request)
+	s.prepared = &prepared
+	runner := reducerRuntime()
+	runner.Accounting = accountingStore
+	runner.PriceEstimator = targetPriceEstimator{"bedrock-primary": 3, "openrouter-fallback": 5}
+
+	first, err := advanceProviderExecution(context.Background(), s, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := activeProviderAttempt(t, first.nextState)
+	reservations := accountingStore.Reservations("dev")
+	if len(reservations) != 1 {
+		t.Fatalf("first provider reservation count = %d, want 1", len(reservations))
+	}
+	if reservations[0].AmountCents != 3 || reservations[0].Coverage != accounting.CoverageKnown || reservations[0].State != "reserved" || !strings.Contains(reservations[0].Operation, "bedrock-primary") {
+		t.Fatalf("first provider reservation = %#v", reservations[0])
+	}
+	if reservations[0].Quote == nil || reservations[0].Quote.TargetID != "bedrock-primary" || reservations[0].Quote.QuantityCoverage != "partial" {
+		t.Fatal("provider command lost pinned quote or partial quantity coverage")
+	}
+
+	fallback, err := reduce(context.Background(), first.nextState, providerCallFailed{
+		attemptID: active.id,
+		failure:   mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("bedrock-primary", 503, "unavailable", ""))),
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations = accountingStore.Reservations("dev")
+	if len(reservations) != 2 {
+		t.Fatalf("fallback reservation count = %d, want 2", len(reservations))
+	}
+	if reservations[0].Operation == reservations[1].Operation {
+		t.Fatalf("fallback reused accounting operation: %#v", reservations)
+	}
+	if reservations[1].Quote == nil || reservations[1].Quote.TargetID != "openrouter-fallback" || reservations[0].Quote.Price.ExternalID == reservations[1].Quote.Price.ExternalID {
+		t.Fatal("fallback reused first target economics")
+	}
+	settleAccountingAttempt(runner, first.nextState, first.command.(callProviderCommand), providerCallFailed{
+		attemptID: active.id,
+		failure:   mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("bedrock-primary", 503, "unavailable", ""))),
+	})
+	fallbackActive := activeProviderAttempt(t, fallback.nextState)
+	settleAccountingAttempt(runner, fallback.nextState, fallback.command.(callProviderCommand), providerIngressReceived{attemptID: fallbackActive.id})
+	if err := accountingStore.SettleUsage("dev", reservations[1].WindowKey, reservations[1].Operation, canonical.NewUnknownTokenUsage(), true); err != nil {
+		t.Fatal(err)
+	}
+	reservations = accountingStore.Reservations("dev")
+	if reservations[0].State != "uncertain" || reservations[0].AmountCents != 3 || reservations[1].State != "uncertain" || reservations[1].AmountCents != 5 {
+		t.Fatalf("fallback settlement provenance = %#v", reservations)
+	}
+	reopened, err := accounting.Open(accountingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted := reopened.Reservations("dev"); len(persisted) != 2 || persisted[0].State != "uncertain" || persisted[1].State != "uncertain" {
+		t.Fatalf("reopened fallback reservations = %#v", persisted)
+	}
+	if !reflect.DeepEqual(reopened.Reservations("dev"), reservations) {
+		t.Fatal("restart changed admitted attempt quotes")
+	}
+	if _, ok := fallback.command.(callProviderCommand); !ok {
+		t.Fatalf("fallback command = %T, want callProviderCommand", fallback.command)
+	}
+}
+
+func TestMismatchedOrInvalidQuoteCannotEmitProviderCommand(t *testing.T) {
+	for _, field := range []string{"target", "generation", "provider", "model", "coverage", "rate"} {
+		t.Run(field, func(t *testing.T) {
+			store, err := accounting.Open(filepath.Join(t.TempDir(), "accounting.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := reducerTestState(t)
+			state.route = routePlan{targets: []routing.Target{requestpathTarget(t, "quote-target")}}
+			prepared := mustBeginContinuity(t, state.input.request)
+			state.prepared = &prepared
+			runner := reducerRuntime()
+			runner.Accounting = store
+			runner.PriceEstimator = quoteEstimatorFunc(func(target provider.TargetSnapshot, _ canonical.CanonicalRequest) (accounting.Quote, bool) {
+				quote := priceQuoteForTarget(target, 3)
+				switch field {
+				case "target":
+					quote.TargetID = "other"
+				case "generation":
+					quote.TargetVersion++
+				case "provider":
+					quote.Price.Provider = "other"
+				case "model":
+					quote.Price.ExternalID = "other"
+				case "coverage":
+					quote.QuantityCoverage = "invented"
+				case "rate":
+					quote.Price.InputPerMillion = "NaN"
+				}
+				return quote, true
+			})
+			outcome, err := advanceProviderExecution(t.Context(), state, runner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, ok := outcome.nextState.phase.(failedPhase)
+			var problem canonical.Error
+			if outcome.command != nil || !ok || !errors.As(failed.problem, &problem) || problem.Code != canonical.ErrorCodeCostUnavailable || len(store.Reservations("dev")) != 0 {
+				t.Fatal("invalid quote issued work or persisted fake price")
+			}
+		})
+	}
+}
+
+func TestUnknownPriceEnforcementDeniesBeforeProviderCommand(t *testing.T) {
+	accountingStore, err := accounting.Open(filepath.Join(t.TempDir(), "accounting.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := accountingStore.SetLimit("dev", accounting.Limit{Currency: "USD", AmountCents: 10, Window: "day", Mode: accounting.ModeStopNewBillableWork, UnknownPrice: "reject"}); err != nil {
+		t.Fatal(err)
+	}
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "unknown-price")}}
+	prepared := mustBeginContinuity(t, s.input.request)
+	s.prepared = &prepared
+	runner := reducerRuntime()
+	runner.Accounting = accountingStore
+
+	outcome, err := advanceProviderExecution(context.Background(), s, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.command != nil {
+		t.Fatalf("unknown-price enforcement emitted command %T", outcome.command)
+	}
+	failed, ok := outcome.nextState.phase.(failedPhase)
+	var problem canonical.Error
+	if !ok || !errors.As(failed.problem, &problem) || problem.Code != canonical.ErrorCodeCostUnavailable {
+		t.Fatalf("phase=%T problem=%v, want COST_UNAVAILABLE failed phase", outcome.nextState.phase, failed.problem)
+	}
+	if reservations := accountingStore.Reservations("dev"); len(reservations) != 0 {
+		t.Fatalf("denied unknown-price request persisted reservations: %#v", reservations)
+	}
+}
+
+func TestUnknownPriceObserveOnlyIssuesCommandWithUnknownCoverage(t *testing.T) {
+	accountingStore, err := accounting.Open(filepath.Join(t.TempDir(), "accounting.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := accountingStore.SetLimit("dev", accounting.Limit{Currency: "USD", AmountCents: 10, Window: "day", Mode: accounting.ModeObserveOnly, UnknownPrice: "reject"}); err != nil {
+		t.Fatal(err)
+	}
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "unknown-price-observe")}}
+	prepared := mustBeginContinuity(t, s.input.request)
+	s.prepared = &prepared
+	runner := reducerRuntime()
+	runner.Accounting = accountingStore
+
+	outcome, err := advanceProviderExecution(context.Background(), s, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := outcome.command.(callProviderCommand); !ok {
+		t.Fatalf("observe-only unknown-price command = %T, want callProviderCommand", outcome.command)
+	}
+	reservations := accountingStore.Reservations("dev")
+	if len(reservations) != 1 || reservations[0].Coverage != accounting.CoverageUnknown || reservations[0].AmountCents != 0 {
+		t.Fatalf("observe-only reservation = %#v", reservations)
+	}
+}
+
+func TestMayHaveExecutedFailureSettlesAccountingAsUncertain(t *testing.T) {
+	accountingStore, err := accounting.Open(filepath.Join(t.TempDir(), "accounting.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := accountingStore.SetLimit("dev", accounting.Limit{Currency: "USD", AmountCents: 10, Window: "day", Mode: accounting.ModeStopNewBillableWork, UnknownPrice: "reject"}); err != nil {
+		t.Fatal(err)
+	}
+	s := reducerTestState(t)
+	s.route = routePlan{targets: []routing.Target{requestpathTarget(t, "uncertain-target")}}
+	prepared := mustBeginContinuity(t, s.input.request)
+	s.prepared = &prepared
+	runner := reducerRuntime()
+	runner.Accounting = accountingStore
+	runner.PriceEstimator = fixedPriceEstimator{cents: 3}
+	started, err := advanceProviderExecution(context.Background(), s, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := activeProviderAttempt(t, started.nextState)
+	if len(accountingStore.Reservations("dev")) != 1 {
+		t.Fatal("provider attempt did not reserve accounting hold")
+	}
+	phase := started.nextState.phase.(callingProviderPhase)
+	settleAccountingAttempt(runner, started.nextState, callProviderCommand{
+		attemptID: active.id,
+		backend:   phase.call.backend,
+		document:  phase.call.document,
+		route:     started.nextState.route.name,
+	}, providerCallFailed{
+		attemptID: active.id,
+		failure:   mayHaveExecuted(provider.Unavailable(canonical.NewBackendError("target-a", 503, "timeout", ""))),
+	})
+	reservations := accountingStore.Reservations("dev")
+	if len(reservations) != 1 || reservations[0].State != "uncertain" || reservations[0].AmountCents != 3 {
+		t.Fatalf("may-have-executed accounting settlement = %#v", reservations)
 	}
 }
 
@@ -939,6 +1191,7 @@ func TestProviderCallAttemptRejectsConsumedAttemptKey(t *testing.T) {
 		providerCallSelection{candidateIndex: 0, requestChoice: providerRequestPreferred},
 		call,
 		nil,
+		runtimeBundle{},
 	); err == nil {
 		t.Fatal("consumed provider attempt key was reissued")
 	}
@@ -1041,7 +1294,7 @@ func requestpathTargetWithProtocol(t *testing.T, id string, rawProtocol string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, ModelFixtureConnection(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1122,7 +1375,7 @@ func TestBedrockMantleOmitsUnsupportedStructuredOutputWithoutFallback(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	mantle, err := routing.NewTarget(targetID, model, messagesProtocol, connection)
+	mantle, err := routing.NewTarget(targetID, model, messagesProtocol, ModelFixtureConnection(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1132,7 +1385,7 @@ func TestBedrockMantleOmitsUnsupportedStructuredOutputWithoutFallback(t *testing
 	firstTier, _ := routing.NewTier([]routing.Target{mantle})
 	secondTier, _ := routing.NewTier([]routing.Target{compatible})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1201,7 +1454,7 @@ func TestResponsesStopSequenceIsOmittedWithoutRouteFallback(t *testing.T) {
 	firstTier, _ := routing.NewTier([]routing.Target{responsesTarget})
 	secondTier, _ := routing.NewTier([]routing.Target{chatTarget})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1310,7 +1563,7 @@ func TestUntypedPreparationFailureDoesNotMakeFallbackEligible(t *testing.T) {
 	firstTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "unmarked-a")})
 	secondTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "must-not-run-b")})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1339,7 +1592,7 @@ func TestExchangeLoadsCheckpointOnceAcrossProviderFallback(t *testing.T) {
 		requestpathTarget(t, "retry-b"),
 	})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1399,7 +1652,7 @@ func TestApplyRoutePlanUsesLineageOrExplicitCacheLocalityNotExchangeID(t *testin
 		requestpathTarget(t, "a"), requestpathTarget(t, "b"), requestpathTarget(t, "c"), requestpathTarget(t, "d"),
 	})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1438,7 +1691,7 @@ func TestExchangeDoesNotExecuteFallbackAfterResponseProjectionFailure(t *testing
 	firstTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "projection-a")})
 	secondTier, _ := routing.NewTier([]routing.Target{requestpathTarget(t, "projection-b")})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{firstTier, secondTier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

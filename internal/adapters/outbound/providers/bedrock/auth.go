@@ -55,12 +55,12 @@ func (k bedrockAuthKind) String() string {
 // resolveBedrockAuth is the only Bedrock authentication selection operation.
 // A credential reference selects bearer authentication. Its absence selects
 // the AWS SDK chain; runtime environment inspection never changes strategy.
-func resolveBedrockAuth(ctx context.Context, credentials providersruntime.CredentialProvider, credentialRef, region string) (resolvedBedrockAuthState, error) {
-	if ref := strings.TrimSpace(credentialRef); ref != "" {
+func resolveBedrockAuth(ctx context.Context, credentials providersruntime.CredentialProvider, target provider.TargetSnapshot, region string) (resolvedBedrockAuthState, error) {
+	if ref := strings.TrimSpace(target.CredentialRef); ref != "" {
 		if credentials == nil {
 			return resolvedBedrockAuthState{}, canonical.BadEndpoint("bedrock API key credential resolver is unavailable")
 		}
-		token, err := credentials.ResolveCredential(ctx, "bedrock", ref)
+		token, err := providersruntime.ResolveTargetCredential(ctx, credentials, target)
 		if err != nil || strings.TrimSpace(token) == "" {
 			return resolvedBedrockAuthState{}, canonical.BadEndpoint("bedrock API key credential could not be resolved")
 		}
@@ -83,14 +83,6 @@ type credentialsProvider struct{ credentials aws.Credentials }
 
 func (p credentialsProvider) Retrieve(context.Context) (aws.Credentials, error) {
 	return p.credentials, nil
-}
-
-func applyBedrockAuth(ctx context.Context, credentials providersruntime.CredentialProvider, credentialRef string, req *http.Request, payload []byte, region string) error {
-	resolved, err := resolveBedrockAuth(ctx, credentials, credentialRef, region)
-	if err != nil {
-		return err
-	}
-	return applyResolvedBedrockAuth(ctx, resolved, req, payload, region)
 }
 
 func applyResolvedBedrockAuth(ctx context.Context, resolved resolvedBedrockAuthState, req *http.Request, payload []byte, region string) error {

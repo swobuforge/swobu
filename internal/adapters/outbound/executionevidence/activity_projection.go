@@ -7,6 +7,7 @@ import (
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	domain "github.com/swobuforge/swobu/internal/domain/executionevidence"
+	"github.com/swobuforge/swobu/internal/ledger"
 )
 
 type ProjectionScopeKind string
@@ -28,6 +29,9 @@ type ActivityTokenUsage struct {
 	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
 }
 type ActivityExchange struct {
+	ConnectionID       string `json:"connection_id,omitempty"`
+	ConnectionRevision uint64 `json:"connection_revision,omitempty"`
+
 	ExchangeID     string              `json:"exchange_id"`
 	AccessID       string              `json:"access_id"`
 	Workspace      string              `json:"workspace"`
@@ -47,12 +51,16 @@ type ActivityExchange struct {
 	TokenUsage     *ActivityTokenUsage `json:"token_usage,omitempty"`
 }
 type ActivityProjection struct {
-	Scope     ProjectionScope    `json:"scope"`
-	Exchanges []ActivityExchange `json:"exchanges"`
+	Scope         ProjectionScope      `json:"scope"`
+	Exchanges     []ActivityExchange   `json:"exchanges"`
+	MCPOperations []MCPOperation       `json:"mcp_operations,omitempty"`
+	History       *ledger.Health       `json:"history,omitempty"`
+	Page          *ledger.ActivityPage `json:"page,omitempty"`
 }
 
 type ProjectionInput struct {
-	Scope ProjectionScope
+	Scope   ProjectionScope
+	History []domain.CompletedExchange
 }
 
 func (s *Store) ProjectActivity(input ProjectionInput) ActivityProjection {
@@ -60,8 +68,31 @@ func (s *Store) ProjectActivity(input ProjectionInput) ActivityProjection {
 	if s == nil {
 		return result
 	}
+	result.MCPOperations = s.mcpOperations(input.Scope)
 	all := append(s.Active(), s.Settled()...)
-	sort.Slice(all, func(i, j int) bool { return all[i].Started.StartedAt().After(all[j].Started.StartedAt()) })
+	seen := make(map[string]bool, len(all))
+	for _, record := range all {
+		seen[record.Started.ID().String()] = true
+	}
+	for _, completed := range input.History {
+		if seen[completed.ID().String()] {
+			continue
+		}
+		settled := completed.Settled()
+		lifecycle := ExchangeLifecycle{Started: completed.Started(), Settled: &settled}
+		for _, invocation := range completed.Invocations() {
+			lifecycle.Invocations = append(lifecycle.Invocations, InvocationLifecycle{Started: invocation.Started(), Settled: invocation.Settled()})
+		}
+		all = append(all, lifecycle)
+		seen[completed.ID().String()] = true
+	}
+	sort.Slice(all, func(first, second int) bool {
+		left, right := all[first].Started, all[second].Started
+		if left.StartedAt().Equal(right.StartedAt()) {
+			return left.ID().String() > right.ID().String()
+		}
+		return left.StartedAt().After(right.StartedAt())
+	})
 	for _, record := range all {
 		if input.Scope.Kind == ProjectionScopeWorkspace && record.Started.Workspace().String() != input.Scope.Workspace {
 			continue
@@ -77,6 +108,8 @@ func (s *Store) ProjectActivity(input ProjectionInput) ActivityProjection {
 				row.Model = m.Model().String()
 				row.Protocol = m.Protocol().String()
 				row.TargetVersion = uint64(m.Version())
+				id, revision, _ := m.ConnectionIdentity()
+				row.ConnectionID, row.ConnectionRevision = id.String(), revision
 				if settled, ok := invocation.Settled.(domain.ModelInvocationSettled); ok {
 					usages = append(usages, settled.Usage())
 				}

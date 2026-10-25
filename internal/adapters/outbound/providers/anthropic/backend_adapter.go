@@ -100,7 +100,7 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	httpReq.Header.Set("anthropic-version", anthropicVersionHeaderValue)
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
@@ -155,7 +155,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 	httpReq.Header.Set("anthropic-version", anthropicVersionHeaderValue)
 	httpReq.Header.Set("Accept-Encoding", "gzip, deflate, zstd")
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target); err != nil {
 		return nil, err
 	}
 	resp, err := e.client.Do(httpReq)
@@ -225,14 +225,14 @@ func validateProviderProtocol(providerID profile.ProviderID, target provider.Tar
 	return nil
 }
 
-func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, providerSpec string, credentialRef string) error {
-	if strings.TrimSpace(credentialRef) == "" { // swobu:io-string source=boundary
+func (e BackendAdapter) applyCredential(ctx context.Context, req *http.Request, target provider.TargetSnapshot) error {
+	if strings.TrimSpace(target.CredentialRef) == "" { // swobu:io-string source=boundary
 		return canonical.BadEndpoint("messages provider credential reference is required")
 	}
 	if e.credentials == nil {
 		return canonical.BadEndpoint("credential resolver is not configured")
 	}
-	token, err := e.credentials.ResolveCredential(ctx, providerSpec, credentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, e.credentials, target)
 	if err != nil {
 		return canonical.BadEndpoint("credential reference could not be resolved")
 	}

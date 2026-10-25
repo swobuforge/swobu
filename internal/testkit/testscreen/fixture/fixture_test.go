@@ -18,8 +18,8 @@ func TestPath_BuildsCanonicalVisualFixturePath(t *testing.T) {
 }
 
 func TestPath_EmptyAssertionUsesDefault(t *testing.T) {
-	got := Path("cockpit__testrenderdefaultworkspace", "")
-	want := filepath.Join("testdata", "cockpit__testrenderdefaultworkspace", "fixture", "default.ansi")
+	got := Path("terminal__testdefaultscreen", "")
+	want := filepath.Join("testdata", "terminal__testdefaultscreen", "fixture", "default.ansi")
 	if got != want {
 		t.Fatalf("Path()=%q want %q", got, want)
 	}

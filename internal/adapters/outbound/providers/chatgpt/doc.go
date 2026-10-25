@@ -10,5 +10,9 @@
 // discovery is provider-owned, advisory, and has no bundled entitlement
 // fallback. Stored subscription credentials resolve bearer and account-routing
 // claims from one snapshot; refresh preserves the last routing-bearing ID token
-// when a replacement token omits workspace routing claims.
+// when a replacement token omits workspace routing claims. Connection-bound
+// snapshots read bundle metadata only from their exact owner. Their immutable
+// slots cannot be refreshed in place; revisioned replacement must precede retry.
+// Explicit refreshed account or regulated-endpoint changes reject before any
+// replacement material is returned; missing routing claims inherit the snapshot.
 package chatgpt

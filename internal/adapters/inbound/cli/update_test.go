@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -66,6 +67,9 @@ func TestRunUpdateRefusesUnmanagedPathBeforeInstaller(t *testing.T) {
 }
 
 func TestRunUpdateInvokesCanonicalUnixInstaller(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix installer contract; Windows update is not managed by this installer")
+	}
 	originalCurrent := currentSwobuVersion
 	currentSwobuVersion = func() string { return "1.2.3" }
 	t.Cleanup(func() { currentSwobuVersion = originalCurrent })
@@ -95,6 +99,9 @@ func TestRunUpdateInvokesCanonicalUnixInstaller(t *testing.T) {
 }
 
 func TestRunUpdateReportsInstallerFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix installer contract; Windows update is not managed by this installer")
+	}
 	originalCurrent := currentSwobuVersion
 	currentSwobuVersion = func() string { return "v1.2.3" }
 	t.Cleanup(func() { currentSwobuVersion = originalCurrent })

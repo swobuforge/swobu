@@ -1,31 +1,37 @@
 package accessstate
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
-	"github.com/swobuforge/swobu/internal/platform/atomicfile"
+	"github.com/swobuforge/swobu/internal/domain/credentialaudience"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
-const SchemaVersion = 1
+// The current Principal document has one closed schema. No historical decoding
+// or startup migration is supported before the first release.
+const SchemaVersion = 3
 
 var (
-	ErrNotFound     = errors.New("access identity or credential not found")
-	ErrUnauthorized = errors.New("access credential is invalid or revoked")
-	ErrRevoked      = errors.New("access identity is revoked")
+	ErrNotFound         = errors.New("access identity or credential not found")
+	ErrUnauthorized     = errors.New("access credential is invalid or revoked")
+	ErrRevoked          = errors.New("access identity is revoked")
+	ErrRevisionConflict = errors.New("access state revision conflict")
 )
 
 type CredentialID struct{ value string }
@@ -53,11 +59,44 @@ type Credential struct {
 }
 
 type Access struct {
-	ID          accessidentity.ID
-	Name        string
-	CreatedAt   time.Time
-	RevokedAt   *time.Time
-	Credentials []Credential
+	// Creation receipt is retained with this identity, including after revocation.
+	// It records local caller intent, not authority or a recoverable retry key.
+	CreationKeyHash    string
+	CreationIntentHash string
+	CreationAudit      *PrincipalCreationAudit
+	LabelAudits        []PrincipalLabelAudit
+	// RevocationReceipts retain hashed local request intents for safe recovery.
+	// Receipt-only publication must not advance the Principal authority revision.
+	RevocationReceipts map[string]string
+	RevocationAudits   map[string]PrincipalRevocationAudit
+	// CredentialRevocationReceipts survive removal of the selected credential.
+	// They are recovery attribution, not active authority or revision truth.
+	CredentialRevocationReceipts map[string]string
+	CredentialRevocationAudits   map[string]CredentialRevocationAudit
+	ID                           accessidentity.ID
+	Name                         string
+	CreatedAt                    time.Time
+	RevokedAt                    *time.Time
+	Credentials                  []Credential
+	Permissions                  []Permission
+	// AuthorityGeneration prevents a later authority lifecycle from reviving
+	// consent issued before revocation. Persisted generations are positive.
+	AuthorityGeneration uint64
+	// PermissionGenerations retain natural-relationship history after removal.
+	// Only publication may stamp these counters; detached snapshots are advisory.
+	PermissionGenerations map[routing.WorkspaceSlug]uint64
+}
+
+// Permission is the natural Workspace-use relationship, independent of issued
+// credentials. Zero ExpiresAt means no deadline; the exact deadline denies use.
+type Permission struct {
+	Workspace routing.WorkspaceSlug
+	// Nil is a Workspace-wide grant; a nonempty list is a closed Service set.
+	Services []routing.ServiceKind
+	// RequestLimits are optional per-Service operation ceilings for this
+	// Principal/Workspace relation, shared by all its credentials.
+	RequestLimits []RequestRateLimit
+	ExpiresAt     time.Time
 }
 
 type IssuedCredential struct {
@@ -71,43 +110,114 @@ type Resolution struct {
 	Workspace    routing.WorkspaceSlug
 }
 
-type Store struct {
-	path         string
-	mu           sync.RWMutex
+// Audience projects the credential's established Workspace scope, never its
+// Principal's other grants. Node credentials have a separate owning lifecycle.
+func (r Resolution) Audience() credentialaudience.Audience {
+	return credentialaudience.Workspace(r.Workspace.String())
+}
+
+// credentialAuthority is a derived immutable view of the latest committed
+// grants. Publication installs it before releasing the owner lock. Effect-time
+// callbacks may read it while mutating Access itself; it is never persisted or
+// used to recover a failed publication.
+type credentialAuthority struct {
 	state        []Access
 	byAccess     map[accessidentity.ID]int
 	byCredential map[CredentialID]Resolution
-	byDigest     map[[32]byte]Resolution
-	now          func() time.Time
-	random       io.Reader
 }
 
-func Open(path string) (*Store, error) {
-	store := &Store{path: path, now: time.Now, random: rand.Reader}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+type Store struct {
+	authority          atomic.Pointer[credentialAuthority]
+	mu                 sync.RWMutex
+	state              []Access
+	permissionReceipts []PermissionReceipt
+	credentialReceipts []CredentialReceipt
+	byAccess           map[accessidentity.ID]int
+	byCredential       map[CredentialID]Resolution
+	byDigest           map[[32]byte]Resolution
+	now                func() time.Time
+	random             io.Reader
+	publish            func([]byte) error
+	rateBuckets        map[requestRateKey]requestRateBucket
+}
+
+// Revision is an opaque digest for optimistic operator mutations.
+func (s *Store) Revision() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.revisionLocked()
+}
+
+func (s *Store) revisionLocked() string {
+	raw, err := encode(s.state)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Store) CheckRevision(expected string) error {
+	if expected == "" || expected == s.Revision() {
+		return nil
+	}
+	return ErrRevisionConflict
+}
+
+// OpenInline loads the Node's Principal/Workspace-grant authority directly
+// from its typed document. The caller owns the sole YAML publication lock.
+// There is deliberately no access.json fallback or startup migration.
+func OpenInline(raw []byte, publish func([]byte) error) (*Store, error) {
+	if publish == nil {
+		return nil, errors.New("Principal authority requires Node publisher")
+	}
+	store := &Store{now: time.Now, random: rand.Reader, publish: publish}
+	if len(raw) == 0 {
 		store.reindex()
 		return store, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read access state: %w", err)
+	var disk diskState
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return nil, fmt.Errorf("secure access state: %w", err)
+	if disk.SchemaVersion != SchemaVersion {
+		return nil, fmt.Errorf("inline principals require schema_version %d", SchemaVersion)
 	}
 	state, err := decode(raw)
 	if err != nil {
 		return nil, err
 	}
 	store.state = state
+	store.permissionReceipts = append([]PermissionReceipt(nil), disk.PermissionReceipts...)
+	store.credentialReceipts = disk.CredentialReceipts
 	store.reindex()
 	return store, nil
+}
+
+// ValidateDocument checks the Principal domain schema without allowing any
+// mutation or creating sidecars; used by offline swobu config validate.
+func ValidateDocument(raw []byte) ([]Access, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	return decode(raw)
 }
 
 func (s *Store) List() []Access {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneState(s.state)
+}
+
+// WithReviewSnapshot holds the authority revision while a caller projects its
+// matching detached impact. The callback must not reenter this Store.
+func (s *Store) WithReviewSnapshot(project func(string, []Access) error) error {
+	if s == nil || project == nil {
+		return errors.New("Access review requires a store and projection")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return project(s.revisionLocked(), cloneState(s.state))
 }
 
 func (s *Store) Create(name string, workspace routing.WorkspaceSlug) (Access, IssuedCredential, error) {
@@ -125,14 +235,16 @@ func (s *Store) Create(name string, workspace routing.WorkspaceSlug) (Access, Is
 	if err != nil {
 		return Access{}, IssuedCredential{}, err
 	}
-	access := Access{ID: id, Name: name, CreatedAt: s.now().UTC(), Credentials: []Credential{credential.Credential}}
+	access := Access{ID: id, Name: name, CreatedAt: s.now().UTC(), Credentials: []Credential{credential.Credential}, Permissions: []Permission{{Workspace: workspace}}}
 	candidate := append(cloneState(s.state), access)
 	if err := s.commit(candidate); err != nil {
 		return Access{}, IssuedCredential{}, err
 	}
-	return cloneAccess(access), credential, nil
+	return cloneAccess(s.state[s.byAccess[id]]), credential, nil
 }
 
+// IssueCredential issues into an existing, currently active grant.
+// Credential issuance never creates or broadens Workspace permission.
 func (s *Store) IssueCredential(id accessidentity.ID, workspace routing.WorkspaceSlug) (IssuedCredential, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -142,6 +254,9 @@ func (s *Store) IssueCredential(id accessidentity.ID, workspace routing.Workspac
 	}
 	if s.state[index].RevokedAt != nil {
 		return IssuedCredential{}, ErrRevoked
+	}
+	if !permissionAllows(s.state[index], workspace, s.now()) {
+		return IssuedCredential{}, ErrUnauthorized
 	}
 	issued, err := s.newCredential(workspace)
 	if err != nil {
@@ -166,17 +281,108 @@ func (s *Store) Authenticate(token string) (Resolution, error) {
 	if !ok {
 		return Resolution{}, ErrUnauthorized
 	}
-	return resolution, nil
-}
-
-func (s *Store) ResolveCredential(id CredentialID) (Resolution, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	resolution, ok := s.byCredential[id]
-	if !ok {
+	if index, exists := s.byAccess[resolution.AccessID]; !exists || !permissionAllows(s.state[index], resolution.Workspace, s.now()) {
 		return Resolution{}, ErrUnauthorized
 	}
 	return resolution, nil
+}
+
+// ResolveCredential reads the latest committed credential authority without
+// reentering the owner's publication mutex. It grants no transport authority.
+func (s *Store) ResolveCredential(id CredentialID) (Resolution, error) {
+	snapshot := s.authority.Load()
+	if snapshot == nil {
+		return Resolution{}, ErrUnauthorized
+	}
+	resolution, ok := snapshot.byCredential[id]
+	if !ok {
+		return Resolution{}, ErrUnauthorized
+	}
+	index, exists := snapshot.byAccess[resolution.AccessID]
+	if !exists || !permissionAllows(snapshot.state[index], resolution.Workspace, s.now()) {
+		return Resolution{}, ErrUnauthorized
+	}
+	return resolution, nil
+}
+
+// ResolveCredentialForService checks the latest committed grant on every
+// effect, including callbacks running inside an Access mutation. A successful
+// self-revocation completes once; later calls observe the published revocation.
+func (s *Store) ResolveCredentialForService(id CredentialID, service routing.ServiceKind) (Resolution, error) {
+	if _, err := routing.ParseServiceKind(string(service)); err != nil {
+		return Resolution{}, ErrUnauthorized
+	}
+	snapshot := s.authority.Load()
+	if snapshot == nil {
+		return Resolution{}, ErrUnauthorized
+	}
+	resolution, ok := snapshot.byCredential[id]
+	if !ok {
+		return Resolution{}, ErrUnauthorized
+	}
+	index, exists := snapshot.byAccess[resolution.AccessID]
+	if !exists || snapshot.state[index].RevokedAt != nil || !permissionAllowsService(snapshot.state[index], resolution.Workspace, service, s.now()) {
+		return Resolution{}, ErrUnauthorized
+	}
+	return resolution, nil
+}
+
+// GrantPermission changes Workspace authority without issuing a credential.
+func (s *Store) GrantPermission(id accessidentity.ID, workspace routing.WorkspaceSlug) error {
+	return s.GrantPermissionAtRevision(id, workspace, "")
+}
+
+// GrantPermissionAtRevision admits the reviewed state under the same lock as
+// authority publication. Empty revision is reserved for internal lifecycle work;
+// the operator transport requires a strong precondition before entering here.
+func (s *Store) GrantPermissionAtRevision(id accessidentity.ID, workspace routing.WorkspaceSlug, expected string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected != "" && expected != s.revisionLocked() {
+		return ErrRevisionConflict
+	}
+	index, ok := s.byAccess[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if s.state[index].RevokedAt != nil {
+		return ErrRevoked
+	}
+	if hasPermission(s.state[index], workspace) {
+		return nil
+	}
+	candidate := cloneState(s.state)
+	candidate[index].Permissions = append(candidate[index].Permissions, Permission{Workspace: workspace})
+	return s.commit(candidate)
+}
+
+// RevokePermission removes Workspace authority but preserves credential
+// metadata and plaintext irrecoverability for explicit credential lifecycle.
+func (s *Store) RevokePermission(id accessidentity.ID, workspace routing.WorkspaceSlug) error {
+	return s.RevokePermissionAtRevision(id, workspace, "")
+}
+
+// RevokePermissionAtRevision checks consent before any mutation while holding
+// the authority store lock, including no-op and already-absent permissions.
+func (s *Store) RevokePermissionAtRevision(id accessidentity.ID, workspace routing.WorkspaceSlug, expected string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected != "" && expected != s.revisionLocked() {
+		return ErrRevisionConflict
+	}
+	index, ok := s.byAccess[id]
+	if !ok {
+		return ErrNotFound
+	}
+	candidate := cloneState(s.state)
+	permissions := candidate[index].Permissions[:0]
+	for _, current := range candidate[index].Permissions {
+		if current.Workspace != workspace {
+			permissions = append(permissions, current)
+		}
+	}
+	candidate[index].Permissions = permissions
+	return s.commit(candidate)
 }
 
 func (s *Store) RevokeCredential(accessID accessidentity.ID, credentialID CredentialID) (bool, error) {
@@ -217,10 +423,11 @@ func (s *Store) RevokeAccess(id accessidentity.ID) (bool, error) {
 	now := s.now().UTC()
 	candidate[index].RevokedAt = &now
 	candidate[index].Credentials = nil
+	candidate[index].Permissions = nil
 	return true, s.commit(candidate)
 }
 
-// RevokeWorkspace removes every credential rooted in a destroyed Workspace.
+// RevokeWorkspace removes every credential and permission rooted in a destroyed Workspace.
 // The Access identity remains so historical attribution stays resolvable.
 func (s *Store) RevokeWorkspace(workspace routing.WorkspaceSlug) (bool, error) {
 	s.mu.Lock()
@@ -237,28 +444,15 @@ func (s *Store) RevokeWorkspace(workspace routing.WorkspaceSlug) (bool, error) {
 			credentials = append(credentials, credential)
 		}
 		candidate[index].Credentials = credentials
-	}
-	if !removed {
-		return false, nil
-	}
-	return true, s.commit(candidate)
-}
-
-func (s *Store) ReconcileWorkspaces(config routing.Config) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	candidate := cloneState(s.state)
-	removed := false
-	for index := range candidate {
-		credentials := candidate[index].Credentials[:0]
-		for _, credential := range candidate[index].Credentials {
-			if _, ok := config.Workspace(credential.Workspace); !ok {
+		permissions := candidate[index].Permissions[:0]
+		for _, permission := range candidate[index].Permissions {
+			if permission.Workspace == workspace {
 				removed = true
 				continue
 			}
-			credentials = append(credentials, credential)
+			permissions = append(permissions, permission)
 		}
-		candidate[index].Credentials = credentials
+		candidate[index].Permissions = permissions
 	}
 	if !removed {
 		return false, nil
@@ -321,15 +515,74 @@ func validateName(raw string) (string, error) {
 }
 
 func (s *Store) commit(candidate []Access) error {
-	raw, err := encode(candidate)
+	return s.commitWithPermissionReceipts(candidate, s.permissionReceipts)
+}
+
+func (s *Store) commitWithPermissionReceipts(candidate []Access, receipts []PermissionReceipt) error {
+	return s.commitWithReceipts(candidate, receipts, s.credentialReceipts)
+}
+
+func (s *Store) commitWithReceipts(candidate []Access, receipts []PermissionReceipt, credentialReceipts []CredentialReceipt) error {
+	candidate = cloneState(candidate)
+	for index := range candidate {
+		var previous Access
+		if previousIndex, exists := s.byAccess[candidate[index].ID]; exists {
+			previous = s.state[previousIndex]
+		}
+		if err := stampPermissionGenerations(previous, &candidate[index]); err != nil {
+			return err
+		}
+		generation := uint64(0)
+		changed := true
+		if previousIndex, exists := s.byAccess[candidate[index].ID]; exists {
+			previous := s.state[previousIndex]
+			generation = previous.AuthorityGeneration
+			current := candidate[index]
+			current.AuthorityGeneration = generation
+			previous.CreationAudit = nil
+			current.CreationAudit = nil
+			previous.LabelAudits = nil
+			current.LabelAudits = nil
+			previous.RevocationReceipts = nil
+			current.RevocationReceipts = nil
+			previous.RevocationAudits = nil
+			current.RevocationAudits = nil
+			previous.CredentialRevocationReceipts = nil
+			current.CredentialRevocationReceipts = nil
+			previous.CredentialRevocationAudits = nil
+			current.CredentialRevocationAudits = nil
+			before, err := encode([]Access{previous})
+			if err != nil {
+				return err
+			}
+			after, err := encode([]Access{current})
+			if err != nil {
+				return err
+			}
+			changed = !bytes.Equal(before, after)
+		}
+		if changed {
+			if generation == ^uint64(0) {
+				return errors.New("access authority generation exhausted")
+			}
+			generation++
+		}
+		// Supplied snapshots cannot roll back or manufacture generation. Stamp
+		// the candidate only; failed publication retains the original counter.
+		candidate[index].AuthorityGeneration = generation
+	}
+	raw, err := encodeDocument(candidate, receipts, credentialReceipts)
 	if err != nil {
 		return err
 	}
-	if err := atomicfile.Replace(s.path, raw, 0o600); err != nil {
-		return fmt.Errorf("persist access state: %w", err)
+	if err := s.publish(raw); err != nil {
+		return fmt.Errorf("publish Principal authority: %w", err)
 	}
 	s.state = candidate
+	s.permissionReceipts = receipts
+	s.credentialReceipts = credentialReceipts
 	s.reindex()
+	s.pruneRequestRateBuckets()
 	return nil
 }
 
@@ -348,18 +601,39 @@ func (s *Store) reindex() {
 			s.byDigest[credential.Digest] = resolution
 		}
 	}
+	s.authority.Store(&credentialAuthority{state: cloneState(s.state), byAccess: s.byAccess, byCredential: s.byCredential})
 }
 
 type diskState struct {
-	SchemaVersion int          `json:"schema_version"`
-	Access        []diskAccess `json:"access"`
+	CredentialReceipts []CredentialReceipt `json:"credential_receipts,omitempty"`
+	SchemaVersion      int                 `json:"schema_version"`
+	Access             []diskAccess        `json:"access"`
+	PermissionReceipts []PermissionReceipt `json:"permission_receipts,omitempty"`
 }
 type diskAccess struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CreatedAt   time.Time        `json:"created_at"`
-	RevokedAt   *time.Time       `json:"revoked_at,omitempty"`
-	Credentials []diskCredential `json:"credentials"`
+	LabelAudits                  []PrincipalLabelAudit                `json:"label_audits,omitempty"`
+	CreationAudit                *PrincipalCreationAudit              `json:"creation_audit,omitempty"`
+	CredentialRevocationAudits   map[string]CredentialRevocationAudit `json:"credential_revocation_audits,omitempty"`
+	RevocationAudits             map[string]PrincipalRevocationAudit  `json:"revocation_audits,omitempty"`
+	CredentialRevocationReceipts map[string]string                    `json:"credential_revocation_receipts,omitempty"`
+	RevocationReceipts           map[string]string                    `json:"revocation_receipts,omitempty"`
+	CreationKeyHash              string                               `json:"creation_key_hash,omitempty"`
+	CreationIntentHash           string                               `json:"creation_intent_hash,omitempty"`
+	PermissionGenerations        map[string]uint64                    `json:"permission_generations,omitempty"`
+	AuthorityGeneration          uint64                               `json:"authority_generation,omitempty"`
+	ID                           string                               `json:"id"`
+	Name                         string                               `json:"name"`
+	CreatedAt                    time.Time                            `json:"created_at"`
+	RevokedAt                    *time.Time                           `json:"revoked_at,omitempty"`
+	Credentials                  []diskCredential                     `json:"credentials"`
+	Permissions                  []diskPermission                     `json:"permissions"`
+}
+
+type diskPermission struct {
+	Workspace     string                `json:"workspace"`
+	Services      []routing.ServiceKind `json:"services,omitempty"`
+	RequestLimits []RequestRateLimit    `json:"request_limits,omitempty"`
+	ExpiresAt     *time.Time            `json:"expires_at,omitempty"`
 }
 type diskCredential struct {
 	ID        string    `json:"id"`
@@ -368,10 +642,41 @@ type diskCredential struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func encode(state []Access) ([]byte, error) {
-	disk := diskState{SchemaVersion: SchemaVersion, Access: make([]diskAccess, 0, len(state))}
+func encode(state []Access, receipts ...[]PermissionReceipt) ([]byte, error) {
+	var permissionReceipts []PermissionReceipt
+	if len(receipts) > 0 {
+		permissionReceipts = receipts[0]
+	}
+	return encodeDocument(state, permissionReceipts, nil)
+}
+
+func encodeDocument(state []Access, permissions []PermissionReceipt, credentials []CredentialReceipt) ([]byte, error) {
+	disk := diskState{SchemaVersion: SchemaVersion, Access: make([]diskAccess, 0, len(state)), PermissionReceipts: permissions, CredentialReceipts: credentials}
 	for _, access := range state {
-		entry := diskAccess{ID: access.ID.String(), Name: access.Name, CreatedAt: access.CreatedAt, RevokedAt: access.RevokedAt, Credentials: make([]diskCredential, 0, len(access.Credentials))}
+		entry := diskAccess{ID: access.ID.String(), Name: access.Name, CreatedAt: access.CreatedAt, RevokedAt: access.RevokedAt, Credentials: make([]diskCredential, 0, len(access.Credentials)), Permissions: make([]diskPermission, 0, len(access.Permissions))}
+		entry.AuthorityGeneration = access.AuthorityGeneration
+		entry.CreationKeyHash = access.CreationKeyHash
+		entry.CreationIntentHash = access.CreationIntentHash
+		entry.CreationAudit = access.CreationAudit
+		entry.LabelAudits = access.LabelAudits
+		entry.RevocationReceipts = access.RevocationReceipts
+		entry.RevocationAudits = access.RevocationAudits
+		entry.CredentialRevocationReceipts = access.CredentialRevocationReceipts
+		entry.CredentialRevocationAudits = access.CredentialRevocationAudits
+		if len(access.PermissionGenerations) != 0 {
+			entry.PermissionGenerations = make(map[string]uint64, len(access.PermissionGenerations))
+			for workspace, generation := range access.PermissionGenerations {
+				entry.PermissionGenerations[workspace.String()] = generation
+			}
+		}
+		for _, permission := range access.Permissions {
+			persisted := diskPermission{Workspace: permission.Workspace.String(), Services: permission.Services, RequestLimits: permission.RequestLimits}
+			if !permission.ExpiresAt.IsZero() {
+				expires := permission.ExpiresAt.UTC()
+				persisted.ExpiresAt = &expires
+			}
+			entry.Permissions = append(entry.Permissions, persisted)
+		}
 		for _, credential := range access.Credentials {
 			entry.Credentials = append(entry.Credentials, diskCredential{ID: credential.ID.String(), Digest: base64.RawURLEncoding.EncodeToString(credential.Digest[:]), Workspace: credential.Workspace.String(), CreatedAt: credential.CreatedAt})
 		}
@@ -397,11 +702,21 @@ func decode(raw []byte) ([]Access, error) {
 	if disk.SchemaVersion != SchemaVersion {
 		return nil, fmt.Errorf("unsupported access state schema version %d", disk.SchemaVersion)
 	}
+	if err := validatePermissionReceipts(disk.PermissionReceipts); err != nil {
+		return nil, fmt.Errorf("decode access state: %w", err)
+	}
+	if err := validateCredentialReceipts(disk.CredentialReceipts); err != nil {
+		return nil, fmt.Errorf("decode access state: %w", err)
+	}
 	state := make([]Access, 0, len(disk.Access))
 	seenAccess := map[accessidentity.ID]struct{}{}
 	seenCredential := map[CredentialID]struct{}{}
 	seenDigest := map[[32]byte]struct{}{}
+	seenCreationKeys := map[string]bool{}
 	for _, entry := range disk.Access {
+		if entry.Permissions == nil {
+			return nil, errors.New("decode access state: current permissions array required")
+		}
 		id, err := accessidentity.RestoreManaged(entry.ID)
 		if err != nil {
 			return nil, fmt.Errorf("decode access ID: %w", err)
@@ -418,6 +733,106 @@ func decode(raw []byte) ([]Access, error) {
 			return nil, errors.New("decode access state: created_at is required")
 		}
 		access := Access{ID: id, Name: name, CreatedAt: entry.CreatedAt, RevokedAt: entry.RevokedAt}
+		if entry.CreationKeyHash != "" || entry.CreationIntentHash != "" {
+			for _, value := range []string{entry.CreationKeyHash, entry.CreationIntentHash} {
+				decoded, err := hex.DecodeString(value)
+				if err != nil || len(decoded) != sha256.Size || value != strings.ToLower(value) {
+					return nil, errors.New("decode access state: invalid Principal creation receipt")
+				}
+			}
+			if seenCreationKeys[entry.CreationKeyHash] {
+				return nil, errors.New("decode access state: duplicate Principal creation receipt")
+			}
+			seenCreationKeys[entry.CreationKeyHash] = true
+			access.CreationKeyHash, access.CreationIntentHash = entry.CreationKeyHash, entry.CreationIntentHash
+		}
+		if entry.AuthorityGeneration == 0 {
+			return nil, errors.New("decode access state: Principal authority generation is required")
+		}
+		access.AuthorityGeneration = entry.AuthorityGeneration
+		if err := validatePrincipalCreationAudit(access, entry.CreationAudit); err != nil {
+			return nil, err
+		}
+		access.CreationAudit = entry.CreationAudit
+		if err := validatePrincipalLabelAudits(entry.ID, entry.AuthorityGeneration, entry.LabelAudits); err != nil {
+			return nil, err
+		}
+		access.LabelAudits = entry.LabelAudits
+		if len(entry.CredentialRevocationReceipts) != 0 {
+			access.CredentialRevocationReceipts = make(map[string]string, len(entry.CredentialRevocationReceipts))
+			for key, intent := range entry.CredentialRevocationReceipts {
+				for _, value := range []string{key, intent} {
+					decoded, err := hex.DecodeString(value)
+					if err != nil || len(decoded) != sha256.Size || value != strings.ToLower(value) {
+						return nil, errors.New("decode access state: invalid credential revocation receipt")
+					}
+				}
+				access.CredentialRevocationReceipts[key] = intent
+			}
+		}
+		if len(entry.RevocationReceipts) != 0 {
+			if entry.RevokedAt == nil {
+				return nil, errors.New("decode access state: revocation receipt requires revoked identity")
+			}
+			access.RevocationReceipts = make(map[string]string, len(entry.RevocationReceipts))
+			for key, intent := range entry.RevocationReceipts {
+				for _, value := range []string{key, intent} {
+					decoded, err := hex.DecodeString(value)
+					if err != nil || len(decoded) != sha256.Size || value != strings.ToLower(value) {
+						return nil, errors.New("decode access state: invalid Principal revocation receipt")
+					}
+				}
+				access.RevocationReceipts[key] = intent
+			}
+		}
+		if err := validatePrincipalRevocationAudits(entry.ID, entry.RevocationReceipts, entry.RevocationAudits); err != nil {
+			return nil, err
+		}
+		access.RevocationAudits = entry.RevocationAudits
+		if err := validateCredentialRevocationAudits(entry.ID, entry.CredentialRevocationReceipts, entry.CredentialRevocationAudits); err != nil {
+			return nil, err
+		}
+		access.CredentialRevocationAudits = entry.CredentialRevocationAudits
+		if len(entry.PermissionGenerations) != 0 {
+			access.PermissionGenerations = make(map[routing.WorkspaceSlug]uint64, len(entry.PermissionGenerations))
+			for rawWorkspace, generation := range entry.PermissionGenerations {
+				workspace, err := routing.ParseWorkspaceSlug(rawWorkspace)
+				if err != nil || generation == 0 {
+					return nil, errors.New("decode permission generation: canonical Workspace and positive generation required")
+				}
+				access.PermissionGenerations[workspace] = generation
+			}
+		}
+		for _, persisted := range entry.Permissions {
+			workspace, err := routing.ParseWorkspaceSlug(persisted.Workspace)
+			if err != nil {
+				return nil, fmt.Errorf("decode permission workspace: %w", err)
+			}
+			if hasPermission(access, workspace) {
+				return nil, errors.New("decode access state: duplicate permission Workspace")
+			}
+			services, err := canonicalServices(persisted.Services)
+			if err != nil {
+				return nil, fmt.Errorf("decode permission: %w", err)
+			}
+			// Persisted restricted grants must remain canonical. Otherwise two
+			// equivalent texts can have different reviewer intent fingerprints.
+			if services != nil && !slices.Equal(services, persisted.Services) {
+				return nil, errors.New("decode permission: Services must be in canonical order")
+			}
+			limits, err := canonicalRequestRates(persisted.RequestLimits, services)
+			if err != nil || (limits != nil && !slices.Equal(limits, persisted.RequestLimits)) {
+				return nil, errors.New("decode permission: invalid or noncanonical request limits")
+			}
+			permission := Permission{Workspace: workspace, Services: services, RequestLimits: limits}
+			if persisted.ExpiresAt != nil {
+				if persisted.ExpiresAt.IsZero() {
+					return nil, errors.New("decode permission: expiry must not be zero")
+				}
+				permission.ExpiresAt = persisted.ExpiresAt.UTC()
+			}
+			access.Permissions = append(access.Permissions, permission)
+		}
 		if entry.RevokedAt != nil && len(entry.Credentials) != 0 {
 			return nil, errors.New("decode access state: revoked identity has credentials")
 		}
@@ -461,11 +876,83 @@ func cloneState(state []Access) []Access {
 	}
 	return out
 }
+
+func clonePermission(permission Permission) Permission {
+	permission.Services = append([]routing.ServiceKind(nil), permission.Services...)
+	permission.RequestLimits = append([]RequestRateLimit(nil), permission.RequestLimits...)
+	return permission
+}
+
 func cloneAccess(access Access) Access {
+	access.LabelAudits = append([]PrincipalLabelAudit(nil), access.LabelAudits...)
+	if access.CreationAudit != nil {
+		audit := *access.CreationAudit
+		access.CreationAudit = &audit
+	}
+	if access.CredentialRevocationAudits != nil {
+		audits := make(map[string]CredentialRevocationAudit, len(access.CredentialRevocationAudits))
+		for key, audit := range access.CredentialRevocationAudits {
+			audits[key] = audit
+		}
+		access.CredentialRevocationAudits = audits
+	}
+	if access.RevocationAudits != nil {
+		audits := make(map[string]PrincipalRevocationAudit, len(access.RevocationAudits))
+		for key, audit := range access.RevocationAudits {
+			audit.Workspaces = append([]string{}, audit.Workspaces...)
+			audits[key] = audit
+		}
+		access.RevocationAudits = audits
+	}
+	if access.CredentialRevocationReceipts != nil {
+		receipts := make(map[string]string, len(access.CredentialRevocationReceipts))
+		for key, intent := range access.CredentialRevocationReceipts {
+			receipts[key] = intent
+		}
+		access.CredentialRevocationReceipts = receipts
+	}
+	if access.RevocationReceipts != nil {
+		receipts := make(map[string]string, len(access.RevocationReceipts))
+		for key, intent := range access.RevocationReceipts {
+			receipts[key] = intent
+		}
+		access.RevocationReceipts = receipts
+	}
+	if access.PermissionGenerations != nil {
+		generations := make(map[routing.WorkspaceSlug]uint64, len(access.PermissionGenerations))
+		for workspace, generation := range access.PermissionGenerations {
+			generations[workspace] = generation
+		}
+		access.PermissionGenerations = generations
+	}
 	access.Credentials = append([]Credential(nil), access.Credentials...)
+	access.Permissions = append([]Permission(nil), access.Permissions...)
+	for i := range access.Permissions {
+		access.Permissions[i] = clonePermission(access.Permissions[i])
+	}
 	if access.RevokedAt != nil {
 		value := *access.RevokedAt
 		access.RevokedAt = &value
 	}
 	return access
+}
+
+func hasPermission(access Access, workspace routing.WorkspaceSlug) bool {
+	for _, current := range access.Permissions {
+		if current.Workspace == workspace {
+			return true
+		}
+	}
+	return false
+}
+
+// permissionAllows checks time at each authorization boundary, not at startup
+// or index construction. Expiry does not erase credentials or mutate revision.
+func permissionAllows(access Access, workspace routing.WorkspaceSlug, now time.Time) bool {
+	for _, permission := range access.Permissions {
+		if permission.Workspace == workspace {
+			return permission.ExpiresAt.IsZero() || now.Before(permission.ExpiresAt)
+		}
+	}
+	return false
 }

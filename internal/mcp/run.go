@@ -20,8 +20,10 @@ const (
 )
 
 type binding struct {
-	source     canonical.ToolKey
-	remoteName string
+	source             canonical.ToolKey
+	remoteName         string
+	connectionID       string
+	connectionRevision string
 }
 
 type sourceResolution struct {
@@ -37,6 +39,7 @@ type sourceResolver func(context.Context, canonical.MCPToolSource, SourceAccess)
 // availability, SDK sessions, execution bindings, the attempt transformation, and
 // remote-effect budgets.
 type Run struct {
+	boundCalls       map[canonical.ToolKey]boundCallBinding
 	sessions         map[canonical.ToolKey]*session
 	bindings         map[canonical.ToolKey]binding
 	attemptTools     map[canonical.ToolKey][]canonical.ToolDeclaration
@@ -44,6 +47,61 @@ type Run struct {
 	callCount        int
 	roundCount       int
 	firstUnavailable error
+}
+
+type boundCallBinding struct {
+	execute func(context.Context, canonical.ToolCallItem) (canonical.CanonicalItem, error)
+}
+
+// WithWorkspaceCalls attaches the selected Workspace catalog to the same
+// execution owner as upstream MCP. It stages all bindings before publishing
+// any, so duplicate names or existing remote bindings cannot partially apply.
+func (r *Run) WithWorkspaceCalls(selected []CatalogTool, execute func(context.Context, CatalogTool, canonical.ToolCallItem) (canonical.CanonicalItem, error)) (*Run, error) {
+	if len(selected) == 0 {
+		return r, nil
+	}
+	if execute == nil {
+		return nil, canonical.InternalError("Workspace MCP execution is unavailable")
+	}
+	if r == nil {
+		r = &Run{}
+	}
+	type localBinding struct {
+		call   boundCallBinding
+		source binding
+	}
+	staged := make(map[canonical.ToolKey]localBinding, len(selected))
+	for _, tool := range selected {
+		key, err := canonical.NewToolKey("workspace/mcp", canonical.ToolKindFunction, tool.Name)
+		if err != nil || tool.Source.IsZero() || tool.SourceID == "" {
+			return nil, canonical.InternalError("Workspace MCP binding is invalid")
+		}
+		if _, exists := r.bindings[key]; exists {
+			return nil, canonical.InternalError("Workspace MCP binding conflicts")
+		}
+		if _, duplicate := staged[key]; duplicate {
+			return nil, canonical.InternalError("Workspace MCP binding repeats a tool")
+		}
+		frozen := tool
+		frozen.Declaration = tool.Declaration.Clone()
+		staged[key] = localBinding{
+			call: boundCallBinding{execute: func(ctx context.Context, call canonical.ToolCallItem) (canonical.CanonicalItem, error) {
+				return execute(ctx, frozen, call)
+			}},
+			source: binding{source: tool.Source, connectionID: tool.ConnectionID, connectionRevision: tool.ConnectionRevision},
+		}
+	}
+	if r.bindings == nil {
+		r.bindings = make(map[canonical.ToolKey]binding)
+	}
+	if r.boundCalls == nil {
+		r.boundCalls = make(map[canonical.ToolKey]boundCallBinding)
+	}
+	for key, bound := range staged {
+		r.boundCalls[key] = bound.call
+		r.bindings[key] = bound.source
+	}
+	return r, nil
 }
 
 // Open resolves every MCP source independently and returns exact canonical
@@ -75,7 +133,7 @@ func openWith(
 	if err := validateLocallyExecutableSources(environment); err != nil {
 		return canonical.CanonicalRequest{}, nil, nil, err
 	}
-	sources := localMCPSources(environment)
+	sources := localMCPMounts(environment)
 	if len(sources) == 0 {
 		return request.Clone(), nil, nil, nil
 	}
@@ -252,7 +310,7 @@ func resolveRemoteSource(
 	}, nil
 }
 
-func localMCPSources(environment canonical.ToolEnvironment) []canonical.MCPToolSource {
+func localMCPMounts(environment canonical.ToolEnvironment) []canonical.MCPToolSource {
 	var sources []canonical.MCPToolSource
 	seen := make(map[canonical.ToolKey]struct{})
 	for _, declaration := range environment.Declarations() {
@@ -337,31 +395,24 @@ func bindingsForCatalog(catalog canonical.MCPToolSource) (
 	return bindings, attemptTools, changes, nil
 }
 
-// Calls purely classifies one completed assistant round. Budget reservation is
-// deliberately separate so reducer evaluation does not hide state mutation.
-func (r *Run) Calls(response canonical.CanonicalResponse) ([]canonical.ToolCallItem, error) {
-	if r == nil {
-		return nil, nil
-	}
-	var remote []canonical.ToolCallItem
-	callerOwned := 0
+// PartitionCalls classifies a completed round without effects or budget
+// reservation. Local calls require exact frozen execution bindings; caller
+// calls retain their canonical identity and order. Provider-owned calls stay
+// in the response but enter neither partition. Exchange settles local work
+// and checkpoints pending caller work before completing mixed-round handoff.
+func (r *Run) PartitionCalls(response canonical.CanonicalResponse) (local, caller []canonical.ToolCallItem) {
 	for _, item := range response.Items() {
 		call, ok := item.ToolCall()
 		if !ok {
 			continue
 		}
-		if _, owned := r.bindings[call.Tool()]; owned {
-			remote = append(remote, call)
-			continue
-		}
-		if callerExecutes(call) {
-			callerOwned++
+		if r.OwnsCall(call.Tool()) {
+			local = append(local, call)
+		} else if callerExecutes(call) {
+			caller = append(caller, call)
 		}
 	}
-	if len(remote) > 0 && callerOwned > 0 {
-		return nil, canonical.NotImplemented("Swobu does not implement assistant rounds that mix remote MCP and caller-owned tool calls")
-	}
-	return remote, nil
+	return local, caller
 }
 
 func callerExecutes(call canonical.ToolCallItem) bool {
@@ -376,6 +427,17 @@ func callerExecutes(call canonical.ToolCallItem) bool {
 	default:
 		return false
 	}
+}
+
+// OwnsCall reports execution ownership from the immutable binding set. It does
+// not authorize or execute an effect; Exchange uses it only to keep local work
+// private while preserving caller/provider-owned stream order.
+func (r *Run) OwnsCall(key canonical.ToolKey) bool {
+	if r == nil {
+		return false
+	}
+	_, owned := r.bindings[key]
+	return owned
 }
 
 func (*Run) String() string   { return "<mcp-run>" }
@@ -459,6 +521,7 @@ func (r *Run) validateAttemptPolicy(attempt canonical.CanonicalRequest) error {
 // PreparedCall is a locally validated MCP execution. Constructing it performs
 // no external I/O; Execute is the boundary that issues tools/call.
 type PreparedCall struct {
+	bound     *boundCallBinding
 	run       *Run
 	call      canonical.ToolCallItem
 	owned     binding
@@ -469,10 +532,14 @@ type PreparedCall struct {
 // ExecutionIdentity returns the opaque source and tool identity for a
 // prepared call. It exposes no endpoint, credential, or input content.
 func (p PreparedCall) ExecutionIdentity() (canonical.ToolKey, canonical.ToolKey, bool) {
-	if p.run == nil || p.active == nil {
+	if p.run == nil || (p.active == nil && p.bound == nil) {
 		return canonical.ToolKey{}, canonical.ToolKey{}, false
 	}
 	return p.owned.source.Clone(), p.call.Tool().Clone(), true
+}
+
+func (p PreparedCall) ConnectionIdentity() (string, string, bool) {
+	return p.owned.connectionID, p.owned.connectionRevision, p.owned.connectionID != "" && p.owned.connectionRevision != ""
 }
 
 // PrepareCall performs binding, session, and input validation before any
@@ -484,6 +551,12 @@ func (r *Run) PrepareCall(call canonical.ToolCallItem) (PreparedCall, error) {
 	owned, ok := r.bindings[call.Tool()]
 	if !ok {
 		return PreparedCall{}, canonical.InternalError("MCP call has no request-owned execution binding")
+	}
+	if attached, ok := r.boundCalls[call.Tool()]; ok {
+		if _, object := call.Input().Object(); !object {
+			return PreparedCall{}, canonical.BadRequest("bound local tool call requires object arguments")
+		}
+		return PreparedCall{run: r, call: call, owned: owned, bound: &attached}, nil
 	}
 	active := r.sessions[owned.source]
 	if active == nil {
@@ -505,6 +578,22 @@ func (r *Run) PrepareCall(call canonical.ToolCallItem) (PreparedCall, error) {
 
 // Execute performs the external MCP tools/call operation for a prepared call.
 func (p PreparedCall) Execute(ctx context.Context) (canonical.CanonicalItem, error) {
+	if err := ctx.Err(); err != nil {
+		return canonical.CanonicalItem{}, err
+	}
+	if p.run != nil && p.bound != nil {
+		ctx, cancel := context.WithTimeout(ctx, ToolCallTimeout)
+		defer cancel()
+		item, err := p.bound.execute(ctx, p.call)
+		if err != nil {
+			return canonical.CanonicalItem{}, err
+		}
+		result, ok := item.ToolResult()
+		if !ok || result.CallID() != p.call.CallID() {
+			return canonical.CanonicalItem{}, projectionError("bound local execution returned an invalid causal result")
+		}
+		return item, nil
+	}
 	if p.run == nil || p.active == nil {
 		return canonical.CanonicalItem{}, canonical.InternalError("MCP prepared call is invalid")
 	}

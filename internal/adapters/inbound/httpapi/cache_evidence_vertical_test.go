@@ -3,15 +3,21 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/swobuforge/swobu/internal/ledger"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	executionevidence "github.com/swobuforge/swobu/internal/adapters/outbound/executionevidence"
 	"github.com/swobuforge/swobu/internal/adapters/outbound/providers/protocolcodec"
 	operatorclient "github.com/swobuforge/swobu/internal/app/operator/client"
 	"github.com/swobuforge/swobu/internal/carrier"
+	"github.com/swobuforge/swobu/internal/connections"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/exchange"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -45,22 +51,22 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 	workspace := cacheEvidenceWorkspace(t)
 	evidenceStore := executionevidence.NewStore(executionevidence.Config{})
 	runtime := cacheEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: &cacheEvidenceTransport{}}
-	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
+	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel,
 		PolicyResolver:    exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		ExecutionEvidence: evidenceStore,
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle("/c/", localAuthorityTestHandler(NewHandler(ingress)))
-	mux.Handle("/_swobu/activity", NewActivityHandler(func(_ *http.Request, scope executionevidence.ProjectionScope) (executionevidence.ActivityProjection, error) {
+	mux.Handle("/workspaces/", localAuthorityTestHandler(NewWorkspaceDataHandler(ingress)))
+	mux.Handle("/api/v1/activity", NewActivityHandler(func(_ *http.Request, scope executionevidence.ProjectionScope, _ ledger.ActivityPageQuery) (executionevidence.ActivityProjection, error) {
 		return evidenceStore.ProjectActivity(executionevidence.ProjectionInput{Scope: scope}), nil
 	}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	firstID := issueCacheEvidenceRequest(t, server, `{"model":"default","instructions":"be concise","input":"one","stream":false}`)
-	issueCacheEvidenceRequest(t, server, `{"model":"default","previous_response_id":"`+firstID+`","instructions":"be expansive","input":"two","stream":false}`)
-	statusResponse, err := server.Client().Get(server.URL + "/_swobu/activity")
+	firstID := issueCacheEvidenceRequest(t, server, `{"model":"cache-route","instructions":"be concise","input":"one","stream":false}`)
+	issueCacheEvidenceRequest(t, server, `{"model":"cache-route","previous_response_id":"`+firstID+`","instructions":"be expansive","input":"two","stream":false}`)
+	statusResponse, err := server.Client().Get(server.URL + "/api/v1/activity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +114,14 @@ func TestCacheEvidenceTraversesExchangeStoreHTTPAndOperatorClient(t *testing.T) 
 func TestClientFamilyTraversesRealHTTPIndependentlyFromProtocolAndProvider(t *testing.T) {
 	workspace := cacheEvidenceWorkspace(t)
 	runtime := cacheEvidenceRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), transport: &cacheEvidenceTransport{}}
-	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{
+	ingress := exchange.NewIngress(imageIncidentWorkspaceLookup{workspace: workspace}, runtime, exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel,
 		PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 	})
-	server := httptest.NewServer(localAuthorityTestHandler(NewHandler(ingress)))
+	server := httptest.NewServer(localAuthorityTestHandler(NewWorkspaceDataHandler(ingress)))
 	defer server.Close()
 
-	issueClientFamilyRequest(t, server, "/c/cache/responses", "Codex/1.2", `{"model":"default","input":"one","stream":false}`)
-	issueClientFamilyRequest(t, server, "/c/cache/chat/completions", "Claude-Code/2.0", `{"model":"default","messages":[{"role":"user","content":"two"}],"stream":false}`)
+	issueClientFamilyRequest(t, server, "/workspaces/cache/responses", "Codex/1.2", `{"model":"cache-route","input":"one","stream":false}`)
+	issueClientFamilyRequest(t, server, "/workspaces/cache/chat/completions", "Claude-Code/2.0", `{"model":"cache-route","messages":[{"role":"user","content":"two"}],"stream":false}`)
 
 }
 
@@ -139,7 +145,7 @@ func issueClientFamilyRequest(t *testing.T, server *httptest.Server, path string
 
 func issueCacheEvidenceRequest(t *testing.T, server *httptest.Server, body string) string {
 	t.Helper()
-	request, _ := http.NewRequest(http.MethodPost, server.URL+"/c/cache/responses", strings.NewReader(body))
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/workspaces/cache/responses", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := server.Client().Do(request)
 	if err != nil {
@@ -167,15 +173,44 @@ func cacheEvidenceWorkspace(t *testing.T) routing.Workspace {
 	providerID, _ := routing.ParseProvider("custom", func(raw string) bool { return raw == "custom" })
 	connection, _ := routing.NewCustomConnection(providerID, "https://example.test/v1", nil)
 	protocol, _ := routing.ParseProtocol("responses", providerID, func(routing.Provider, string) bool { return true })
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, registerHTTPModel(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tier, _ := routing.NewTier([]routing.Target{target})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return workspace
+}
+
+var httpModelFixtures sync.Map
+
+func registerHTTPModel(t *testing.T, upstream routing.Connection) connectionidentity.ID {
+	t.Helper()
+	id, err := connectionidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := connections.NewModelSpec(upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := connections.New(id, "Synthetic HTTP account", spec, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpModelFixtures.Store(id, value)
+	t.Cleanup(func() { httpModelFixtures.Delete(id) })
+	return id
+}
+
+func lookupHTTPModel(id connectionidentity.ID) (connections.Connection, error) {
+	value, ok := httpModelFixtures.Load(id)
+	if !ok {
+		return connections.Connection{}, errors.New("unregistered synthetic HTTP account")
+	}
+	return value.(connections.Connection), nil
 }

@@ -5,24 +5,48 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/swobuforge/swobu/internal/accounting"
+	"github.com/swobuforge/swobu/internal/connections"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/mcp"
 	"github.com/swobuforge/swobu/internal/observation"
 	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/routing"
 )
 
 // runtimeBundle contains the explicit dependencies used by exchange commands.
 type runtimeBundle struct {
-	Runtime           ExecutionRuntime
-	ExecutionEvidence observation.ExecutionEvidenceSink
-	CheckpointStore   continuity.Store
-	ResponseIDs       ResponseIDGenerator
-	Policy            WorkspacePolicy
-	ImageFetcher      provider.ImageFetcher
-	PolicyResolver    WorkspacePolicyResolver
-	TargetBackoff     *targetBackoffLedger
-	TargetExceptions  *targetExceptions
+	ModelConnection func(connectionidentity.ID) (connections.Connection, error)
+	// PublishRefreshedCredential stages immutable material and compares the
+	// captured Connection revision before publishing a replacement binding.
+	PublishRefreshedCredential func(context.Context, provider.TargetSnapshot, string) error
+
+	localToolDelivery      *localToolDelivery
+	Accounting             *accounting.Store
+	PriceEstimator         PriceEstimator
+	Runtime                ExecutionRuntime
+	ExecutionEvidence      observation.ExecutionEvidenceSink
+	CheckpointStore        continuity.Store
+	ResponseIDs            ResponseIDGenerator
+	Policy                 WorkspacePolicy
+	ImageFetcher           provider.ImageFetcher
+	PolicyResolver         WorkspacePolicyResolver
+	TargetBackoff          *targetBackoffLedger
+	TargetExceptions       *targetExceptions
+	WorkspaceToolCatalog   func(context.Context, routing.Workspace) ([]mcp.CatalogTool, error)
+	WorkspaceToolCall      func(context.Context, accessidentity.ID, routing.Workspace, mcp.CatalogTool, canonical.ToolCallItem) (canonical.CanonicalItem, error)
+	selectedWorkspaceTools []mcp.CatalogTool
+	workspaceToolExecute   func(context.Context, mcp.CatalogTool, canonical.ToolCallItem) (canonical.CanonicalItem, error)
+}
+
+// PriceEstimator supplies a target-pinned quote, including economic identity
+// and quantity coverage. A false result remains unknown, never a zero price.
+type PriceEstimator interface {
+	Estimate(provider.TargetSnapshot, canonical.CanonicalRequest) (accounting.Quote, bool)
 }
 
 func allocateResponseID(ctx context.Context, exchangeID string, gen ResponseIDGenerator) (canonical.SwobuResponseID, error) {

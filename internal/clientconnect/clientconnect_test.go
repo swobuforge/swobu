@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,11 +16,11 @@ import (
 
 func testTarget(t *testing.T) Target {
 	t.Helper()
-	target, err := NewTarget("work", "http://127.0.0.1:7926/c/work")
+	target, err := NewTarget("work", "http://127.0.0.1:7926/workspaces/work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return target
+	return target.WithModelID("coding").WithAuthentication("test-principal", "test-workspace-credential")
 }
 
 func codexServiceForPath(path string) *Service {
@@ -37,10 +38,10 @@ func codexServiceForPath(path string) *Service {
 
 func TestNewTargetCanonicalizesWorkspaceURLAndClassifiesLoopback(t *testing.T) {
 	target := testTarget(t)
-	if target.WorkspaceURL() != "http://127.0.0.1:7926/c/work" || !target.IsLocal() {
+	if target.WorkspaceURL() != "http://127.0.0.1:7926/workspaces/work" || !target.IsLocal() {
 		t.Fatalf("target = %#v", target)
 	}
-	remote, err := NewTarget("work", "https://swobu.example/c/work")
+	remote, err := NewTarget("work", "https://swobu.example/workspaces/work")
 	if err != nil || remote.IsLocal() {
 		t.Fatalf("remote target = %#v, %v", remote, err)
 	}
@@ -48,29 +49,30 @@ func TestNewTargetCanonicalizesWorkspaceURLAndClassifiesLoopback(t *testing.T) {
 
 func TestNewTargetAcceptsRootOrV1AndDerivesOneCanonicalSuffix(t *testing.T) {
 	for _, input := range []string{
-		"http://127.0.0.1:7926/c/work",
-		"http://127.0.0.1:7926/c/work/",
-		"http://127.0.0.1:7926/c/work/v1",
-		"http://127.0.0.1:7926/c/work/v1/",
+		"http://127.0.0.1:7926/workspaces/work",
+		"http://127.0.0.1:7926/workspaces/work/",
+		"http://127.0.0.1:7926/workspaces/work/v1",
+		"http://127.0.0.1:7926/workspaces/work/v1/",
 	} {
 		target, err := NewTarget("work", input)
 		if err != nil {
 			t.Fatalf("NewTarget(%q): %v", input, err)
 		}
-		if target.WorkspaceURL() != "http://127.0.0.1:7926/c/work" {
+		if target.WorkspaceURL() != "http://127.0.0.1:7926/workspaces/work" {
 			t.Fatalf("NewTarget(%q) = %#v", input, target)
 		}
 	}
 	for _, suffix := range []string{"/v1/v1", "/models", "/responses", "/messages", "/chat/completions"} {
-		if _, err := NewTarget("work", "http://127.0.0.1:7926/c/work"+suffix); err == nil {
+		if _, err := NewTarget("work", "http://127.0.0.1:7926/workspaces/work"+suffix); err == nil {
 			t.Fatalf("NewTarget accepted operation/version suffix %q", suffix)
 		}
 	}
 	for _, input := range []string{
-		"ftp://127.0.0.1/c/work",
-		"http://user@127.0.0.1/c/work",
-		"http://127.0.0.1/c/work?version=v1",
-		"http://127.0.0.1/c/work#v1",
+		"http://127.0.0.1:7926/c/work", // obsolete endpoint must never be accepted
+		"ftp://127.0.0.1/workspaces/work",
+		"http://user@127.0.0.1/workspaces/work",
+		"http://127.0.0.1/workspaces/work?version=v1",
+		"http://127.0.0.1/workspaces/work#v1",
 	} {
 		if _, err := NewTarget("work", input); err == nil {
 			t.Fatalf("NewTarget accepted non-base address %q", input)
@@ -79,7 +81,7 @@ func TestNewTargetAcceptsRootOrV1AndDerivesOneCanonicalSuffix(t *testing.T) {
 }
 
 func TestCanonicalWorkspaceURLComposesWithAcceptedVersionedAndUnversionedOperations(t *testing.T) {
-	target, err := NewTarget("work", "http://127.0.0.1:7926/c/work/v1")
+	target, err := NewTarget("work", "http://127.0.0.1:7926/workspaces/work/v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,7 @@ func TestCanonicalWorkspaceURLComposesWithAcceptedVersionedAndUnversionedOperati
 			if err != nil {
 				t.Fatal(err)
 			}
-			operationPath := strings.TrimPrefix(parsed.EscapedPath(), "/c/work")
+			operationPath := strings.TrimPrefix(parsed.EscapedPath(), "/workspaces/work")
 			got, err := canonical.NormalizePath(operationPath)
 			if err != nil {
 				t.Fatalf("NormalizePath(%q): %v", operationPath, err)
@@ -111,6 +113,39 @@ func TestCanonicalWorkspaceURLComposesWithAcceptedVersionedAndUnversionedOperati
 				t.Fatalf("NormalizePath(%q) = %q, want %q", operationPath, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCanonicalWorkspaceTargetComposesClientOperationPaths(t *testing.T) {
+	target, err := NewTarget("research", "http://127.0.0.1:7926/workspaces/research/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.WorkspaceURL() != "http://127.0.0.1:7926/workspaces/research" {
+		t.Fatalf("canonical target = %q", target.WorkspaceURL())
+	}
+	for _, operation := range []string{
+		"/v1/responses",
+		"/responses",
+		"/v1/chat/completions",
+		"/chat/completions",
+		"/v1/messages",
+		"/messages",
+		"/v1/models",
+		"/models",
+	} {
+		parsed, err := url.Parse(target.WorkspaceURL() + operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix := "/workspaces/research"
+		path := strings.TrimPrefix(parsed.EscapedPath(), prefix)
+		if strings.Contains(path, "/v1/v1") {
+			t.Fatalf("operation %q double-versioned path %q", operation, parsed.Path)
+		}
+		if _, err := canonical.NormalizePath(path); err != nil {
+			t.Fatalf("NormalizePath(%q): %v", path, err)
+		}
 	}
 }
 
@@ -131,7 +166,7 @@ func TestCodexDeclaresSwobuProviderAndPreservesForeignState(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(path)
 	got := string(raw)
-	for _, want := range []string{`model = "default"`, `model_provider = "swobu"`, `[model_providers.swobu]`, `name = "Swobu"`, `base_url = "http://127.0.0.1:7926/c/work"`, `wire_api = "responses"`, `openai_base_url = "https://legacy.example"`, `[profiles.work]`} {
+	for _, want := range []string{`model = "coding"`, `model_provider = "swobu"`, `[model_providers.swobu]`, `name = "Swobu"`, `base_url = "http://127.0.0.1:7926/workspaces/work"`, `wire_api = "responses"`, `openai_base_url = "https://legacy.example"`, `[profiles.work]`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -140,8 +175,12 @@ func TestCodexDeclaresSwobuProviderAndPreservesForeignState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		t.Fatalf("existing Codex configuration mode changed: %o", info.Mode().Perm())
+	}
+	verifiedPlan, err := service.Plan(context.Background(), ClientCodex, testTarget(t))
+	if err != nil || !verifiedPlan.AlreadyConfigured() {
+		t.Fatalf("mode-only change must not force another Connect apply: %#v, %v", verifiedPlan.Changes, err)
 	}
 }
 
@@ -161,7 +200,7 @@ func TestCodexReusesExistingSwobuProviderAndPreservesMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(path)
-	for _, want := range []string{`model = "default"`, `model_provider = "swobu"`, `name = "Old"`, `base_url = "http://127.0.0.1:7926/c/work"`, `wire_api = "responses"`, `experimental_bearer_token = "keep"`} {
+	for _, want := range []string{`model = "coding"`, `model_provider = "swobu"`, `name = "Old"`, `base_url = "http://127.0.0.1:7926/workspaces/work"`, `wire_api = "responses"`, `experimental_bearer_token = "test-workspace-credential"`} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -175,7 +214,7 @@ func TestCodexRejectsInvalidInputWithoutChange(t *testing.T) {
 		if err := os.WriteFile(path, fixture, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := planCodex(path, testTarget(t)); err == nil {
+		if _, err := planCodex(path, testTarget(t), os.Getenv); err == nil {
 			t.Fatalf("error = %v", err)
 		}
 		got, _ := os.ReadFile(path)
@@ -211,6 +250,7 @@ func TestClaudePlanChangesOnlyOwnedSemanticLeaves(t *testing.T) {
 	_ = json.Unmarshal(got, &after)
 	before["env"].(map[string]any)["ANTHROPIC_BASE_URL"] = testTarget(t).WorkspaceURL()
 	before["env"].(map[string]any)["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+	before["env"].(map[string]any)["ANTHROPIC_AUTH_TOKEN"] = testTarget(t).bearer
 	if !deepJSONEqual(before, after) {
 		t.Fatalf("semantic delta exceeded owned leaves: %s", got)
 	}
@@ -235,7 +275,7 @@ func TestClaudePlanPreservesEverySourceByteOutsideOwnedString(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []byte(strings.Replace(string(original), "https://old.example", testTarget(t).WorkspaceURL(), 1))
-	want = []byte(strings.Replace(string(want), " },", `,"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1" },`, 1))
+	want = []byte(strings.Replace(string(want), " },", `,"ANTHROPIC_AUTH_TOKEN":"test-workspace-credential","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1" },`, 1))
 	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
@@ -269,8 +309,8 @@ func TestClaudeEndpointLeafDeterminesApplyOrReplaceGrammar(t *testing.T) {
 	}{
 		{name: "new leaves apply", raw: []byte(`{"env":{"KEEP":"yes"}}`)},
 		{name: "existing endpoint replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://old.example"}}`), wantOverwrite: true},
-		{name: "disabled discovery replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`), wantOverwrite: true},
-		{name: "enabled discovery and endpoint are unchanged", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"}}`)},
+		{name: "disabled discovery replaces", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/workspaces/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`), wantOverwrite: true},
+		{name: "enabled discovery and endpoint are unchanged", raw: []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/workspaces/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1"}}`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -292,7 +332,7 @@ func TestClaudeEndpointLeafDeterminesApplyOrReplaceGrammar(t *testing.T) {
 func TestClaudeDiscoverySettingUsesExistingReplacementSafeguard(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
-	original := []byte(`{"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/c/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`)
+	original := []byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"test-workspace-credential","KEEP":"yes","ANTHROPIC_BASE_URL":"http://127.0.0.1:7926/workspaces/work","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"0"}}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +414,7 @@ func TestApplyRefusesChangedCodexBackendEvidence(t *testing.T) {
 func TestApplyRefusesChangedCodexSwobuEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(path, []byte("model = \"default\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://old.example\"\nwire_api=\"responses\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("model = \"coding\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://old.example\"\nwire_api=\"responses\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	service := codexServiceForPath(path)
@@ -382,7 +422,7 @@ func TestApplyRefusesChangedCodexSwobuEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer := []byte("model = \"default\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://new.example\"\nwire_api=\"responses\"\n")
+	newer := []byte("model = \"coding\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://new.example\"\nwire_api=\"responses\"\n")
 	if err := os.WriteFile(path, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +446,7 @@ func TestApplySucceedsWhenCodexAlreadyConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	already := []byte("model = \"default\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"http://127.0.0.1:7926/c/work\"\nwire_api=\"responses\"\n")
+	already := []byte("model = \"coding\"\nmodel_provider = \"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"http://127.0.0.1:7926/workspaces/work\"\nwire_api=\"responses\"\n[model_providers.swobu.http_headers]\nAuthorization=\"Bearer test-workspace-credential\"\n")
 	if err := os.WriteFile(path, already, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +462,7 @@ func TestApplySucceedsWhenCodexAlreadyConfigured(t *testing.T) {
 func TestApplyReplansReviewedCodexConfiguredState(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	configured := []byte("model=\"default\"\nmodel_provider=\"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"http://127.0.0.1:7926/c/work\"\nwire_api=\"responses\"\n")
+	configured := []byte("model=\"coding\"\nmodel_provider=\"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"http://127.0.0.1:7926/workspaces/work\"\nwire_api=\"responses\"\n[model_providers.swobu.http_headers]\nAuthorization=\"Bearer test-workspace-credential\"\n")
 	if err := os.WriteFile(path, configured, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +471,7 @@ func TestApplyReplansReviewedCodexConfiguredState(t *testing.T) {
 	if err != nil || !plan.AlreadyConfigured() {
 		t.Fatalf("plan = %#v, %v", plan, err)
 	}
-	newer := []byte("model=\"default\"\nmodel_provider=\"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://new.example\"\nwire_api=\"responses\"\n")
+	newer := []byte("model=\"coding\"\nmodel_provider=\"swobu\"\n[model_providers.swobu]\nname=\"Swobu\"\nbase_url=\"https://new.example\"\nwire_api=\"responses\"\n[model_providers.swobu.http_headers]\nAuthorization=\"Bearer test-workspace-credential\"\n")
 	if err := os.WriteFile(path, newer, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -516,14 +556,14 @@ func TestPlanRejectsForeignConfigurationLargerThan16MiB(t *testing.T) {
 	if err := os.WriteFile(path, oversized, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := planCodex(path, testTarget(t)); err == nil || !strings.Contains(err.Error(), "16 MiB") {
+	if _, err := planCodex(path, testTarget(t), os.Getenv); err == nil || !strings.Contains(err.Error(), "16 MiB") {
 		t.Fatalf("oversized plan error = %v", err)
 	}
 }
 
 func TestPlanRejectsNonRegularForeignConfiguration(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := planCodex(dir, testTarget(t)); err == nil || !strings.Contains(err.Error(), "regular file") {
+	if _, err := planCodex(dir, testTarget(t), os.Getenv); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("directory plan error = %v", err)
 	}
 }
@@ -551,12 +591,12 @@ func TestPlanRejectsRemoteAndMalformedTargetsBeforeInspection(t *testing.T) {
 		homeDir: func() (string, error) { called = true; return t.TempDir(), nil },
 		getenv:  func(string) string { called = true; return "" },
 	}
-	remote, err := NewTarget("work", "https://swobu.example/c/work")
+	remote, err := NewTarget("work", "https://swobu.example/workspaces/work")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, target := range []Target{remote, {}, {workspaceSlug: "work", workspaceURL: "not-canonical", local: true}} {
-		if _, err := service.Plan(context.Background(), ClientCodex, target); err == nil || !strings.Contains(err.Error(), "loopback") {
+		if _, err := service.Plan(context.Background(), ClientCodex, target.WithModelID("coding")); err == nil || !strings.Contains(err.Error(), "loopback") {
 			t.Fatalf("Plan(%#v) error = %v", target, err)
 		}
 	}
@@ -586,7 +626,7 @@ func TestApplyRejectsEveryChangedExportedReviewedField(t *testing.T) {
 			return p
 		}},
 		"target": {mutate: func(p Plan) Plan {
-			p.Target, _ = NewTarget("other", "http://127.0.0.1:7926/c/other")
+			p.Target, _ = NewTarget("other", "http://127.0.0.1:7926/workspaces/other")
 			return p
 		}},
 	}
@@ -628,4 +668,14 @@ func deepJSONEqual(left, right any) bool {
 	l, _ := json.Marshal(left)
 	r, _ := json.Marshal(right)
 	return string(l) == string(r)
+}
+
+func TestAutomaticClientPlanRequiresExplicitModelID(t *testing.T) {
+	target, err := NewTarget("work", "http://127.0.0.1:7926/workspaces/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewService().Plan(context.Background(), ClientCodex, target); err == nil {
+		t.Fatal("client configuration without a requested model ID was accepted")
+	}
 }

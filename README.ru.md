@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> Продукт переходит на веб-интерфейс. Актуальное описание и установку см. в [README на английском](README.md); инструкции по интерфейсу ниже относятся к предыдущей версии.
+
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · **Русский** · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Один endpoint для Claude Code, Codex и других AI-агентов: DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock и другие — с автоматическим роутингом, балансировкой и failover.**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-Установщик запускает Swobu и открывает **Cockpit** — терминальный интерфейс.
+Установщик запускает Swobu и открывает **веб-интерфейс оператора** в браузере.
 
 Добавьте провайдера, создайте route и подключите агента.
 
 ### Подключить агента
 
-Cockpit умеет сам настраивать поддерживаемые клиенты.
+Веб-интерфейс оператора помогает настраивать поддерживаемые клиенты.
 
 Или используйте CLI:
 

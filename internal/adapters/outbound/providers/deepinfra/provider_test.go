@@ -112,12 +112,12 @@ func TestFailFastOverloadIsRejectedBeforeExecutionOnlyForDocumentedResponse(t *t
 		name     string
 		document string
 		err      error
-		want     provider.ExecutionPossibility
+		want     provider.ExecutionDisposition
 	}{
-		{name: "documented overload", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.ExecutionRejectedBeforeExecution},
-		{name: "terminal overload", document: `{}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.ExecutionMayHaveOccurred},
-		{name: "unmarked fail fast", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.ExecutionMayHaveOccurred},
-		{name: "other rate limit", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(canonical.NewBackendError("deepinfra", http.StatusTooManyRequests, `{"error":{"code":"rate_limited"}}`, "")), want: provider.ExecutionMayHaveOccurred},
+		{name: "documented overload", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.DispositionRejectedBeforeExecution},
+		{name: "terminal overload", document: `{}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.DispositionMayHaveOccurred},
+		{name: "unmarked fail fast", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(overloaded), want: provider.DispositionMayHaveOccurred},
+		{name: "other rate limit", document: `{"fail_fast":true}`, err: provider.AttemptMayHaveExecuted(canonical.NewBackendError("deepinfra", http.StatusTooManyRequests, `{"error":{"code":"rate_limited"}}`, "")), want: provider.DispositionMayHaveOccurred},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport := overloadTransport{standard: provider.TransportFunc(func(context.Context, carrier.Document) (provider.Ingress, error) {

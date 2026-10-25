@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> Produk sedang beralih ke antarmuka web. Lihat [README bahasa Inggris](README.md) untuk arah produk dan petunjuk instalasi terkini; petunjuk antarmuka di bawah menjelaskan versi sebelumnya.
+
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · **Bahasa Indonesia** · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Satu endpoint untuk Claude Code, Codex, dan agen AI lain agar dapat memakai DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock, dan lainnya — dengan routing, load balancing, dan failover otomatis.**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-Installer menjalankan Swobu dan membuka **Cockpit**, antarmuka terminalnya.
+Installer menjalankan Swobu dan membuka **Operator Web** di browser.
 
 Tambahkan provider, buat route, lalu hubungkan agen Anda.
 
 ### Hubungkan agen
 
-Cockpit dapat mengonfigurasi klien yang didukung untuk Anda.
+Operator Web membantu mengonfigurasi klien yang didukung.
 
 Atau gunakan CLI:
 

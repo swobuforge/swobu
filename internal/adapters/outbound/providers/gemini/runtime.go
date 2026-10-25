@@ -145,7 +145,7 @@ func (r *geminiRuntime) resolveAuth(ctx context.Context, target provider.TargetS
 	if r.credentials == nil {
 		return resolvedAuth{}, canonical.BadEndpoint("credential resolver is not configured")
 	}
-	token, err := r.credentials.ResolveCredential(ctx, target.ProviderID(), target.CredentialRef)
+	token, err := providersruntime.ResolveTargetCredential(ctx, r.credentials, target)
 	if err != nil {
 		return resolvedAuth{}, canonical.BadEndpoint("credential reference could not be resolved")
 	}

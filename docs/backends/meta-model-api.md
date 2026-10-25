@@ -1,8 +1,8 @@
 # Meta Model API
 
-Select **Meta Model API** in Cockpit to route requests to Muse Spark.
+Select **Meta Model API** in the Web Operator to route requests to Muse Spark.
 
-Configure a target in Cockpit with:
+Configure a target in the Web Operator with:
 
 - provider: `Meta Model API`
 - model: a model available to your Meta account

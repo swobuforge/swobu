@@ -2,6 +2,8 @@ package configstore
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,266 +18,84 @@ import (
 )
 
 type documentDTO struct {
-	SchemaVersion int                     `yaml:"schema_version"`
-	Workspaces    map[string]workspaceDTO `yaml:"workspaces"`
+	// Connections are owned and validated by connections.Store, not routing.
+	// Keeping the YAML node here permits strict top-level field validation.
+	Connections       *yaml.Node                        `yaml:"connections,omitempty"`
+	Principals        *yaml.Node                        `yaml:"principals,omitempty"`
+	Publications      *yaml.Node                        `yaml:"publications,omitempty"`
+	Accounting        *yaml.Node                        `yaml:"accounting,omitempty"`
+	DisplayNameAudits []WorkspaceDisplayNameAudit       `yaml:"workspace_display_name_audits,omitempty"`
+	DeletionAudits    map[string]WorkspaceDeletionAudit `yaml:"workspace_deletion_audits,omitempty"`
+	CreationAudits    map[string]WorkspaceCreationAudit `yaml:"workspace_creation_audits,omitempty"`
+	Creations         map[string]creationReceipt        `yaml:"workspace_creations,omitempty"`
+	Deletions         map[string]deletionReceipt        `yaml:"workspace_deletions,omitempty"`
+	SchemaVersion     int                               `yaml:"schema_version"`
+	Workspaces        map[string]workspaceDTO           `yaml:"workspaces"`
 }
 type workspaceDTO struct {
-	DefaultRoute      string              `yaml:"default_route"`
-	TargetGenerations map[string]uint64   `yaml:"target_generations,omitempty"`
-	Routes            map[string]routeDTO `yaml:"routes"`
+	DisplayName           string                 `yaml:"display_name,omitempty"`
+	EnabledServices       *[]string              `yaml:"enabled_services,omitempty"`
+	ServiceLimits         *routing.ServiceLimits `yaml:"service_limits,omitempty"`
+	ManagementIncarnation string                 `yaml:"management_incarnation,omitempty"`
+	ManagementRevision    *uint64                `yaml:"management_revision,omitempty"`
+	TargetGenerations     map[string]uint64      `yaml:"target_generations,omitempty"`
+	Routes                []routeDTO             `yaml:"routes"`
+	MCPMounts             map[string]mcpMountDTO `yaml:"mcp_mounts,omitempty"`
+	Search                *searchDTO             `yaml:"search,omitempty"`
+	Media                 *mediaDTO              `yaml:"media,omitempty"`
+}
+type mcpMountDTO struct {
+	Builtin      string   `yaml:"builtin,omitempty"`
+	ConnectionID string   `yaml:"connection_id,omitempty"`
+	AllowedTools []string `yaml:"allowed_tools,omitempty"`
+}
+type searchDTO struct {
+	ConnectionID          string   `yaml:"connection_id"`
+	FallbackConnectionIDs []string `yaml:"fallback_connection_ids,omitempty"`
+}
+type mediaDTO struct {
+	Routes []string `yaml:"routes,omitempty"`
 }
 type routeDTO struct {
-	Tiers []tierDTO `yaml:"tiers"`
+	Pattern string    `yaml:"pattern"`
+	Tiers   []tierDTO `yaml:"tiers"`
 }
 type tierDTO struct {
 	Targets []targetDTO `yaml:"targets"`
 }
 type targetDTO struct {
-	ID         string        `yaml:"id"`
-	Version    *uint64       `yaml:"version,omitempty"`
-	Model      string        `yaml:"model"`
-	Protocol   string        `yaml:"protocol,omitempty"`
-	Connection connectionDTO `yaml:"connection"`
-}
-
-// connectionDTO preserves the provider-keyed YAML contract while keeping its
-// Go representation free of catalog-sized provider fields. The profile chooses
-// the stable child grammar from the provider's durable connection shape.
-type connectionDTO struct {
-	Draft routing.ConnectionDraft
-}
-
-type credentialConnectionDTO struct {
-	Credential string `yaml:"credential,omitempty"`
-}
-type zaiConnectionDTO struct {
-	Access     string `yaml:"access"`
-	Credential string `yaml:"credential"`
-}
-type endpointCredentialConnectionDTO struct {
-	BaseURL    string `yaml:"base_url,omitempty"`
-	Credential string `yaml:"credential,omitempty"`
-}
-type azureConnectionDTO struct {
-	ProjectEndpoint string `yaml:"project_endpoint"`
-	Credential      string `yaml:"credential"`
-}
-type bedrockConnectionDTO struct {
-	Region     string `yaml:"region"`
-	Endpoint   string `yaml:"endpoint,omitempty"`
-	Credential string `yaml:"credential,omitempty"`
-}
-type customConnectionDTO struct {
-	BaseURL string         `yaml:"base_url"`
-	Auth    *customAuthDTO `yaml:"auth,omitempty"`
-}
-type customAuthDTO struct {
-	Header *customHeaderDTO `yaml:"header,omitempty"`
-}
-type customHeaderDTO struct {
-	Name       string `yaml:"name"`
-	Credential string `yaml:"credential"`
-}
-
-func (dto *connectionDTO) UnmarshalYAML(value *yaml.Node) error {
-	provider, child, err := singleProviderYAMLNode(value)
-	if err != nil {
-		return err
-	}
-	shape, ok := profile.ConnectionShapeForSpec(provider)
-	if !ok {
-		return fmt.Errorf("connection.%s: provider is unsupported", provider)
-	}
-	draft := routing.ConnectionDraft{Provider: provider}
-	switch shape {
-	case routing.ConnectionShapeStandard:
-		locator, _ := profile.LocatorSpecForProvider(provider)
-		entry, _ := profile.ProfileForSpec(provider)
-		if locator.Kind == profile.LocatorAzureProject {
-			var encoded azureConnectionDTO
-			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.ProjectEndpoint, Credential: encoded.Credential}
-		} else if locator.Kind == profile.LocatorFixed {
-			var encoded credentialConnectionDTO
-			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			draft.Standard = &routing.StandardConnectionDraft{Credential: encoded.Credential}
-		} else {
-			var encoded endpointCredentialConnectionDTO
-			if err := decodeStrictYAMLNode(child, &encoded, standardConnectionYAMLFields(locator, entry.Credential)...); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			draft.Standard = &routing.StandardConnectionDraft{Locator: encoded.BaseURL, Credential: encoded.Credential}
-		}
-	case routing.ConnectionShapeZAI:
-		var encoded zaiConnectionDTO
-		if err := decodeStrictYAMLNode(child, &encoded, "access", "credential"); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: encoded.Access, Credential: encoded.Credential}
-	case routing.ConnectionShapeBedrock:
-		var encoded bedrockConnectionDTO
-		if err := decodeStrictYAMLNode(child, &encoded, "region", "endpoint", "credential"); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: encoded.Region, Endpoint: encoded.Endpoint, Credential: encoded.Credential}
-	case routing.ConnectionShapeCustom:
-		var encoded customConnectionDTO
-		if err := decodeStrictYAMLNode(child, &encoded, "base_url", "auth"); err != nil {
-			return fmt.Errorf("connection.%s: %w", provider, err)
-		}
-		if encoded.Auth != nil && encoded.Auth.Header == nil {
-			return fmt.Errorf("connection.%s.auth: exactly one auth variant is required", provider)
-		}
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: encoded.BaseURL}
-		if encoded.Auth != nil {
-			if err := validateCustomHeaderYAML(child); err != nil {
-				return fmt.Errorf("connection.%s: %w", provider, err)
-			}
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: encoded.Auth.Header.Name, Credential: encoded.Auth.Header.Credential}
-		}
-	default:
-		return fmt.Errorf("connection.%s: provider connection requirements are unsupported", provider)
-	}
-	dto.Draft = draft
-	return nil
-}
-
-func standardConnectionYAMLFields(locator profile.LocatorSpec, credential profile.CredentialSpec) []string {
-	fields := make([]string, 0, 2)
-	switch locator.Kind {
-	case profile.LocatorAzureProject:
-		fields = append(fields, "project_endpoint")
-	case profile.LocatorBaseURL:
-		fields = append(fields, "base_url")
-	}
-	if credential.Requirement != profile.CredentialUnsupported {
-		fields = append(fields, "credential")
-	}
-	return fields
-}
-
-func (dto connectionDTO) MarshalYAML() (any, error) {
-	connection, err := routing.FinalizeConnection(dto.Draft, profile.RoutingConstructionFacts())
-	if err != nil {
-		return nil, err
-	}
-	provider := string(connection.Provider())
-	switch connection := connection.(type) {
-	case routing.StandardConnection:
-		locator, _ := profile.LocatorSpecForProvider(provider)
-		if locator.Kind == profile.LocatorAzureProject {
-			value, _ := connection.Locator()
-			return map[string]any{provider: azureConnectionDTO{ProjectEndpoint: value.String(), Credential: connection.Credential().String()}}, nil
-		}
-		if locator.Kind == profile.LocatorFixed {
-			return map[string]any{provider: credentialConnectionDTO{Credential: connection.Credential().String()}}, nil
-		}
-		value, _ := connection.Locator()
-		return map[string]any{provider: endpointCredentialConnectionDTO{BaseURL: value.String(), Credential: connection.Credential().String()}}, nil
-	case routing.ZAIConnection:
-		return map[string]any{provider: zaiConnectionDTO{Access: string(connection.Access()), Credential: connection.Credential().String()}}, nil
-	case routing.BedrockConnection:
-		return map[string]any{provider: bedrockConnectionDTO{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}}, nil
-	case routing.CustomConnection:
-		encoded := customConnectionDTO{BaseURL: connection.BaseURL().String()}
-		if auth := connection.Auth(); auth != nil {
-			header, ok := auth.(routing.CustomHeaderAuth)
-			if !ok {
-				return nil, fmt.Errorf("unsupported custom auth %T", auth)
-			}
-			encoded.Auth = &customAuthDTO{Header: &customHeaderDTO{Name: header.Name(), Credential: header.Credential().String()}}
-		}
-		return map[string]any{provider: encoded}, nil
-	default:
-		return nil, fmt.Errorf("unsupported routing connection %T", connection)
-	}
-}
-
-func singleProviderYAMLNode(value *yaml.Node) (string, *yaml.Node, error) {
-	if value.Kind != yaml.MappingNode || len(value.Content) != 2 || value.Content[0].Kind != yaml.ScalarNode {
-		return "", nil, fmt.Errorf("connection must contain exactly one provider key")
-	}
-	provider := strings.TrimSpace(value.Content[0].Value)
-	if !profile.SupportsSpec(provider) {
-		return "", nil, fmt.Errorf("connection.%s: provider is unsupported", provider)
-	}
-	return provider, value.Content[1], nil
-}
-
-func decodeStrictYAMLNode(value *yaml.Node, target any, allowed ...string) error {
-	if value.Kind != yaml.MappingNode {
-		return fmt.Errorf("connection payload must be a mapping")
-	}
-	known := make(map[string]struct{}, len(allowed))
-	for _, field := range allowed {
-		known[field] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(allowed))
-	for index := 0; index < len(value.Content); index += 2 {
-		key := value.Content[index]
-		if key.Kind != yaml.ScalarNode {
-			return fmt.Errorf("connection field name must be a string")
-		}
-		if _, exists := known[key.Value]; !exists {
-			return fmt.Errorf("field %q is not recognized", key.Value)
-		}
-		if _, duplicate := seen[key.Value]; duplicate {
-			return fmt.Errorf("field %q is duplicated", key.Value)
-		}
-		seen[key.Value] = struct{}{}
-	}
-	return value.Decode(target)
-}
-
-func validateCustomHeaderYAML(value *yaml.Node) error {
-	for index := 0; index < len(value.Content); index += 2 {
-		if value.Content[index].Value != "auth" {
-			continue
-		}
-		auth := value.Content[index+1]
-		if err := validateMappingFields(auth, "header"); err != nil {
-			return fmt.Errorf("auth: %w", err)
-		}
-		if len(auth.Content) == 2 && auth.Content[0].Value == "header" {
-			if err := validateMappingFields(auth.Content[1], "name", "credential"); err != nil {
-				return fmt.Errorf("auth.header: %w", err)
-			}
-		}
-	}
-	return nil
-}
-
-func validateMappingFields(value *yaml.Node, allowed ...string) error {
-	if value.Kind != yaml.MappingNode {
-		return fmt.Errorf("connection payload must be a mapping")
-	}
-	known := make(map[string]struct{}, len(allowed))
-	for _, field := range allowed {
-		known[field] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(allowed))
-	for index := 0; index < len(value.Content); index += 2 {
-		key := value.Content[index]
-		if key.Kind != yaml.ScalarNode {
-			return fmt.Errorf("connection field name must be a string")
-		}
-		if _, exists := known[key.Value]; !exists {
-			return fmt.Errorf("field %q is not recognized", key.Value)
-		}
-		if _, duplicate := seen[key.Value]; duplicate {
-			return fmt.Errorf("field %q is duplicated", key.Value)
-		}
-		seen[key.Value] = struct{}{}
-	}
-	return nil
+	ID           string  `yaml:"id"`
+	Version      *uint64 `yaml:"version"`
+	Model        string  `yaml:"model"`
+	Protocol     string  `yaml:"protocol"`
+	ConnectionID string  `yaml:"connection_id"`
 }
 
 func decode(raw []byte) (routing.Config, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	if _, err := decodeDisplayNameAudits(raw); err != nil {
+		return routing.Config{}, err
+	}
+	if _, err := decodeWorkspaceDeletionAudits(raw); err != nil {
+		return routing.Config{}, err
+	}
+	if _, err := decodeWorkspaceCreationAudits(raw); err != nil {
+		return routing.Config{}, err
+	}
+	if _, err := decodeCreationReceipts(raw); err != nil {
+		return routing.Config{}, err
+	}
+	if _, err := decodeDeletionReceipts(raw); err != nil {
+		return routing.Config{}, err
+	}
+	// The inline Connection document is owned by the Connections codec. Decode
+	// routing with strict fields after removing that opaque subtree; otherwise
+	// yaml.v3 applies KnownFields recursively to the Connection schema and
+	// rejects its deliberately independent fields.
+	routingRaw, err := withoutNodeOwnedSections(raw)
+	if err != nil {
+		return routing.Config{}, fmt.Errorf("decode routing config: %w", err)
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(routingRaw))
 	decoder.KnownFields(true)
 	var dto documentDTO
 	if err := decoder.Decode(&dto); err != nil {
@@ -288,30 +108,32 @@ func decode(raw []byte) (routing.Config, error) {
 		}
 		return routing.Config{}, fmt.Errorf("decode routing config: %w", err)
 	}
-	if dto.SchemaVersion != routing.SchemaVersion {
-		return routing.Config{}, fmt.Errorf("unsupported schema_version %d (supported: %d)", dto.SchemaVersion, routing.SchemaVersion)
+	if dto.SchemaVersion != routing.ReferenceSchemaVersion {
+		return routing.Config{}, fmt.Errorf("unsupported schema_version %d (current: %d); create a new current routing config", dto.SchemaVersion, routing.ReferenceSchemaVersion)
 	}
 	workspaces := make([]routing.Workspace, 0, len(dto.Workspaces))
 	for rawSlug, encodedWorkspace := range dto.Workspaces {
+		if encodedWorkspace.Media != nil {
+			return routing.Config{}, fmt.Errorf("workspaces.%s: unsupported composed capability", rawSlug)
+		}
 		slug, err := routing.ParseWorkspaceSlug(rawSlug)
 		if err != nil {
 			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug)
 		}
-		defaultRoute, err := routing.ParseRouteName(encodedWorkspace.DefaultRoute)
-		if err != nil {
-			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug+".default_route")
-		}
+		// Routes are one ordered value: their position is their first-match priority.
+		// Mapping-form routes and separate order metadata have no meaning.
 		routes := make([]routing.Route, 0, len(encodedWorkspace.Routes))
-		for rawName, encodedRoute := range encodedWorkspace.Routes {
+		for routeIndex, encodedRoute := range encodedWorkspace.Routes {
+			rawName := encodedRoute.Pattern
 			name, err := routing.ParseRouteName(rawName)
 			if err != nil {
-				return routing.Config{}, prefixPath(err, "workspaces."+rawSlug+".routes."+rawName)
+				return routing.Config{}, prefixPath(err, fmt.Sprintf("workspaces.%s.routes[%d]", rawSlug, routeIndex))
 			}
 			tiers := make([]routing.Tier, 0, len(encodedRoute.Tiers))
 			for tierIndex, encodedTier := range encodedRoute.Tiers {
 				targets := make([]routing.Target, 0, len(encodedTier.Targets))
 				for targetIndex, encodedTarget := range encodedTier.Targets {
-					path := fmt.Sprintf("workspaces.%s.routes.%s.tiers[%d].targets[%d]", rawSlug, rawName, tierIndex, targetIndex)
+					path := fmt.Sprintf("workspaces.%s.routes[%d].tiers[%d].targets[%d]", rawSlug, routeIndex, tierIndex, targetIndex)
 					target, err := decodeTarget(encodedTarget)
 					if err != nil {
 						return routing.Config{}, prefixPath(err, path)
@@ -320,13 +142,13 @@ func decode(raw []byte) (routing.Config, error) {
 				}
 				tier, err := routing.NewTier(targets)
 				if err != nil {
-					return routing.Config{}, prefixPath(err, fmt.Sprintf("workspaces.%s.routes.%s.tiers[%d]", rawSlug, rawName, tierIndex))
+					return routing.Config{}, prefixPath(err, fmt.Sprintf("workspaces.%s.routes[%d].tiers[%d]", rawSlug, routeIndex, tierIndex))
 				}
 				tiers = append(tiers, tier)
 			}
 			route, err := routing.NewRoute(name, tiers)
 			if err != nil {
-				return routing.Config{}, prefixPath(err, "workspaces."+rawSlug+".routes."+rawName)
+				return routing.Config{}, prefixPath(err, fmt.Sprintf("workspaces.%s.routes[%d]", rawSlug, routeIndex))
 			}
 			routes = append(routes, route)
 		}
@@ -341,55 +163,174 @@ func decode(raw []byte) (routing.Config, error) {
 			}
 			generations[id] = routing.TargetVersion(rawVersion)
 		}
-		workspace, err := routing.RestoreWorkspace(slug, defaultRoute, routes, generations)
+		mounts := make(map[string]routing.MCPMount, len(encodedWorkspace.MCPMounts))
+		for alias, source := range encodedWorkspace.MCPMounts {
+			mounts[alias] = routing.MCPMount{Builtin: source.Builtin, ConnectionID: source.ConnectionID, AllowedTools: append([]string(nil), source.AllowedTools...)}
+		}
+		searchConnection := ""
+		if encodedWorkspace.Search != nil {
+			searchConnection = strings.TrimSpace(encodedWorkspace.Search.ConnectionID)
+		}
+		fallback := []string(nil)
+		if encodedWorkspace.Search != nil {
+			fallback = encodedWorkspace.Search.FallbackConnectionIDs
+		}
+		workspace, err := routing.RestoreWorkspaceWithSearchRoute(slug, routes, generations, mounts, searchConnection, fallback)
+		if err == nil && encodedWorkspace.EnabledServices != nil {
+			kinds := make([]routing.ServiceKind, 0, len(*encodedWorkspace.EnabledServices))
+			for _, rawKind := range *encodedWorkspace.EnabledServices {
+				kind, parseErr := routing.ParseServiceKind(rawKind)
+				if parseErr != nil {
+					return routing.Config{}, prefixPath(parseErr, "workspaces."+rawSlug+".enabled_services")
+				}
+				kinds = append(kinds, kind)
+			}
+			workspace, err = workspace.WithServices(kinds)
+		}
 		if err != nil {
 			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug)
 		}
+		if err == nil && encodedWorkspace.ServiceLimits != nil {
+			workspace, err = workspace.WithServiceLimits(*encodedWorkspace.ServiceLimits)
+		}
+		if err != nil {
+			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug+".service_limits")
+		}
+		workspace, err = workspace.WithDisplayName(encodedWorkspace.DisplayName)
+		if err != nil {
+			return routing.Config{}, prefixPath(err, "workspaces."+rawSlug)
+		}
+		revision := uint64(1)
+		if encodedWorkspace.ManagementRevision != nil {
+			revision = *encodedWorkspace.ManagementRevision
+			if revision == 0 {
+				return routing.Config{}, fmt.Errorf("workspaces.%s.management_revision: must be greater than zero", rawSlug)
+			}
+		}
+		workspace = workspace.WithManagementRevision(revision)
+		incarnation := encodedWorkspace.ManagementIncarnation
+		if incarnation != "" {
+			decoded, err := hex.DecodeString(incarnation)
+			if err != nil || len(decoded) != 32 || incarnation != strings.ToLower(incarnation) {
+				return routing.Config{}, fmt.Errorf("workspaces.%s.management_incarnation: expected 64 lowercase hex characters", rawSlug)
+			}
+		} else {
+			// Manually authored files may lack lifetime identity. Derive their initial value
+			// from canonical persisted facts without rewriting on read. The next
+			// store commit persists it; new creations always receive random IDs.
+			one, err := routing.NewConfig([]routing.Workspace{workspace})
+			if err != nil {
+				return routing.Config{}, err
+			}
+			encoded, err := encodeDocument(one, dto.SchemaVersion)
+			if err != nil {
+				return routing.Config{}, err
+			}
+			digest := sha256.Sum256(append([]byte("swobu-workspace-legacy-incarnation:"), encoded...))
+			incarnation = hex.EncodeToString(digest[:])
+		}
+		workspace = workspace.WithManagementIncarnation(incarnation)
 		workspaces = append(workspaces, workspace)
 	}
 	return routing.NewConfig(workspaces)
 }
 
-func decodeTarget(dto targetDTO) (routing.Target, error) {
-	connection, err := connectionDraft(dto.Connection)
-	if err != nil {
-		return routing.Target{}, err
+func withoutNodeOwnedSections(raw []byte) ([]byte, error) {
+	var document yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
 	}
-	target, err := routing.FinalizeTarget(routing.TargetDraft{
-		ID:         dto.ID,
-		Model:      dto.Model,
-		Protocol:   dto.Protocol,
-		Connection: connection,
-	}, profile.RoutingConstructionFacts())
-	if err != nil {
-		return routing.Target{}, err
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("multiple YAML documents are unsupported")
+		}
+		return nil, err
 	}
-	version := routing.TargetVersion(1)
-	if dto.Version == nil {
-		// Schema v1 predates durable target versions. Reading an absent value as
-		// the initial revision is the one-way migration; every subsequent write
-		// emits the explicit daemon-owned value.
-	} else if *dto.Version == 0 {
-		return routing.Target{}, fmt.Errorf("target.version: must be greater than zero")
-	} else {
-		version = routing.TargetVersion(*dto.Version)
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("routing config must be a mapping")
 	}
-	return routing.RestoreTarget(target.ID(), version, target.Model(), target.Protocol(), target.Connection())
+	root := document.Content[0]
+	filtered := make([]*yaml.Node, 0, len(root.Content))
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		switch root.Content[i].Value {
+		case "connections", "principals", "publications", "accounting":
+			continue
+		}
+		filtered = append(filtered, root.Content[i], root.Content[i+1])
+	}
+	root.Content = filtered
+	var buffer bytes.Buffer
+	encoder := yaml.NewEncoder(&buffer)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&document); err != nil {
+		return nil, err
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
-func connectionDraft(dto connectionDTO) (routing.ConnectionDraft, error) {
-	return dto.Draft, nil
+func documentSchema(raw []byte) (int, error) {
+	var header struct {
+		SchemaVersion int `yaml:"schema_version"`
+	}
+	if err := yaml.Unmarshal(raw, &header); err != nil {
+		return 0, err
+	}
+	return header.SchemaVersion, nil
+}
+
+func decodeTarget(dto targetDTO) (routing.Target, error) {
+	target, err := routing.FinalizeTarget(routing.TargetDraft{ID: dto.ID, Model: dto.Model, Protocol: dto.Protocol, ConnectionID: dto.ConnectionID}, profile.RoutingConstructionFacts())
+	if err != nil {
+		return routing.Target{}, err
+	}
+	if dto.Version == nil || *dto.Version == 0 {
+		return routing.Target{}, fmt.Errorf("positive explicit target version required")
+	}
+	return routing.RestoreTarget(target.ID(), routing.TargetVersion(*dto.Version), target.Model(), target.Protocol(), target.ConnectionID())
 }
 
 func encode(config routing.Config) ([]byte, error) {
-	dto := documentDTO{SchemaVersion: routing.SchemaVersion, Workspaces: map[string]workspaceDTO{}}
+	return encodeDocument(config, routing.ReferenceSchemaVersion)
+}
+
+func encodeDocument(config routing.Config, schemaVersion int) ([]byte, error) {
+	return encodeDocumentWithReceipts(config, schemaVersion, nil, nil, nil, nil, nil)
+}
+
+func encodeDocumentWithReceipts(config routing.Config, schemaVersion int, receipts map[string]deletionReceipt, creations map[string]creationReceipt, audits map[string]WorkspaceCreationAudit, deletionAudits map[string]WorkspaceDeletionAudit, displayAudits []WorkspaceDisplayNameAudit) ([]byte, error) {
+	dto := documentDTO{SchemaVersion: schemaVersion, Workspaces: map[string]workspaceDTO{}, Deletions: receipts, Creations: creations, CreationAudits: audits, DeletionAudits: deletionAudits, DisplayNameAudits: displayAudits}
 	for _, workspace := range config.Workspaces() {
-		encodedWorkspace := workspaceDTO{DefaultRoute: workspace.DefaultRoute().String(), TargetGenerations: map[string]uint64{}, Routes: map[string]routeDTO{}}
+		encodedWorkspace := workspaceDTO{TargetGenerations: map[string]uint64{}, Routes: []routeDTO{}}
+		encodedWorkspace.DisplayName = workspace.DisplayName()
+		if limits := workspace.ServiceLimits(); limits != (routing.ServiceLimits{}) {
+			encodedWorkspace.ServiceLimits = &limits
+		}
+		kinds := make([]string, 0, len(workspace.EnabledServices()))
+		for _, kind := range workspace.EnabledServices() {
+			kinds = append(kinds, string(kind))
+		}
+		encodedWorkspace.EnabledServices = &kinds
+		encodedWorkspace.ManagementIncarnation = workspace.ManagementIncarnation()
+		if revision := workspace.ManagementRevision(); revision != 0 {
+			encodedWorkspace.ManagementRevision = &revision
+		}
+		encodedWorkspace.MCPMounts = map[string]mcpMountDTO{}
+		for alias, mount := range workspace.MCPMounts() {
+			encodedWorkspace.MCPMounts[alias] = mcpMountDTO{Builtin: mount.Builtin, ConnectionID: mount.ConnectionID, AllowedTools: append([]string(nil), mount.AllowedTools...)}
+		}
+		if sourceID := workspace.SearchConnectionID(); sourceID != "" {
+			encodedWorkspace.Search = &searchDTO{ConnectionID: sourceID, FallbackConnectionIDs: workspace.SearchFallbackIDs()}
+		}
 		for id, version := range workspace.TargetGenerations() {
 			encodedWorkspace.TargetGenerations[id.String()] = uint64(version)
 		}
 		for _, route := range workspace.Routes() {
-			encodedRoute := routeDTO{Tiers: make([]tierDTO, 0, len(route.Tiers()))}
+			encodedRoute := routeDTO{Pattern: route.Name().String(), Tiers: make([]tierDTO, 0, len(route.Tiers()))}
 			for _, tier := range route.Tiers() {
 				targets := tier.Targets()
 				sort.Slice(targets, func(i, j int) bool { return targets[i].ID().String() < targets[j].ID().String() })
@@ -403,7 +344,7 @@ func encode(config routing.Config) ([]byte, error) {
 				}
 				encodedRoute.Tiers = append(encodedRoute.Tiers, encodedTier)
 			}
-			encodedWorkspace.Routes[route.Name().String()] = encodedRoute
+			encodedWorkspace.Routes = append(encodedWorkspace.Routes, encodedRoute)
 		}
 		dto.Workspaces[workspace.Slug().String()] = encodedWorkspace
 	}
@@ -421,41 +362,7 @@ func encode(config routing.Config) ([]byte, error) {
 
 func encodeTarget(target routing.Target) (targetDTO, error) {
 	version := uint64(target.Version())
-	dto := targetDTO{ID: target.ID().String(), Version: &version, Model: target.Model().String(), Protocol: target.Protocol().String()}
-	if _, derived := profile.DerivedProtocolForSpec(string(target.Provider())); derived {
-		dto.Protocol = ""
-	}
-	draft, err := connectionDraftFromRouting(target.Connection())
-	if err != nil {
-		return targetDTO{}, fmt.Errorf("encode target %s: %w", target.ID().String(), err)
-	}
-	dto.Connection = connectionDTO{Draft: draft}
-	return dto, nil
-}
-
-func connectionDraftFromRouting(connection routing.Connection) (routing.ConnectionDraft, error) {
-	draft := routing.ConnectionDraft{Provider: string(connection.Provider())}
-	switch connection := connection.(type) {
-	case routing.StandardConnection:
-		locator, _ := connection.Locator()
-		draft.Standard = &routing.StandardConnectionDraft{Locator: locator.String(), Credential: connection.Credential().String()}
-	case routing.ZAIConnection:
-		draft.ZAI = &routing.ZAIConnectionDraft{Access: string(connection.Access()), Credential: connection.Credential().String()}
-	case routing.BedrockConnection:
-		draft.Bedrock = &routing.BedrockConnectionDraft{Region: connection.Region().String(), Endpoint: connection.Endpoint(), Credential: connection.Credential().String()}
-	case routing.CustomConnection:
-		draft.Custom = &routing.CustomConnectionDraft{BaseURL: connection.BaseURL().String()}
-		if auth := connection.Auth(); auth != nil {
-			header, ok := auth.(routing.CustomHeaderAuth)
-			if !ok {
-				return routing.ConnectionDraft{}, fmt.Errorf("unsupported custom auth %T", auth)
-			}
-			draft.Custom.Header = &routing.CustomHeaderDraft{Name: header.Name(), Credential: header.Credential().String()}
-		}
-	default:
-		return routing.ConnectionDraft{}, fmt.Errorf("unsupported routing connection %T", connection)
-	}
-	return draft, nil
+	return targetDTO{ID: target.ID().String(), Version: &version, Model: target.Model().String(), Protocol: target.Protocol().String(), ConnectionID: target.ConnectionID().String()}, nil
 }
 
 // unknownFieldTypeSuffix strips yaml.v3's internal Go type name (e.g.

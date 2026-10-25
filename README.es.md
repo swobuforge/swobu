@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> El producto está migrando a una interfaz web. Consulta el [README en inglés](README.md) para la dirección actual y la instalación; las instrucciones de interfaz de abajo describen la versión anterior.
+
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · **Español** · [Українська](README.uk.md)
 
 **Un solo endpoint para que Claude Code, Codex y otros agentes de IA usen DeepSeek, Kimi, GLM, OpenAI, Anthropic, OpenRouter, Ollama, Bedrock y más, con routing, balanceo y failover automáticos.**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-El instalador inicia Swobu y abre **Cockpit**, la interfaz de terminal.
+El instalador inicia Swobu y abre el **Operador web** en el navegador.
 
 Añade un proveedor, crea una route y conecta tu agente.
 
 ### Conecta un agente
 
-Cockpit puede configurar por ti los clientes compatibles.
+El Operador web te ayuda a configurar clientes compatibles.
 
 O usa la CLI:
 

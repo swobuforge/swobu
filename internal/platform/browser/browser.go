@@ -16,7 +16,7 @@ var openMu sync.Mutex
 // Open starts the default browser for the given raw URL.
 // It accepts only absolute HTTP(S) URLs and returns platform opener failures.
 // Child-process output is discarded so a failed platform opener cannot paint
-// diagnostics over a terminal UI. The mutex protects cli/browser's writer
+// diagnostics to the caller's terminal. The mutex protects cli/browser's writer
 // globals while they are temporarily redirected.
 func Open(raw string) error {
 	raw = strings.TrimSpace(raw)

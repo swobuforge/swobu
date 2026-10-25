@@ -47,6 +47,7 @@ CREATE TABLE swobu_ledger_invocations (
   route_name TEXT,
   target_id TEXT,
   target_version_dec TEXT,
+ 
   provider_spec TEXT,
   provider_protocol TEXT,
   provider_model TEXT,
@@ -77,6 +78,12 @@ func createSchemaV1(ctx context.Context, conn *sql.Conn, createdBy string) error
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, schemaMCPHistory); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, schemaConnectionIdentity); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_meta(schema_version, created_by_version, created_at_ns) VALUES(?, ?, ?)`, schemaVersion, createdBy, time.Now().UTC().UnixNano()); err != nil {

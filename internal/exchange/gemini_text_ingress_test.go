@@ -10,12 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"errors"
 	providersadapter "github.com/swobuforge/swobu/internal/adapters/outbound/providers"
 	providersruntime "github.com/swobuforge/swobu/internal/adapters/outbound/providers/runtime"
 	"github.com/swobuforge/swobu/internal/continuity"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/exchange/codecresolver"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
@@ -43,8 +46,9 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 	runtime := geminiTextRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), registry: registry}
 	workspace := geminiTextWorkspace(t, server.URL+"/v1")
 	ingress := NewIngress(geminiTextWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
-		PolicyResolver: StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
-		ResponseIDs:    deterministicResponseIDGenerator{},
+		ModelConnection: LookupModelFixture,
+		PolicyResolver:  StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
+		ResponseIDs:     deterministicResponseIDGenerator{},
 	})
 
 	for _, tc := range []struct {
@@ -79,7 +83,7 @@ func TestGeminiNativeTextStreamServesEveryClientIngress(t *testing.T) {
 	}
 }
 
-func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t *testing.T) {
+func TestGeminiConfiguredRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t *testing.T) {
 	providerRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		providerRequests++
@@ -105,11 +109,12 @@ func TestGeminiDefaultRouteAcceptsBufferedResponsesAfterPortableSearchHistory(t 
 	runtime := geminiTextRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), registry: registry}
 	workspace := geminiTextWorkspace(t, server.URL+"/v1")
 	ingress := NewIngress(geminiTextWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
-		PolicyResolver: StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
-		ResponseIDs:    deterministicResponseIDGenerator{},
+		ModelConnection: LookupModelFixture,
+		PolicyResolver:  StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
+		ResponseIDs:     deterministicResponseIDGenerator{},
 	})
 	body := []byte(`{
-		"model":"default",
+		"model":"gemini-route",
 		"stream":false,
 		"tools":[{"type":"web_search"}],
 		"input":[
@@ -173,11 +178,12 @@ func TestGeminiResponsesIngressDispatchesWhenParallelToolCallsFalseWithTools(t *
 	runtime := geminiTextRuntime{RuntimeCodecResolver: codecresolver.NewRuntimeCodecResolver(), registry: registry}
 	workspace := geminiTextWorkspace(t, server.URL+"/v1")
 	ingress := NewIngress(geminiTextWorkspaceLookup{workspace: workspace}, runtime, RuntimePoliciesSpec{
-		PolicyResolver: StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
-		ResponseIDs:    deterministicResponseIDGenerator{},
+		ModelConnection: LookupModelFixture,
+		PolicyResolver:  StaticWorkspacePolicyResolver{Policy: DefaultWorkspacePolicy()},
+		ResponseIDs:     deterministicResponseIDGenerator{},
 	})
 	body := []byte(`{
-		"model":"default",
+		"model":"gemini-route",
 		"stream":true,
 		"parallel_tool_calls":false,
 		"tools":[{
@@ -243,7 +249,7 @@ func TestGeminiFreshContinuationReentryAfterLocallyResolvedFunctionRound(t *test
 	}
 	workspace := geminiTextWorkspace(t, "https://generativelanguage.googleapis.com/v1")
 	target := workspace.Routes()[0].Tiers()[0].Targets()[0]
-	targetSnapshot, err := ProviderTargetFromConnection(target.ID().String(), target.Connection(), target.Protocol().String())
+	targetSnapshot, err := toProviderTarget(target, LookupModelFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,6 +301,17 @@ data: {"event_type":"interaction.completed","interaction":{"id":"interaction_1",
 type geminiTextCredentialResolver struct{}
 
 func (geminiTextCredentialResolver) ResolveCredential(context.Context, string, string) (string, error) {
+	return "", errors.New("provider-only credential resolution forbidden")
+}
+
+func (geminiTextCredentialResolver) ResolveScopedCredential(_ context.Context, scope credentialref.Scope, ref string) (string, error) {
+	id, err := connectionidentity.Parse(scope.Identifier())
+	if err != nil || scope.Kind() != credentialref.ScopeConnection || ref != "env:GEMINI_API_KEY" {
+		return "", errors.New("unexpected synthetic credential binding")
+	}
+	if _, err := LookupModelFixture(id); err != nil {
+		return "", err
+	}
 	return "gemini-token", nil
 }
 
@@ -339,7 +356,7 @@ func geminiTextWorkspace(t *testing.T, baseURL string) routing.Workspace {
 	}
 	targetID, _ := routing.ParseTargetID("gemini-target")
 	model, _ := routing.ParseUpstreamModel("gemini-model")
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, ModelFixtureConnection(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +368,7 @@ func geminiTextWorkspace(t *testing.T, baseURL string) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}

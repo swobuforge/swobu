@@ -9,10 +9,7 @@ import (
 
 const managedPrefix = "acc_"
 
-var (
-	Local = ID{value: "local"}
-	Share = ID{value: "share"}
-)
+var Local = ID{value: "local"}
 
 // ID is a validated, non-secret attribution identity. The zero value is
 // invalid so admission boundaries cannot accidentally describe anonymity.
@@ -22,11 +19,9 @@ func Parse(raw string) (ID, error) {
 	switch raw {
 	case Local.value:
 		return Local, nil
-	case Share.value:
-		return Share, nil
 	}
 	if !strings.HasPrefix(raw, managedPrefix) {
-		return ID{}, errors.New("access ID must be local, share, or an acc_ managed ID")
+		return ID{}, errors.New("access ID must be local or an acc_ managed ID")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(raw, managedPrefix))
 	if err != nil || len(payload) != 16 {

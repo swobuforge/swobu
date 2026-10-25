@@ -86,52 +86,25 @@ func TestParseProviderUsesConstructionSupport(t *testing.T) {
 	}
 }
 
-// TestFinalizeTargetAcceptsFutureStandardProviderWithoutProviderArm is the
-// N+1 falsification: once the construction edge admits a provider as Standard,
-// routing needs no identifier constant, connection variant, or finalizer arm.
-func TestFinalizeTargetAcceptsFutureStandardProviderWithoutProviderArm(t *testing.T) {
-	target, err := FinalizeTarget(TargetDraft{
-		ID:       "futurecloud-default",
-		Model:    "future-model",
-		Protocol: "chat_completions",
-		Connection: ConnectionDraft{
-			Provider: "futurecloud",
-			Standard: &StandardConnectionDraft{
-				Locator:    "https://api.futurecloud.example/v1",
-				Credential: "env:FUTURECLOUD_API_KEY",
-			},
-		},
-	}, TargetConstructionFacts{
+// New providers require no new connection shape or domain branch.
+func TestFinalizeConnectionAcceptsFutureStandardProviderWithoutProviderArm(t *testing.T) {
+	connection, err := FinalizeConnection(ConnectionDraft{Provider: "futurecloud", Standard: &StandardConnectionDraft{Locator: "https://api.futurecloud.example/v1", Credential: "env:FUTURECLOUD_API_KEY"}}, TargetConstructionFacts{
 		ProviderSupported: func(raw string) bool { return raw == "futurecloud" },
 		ConnectionShape: func(provider Provider) (ConnectionShape, bool) {
 			return ConnectionShapeStandard, provider == "futurecloud"
 		},
-		ValidateStandardConnection: func(_ Provider, draft StandardConnectionDraft) (StandardConnectionDraft, error) {
-			return draft, nil
-		},
-		ProtocolSupported: func(provider Provider, protocol string) bool {
-			return provider == "futurecloud" && protocol == "chat_completions"
-		},
+		ValidateStandardConnection: func(_ Provider, draft StandardConnectionDraft) (StandardConnectionDraft, error) { return draft, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target.Provider() != Provider("futurecloud") {
-		t.Fatalf("provider = %q, want futurecloud", target.Provider())
-	}
-	connection, ok := target.Connection().(StandardConnection)
+	value, ok := connection.(StandardConnection)
 	if !ok {
-		t.Fatalf("connection = %T, want StandardConnection", target.Connection())
+		t.Fatal("standard shape lost")
 	}
-	locator, ok := connection.Locator()
-	if !ok {
-		t.Fatal("futurecloud standard connection omitted its authored locator")
-	}
-	if got := locator.String(); got != "https://api.futurecloud.example/v1" {
-		t.Fatalf("locator = %q", got)
-	}
-	if got := connection.Credential().String(); got != "env:FUTURECLOUD_API_KEY" {
-		t.Fatalf("credential = %q", got)
+	locator, ok := value.Locator()
+	if !ok || locator.String() != "https://api.futurecloud.example/v1" || value.Credential().String() != "env:FUTURECLOUD_API_KEY" || value.Provider() != "futurecloud" {
+		t.Fatal("provider facts lost")
 	}
 }
 

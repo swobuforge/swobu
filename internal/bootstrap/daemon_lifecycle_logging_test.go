@@ -23,7 +23,7 @@ func TestDaemonLifecycle_CloseIsIdempotentAndEmitsStructuredLifecycleEvents(t *t
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(dir, "swobu.yaml")
-	configYAML := "schema_version: 1\nworkspaces: {}\n"
+	configYAML := "schema_version: 5\nworkspaces: {}\n"
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}

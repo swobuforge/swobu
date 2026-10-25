@@ -135,6 +135,8 @@ type resolvingTargetFactsPhase struct {
 func (resolvingTargetFactsPhase) isPhase() {}
 
 type callingMCPPhase struct {
+	// handoff is present only when caller-owned work remains unresolved.
+	handoff      *providerCall
 	selection    providerCallSelection
 	target       provider.TargetSnapshot
 	response     completedProviderResponse
@@ -295,6 +297,8 @@ type providerCall struct {
 	resolvedFrom       canonical.SwobuResponseID
 	executionAffinity  executionaffinity.Key
 	delayClientHandoff bool
+	localToolStreaming bool
+	ownsLocalCall      func(canonical.ToolKey) bool
 	providerRound      int
 	targetGeneration   targetExceptionGeneration
 	factReads          map[provider.TargetFact]bool
@@ -316,6 +320,8 @@ func reduce(ctx context.Context, s exchangeState, event exchangeEvent, runner ru
 		return reducePreparingMCP(ctx, s, event, runner)
 	case callingProviderPhase:
 		return reduceCallingProvider(ctx, s, p, event, runner)
+	case refreshingCredentialPhase:
+		return reduceRefreshingCredential(ctx, s, p, event, runner)
 	case resolvingTargetFactsPhase:
 		return reduceResolvingTargetFacts(ctx, s, p, event, runner)
 	case callingMCPPhase:
@@ -510,6 +516,13 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if err != nil {
 			return reducerOutcome{}, err
 		}
+		if credentialRefreshAdmitted(s, attempt, phase.call.backend, result.failure, runner) {
+			s.phase = refreshingCredentialPhase{attemptID: phase.attemptID}
+			return reducerOutcome{nextState: s, command: refreshCredentialCommand{
+				attemptID: phase.attemptID, target: attempt.target, refresh: phase.call.backend.RefreshCredential,
+				publish: runner.PublishRefreshedCredential,
+			}}, nil
+		}
 		if targetFactCharacterizationAdmitted(attempt, result.failure) {
 			facts := sortedTargetFacts(attempt.factReads)
 			s.phase = resolvingTargetFactsPhase{attemptID: phase.attemptID, backend: phase.call.backend}
@@ -533,8 +546,11 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		if result.attemptID != phase.attemptID {
 			return reducerOutcome{}, fmt.Errorf("exchange invariant: provider call attempt %d returned while %d is active", result.attemptID, phase.attemptID)
 		}
-		if runner.ExecutionEvidence != nil {
+		if runner.ExecutionEvidence != nil || runner.Accounting != nil {
 			phase.call.evidenceSettlement = func(outcome execution.Outcome, usage canonical.TokenUsage) {
+				if runner.Accounting != nil && attempt.accountingOperation != "" {
+					_ = runner.Accounting.SettleUsage(s.input.workspace.Slug().String(), attempt.accountingWindow, attempt.accountingOperation, usage, outcome == execution.Succeeded)
+				}
 				if outcome == execution.Succeeded {
 					emitProviderInvocationSettlement(runner.ExecutionEvidence, s, attempt, execution.Succeeded, execution.Occurred, "", usage)
 				} else if outcome == execution.Cancelled {
@@ -547,6 +563,10 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 		response, completedResponse, providerCompatibility, completionErr := completeProviderCall(ctx, phase.call, result.ingress, s.swobuResponseID, runner)
 		changes := providerCompatibility.completedChanges()
 		if completionErr != nil {
+			if runner.localToolDelivery != nil && runner.localToolDelivery.response != nil {
+				s.phase = failedPhase{problem: completionErr, target: attempt.target}
+				return reducerOutcome{nextState: s}, nil
+			}
 			logProviderAttemptFailedBeforeHandoff(s, phase.attemptID, attempt, completionErr)
 			var err error
 			s, err = failProviderCallAttempt(s, phase.attemptID, provider.AttemptMayHaveExecuted(completionErr))
@@ -565,24 +585,37 @@ func reduceCallingProvider(ctx context.Context, s exchangeState, phase callingPr
 			s.effectiveChanges = append(s.effectiveChanges, attempt.requestChanges...)
 			s.effectiveChanges = append(s.effectiveChanges, changes...)
 			rounds := append(append([]canonical.TokenUsage(nil), s.providerUsage...), completedResponse.client.Usage())
-			calls, err := s.mcp.Calls(completedResponse.client)
-			if err != nil {
-				s.phase = failedPhase{problem: err, target: attempt.target}
-				return reducerOutcome{nextState: s}, nil
-			}
+			calls, caller := s.mcp.PartitionCalls(completedResponse.client)
 			if len(calls) > 0 {
+				if len(caller) == 0 && phase.call.localToolStreaming && runner.localToolDelivery != nil {
+					runner.localToolDelivery.projection.beginRound()
+				}
 				s.providerUsage = rounds
 				selection := providerCallSelection{candidateIndex: attempt.candidateIndex, requestChoice: providerRequestPreferred}
 				mcpPhase := callingMCPPhase{
 					selection: selection, target: attempt.target, calls: calls,
 					response: completedProviderResponse{client: completedResponse.client.Clone(), continuation: completedResponse.continuation.Clone()},
 				}
+				if len(caller) > 0 {
+					call := phase.call
+					mcpPhase.handoff = &call
+				}
 				outcome, beginErr := beginMCPBatch(s, mcpPhase)
 				return outcome, beginErr
 			}
 			completedResponse.client = completedResponse.client.WithUsage(canonical.SumTokenUsage(rounds...))
 			completedResponse.continuation = completedResponse.continuation.WithUsage(canonical.SumTokenUsage(rounds...))
-			response, err = handoffCompletedProviderResponse(ctx, phase.call, *completedResponse, runner)
+			if phase.call.localToolStreaming && runner.localToolDelivery != nil {
+				runner.localToolDelivery.changes = compat.CloneChanges(s.effectiveChanges)
+				// Configure winning compatibility before terminal consumption can
+				// complete the codec on the concurrent delivery side.
+				if completion := responseCompletion(runner.localToolDelivery.response); completion != nil {
+					completion.ConfigureCompatibility(s.effectiveChanges, nil)
+				}
+				response, err = runner.localToolDelivery.finish(ctx, phase.call, runner, *completedResponse)
+			} else {
+				response, err = handoffCompletedProviderResponse(ctx, phase.call, *completedResponse, runner)
+			}
 			if err != nil {
 				s.phase = failedPhase{problem: err, target: attempt.target}
 				return reducerOutcome{nextState: s}, nil
@@ -639,13 +672,23 @@ const (
 )
 
 type providerCallSelection struct {
-	candidateIndex int
-	requestChoice  providerRequestChoice
+	credentialRetry bool
+	candidateIndex  int
+	requestChoice   providerRequestChoice
 }
 
 // advanceProviderExecution is the sole transition that chooses further
 // provider execution. It performs deterministic preparation but never I/O.
 func advanceProviderExecution(ctx context.Context, s exchangeState, runner runtimeBundle) (reducerOutcome, error) {
+	if runner.localToolDelivery != nil && runner.localToolDelivery.response != nil {
+		return terminateProviderExecution(s), nil
+	}
+	if runner.localToolDelivery != nil {
+		// A failed private round may have staged identity but exposed nothing.
+		// Discard its prefix before fallback; never splice target identities.
+		runner.localToolDelivery.projection = newLocalToolClientProjection(s.swobuResponseID)
+		runner.localToolDelivery.opening = nil
+	}
 	if s.prepared == nil {
 		return reducerOutcome{}, fmt.Errorf("exchange invariant: provider preparation requires resolved continuity request")
 	}
@@ -664,7 +707,7 @@ func advanceProviderExecutionFrom(ctx context.Context, s exchangeState, runner r
 		call, target, requestChanges, fetchCache, err := prepareProviderCall(ctx, s, selection, runner)
 		s.mediaFetchCache = cloneMediaFetchCache(fetchCache)
 		if err == nil {
-			return beginProviderCallAttempt(s, selection, call, requestChanges)
+			return beginProviderCallAttempt(s, selection, call, requestChanges, runner)
 		}
 		if candidatePreparationCanAdvance(err) {
 			if next, exists := nextRouteCandidate(s, selection); exists {

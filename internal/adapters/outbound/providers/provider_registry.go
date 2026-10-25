@@ -102,9 +102,6 @@ func NewProviderRegistry(client *http.Client, credentials providersruntime.Crede
 		// Baseten intentionally composes the shared standard runtime in P0; its
 		// managed and exact deployment bases do not require a provider codec.
 		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecBaseten)),
-		// Hyperbolic's manual model authoring is derived from its profile while
-		// the inference runtime remains the shared Chat transport.
-		openaifamily.NewRuntime(client, credentials, openaifamily.StandardBearerPolicy(profile.ProviderSpecHyperbolic)),
 		siliconflow.NewRuntime(client, credentials),
 	})
 }

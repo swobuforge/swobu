@@ -9,22 +9,30 @@ import (
 )
 
 func (s *LoginService) evictExpiredLocked(now time.Time) {
+	callbackBecameIdle := false
 	for sid, rec := range s.sessions {
 		if now.Sub(rec.createdAt) <= authSessionTTL {
 			continue
 		}
 		if !rec.terminal && strings.TrimSpace(rec.oauthState) != "" && s.callbackActiveCount > 0 { // swobu:io-string source=boundary
 			s.callbackActiveCount--
+			callbackBecameIdle = s.callbackActiveCount == 0
 		}
 		delete(s.sessions, sid)
 		delete(s.sessionByState, rec.oauthState)
 	}
-	if s.callbackActiveCount == 0 {
+	// The eviction ticker may run faster than the callback idle grace period.
+	// Re-arm shutdown only when expiration actually removed the final active
+	// browser session; rescheduling on empty/no-op ticks starves the timer.
+	if callbackBecameIdle {
 		s.scheduleCallbackShutdownLocked()
 	}
 }
 
 func (s *LoginService) ensureCallbackServerStartedLocked() error {
+	if s.closed {
+		return fmt.Errorf("chatgpt login service is shut down")
+	}
 	addr := strings.TrimSpace(s.config.CallbackListenAddr) // swobu:io-string source=boundary
 	if addr == "" {
 		return nil

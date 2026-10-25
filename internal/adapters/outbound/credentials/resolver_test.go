@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 )
 
 func mustBundle(t *testing.T, token string) string {
@@ -47,6 +49,16 @@ func TestStoredSecretResolver_ResolveCredential_ExplicitSecretName(t *testing.T)
 	}
 	if token != "token-1" {
 		t.Fatalf("token = %q, want token-1", token)
+	}
+}
+
+func TestProviderCredentialScopeRetainsExistingKeyringNamespace(t *testing.T) {
+	scope, err := credentialref.NewProviderScope("openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := KeyringScopeForCredential(scope); got != KeyringScopeForProvider("openrouter") {
+		t.Fatalf("provider scope=%q, want historical %q", got, KeyringScopeForProvider("openrouter"))
 	}
 }
 
@@ -204,7 +216,7 @@ func TestFileResolver_ResolveCredential_RejectsRelativePath(t *testing.T) {
 	}
 }
 
-func TestFileResolver_ResolveCredential_RejectsSymlink(t *testing.T) {
+func TestFileResolver_ResolveCredential_AcceptsProjectedSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := dir + "/real.key"
 	if err := os.WriteFile(target, []byte("token"), 0o600); err != nil {
@@ -215,8 +227,8 @@ func TestFileResolver_ResolveCredential_RejectsSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 	resolver := NewFileResolver()
-	_, err := resolver.ResolveCredential(context.Background(), "openrouter", "file:"+link)
-	if err == nil {
-		t.Fatalf("ResolveCredential returned nil error, want symlink failure")
+	token, err := resolver.ResolveCredential(context.Background(), "openrouter", "file:"+link)
+	if err != nil || token != "token" {
+		t.Fatalf("ResolveCredential=(%q,%v), want token", token, err)
 	}
 }

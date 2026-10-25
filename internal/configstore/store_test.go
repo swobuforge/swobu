@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
@@ -21,7 +23,7 @@ func openTestStore(t *testing.T) (*Store, string) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "swobu.yaml")
-	if err := os.WriteFile(path, []byte("schema_version: 1\nworkspaces: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := Open(path)
@@ -43,7 +45,7 @@ func TestOpenOrCreateOwnsInitialDocumentAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != "schema_version: 1\nworkspaces: {}\n" {
+	if string(raw) != "schema_version: 5\nworkspaces: {}\n" {
 		t.Fatalf("initial document = %q", raw)
 	}
 	if store.Config().WorkspaceCount() != 0 {
@@ -52,10 +54,37 @@ func TestOpenOrCreateOwnsInitialDocumentAndLock(t *testing.T) {
 	if _, err := OpenOrCreate(path); !errors.Is(err, ErrLocked) {
 		t.Fatalf("second OpenOrCreate error = %v, want ErrLocked", err)
 	}
-	fileInfo, _ := os.Stat(path)
-	dirInfo, _ := os.Stat(filepath.Dir(path))
-	if fileInfo.Mode().Perm() != 0o600 || dirInfo.Mode().Perm() != 0o700 {
-		t.Fatalf("modes file=%o dir=%o", fileInfo.Mode().Perm(), dirInfo.Mode().Perm())
+}
+
+func TestOpenRejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	for _, suffix := range []string{"", ".lock"} {
+		t.Run("config"+suffix, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Chmod(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "swobu.yaml")
+			target := filepath.Join(t.TempDir(), "external.yaml")
+			content := []byte("schema_version: 5\nworkspaces: {}\n")
+			if err := os.WriteFile(target, content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Symlink(target, path+suffix); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			store, err := OpenOrCreate(path)
+			if store != nil {
+				_ = store.Close()
+			}
+			if err == nil {
+				t.Fatal("symlink admitted")
+			}
+			after, err := os.ReadFile(target)
+			if err != nil || !bytes.Equal(content, after) {
+				t.Fatalf("symlink target changed: %v", err)
+			}
+		})
 	}
 }
 
@@ -64,7 +93,7 @@ func storeTarget(t *testing.T, id string) routing.Target {
 	targetID, _ := routing.ParseTargetID(id)
 	model, _ := routing.ParseUpstreamModel("model-" + id)
 	provider, _ := routing.ParseProvider("openai", func(raw string) bool { return raw == "openai" })
-	connection, _ := routing.NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
+	connection, _ := connectionidentity.Parse("cn_shared")
 	protocol, _ := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
 	target, err := routing.NewTarget(targetID, model, protocol, connection)
 	if err != nil {
@@ -95,6 +124,182 @@ func TestStorePublishesOnlyAfterSuccessfulRename(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsInvalidMCPAliasesWithoutPublication(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "swobu.yaml")
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.Update(t.Context(), func(c routing.Config) (routing.Config, error) {
+		created, err := addWorkspace(t, "dev")(c)
+		if err != nil {
+			return routing.Config{}, err
+		}
+		slug, _ := routing.ParseWorkspaceSlug("dev")
+		return created.SetServiceEnabled(slug, routing.ServiceMCP, true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := store.Config().Workspace(slug)
+	for _, alias := range []string{"", "swobu", "Docs", "1docs", "docs\t", "docs:extra", "é", strings.Repeat("a", 33)} {
+		t.Run(alias, func(t *testing.T) {
+			_, err := store.Update(t.Context(), func(current routing.Config) (routing.Config, error) {
+				return current.SetMCPMount(slug, alias, routing.MCPMount{ConnectionID: "docs", AllowedTools: []string{"search"}})
+			})
+			if !errors.Is(err, routing.ErrInvalidConfig) {
+				t.Fatalf("invalid alias error = %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspace, _ := store.Config().Workspace(slug)
+			if !bytes.Equal(before, after) || len(workspace.MCPMounts()) != 0 || workspace.ConfigurationRevision() != original.ConfigurationRevision() || workspace.ManagementRevision() != original.ManagementRevision() {
+				t.Fatal("invalid alias changed durable or published Workspace state")
+			}
+		})
+	}
+	alias := "a" + strings.Repeat("b", 30) + "2"
+	if _, err := store.Update(t.Context(), func(current routing.Config) (routing.Config, error) {
+		return current.SetMCPMount(slug, alias, routing.MCPMount{ConnectionID: "docs", AllowedTools: []string{"search"}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	workspace, _ := reopened.Config().Workspace(slug)
+	if mounts := workspace.MCPMounts(); len(mounts) != 1 || mounts[alias].ConnectionID != "docs" {
+		t.Fatalf("valid boundary alias changed on reopen: %#v", mounts)
+	}
+}
+
+func TestWorkspaceConfigurationRevisionTracksSuccessfulSemanticPublication(t *testing.T) {
+	store, path := openTestStore(t)
+	if _, err := store.Update(t.Context(), func(c routing.Config) (routing.Config, error) {
+		created, err := addWorkspace(t, "dev")(c)
+		if err != nil {
+			return routing.Config{}, err
+		}
+		slug, _ := routing.ParseWorkspaceSlug("dev")
+		return created.SetServiceEnabled(slug, routing.ServiceMCP, true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := routing.ParseWorkspaceSlug("dev")
+	original := store.Config()
+	workspace, _ := original.Workspace(slug)
+	revision := workspace.ConfigurationRevision()
+	if revision == "" {
+		t.Fatal("published Workspace has no revision")
+	}
+	check := func(expected string) {
+		t.Helper()
+		workspace, err := store.GetWorkspace(t.Context(), slug)
+		if err != nil || workspace.ConfigurationRevision() != expected {
+			t.Fatalf("revision=%q expected=%q err=%v", workspace.ConfigurationRevision(), expected, err)
+		}
+	}
+	if _, err := store.Update(t.Context(), addWorkspace(t, "other")); err != nil {
+		t.Fatal(err)
+	}
+	check(revision)
+	edit := func(current routing.Config) (routing.Config, error) {
+		return current.SetMCPMount(slug, "docs", routing.MCPMount{ConnectionID: "docs", AllowedTools: []string{"search"}})
+	}
+	rename := store.ops.rename
+	store.ops.rename = func(string, string) error { return errors.New("injected rename failure") }
+	if _, err := store.Update(t.Context(), edit); err == nil {
+		t.Fatal("failed publication succeeded")
+	}
+	check(revision)
+	store.ops.rename = rename
+	if _, err := store.Update(t.Context(), edit); err != nil {
+		t.Fatal(err)
+	}
+	changed, _ := store.GetWorkspace(t.Context(), slug)
+	if changed.ConfigurationRevision() == revision {
+		t.Fatal("semantic commit retained revision")
+	}
+	if _, err := store.Update(t.Context(), func(routing.Config) (routing.Config, error) { return original, nil }); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ := store.GetWorkspace(t.Context(), slug)
+	if restored.ConfigurationRevision() == revision || restored.ConfigurationRevision() == changed.ConfigurationRevision() {
+		t.Fatal("restoring settings revived an old revision")
+	}
+	if _, err := store.Update(t.Context(), func(current routing.Config) (routing.Config, error) { return current, nil }); err != nil {
+		t.Fatal(err)
+	}
+	check(restored.ConfigurationRevision())
+	if _, err := store.Update(t.Context(), func(current routing.Config) (routing.Config, error) { return current.DeleteWorkspace(slug) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Update(t.Context(), func(routing.Config) (routing.Config, error) { return original, nil }); err != nil {
+		t.Fatal(err)
+	}
+	recreated, _ := store.GetWorkspace(t.Context(), slug)
+	if recreated.ConfigurationRevision() == revision || recreated.ConfigurationRevision() == restored.ConfigurationRevision() {
+		t.Fatal("delete/recreate revived an old revision")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || bytes.Contains(raw, []byte(recreated.ConfigurationRevision())) {
+		t.Fatal("runtime revision leaked into authored YAML")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	fresh, _ := reopened.GetWorkspace(t.Context(), slug)
+	if fresh.ConfigurationRevision() == "" || fresh.ConfigurationRevision() == recreated.ConfigurationRevision() {
+		t.Fatal("reopened store reused runtime revision")
+	}
+}
+
+func TestRecoveryCannotBypassActiveStoreLock(t *testing.T) {
+	_, path := openTestStore(t)
+	calls := 0
+	if _, err := OpenOrCreateAfterRecovery(path, func() error { calls++; return nil }); !errors.Is(err, ErrLocked) {
+		t.Fatal("recovery bypassed lifetime lock", err)
+	}
+	if calls != 0 {
+		t.Fatal("recovery effects ran before lock")
+	}
+}
+
+func TestStorePreservesReferenceSchemaOnUpdate(t *testing.T) {
+	store, path := openTestStore(t)
+	if _, err := store.Update(context.Background(), addWorkspace(t, "dev")); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !bytes.HasPrefix(raw, []byte("schema_version: 5\n")) {
+		t.Fatal("current publication changed schema")
+	}
+}
+
 func TestFailedUpdateTargetPersistenceLeavesSnapshotAndDiskUnchanged(t *testing.T) {
 	store, path := openTestStore(t)
 	if _, err := store.Update(context.Background(), addWorkspace(t, "dev")); err != nil {
@@ -114,7 +319,7 @@ func TestFailedUpdateTargetPersistenceLeavesSnapshotAndDiskUnchanged(t *testing.
 		workspace, _ := config.Workspace(slug)
 		current, _ := workspace.Route(route)
 		spec := current.Spec()
-		spec.Tiers[0].Targets[0].Settings = routing.TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection()}
+		spec.Tiers[0].Targets[0].Settings = routing.TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), ConnectionID: replacement.ConnectionID()}
 		return config.ApplyRouteSpec(slug, route, spec)
 	})
 	if err == nil {
@@ -330,13 +535,13 @@ func TestDirectorySyncFailureCommitsAndStoreRemainsWritable(t *testing.T) {
 	}
 }
 
-func TestStoreUsesPrivatePermissionsAndCleansStaleTemps(t *testing.T) {
+func TestStoreCleansStaleTempsWithoutRepermissioningExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "swobu.yaml")
-	if err := os.WriteFile(path, []byte("schema_version: 1\nworkspaces: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(dir, ".swobu.yaml.tmp-stale")
@@ -346,53 +551,66 @@ func TestStoreUsesPrivatePermissionsAndCleansStaleTemps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0644 {
+		t.Fatalf("opening existing config rewrote its permissions: %04o", info.Mode().Perm())
+	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale temp still exists: %v", err)
 	}
 	if _, err := store.Update(context.Background(), addWorkspace(t, "dev")); err != nil {
 		t.Fatal(err)
 	}
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("file mode = %o", info.Mode().Perm())
-	}
-	dirInfo, _ := os.Stat(dir)
-	if dirInfo.Mode().Perm() != 0o700 {
-		t.Fatalf("dir mode = %o", dirInfo.Mode().Perm())
+	// Open and Update succeed with an operator-selected 0644 starting file;
+	// the atomic replacement retains its normal restrictive creation mode.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestOpenDoesNotMutateExistingUnsafeDirectory(t *testing.T) {
+func TestOpenAcceptsExistingDirectoryWithoutRepermissioning(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o750); err != nil {
+	if err := os.Chmod(dir, 0750); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "swobu.yaml")
-	if err := os.WriteFile(path, []byte("schema_version: 1\nworkspaces: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(path); err == nil {
-		t.Fatal("Open unexpectedly accepted unsafe existing directory")
-	}
-	info, err := os.Stat(dir)
+	before, err := os.Stat(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o750 {
-		t.Fatalf("directory mode mutated to %o", info.Mode().Perm())
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("trusted local directory was rejected: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode().Perm() != after.Mode().Perm() {
+		t.Fatal("Swobu rewrote existing directory permissions")
 	}
 }
 
-func TestOpenRepairsExistingLockFilePermissions(t *testing.T) {
+func TestOpenDoesNotRepermissionExistingLockFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(dir, "swobu.yaml")
-	if err := os.WriteFile(path, []byte("schema_version: 1\nworkspaces: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("schema_version: 5\nworkspaces: {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path+".lock", nil, 0o644); err != nil {
+	if err := os.WriteFile(path+".lock", nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path + ".lock")
+	if err != nil {
 		t.Fatal(err)
 	}
 	store, err := Open(path)
@@ -400,11 +618,11 @@ func TestOpenRepairsExistingLockFilePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	info, err := os.Stat(path + ".lock")
+	after, err := os.Stat(path + ".lock")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("lock mode = %o, want 600", info.Mode().Perm())
+	if before.Mode().Perm() != after.Mode().Perm() {
+		t.Fatal("Swobu rewrote existing lock permissions")
 	}
 }

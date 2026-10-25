@@ -270,7 +270,7 @@ func TestProjectOpaqueReplayForTargetDropsUnboundClientReplay(t *testing.T) {
 func TestPrepareProviderCallTargetBoundReplayAndFallback(t *testing.T) {
 	targetA := requestpathTarget(t, "deepinfra-a")
 	targetB := requestpathTarget(t, "fallback-b")
-	pathA, err := resolveProviderPath(targetA)
+	pathA, err := resolveProviderPath(targetA, LookupModelFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestPrepareProviderCallTargetBoundReplayAndFallback(t *testing.T) {
 func TestCheckpointRecoveryPreservesAndProjectsTargetBoundReplay(t *testing.T) {
 	targetA := requestpathTarget(t, "deepinfra-a")
 	targetB := requestpathTarget(t, "fallback-b")
-	pathA, err := resolveProviderPath(targetA)
+	pathA, err := resolveProviderPath(targetA, LookupModelFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,6 +670,7 @@ func TestImplicitHistoryFingerprintResumeRestoresTargetBoundOpaqueReplay(t *test
 		staticWorkspaceLookup{workspace: workspace},
 		runtime,
 		RuntimePoliciesSpec{
+			ModelConnection: LookupModelFixture,
 			CheckpointStore: checkpointStore,
 			ResponseIDs:     deterministicResponseIDGenerator{},
 		},

@@ -9,6 +9,10 @@ import (
 	"log/slog"
 )
 
+// HandleCallback accepts only the exact provider-registered loopback path and
+// a live, unexpired browser session's unpredictable state. Expired and
+// canceled handoffs are rejected synchronously, independent of the eviction
+// ticker, so callback timing cannot extend provider-session lifetime.
 func (s *LoginService) HandleCallback(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -17,6 +21,10 @@ func (s *LoginService) HandleCallback(w http.ResponseWriter, req *http.Request) 
 	q := req.URL.Query()
 	state := strings.TrimSpace(q.Get("state"))                                                                                                                                                                    // swobu:io-string source=boundary
 	slog.Info("chatgpt auth callback received", "component", "chatgpt_login", "has_state", state != "", "has_code", strings.TrimSpace(q.Get("code")) != "", "has_error", strings.TrimSpace(q.Get("error")) != "") // swobu:io-string source=boundary
+	if req.URL.Path != callbackPath || req.URL.RawQuery == "" || req.URL.Fragment != "" {
+		http.NotFound(w, req)
+		return
+	}
 	if state == "" {
 		http.Error(w, "missing state", http.StatusBadRequest)
 		return
@@ -35,9 +43,20 @@ func (s *LoginService) HandleCallback(w http.ResponseWriter, req *http.Request) 
 		writeAuthenticationErrorPage(w, http.StatusNotFound, callbackRequestID(q))
 		return
 	}
+	if s.config.Now().Sub(rec.createdAt) > authSessionTTL {
+		s.setTerminalStateLocked(rec, SessionExpired, "login session expired")
+		s.mu.Unlock()
+		writeAuthenticationErrorPage(w, http.StatusGone, callbackRequestID(q))
+		return
+	}
 	if rec.terminal {
 		slog.Info("chatgpt auth callback ignored because session is terminal", "component", "chatgpt_login", "session_id", sid)
+		state := rec.state
 		s.mu.Unlock()
+		if state != SessionSucceeded {
+			writeAuthenticationErrorPage(w, http.StatusGone, callbackRequestID(q))
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte("<html><body>Login already completed. You can close this tab.</body></html>"))
 		return

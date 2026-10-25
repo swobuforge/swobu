@@ -32,6 +32,8 @@ const (
 	ToolCallTimeout          = 30 * time.Second
 )
 
+var errMCPNetworkDenied = errors.New("MCP endpoint resolution contains a prohibited address")
+
 var errAuthenticationRequired = errors.New("MCP source requires authentication")
 
 // ResultProjectionError means the remote tool returned a response that was
@@ -57,18 +59,34 @@ func projectionError(format string, args ...any) error {
 }
 
 type session struct {
-	source     canonical.MCPToolSource
-	sdk        *mcp.ClientSession
-	authStatus *authenticationStatus
+	source      canonical.MCPToolSource
+	sdk         *mcp.ClientSession
+	authStatus  *authenticationStatus
+	nativeTools map[string]json.RawMessage
 }
 
 func openSession(ctx context.Context, source canonical.MCPToolSource, access SourceAccess) (*session, error) {
 	remote := source.Source()
-	httpClient, authStatus, err := safeHTTPClient(source, access)
+	httpClient, authStatus, err := safeHTTPClient(source, SourceAccess{Authorization: access.Authorization, Headers: access.Headers})
 	if err != nil {
 		return nil, err
 	}
+	if access.ResolveAuthorization != nil {
+		endpoint, ok := remote.URL()
+		if !ok {
+			return nil, canonical.InternalError("MCP client requires a URL source")
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, canonical.BadRequest("MCP endpoint URL is invalid")
+		}
+		httpClient.Transport = sourceCredentialTransport{
+			next: httpClient.Transport, origin: endpointOrigin(parsed), resolve: access.ResolveAuthorization,
+		}
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "swobu", Version: "v0"}, nil)
+	client.AddSendingMiddleware(nativeResponseMiddleware)
+	httpClient.Transport = nativeResponseTransport{next: httpClient.Transport}
 	endpoint, ok := remote.URL()
 	if !ok {
 		return nil, canonical.InternalError("local MCP client requires a URL source")
@@ -95,6 +113,7 @@ func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, [
 	discovered := make(map[string]canonical.ToolDeclaration)
 	discoveredDecisions := make(map[string][]compat.Change)
 	discoveredOrder := make([]string, 0)
+	nativeTools := make(map[string]json.RawMessage)
 	cursor := ""
 	bounds := toolListBounds{
 		bytes: len(s.source.Description()), seenCursors: map[string]struct{}{},
@@ -131,6 +150,11 @@ func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, [
 				return nil, nil, fmt.Errorf("MCP source %q returned duplicate tool %q", s.source.Key().Name(), tool.Name)
 			}
 			discovered[tool.Name] = declaration
+			native, err := freezeNativeTool(tool)
+			if err != nil {
+				return nil, nil, err
+			}
+			nativeTools[tool.Name] = native
 			discoveredOrder = append(discoveredOrder, tool.Name)
 			discoveredDecisions[tool.Name] = toolDecisions
 		}
@@ -154,6 +178,11 @@ func (s *session) listTools(ctx context.Context) ([]canonical.ToolDeclaration, [
 			changes = append(changes, discoveredDecisions[name]...)
 		}
 	}
+	s.nativeTools = make(map[string]json.RawMessage, len(declarations))
+	for _, declaration := range declarations {
+		function, _ := declaration.Function()
+		s.nativeTools[function.Key().Name()] = nativeTools[function.Key().Name()]
+	}
 	return declarations, changes, nil
 }
 
@@ -176,8 +205,11 @@ func sdkToolRetainedBytes(sourceDescription string, tool *mcp.Tool) (int, error)
 			expandedDescription += "\n\n" + tool.Description
 		}
 	}
-	return len(tool.Name) + len(tool.Description) + len(input) + len(output) +
-		len(expandedDescription), nil
+	native, err := freezeNativeTool(tool)
+	if err != nil {
+		return 0, err
+	}
+	return len(native) + len(tool.Name) + len(tool.Description) + len(input) + len(output) + len(expandedDescription), nil
 }
 
 func declarationFromSDKTool(source canonical.MCPToolSource, tool *mcp.Tool) (canonical.ToolDeclaration, []compat.Change, error) {
@@ -254,7 +286,9 @@ func (s *session) callWithTimeout(ctx context.Context, remoteName string, input 
 
 func toolArguments(input canonical.JSONObject) (map[string]any, error) {
 	var arguments map[string]any
-	if err := json.Unmarshal([]byte(input.String()), &arguments); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(input.String()))
+	decoder.UseNumber()
+	if err := decoder.Decode(&arguments); err != nil {
 		return nil, err
 	}
 	return arguments, nil
@@ -270,6 +304,15 @@ func (s *session) callPreparedWithTimeout(ctx context.Context, remoteName string
 	result, err := s.sdk.CallTool(ctx, &mcp.CallToolParams{Name: remoteName, Arguments: arguments})
 	if err != nil {
 		return nil, false, fmt.Errorf("call MCP tool %q: %w", remoteName, err)
+	}
+	return projectToolResult(remoteName, result)
+}
+
+// projectToolResult is shared by request-owned sessions and Workspace bindings;
+// neither execution path may silently drop unsupported or oversized results.
+func projectToolResult(remoteName string, result *mcp.CallToolResult) ([]canonical.ToolResultPart, bool, error) {
+	if result == nil {
+		return nil, false, projectionError("MCP tool %q returned no result", remoteName)
 	}
 	parts := make([]canonical.ToolResultPart, 0, len(result.Content)+1)
 	totalBytes := 0
@@ -353,7 +396,7 @@ func safeHTTPClient(source canonical.MCPToolSource, access SourceAccess) (*http.
 			return nil, fmt.Errorf("resolve MCP endpoint: %w", err)
 		}
 		if !publicMCPResolution(addresses) {
-			return nil, fmt.Errorf("MCP endpoint resolution contains a prohibited address")
+			return nil, errMCPNetworkDenied
 		}
 		var last error
 		for _, ip := range addresses {
@@ -406,6 +449,26 @@ type bearerTransport struct {
 	next   http.RoundTripper
 	origin string
 	bearer string
+}
+
+type sourceCredentialTransport struct {
+	next    http.RoundTripper
+	origin  string
+	resolve func(context.Context) (string, error)
+}
+
+func (t sourceCredentialTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if t.resolve == nil {
+		return nil, fmt.Errorf("MCP source credential resolver is unavailable")
+	}
+	if endpointOrigin(request.URL) != t.origin {
+		return t.next.RoundTrip(request)
+	}
+	secret, err := t.resolve(request.Context())
+	if err != nil {
+		return nil, err
+	}
+	return (bearerTransport{next: t.next, origin: t.origin, bearer: secret}).RoundTrip(request)
 }
 
 type headerTransport struct {

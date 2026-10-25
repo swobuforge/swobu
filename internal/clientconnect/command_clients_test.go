@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,9 @@ type openClawE2EState struct {
 }
 
 func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture launches a POSIX shell script; command adapter behavior is covered by injected command tests on Windows")
+	}
 	t.Setenv("OPENCLAW_NIX_MODE", "")
 	t.Setenv("OPENCLAW_E2E_HELPER", "1")
 
@@ -79,7 +83,7 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 		ConfigPath: filepath.Join(tempDir, "openclaw.json"),
 		Primary:    "openrouter/e2e",
 		Provider: map[string]any{
-			"baseUrl": "http://127.0.0.1:7926/c/old",
+			"baseUrl": "http://127.0.0.1:7926/workspaces/old",
 			"api":     "legacy",
 			"apiKey":  "human-managed",
 			"metadata": map[string]any{
@@ -105,7 +109,7 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	service := NewService()
-	target := testTarget(t)
+	target := testTarget(t).WithAuthentication("test-principal", "human-managed")
 	clients := service.Discover(context.Background(), target)
 	found := false
 	for _, client := range clients {
@@ -130,8 +134,8 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 	}
 
 	state := readOpenClawE2EState(t, statePath)
-	if state.Primary != "swobu/default" {
-		t.Fatalf("primary = %q, want swobu/default", state.Primary)
+	if state.Primary != "swobu/coding" {
+		t.Fatalf("primary = %q, want swobu/coding", state.Primary)
 	}
 	if state.Provider["baseUrl"] != target.WorkspaceURL() || state.Provider["api"] != "openai-completions" || state.Provider["apiKey"] != "human-managed" {
 		t.Fatalf("provider not wired to target while preserving credentials: %#v", state.Provider)
@@ -141,13 +145,13 @@ func TestOpenClawAutoWiringEndToEnd(t *testing.T) {
 		t.Fatalf("provider metadata not preserved: %#v", state.Provider)
 	}
 	models, ok := state.Provider["models"].([]any)
-	if !ok || !modelListContains(models, "existing") || !modelListContains(models, "default") {
+	if !ok || !modelListContains(models, "existing") || !modelListContains(models, "coding") {
 		t.Fatalf("provider models not merged: %#v", state.Provider["models"])
 	}
 	if _, ok := state.Allowlist["openrouter/e2e"]; !ok {
 		t.Fatalf("existing allowlist entry not preserved: %#v", state.Allowlist)
 	}
-	if _, ok := state.Allowlist["swobu/default"]; !ok {
+	if _, ok := state.Allowlist["swobu/coding"]; !ok {
 		t.Fatalf("Swobu model missing from allowlist: %#v", state.Allowlist)
 	}
 
@@ -278,6 +282,68 @@ func saveOpenClawE2EState(path string, state openClawE2EState) error {
 	return os.WriteFile(path, raw, 0o600)
 }
 
+func TestOpenClawPublishesExactConfigBackupBeforeMutation(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "openclaw.json")
+	original := []byte("{\n  \"operator_setting\": {\"keep\": true},\n  \"models\": {\"providers\": {\"swobu\": {\"baseUrl\": \"http://127.0.0.1:7926/workspaces/work\", \"api\": \"legacy\", \"apiKey\": \"human-managed\"}}}\n}\n")
+	if err := os.WriteFile(configPath, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"openclaw config file":                              {stdout: configPath + "\n"},
+		"openclaw config get agents.defaults.model.primary": {stdout: "other/model\n"},
+		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"legacy","apiKey":"human-managed"}` + "\n"},
+		"openclaw config get agents.defaults.models --json": {code: 1},
+		"openclaw config set models.providers.swobu {\"api\":\"openai-completions\",\"apiKey\":\"human-managed\",\"baseUrl\":\"http://127.0.0.1:7926/workspaces/work\",\"models\":[{\"id\":\"coding\",\"name\":\"coding\"}]} --json": {},
+		"openclaw config set agents.defaults.model.primary swobu/coding": {},
+	}
+	service := commandService(t, "openclaw", replies, &calls)
+	target, err := NewTarget("work", "http://127.0.0.1:7926/workspaces/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target = target.WithModelID("coding").WithAuthentication("test-principal", "human-managed")
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRun := service.run
+	checkedBackupBeforeMutation := false
+	service.run = func(ctx context.Context, name string, args ...string) ([]byte, int, error) {
+		if len(args) >= 3 && args[0] == "config" && args[1] == "set" {
+			backup, err := os.ReadFile(configPath + ".swobu.bak")
+			if err != nil {
+				t.Fatalf("OpenClaw mutation began before backup publication: %v", err)
+			}
+			if !bytes.Equal(backup, original) {
+				t.Fatalf("backup=%q, want exact original %q", backup, original)
+			}
+			checkedBackupBeforeMutation = true
+		}
+		return baseRun(ctx, name, args...)
+	}
+	if _, err := service.Apply(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if !checkedBackupBeforeMutation {
+		t.Fatal("OpenClaw configuration mutation was not observed")
+	}
+	if !strings.Contains(strings.Join(configurationSetCalls(calls)[0].args, " "), target.WorkspaceURL()) {
+		t.Fatalf("OpenClaw migration did not publish canonical Workspace URL: %#v", configurationSetCalls(calls))
+	}
+	backup, err := os.ReadFile(configPath + ".swobu.bak")
+	if err != nil || !bytes.Equal(backup, original) {
+		t.Fatalf("backup=%q, error=%v; want exact original %q", backup, err, original)
+	}
+	info, err := os.Stat(configPath + ".swobu.bak")
+	if err != nil {
+		t.Fatalf("stat backup: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		t.Fatalf("backup mode=%o, want preserved 0640", info.Mode().Perm())
+	}
+}
+
 func TestOpenClawDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 	var calls []commandCall
 	replies := map[string]commandReply{
@@ -286,9 +352,9 @@ func TestOpenClawDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 		"openclaw config get models.providers.swobu --json": {code: 1},
 		"openclaw config get agents.defaults.models --json": {code: 1},
 	}
-	providerJSON := `{"api":"openai-completions","apiKey":"swobu","baseUrl":"http://127.0.0.1:7926/c/work","models":[{"id":"default","name":"Swobu default"}]}`
+	providerJSON := `{"api":"openai-completions","apiKey":"test-workspace-credential","baseUrl":"http://127.0.0.1:7926/workspaces/work","models":[{"id":"coding","name":"coding"}]}`
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
-	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
+	replies["openclaw config set agents.defaults.model.primary swobu/coding"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
 	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
 	if err != nil {
@@ -297,7 +363,7 @@ func TestOpenClawDeclaresSwobuProviderThenSelectsIt(t *testing.T) {
 	if _, err = service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
-	want := []commandCall{{"openclaw", []string{"config", "set", "models.providers.swobu", providerJSON, "--json"}}, {"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/default"}}}
+	want := []commandCall{{"openclaw", []string{"config", "set", "models.providers.swobu", providerJSON, "--json"}}, {"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/coding"}}}
 	if !reflect.DeepEqual(configurationSetCalls(calls), want) {
 		t.Fatalf("apply calls=%#v", calls)
 	}
@@ -333,8 +399,8 @@ func TestOpenClawConfiguredAndNixStates(t *testing.T) {
 	var calls []commandCall
 	replies := map[string]commandReply{
 		"openclaw config file":                              {stdout: "/path/to/config.json\n"},
-		"openclaw config get agents.defaults.model.primary": {stdout: "swobu/default\n"},
-		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"http://127.0.0.1:7926/c/work","api":"openai-completions","apiKey":"swobu","models":[{"id":"default","name":"Swobu default"}]}` + "\n"},
+		"openclaw config get agents.defaults.model.primary": {stdout: "swobu/coding\n"},
+		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"http://127.0.0.1:7926/workspaces/work","api":"openai-completions","apiKey":"test-workspace-credential","models":[{"id":"coding","name":"coding"}]}` + "\n"},
 		"openclaw config get agents.defaults.models --json": {code: 1},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
@@ -490,6 +556,56 @@ func TestOpenClawMissingPathDiagnosticsPlanFreshConfiguration(t *testing.T) {
 	}
 }
 
+func TestOpenClawPlanResolvesDisplayedHomePath(t *testing.T) {
+	home := t.TempDir()
+	openClawHome := filepath.Join(home, ".openclaw")
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"openclaw config file":                              {stdout: "$OPENCLAW_HOME/openclaw.json\n"},
+		"openclaw config get agents.defaults.model.primary": {stdout: "openrouter/e2e\n"},
+		"openclaw config get models.providers.swobu --json": {code: 1},
+		"openclaw config get agents.defaults.models --json": {code: 1},
+	}
+	service := commandService(t, "openclaw", replies, &calls)
+	service.getenv = func(key string) string {
+		if key == "OPENCLAW_HOME" {
+			return openClawHome
+		}
+		return ""
+	}
+
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
+	if err != nil {
+		t.Fatalf("Plan with OpenClaw's displayed home path failed: %v", err)
+	}
+	wantPath := filepath.Join(openClawHome, "openclaw.json")
+	if len(plan.ConfigPaths) != 1 || plan.ConfigPaths[0] != wantPath {
+		t.Fatalf("config paths = %#v, want resolved path %q", plan.ConfigPaths, wantPath)
+	}
+}
+
+func TestOpenClawPlanExpandsTildeConfigPath(t *testing.T) {
+	home := t.TempDir()
+	var calls []commandCall
+	replies := map[string]commandReply{
+		"openclaw config file":                              {stdout: "~/.openclaw/openclaw.json\n"},
+		"openclaw config get agents.defaults.model.primary": {stdout: "openrouter/e2e\n"},
+		"openclaw config get models.providers.swobu --json": {code: 1},
+		"openclaw config get agents.defaults.models --json": {code: 1},
+	}
+	service := commandService(t, "openclaw", replies, &calls)
+	service.homeDir = func() (string, error) { return home, nil }
+
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
+	if err != nil {
+		t.Fatalf("Plan with OpenClaw's tilde path failed: %v", err)
+	}
+	wantPath := filepath.Join(home, ".openclaw", "openclaw.json")
+	if len(plan.ConfigPaths) != 1 || plan.ConfigPaths[0] != wantPath {
+		t.Fatalf("config paths = %#v, want resolved path %q", plan.ConfigPaths, wantPath)
+	}
+}
+
 func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) {
 	var calls []commandCall
 	replies := map[string]commandReply{
@@ -499,9 +615,9 @@ func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) 
 		"openclaw config get models.providers.swobu --json": {code: 1},
 		"openclaw config get agents.defaults.models --json": {code: 1},
 	}
-	providerJSON := `{"api":"openai-completions","apiKey":"swobu","baseUrl":"http://127.0.0.1:7926/c/work","models":[{"id":"default","name":"Swobu default"}]}`
+	providerJSON := `{"api":"openai-completions","apiKey":"test-workspace-credential","baseUrl":"http://127.0.0.1:7926/workspaces/work","models":[{"id":"coding","name":"coding"}]}`
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
-	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
+	replies["openclaw config set agents.defaults.model.primary swobu/coding"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
 
 	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
@@ -521,8 +637,8 @@ func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) 
 	if backendChange.BeforeExists {
 		t.Fatalf("backend change marked existing before: %#v", backendChange)
 	}
-	if backendChange.After != "swobu/default" {
-		t.Fatalf("backend change after = %q, want swobu/default", backendChange.After)
+	if backendChange.After != "swobu/coding" {
+		t.Fatalf("backend change after = %q, want swobu/coding", backendChange.After)
 	}
 
 	if _, err := service.Apply(context.Background(), plan); err != nil {
@@ -530,7 +646,7 @@ func TestOpenClawUnsetDefaultModelPlansInsertionAndAppliesPrimary(t *testing.T) 
 	}
 	want := []commandCall{
 		{"openclaw", []string{"config", "set", "models.providers.swobu", providerJSON, "--json"}},
-		{"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/default"}},
+		{"openclaw", []string{"config", "set", "agents.defaults.model.primary", "swobu/coding"}},
 	}
 	if !reflect.DeepEqual(configurationSetCalls(calls), want) {
 		t.Fatalf("apply calls = %#v, want %#v", calls, want)
@@ -552,14 +668,14 @@ func TestOpenClawReusesExistingCredentialPresentationAndMetadata(t *testing.T) {
 	replies := map[string]commandReply{
 		"openclaw config file":                              {stdout: "/path/to/config.json\n"},
 		"openclaw config get agents.defaults.model.primary": {stdout: "other/model\n"},
-		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"http://127.0.0.1:7926/c/old","api":"legacy","apiKey":"user-managed","metadata":{"owner":"human"},"models":[{"id":"default","name":"My route","capabilities":{"custom":true}}]}` + "\n"},
+		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"http://127.0.0.1:7926/workspaces/old","api":"legacy","apiKey":"user-managed","metadata":{"owner":"human"},"models":[{"id":"coding","name":"My route","capabilities":{"custom":true}}]}` + "\n"},
 		"openclaw config get agents.defaults.models --json": {code: 1},
 	}
-	providerJSON := `{"api":"openai-completions","apiKey":"user-managed","baseUrl":"http://127.0.0.1:7926/c/work","metadata":{"owner":"human"},"models":[{"capabilities":{"custom":true},"id":"default","name":"My route"}]}`
+	providerJSON := `{"api":"openai-completions","apiKey":"user-managed","baseUrl":"http://127.0.0.1:7926/workspaces/work","metadata":{"owner":"human"},"models":[{"capabilities":{"custom":true},"id":"coding","name":"My route"}]}`
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
-	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
+	replies["openclaw config set agents.defaults.model.primary swobu/coding"] = commandReply{}
 	service := commandService(t, "openclaw", replies, &calls)
-	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenClaw, testTarget(t).WithAuthentication("test-principal", "user-managed"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +703,7 @@ func TestOpenClawApplyMergesUnrelatedProviderAndAllowlistEdits(t *testing.T) {
 	replies := map[string]commandReply{
 		"openclaw config file":                              {stdout: "/path/to/config.json\n"},
 		"openclaw config get agents.defaults.model.primary": {stdout: "openrouter/e2e\n"},
-		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"https://old","api":"openai-completions","apiKey":"swobu","metadata":{"owner":"before"},"models":[{"id":"default","name":"Swobu default"}]}` + "\n"},
+		"openclaw config get models.providers.swobu --json": {stdout: `{"baseUrl":"https://old","api":"openai-completions","apiKey":"test-workspace-credential","metadata":{"owner":"before"},"models":[{"id":"coding","name":"coding"}]}` + "\n"},
 		"openclaw config get agents.defaults.models --json": {stdout: `{"other/model":{}}` + "\n"},
 	}
 	service := commandService(t, "openclaw", replies, &calls)
@@ -598,17 +714,17 @@ func TestOpenClawApplyMergesUnrelatedProviderAndAllowlistEdits(t *testing.T) {
 
 	// Unrelated edits arrive between Plan and Apply:
 	replies["openclaw config get models.providers.swobu --json"] = commandReply{
-		stdout: `{"baseUrl":"https://old","api":"openai-completions","apiKey":"swobu","metadata":{"owner":"after"},"models":[{"id":"default","name":"Swobu default"},{"id":"extra","name":"Extra"}]}` + "\n",
+		stdout: `{"baseUrl":"https://old","api":"openai-completions","apiKey":"test-workspace-credential","metadata":{"owner":"after"},"models":[{"id":"coding","name":"coding"},{"id":"extra","name":"Extra"}]}` + "\n",
 	}
 	replies["openclaw config get agents.defaults.models --json"] = commandReply{
 		stdout: `{"other/model":{},"human/model":{}}` + "\n",
 	}
 
-	providerJSON := `{"api":"openai-completions","apiKey":"swobu","baseUrl":"http://127.0.0.1:7926/c/work","metadata":{"owner":"after"},"models":[{"id":"default","name":"Swobu default"},{"id":"extra","name":"Extra"}]}`
-	allowlistJSON := `{"human/model":{},"other/model":{},"swobu/default":{}}`
+	providerJSON := `{"api":"openai-completions","apiKey":"test-workspace-credential","baseUrl":"http://127.0.0.1:7926/workspaces/work","metadata":{"owner":"after"},"models":[{"id":"coding","name":"coding"},{"id":"extra","name":"Extra"}]}`
+	allowlistJSON := `{"human/model":{},"other/model":{},"swobu/coding":{}}`
 	replies["openclaw config set models.providers.swobu "+providerJSON+" --json"] = commandReply{}
 	replies["openclaw config set agents.defaults.models "+allowlistJSON+" --json"] = commandReply{}
-	replies["openclaw config set agents.defaults.model.primary swobu/default"] = commandReply{}
+	replies["openclaw config set agents.defaults.model.primary swobu/coding"] = commandReply{}
 	if _, err := service.Apply(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +767,7 @@ func TestHermesDeclaresCustomBackendWithOneAtomicFileReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"    provider: custom # provider comment", "    default: default", "    base_url: http://127.0.0.1:7926/c/work", unrelatedPrefix, unrelatedSuffix} {
+	for _, want := range []string{"    provider: custom # provider comment", "    default: coding", "    base_url: http://127.0.0.1:7926/workspaces/work", unrelatedPrefix, unrelatedSuffix} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
@@ -676,7 +792,7 @@ func TestHermesPlansOnlyFromPersistedUserConfiguration(t *testing.T) {
 	if len(calls) != 1 || !reflect.DeepEqual(calls[0], commandCall{"hermes", []string{"config", "path"}}) {
 		t.Fatalf("calls = %#v, want only persisted config path lookup", calls)
 	}
-	if len(plan.Changes) != 2 || plan.Changes[0].Before != "openrouter/vendor/model" || !plan.Changes[0].BeforeExists || plan.Changes[1].Before != "https://openrouter.ai/api/v1" || !plan.Changes[1].BeforeExists {
+	if len(plan.Changes) != 3 || plan.Changes[0].Before != "openrouter/vendor/model" || !plan.Changes[0].BeforeExists || plan.Changes[1].Before != "https://openrouter.ai/api/v1" || !plan.Changes[1].BeforeExists {
 		t.Fatalf("changes = %#v", plan.Changes)
 	}
 }
@@ -704,19 +820,22 @@ func TestHermesCreatesMissingConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := hermesModelBlock(testTarget(t).WorkspaceURL())
+	want := hermesModelBlock(testTarget(t).WorkspaceURL(), testTarget(t).bearer, testTarget(t).ModelID())
 	if string(raw) != want {
 		t.Fatalf("config = %q, want %q", raw, want)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v, error = %v", info.Mode().Perm(), err)
 	}
 }
 
 func TestReplaceHermesModelAppendsMissingBlockWithoutReserializing(t *testing.T) {
 	for _, original := range []string{"# human\nkeep:  [one,  two] # exact\n", "# comment only", "  \n"} {
-		next, err := replaceHermesModel([]byte(original), testTarget(t).WorkspaceURL())
+		next, err := replaceHermesModel([]byte(original), testTarget(t).WorkspaceURL(), testTarget(t).bearer, testTarget(t).ModelID())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -724,7 +843,7 @@ func TestReplaceHermesModelAppendsMissingBlockWithoutReserializing(t *testing.T)
 		if original != "" && !strings.HasSuffix(original, "\n") {
 			prefix += "\n"
 		}
-		if string(next) != prefix+hermesModelBlock(testTarget(t).WorkspaceURL()) {
+		if string(next) != prefix+hermesModelBlock(testTarget(t).WorkspaceURL(), testTarget(t).bearer, testTarget(t).ModelID()) {
 			t.Fatalf("next:\n%s", next)
 		}
 	}
@@ -767,14 +886,14 @@ func TestHermesRefusesUnsupportedYAMLSyntaxWithoutChange(t *testing.T) {
 
 func TestHermesPreservesCRLFInChangedAndInsertedLines(t *testing.T) {
 	raw := []byte("model:\r\n  provider: 'openrouter'\r\n  default: \"gpt-4o\"\r\nkeep: true\r\n")
-	next, err := replaceHermesModel(raw, testTarget(t).WorkspaceURL())
+	next, err := replaceHermesModel(raw, testTarget(t).WorkspaceURL(), testTarget(t).bearer, testTarget(t).ModelID())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(next, []byte("\n")) && bytes.Contains(bytes.ReplaceAll(next, []byte("\r\n"), nil), []byte("\n")) {
 		t.Fatalf("introduced LF line endings:\n%q", next)
 	}
-	for _, want := range []string{"  provider: 'custom'\r\n", "  default: \"default\"\r\n", "  base_url: http://127.0.0.1:7926/c/work\r\n", "keep: true\r\n"} {
+	for _, want := range []string{"  provider: 'custom'\r\n", "  default: \"coding\"\r\n", "  base_url: http://127.0.0.1:7926/workspaces/work\r\n", "keep: true\r\n"} {
 		if !bytes.Contains(next, []byte(want)) {
 			t.Fatalf("missing %q:\n%q", want, next)
 		}
@@ -783,11 +902,11 @@ func TestHermesPreservesCRLFInChangedAndInsertedLines(t *testing.T) {
 
 func TestHermesInsertionAtEOFFirstTerminatesExistingLine(t *testing.T) {
 	raw := []byte("model:\n  provider: openrouter\n  default: gpt-4o")
-	next, err := replaceHermesModel(raw, testTarget(t).WorkspaceURL())
+	next, err := replaceHermesModel(raw, testTarget(t).WorkspaceURL(), testTarget(t).bearer, testTarget(t).ModelID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "model:\n  provider: custom\n  default: default\n  base_url: http://127.0.0.1:7926/c/work\n"
+	want := "model:\n  provider: custom\n  default: coding\n  base_url: http://127.0.0.1:7926/workspaces/work\n  api_key: \"test-workspace-credential\"\n"
 	if string(next) != want {
 		t.Fatalf("next:\n%q\nwant:\n%q", next, want)
 	}

@@ -24,7 +24,7 @@ func main() {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
-	root := newRootCommand(runner, os.Stdout, os.Stderr, isInteractiveTTY)
+	root := newRootCommand(runner, os.Stdout, os.Stderr)
 
 	if err := root.Execute(); err != nil {
 		var codeErr *exitCodeError
@@ -36,7 +36,7 @@ func main() {
 	}
 }
 
-func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive func() bool) *cobra.Command {
+func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer) *cobra.Command {
 	if runner == nil {
 		runner = &cli.Runner{}
 	}
@@ -45,9 +45,6 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 	}
 	if runner.Stderr == nil {
 		runner.Stderr = stderr
-	}
-	if isInteractive == nil {
-		isInteractive = isInteractiveTTY
 	}
 
 	exitWithRunner := func(args []string) error {
@@ -69,18 +66,15 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		Version:       controlplane.SwobuVersion(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !isInteractive() {
-				return cmd.Help()
-			}
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return exitWithRunner(nil)
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.Flags().StringVar(&runner.Addr, "addr", "", fmt.Sprintf("daemon address for Cockpit attach-or-start (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
-	root.Flags().StringVar(&runner.ConfigPath, "config", "", fmt.Sprintf("daemon config path when Cockpit starts it (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
+	root.Flags().StringVar(&runner.Addr, "addr", "", fmt.Sprintf("daemon address for local Web Operator attach-or-start (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	root.Flags().StringVar(&runner.ConfigPath, "config", "", fmt.Sprintf("daemon config path when starting the local Web Operator (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
 
 	delegate := func(prefix ...string) func(*cobra.Command, []string) error {
 		return func(_ *cobra.Command, args []string) error {
@@ -89,6 +83,14 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		}
 	}
 
+	// The binary's command tree and leaf help must reflect the existing Runner
+	// dispatch. Leaves pass their flags through to the single standard-library
+	// parser that enforces original review, recovery and local-node authority.
+	leaf := func(use, short string, path ...string) *cobra.Command {
+		return &cobra.Command{Use: use, Short: short, DisableFlagParsing: true, RunE: delegate(path...)}
+	}
+
+	openCmd := &cobra.Command{Use: "open [args]", Short: "Open an authenticated local Web Operator session", DisableFlagParsing: true, RunE: delegate("open")}
 	daemonCmd := &cobra.Command{
 		Use:                "daemon [args]",
 		Short:              "Start daemon",
@@ -107,8 +109,31 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		DisableFlagParsing: true,
 		RunE:               delegate("connect"),
 	}
-	shareCmd := &cobra.Command{Use: "share <workspace>/<route> [args]", Short: "Share one route", DisableFlagParsing: true, RunE: delegate("share")}
-	accessCmd := &cobra.Command{Use: "access <create|list|key|revoke> [args]", Short: "Manage Workspace Access credentials", DisableFlagParsing: true, RunE: delegate("access")}
+	credentialCmd := &cobra.Command{Use: "credential", Short: "Confirm credential issuance or selected revocation", RunE: delegate("credential")}
+	credentialCmd.AddCommand(
+		leaf("issue", "Issue a scoped credential after local confirmation", "credential", "issue"),
+		leaf("revoke", "Revoke one credential after local confirmation", "credential", "revoke"),
+	)
+	principalCmd := &cobra.Command{Use: "principal", Short: "Inspect and manage Principal identity and authority", RunE: delegate("principal")}
+	principalCmd.AddCommand(
+		leaf("list", "List managed Principals and their Workspace permissions", "principal", "list"),
+		leaf("create", "Create a Principal with reviewed attribution", "principal", "create"),
+		leaf("label", "Change a Principal label after local confirmation", "principal", "label"),
+		leaf("revoke", "Revoke a Principal and its credentials", "principal", "revoke"),
+	)
+	workspaceCmd := &cobra.Command{Use: "workspace", Short: "Review and apply Workspace mutations and inspect limits", RunE: delegate("workspace")}
+	permissionCmd := &cobra.Command{Use: "permission", Short: "Review a Principal's Workspace authority", RunE: delegate("workspace", "permission")}
+	permissionCmd.AddCommand(
+		leaf("grant", "Grant Workspace use after local confirmation", "workspace", "permission", "grant"),
+		leaf("revoke", "Revoke Workspace use after local confirmation", "workspace", "permission", "revoke"),
+	)
+	workspaceCmd.AddCommand(
+		leaf("create", "Create an empty Workspace after local confirmation", "workspace", "create"),
+		leaf("display-name", "Change a Workspace display name", "workspace", "display-name"),
+		leaf("delete", "Delete a Workspace after local confirmation", "workspace", "delete"),
+		permissionCmd,
+		leaf("limits", "Inspect Workspace accounting limits and estimated spend", "workspace", "limits"),
+	)
 	downCmd := &cobra.Command{
 		Use:                "down [args]",
 		Short:              "Request daemon shutdown",
@@ -138,11 +163,13 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		DisableFlagParsing: true,
 		RunE:               delegate("telemetry", "off"),
 	}
-	telemetryCmd.AddCommand(telemetryStatusCmd, telemetryOnCmd, telemetryOffCmd)
+	telemetryInspectCmd := leaf("inspect", "Inspect local Node product telemetry without uploading", "telemetry", "inspect")
+	telemetryCmd.AddCommand(telemetryStatusCmd, telemetryOnCmd, telemetryOffCmd, telemetryInspectCmd)
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version",
+		Args:  cobra.NoArgs,
 		RunE:  delegate("version"),
 	}
 	updateCmd := &cobra.Command{
@@ -152,7 +179,9 @@ func newRootCommand(runner *cli.Runner, stdout, stderr io.Writer, isInteractive 
 		RunE:  delegate("update"),
 	}
 
-	root.AddCommand(accessCmd, connectCmd, daemonCmd, shareCmd, statusCmd, telemetryCmd, updateCmd, versionCmd)
+	configCmd := &cobra.Command{Use: "config", Short: "Validate Node authority offline", RunE: delegate("config")}
+	configCmd.AddCommand(leaf("validate", "Validate existing configuration without starting the daemon", "config", "validate"))
+	root.AddCommand(openCmd, configCmd, credentialCmd, principalCmd, workspaceCmd, connectCmd, daemonCmd, statusCmd, telemetryCmd, updateCmd, versionCmd)
 	return root
 }
 
@@ -174,13 +203,4 @@ func asExitCodeError(err error, target **exitCodeError) bool {
 	}
 	*target = codeErr
 	return true
-}
-
-func isInteractiveTTY() bool {
-	statIn, errIn := os.Stdin.Stat()
-	statOut, errOut := os.Stdout.Stat()
-	if errIn != nil || errOut != nil {
-		return false
-	}
-	return (statIn.Mode()&os.ModeCharDevice) != 0 && (statOut.Mode()&os.ModeCharDevice) != 0
 }

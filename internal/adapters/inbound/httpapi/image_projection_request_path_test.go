@@ -56,7 +56,7 @@ func (r imageIncidentRuntime) ResolveBackend(target provider.TargetSnapshot) (pr
 func TestResponsesImageIncidentCallsChatWithSyntheticImageOnce(t *testing.T) {
 	transport := &imageIncidentTransport{}
 	handler := imageIncidentHandler(t, transport)
-	request := httptest.NewRequest(http.MethodPost, "/c/personal/responses", strings.NewReader(imageIncidentResponsesRequest()))
+	request := httptest.NewRequest(http.MethodPost, "/workspaces/personal/responses", strings.NewReader(imageIncidentResponsesRequest()))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Request-Id", "req_image_compat")
 	response := httptest.NewRecorder()
@@ -125,11 +125,11 @@ func imageIncidentHandler(t *testing.T, transport *imageIncidentTransport) http.
 	ingress := exchange.NewIngress(
 		imageIncidentWorkspaceLookup{workspace: workspace},
 		runtime,
-		exchange.RuntimePoliciesSpec{
+		exchange.RuntimePoliciesSpec{ModelConnection: lookupHTTPModel,
 			PolicyResolver: exchange.StaticWorkspacePolicyResolver{Policy: exchange.DefaultWorkspacePolicy()},
 		},
 	)
-	return localAuthorityTestHandler(NewHandler(ingress))
+	return localAuthorityTestHandler(NewWorkspaceDataHandler(ingress))
 }
 
 func imageIncidentWorkspace(t *testing.T) routing.Workspace {
@@ -147,13 +147,13 @@ func imageIncidentWorkspace(t *testing.T) routing.Workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
+	target, err := routing.NewTarget(targetID, model, protocol, registerHTTPModel(t, connection))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tier, _ := routing.NewTier([]routing.Target{target})
 	route, _ := routing.NewRoute(routeName, []routing.Tier{tier})
-	workspace, err := routing.NewWorkspace(slug, routeName, []routing.Route{route})
+	workspace, err := routing.NewWorkspace(slug, []routing.Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func imageIncidentWorkspace(t *testing.T) routing.Workspace {
 
 func imageIncidentResponsesRequest() string {
 	return `{
-		"model":"default",
+		"model":"image-route",
 		"reasoning":{"context":"all_turns"},
 		"tools":[{"type":"function","name":"view_image","parameters":{"type":"object"}}],
 		"input":[

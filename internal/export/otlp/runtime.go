@@ -166,6 +166,9 @@ func (e *Exporter) project(ctx context.Context, x executionevidence.CompletedExc
 		_ = spanCtx
 		switch start := inv.Started().(type) {
 		case executionevidence.ModelInvocationStarted:
+			if id, revision, bound := start.Model().ConnectionIdentity(); bound {
+				attrs = append(attrs, attribute.String("swobu.connection.id", id.String()), attribute.String("swobu.connection.revision", fmt.Sprint(revision)))
+			}
 			settled := inv.Settled().(executionevidence.ModelInvocationSettled)
 			if route := start.Model().Route().String(); route != "" {
 				attrs = append(attrs, attribute.String("swobu.route.name", route))

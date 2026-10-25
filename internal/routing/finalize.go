@@ -3,16 +3,18 @@ package routing
 import (
 	"fmt"
 	"strings"
+
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 )
 
 // TargetDraft is raw boundary input finalized into one Target. Transport and
 // persistence adapters populate it without interpreting provider compatibility
 // or connection semantics.
 type TargetDraft struct {
-	ID         string
-	Model      string
-	Protocol   string
-	Connection ConnectionDraft
+	ID           string
+	Model        string
+	Protocol     string
+	ConnectionID string
 }
 
 // ConnectionDraft is a shape-oriented raw union. Provider identity remains an
@@ -73,9 +75,9 @@ type TargetConstructionFacts struct {
 	BedrockRegionSupported       func(string) bool
 }
 
-// FinalizeTarget is the single interpretation path for raw target and
-// connection input from persistence and operator transports.
-func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, error) {
+// FinalizeTarget validates target-local fields. Connection existence, Models kind
+// and protocol compatibility are admitted together at registry publication.
+func FinalizeTarget(draft TargetDraft, _ TargetConstructionFacts) (Target, error) {
 	id, err := ParseTargetID(draft.ID)
 	if err != nil {
 		return Target{}, err
@@ -84,35 +86,18 @@ func FinalizeTarget(draft TargetDraft, facts TargetConstructionFacts) (Target, e
 	if err != nil {
 		return Target{}, err
 	}
-	connection, err := FinalizeConnection(draft.Connection, facts)
+	connectionID, err := connectionidentity.Parse(draft.ConnectionID)
 	if err != nil {
 		return Target{}, err
 	}
 	rawProtocol := strings.TrimSpace(draft.Protocol)
-	if facts.NormalizeProtocol != nil {
-		normalized, normalizeErr := facts.NormalizeProtocol(connection.Provider(), rawProtocol)
-		if normalizeErr != nil {
-			return Target{}, pathError("target.protocol", normalizeErr.Error())
-		}
-		rawProtocol = normalized
+	if rawProtocol == "" {
+		return Target{}, pathError("target.protocol", "concrete protocol is required")
 	}
-	if facts.DerivedProtocol != nil {
-		if derivedProtocol, derived := facts.DerivedProtocol(connection.Provider()); derived {
-			if rawProtocol != "" {
-				return Target{}, pathError("target.protocol", "provider protocol is derived and must be omitted")
-			}
-			protocol, err := ParseProtocol(derivedProtocol, connection.Provider(), facts.ProtocolSupported)
-			if err != nil {
-				return Target{}, err
-			}
-			return NewTarget(id, model, protocol, connection)
-		}
-	}
-	protocol, err := ParseProtocol(rawProtocol, connection.Provider(), facts.ProtocolSupported)
-	if err != nil {
-		return Target{}, err
-	}
-	return NewTarget(id, model, protocol, connection)
+	// Provider compatibility belongs to the exact referenced Connection. A target
+	// cannot infer provider identity from a protocol shared by several adapters.
+	protocol := Protocol{value: rawProtocol}
+	return NewTarget(id, model, protocol, connectionID)
 }
 
 // FinalizeConnection validates one raw provider-keyed connection document

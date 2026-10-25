@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, 'checkpoint/**']
 
 permissions:
   contents: read
@@ -50,9 +50,8 @@ jobs:
           ./internal/app/operator/workspaces
           ./internal/app/operator/credentialfiles
           ./internal/app/operator/client
-          ./internal/cockpit/adapters
-          ./internal/cockpit/features/target_config
-          ./internal/cockpit/ports
+          ./internal/connections
+          ./internal/adapters/inbound/cli
           ./internal/adapters/inbound/httpapi
       - name: Build native CLI
         run: go build -mod=readonly -trimpath -buildvcs=false ./cmd/swobu

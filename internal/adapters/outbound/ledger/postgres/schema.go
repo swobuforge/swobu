@@ -23,7 +23,8 @@ CREATE TABLE swobu_ledger_invocations (
  ordinal BIGINT NOT NULL CHECK(ordinal >= 1), kind TEXT NOT NULL CHECK(kind IN ('model','mcp_tool')),
  started_at_ns BIGINT NOT NULL, settled_at_ns BIGINT NOT NULL, duration_ns BIGINT NOT NULL CHECK(duration_ns >= 0),
  outcome TEXT NOT NULL, execution_state TEXT NOT NULL, failure_class TEXT,
- route_name TEXT, target_id TEXT, target_version_dec TEXT, provider_spec TEXT,
+ route_name TEXT, target_id TEXT, target_version_dec TEXT,
+  provider_spec TEXT,
  provider_protocol TEXT, provider_model TEXT, purpose TEXT,
  input_tokens BIGINT CHECK(input_tokens >= 0), output_tokens BIGINT CHECK(output_tokens >= 0), reasoning_tokens BIGINT CHECK(reasoning_tokens >= 0),
  cache_read_tokens BIGINT CHECK(cache_read_tokens >= 0), cache_write_tokens BIGINT CHECK(cache_write_tokens >= 0),
@@ -44,6 +45,12 @@ func createSchemaV1(ctx context.Context, conn *sql.Conn, createdBy string) error
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, schemaMCPHistory); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, schemaConnectionIdentity); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO swobu_ledger_meta(schema_version,created_by_version,created_at_ns) VALUES($1,$2,$3)`, schemaVersion, createdBy, time.Now().UTC().UnixNano()); err != nil {

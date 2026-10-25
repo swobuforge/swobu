@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	schemaVersion = 1
+	schemaVersion = 3
 	lockNamespace = 1398230850
 	lockKey       = 1279742513
 )
@@ -118,10 +118,26 @@ func (db *DB) initializeOrValidate(ctx context.Context, createdBy string) error 
 	if version > schemaVersion {
 		return pgError(ledger.ErrorSchemaNewer, fmt.Errorf("unsupported newer schema version %d", version))
 	}
-	if version != schemaVersion {
+	if version != 1 && version != 2 && version != schemaVersion {
 		return pgError(ledger.ErrorSchemaInvalid, fmt.Errorf("unsupported schema version %d", version))
 	}
 	if err := validateSchemaV1(ctx, db.writer); err != nil {
+		return pgError(ledger.ErrorSchemaInvalid, err)
+	}
+	if version == 1 {
+		if err := migrateMCPHistory(ctx, db.writer); err != nil {
+			return pgError(ledger.ErrorMigrationFailed, err)
+		}
+	}
+	if version < 3 {
+		if err := migrateConnectionIdentity(ctx, db.writer); err != nil {
+			return pgError(ledger.ErrorMigrationFailed, err)
+		}
+	}
+	if err := validateConnectionIdentity(ctx, db.writer); err != nil {
+		return pgError(ledger.ErrorSchemaInvalid, err)
+	}
+	if err := validateMCPHistory(ctx, db.writer); err != nil {
 		return pgError(ledger.ErrorSchemaInvalid, err)
 	}
 	return nil

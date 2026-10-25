@@ -1,5 +1,8 @@
 # [Swobu](https://swobu.com/) — LLM Switchboard
 
+> 製品は Web 中心の構成へ移行中です。現在の製品方針と導入手順は [英語版 README](README.md) を参照してください。以下の画面説明は旧版のものです。
+
+
 [English](README.md) · [简体中文](README.zh-CN.md) · **日本語** · [Português (Brasil)](README.pt-BR.md) · [Bahasa Indonesia](README.id.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Українська](README.uk.md)
 
 **Claude Code、Codex、その他の AI エージェントを 1 つのエンドポイントから DeepSeek、Kimi、GLM、OpenAI、Anthropic、OpenRouter、Ollama、Bedrock などへルーティング。負荷分散とフェイルオーバーも自動化します。**
@@ -75,13 +78,13 @@ Windows PowerShell:
 irm https://swobu.com/install.ps1 | iex
 ```
 
-インストーラーが Swobu を起動し、ターミナル UI の **Cockpit** を開きます。
+インストーラーが Swobu を起動し、ブラウザーで **Web Operator** を開きます。
 
 プロバイダーを追加し、ルートを作成して、エージェントを接続します。
 
 ### エージェントを接続する
 
-Cockpit から対応クライアントを設定できます。
+Web Operator から対応クライアントの設定を進められます。
 
 CLI を使うこともできます。
 

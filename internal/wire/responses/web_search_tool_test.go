@@ -85,25 +85,23 @@ func TestDecodeRequestRejectsWebSearchWithUnrepresentedConstraints(t *testing.T)
 			raw := []byte(`{"model":"default","input":"search","tools":[` + test.tool + `]}`)
 			_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 			var canonicalErr canonical.Error
-			if !errors.As(err, &canonicalErr) || (canonicalErr.Code != canonical.ErrorCodeUnsupportedOperation && canonicalErr.Code != canonical.ErrorCodeNotImplemented && canonicalErr.Code != canonical.ErrorCodeBadRequest) {
+			if !errors.As(err, &canonicalErr) || (canonicalErr.Code != canonical.ErrorCodeUnsupportedOperation && canonicalErr.Code != canonical.ErrorCodeBadRequest) {
 				t.Fatalf("error = %T %v, want explicit unsupported restriction", err, err)
 			}
 		})
 	}
 }
 
-func TestDecodeRequestPreservesCodexWebSearchAccessModes(t *testing.T) {
-	tests := []struct {
+func TestDecodeRequestDropsCodexWebSearchAccessHints(t *testing.T) {
+	for _, test := range []struct {
 		name string
 		tool string
-		mode canonical.WebSearchAccessMode
 	}{
-		{name: "cached", tool: `{"type":"web_search","external_web_access":false}`, mode: canonical.WebSearchAccessCached},
-		{name: "live", tool: `{"type":"web_search","external_web_access":true}`, mode: canonical.WebSearchAccessLive},
-		{name: "indexed", tool: `{"type":"web_search","external_web_access":true,"indexed_web_access":true}`, mode: canonical.WebSearchAccessIndexed},
-		{name: "unrestricted", tool: `{"type":"web_search"}`, mode: canonical.WebSearchAccessUnspecified},
-	}
-	for _, test := range tests {
+		{name: "cached", tool: `{"type":"web_search","external_web_access":false}`},
+		{name: "live", tool: `{"type":"web_search","external_web_access":true}`},
+		{name: "indexed", tool: `{"type":"web_search","external_web_access":true,"indexed_web_access":true}`},
+		{name: "unrestricted", tool: `{"type":"web_search"}`},
+	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw := []byte(`{"model":"default","input":"search","tools":[` + test.tool + `]}`)
 			decoded, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
@@ -114,32 +112,11 @@ func TestDecodeRequestPreservesCodexWebSearchAccessModes(t *testing.T) {
 			if len(tools) != 1 || tools[0].Kind() != canonical.ToolKindWebSearch {
 				t.Fatalf("tools = %#v, want preserved web search", tools)
 			}
-			if got, ok := tools[0].WebSearchAccessMode(); !ok || got != test.mode {
-				t.Fatalf("access mode = %v, %v; want %v", got, ok, test.mode)
-			}
 			clonedTools := canonicaltest.Tools(decoded.Request.Request.Clone())
-			if got, ok := clonedTools[0].WebSearchAccessMode(); !ok || got != test.mode {
-				t.Fatalf("cloned access mode = %v, %v; want %v", got, ok, test.mode)
+			if len(clonedTools) != 1 || clonedTools[0].Kind() != canonical.ToolKindWebSearch {
+				t.Fatalf("cloned tools = %#v, want plain web search", clonedTools)
 			}
 		})
-	}
-}
-
-func TestDecodeRequestRejectsFalseIndexedWebAccess(t *testing.T) {
-	raw := []byte(`{"model":"default","input":"search","tools":[{"type":"web_search","indexed_web_access":false}]}`)
-	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error = %T %v, want invalid indexed access rejection", err, err)
-	}
-}
-
-func TestDecodeRequestRejectsContradictoryWebSearchAccessModes(t *testing.T) {
-	raw := []byte(`{"model":"default","input":"search","tools":[{"type":"web_search","external_web_access":false,"indexed_web_access":true}]}`)
-	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeBadRequest {
-		t.Fatalf("error = %T %v, want invalid-constraint rejection", err, err)
 	}
 }
 
@@ -179,7 +156,7 @@ func TestDecodeRequestRejectsUnrepresentableSearchRestrictionBesideOtherTools(t 
 	}`)
 	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeNotImplemented {
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeUnsupportedOperation {
 		t.Fatalf("error = %T %v, want explicit unsupported restriction", err, err)
 	}
 }
@@ -193,7 +170,7 @@ func TestDecodeRequestRejectsSpecificSelectionOfDroppedSearch(t *testing.T) {
 	}`)
 	_, err := (ClientRequestDecoder{}).DecodeClientRequest(carrier.Document{Family: protocolkind.Responses, Raw: raw})
 	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeNotImplemented {
+	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeUnsupportedOperation {
 		t.Fatalf("error = %T %v, want explicit unsupported restriction", err, err)
 	}
 }
@@ -436,28 +413,21 @@ func TestEncodeRequestOmitsWebSearchSourcesIncludeWithoutLoweredHostedSearch(t *
 	}
 }
 
-func TestHostedResponsesSearchPreservesCodexAccessMode(t *testing.T) {
+func TestHostedResponsesSearchDropsCodexAccessMode(t *testing.T) {
 	tests := []struct {
 		name string
-		mode canonical.WebSearchAccessMode
-		want string
 	}{
-		{name: "cached", mode: canonical.WebSearchAccessCached, want: `"external_web_access":false`},
-		{name: "live", mode: canonical.WebSearchAccessLive, want: `"external_web_access":true`},
-		{name: "indexed", mode: canonical.WebSearchAccessIndexed, want: `"external_web_access":true,"indexed_web_access":true`},
+		{name: "plain"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			declaration, err := canonical.NewWebSearchDeclarationWithAccess(test.mode)
-			if err != nil {
-				t.Fatal(err)
-			}
+			declaration := canonical.NewWebSearchDeclaration()
 			request := canonical.NewCanonicalRequest(canonical.RequestParams{
 				Model: canonical.Specify("model"),
 				Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration)},
 			})
 			lowering := DefaultToolLowering().Overlay(ToolLowering{
-				WebSearch: HostedSearchWithAccessProjection(ProviderRequestTool{Type: "web_search"}, true),
+				WebSearch: HostedSearchProjectionWithoutAccess(ProviderRequestTool{Type: "web_search"}, true),
 			})
 			document, err := CompileProviderRequestDocument(
 				EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
@@ -470,29 +440,51 @@ func TestHostedResponsesSearchPreservesCodexAccessMode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(wire.Raw), test.want) || !strings.Contains(string(wire.Raw), `"type":"web_search"`) {
-				t.Fatalf("lowered search = %s, want %s", wire.Raw, test.want)
+			if !strings.Contains(string(wire.Raw), `"type":"web_search"`) || strings.Contains(string(wire.Raw), "external_web_access") || strings.Contains(string(wire.Raw), "indexed_web_access") {
+				t.Fatalf("lowered search retained Codex access restriction: %s", wire.Raw)
 			}
 		})
 	}
 }
 
-func TestUnqualifiedResponsesTargetFailsRatherThanWideningSearchRestriction(t *testing.T) {
-	declaration, err := canonical.NewWebSearchDeclarationWithAccess(canonical.WebSearchAccessCached)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestUnqualifiedResponsesTargetDropsCodexAccessRestriction(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
 	request := canonical.NewCanonicalRequest(canonical.RequestParams{
 		Model: canonical.Specify("model"),
 		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration)},
 	})
-	_, err = CompileProviderRequestDocument(
+	_, err := CompileProviderRequestDocument(
 		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
 		delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{ToolLowering: DefaultToolLowering()},
 	)
-	var canonicalErr canonical.Error
-	if !errors.As(err, &canonicalErr) || canonicalErr.Code != canonical.ErrorCodeNotImplemented {
-		t.Fatalf("compile error = %T %v, want explicit unsupported restriction", err, err)
+	if err != nil {
+		t.Fatalf("compile error = %T %v, want access hint dropped", err, err)
+	}
+}
+
+func TestUnqualifiedResponsesTargetDropsLiveSearchAccessHint(t *testing.T) {
+	declaration := canonical.NewWebSearchDeclaration()
+	request := canonical.NewCanonicalRequest(canonical.RequestParams{
+		Model: canonical.Specify("model"),
+		Items: []canonical.CanonicalItem{canonicaltest.ToolDeclarations(t, declaration)},
+	})
+	document, err := CompileProviderRequestDocument(
+		EncodeInput{Request: request, ToolNames: testAttemptToolNames(request)},
+		delivery.BufferedDelivery(), nil, "", EncodeOptions{}, CompileOptions{
+			ToolLowering: DefaultToolLowering().Overlay(ToolLowering{
+				WebSearch: HostedSearchProjectionWithoutAccess(ProviderRequestTool{Type: "web_search"}, false),
+			}),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := EncodeProviderRequestDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire.Raw), `"type":"web_search"`) || strings.Contains(string(wire.Raw), "external_web_access") {
+		t.Fatalf("lowered live search = %s", wire.Raw)
 	}
 }
 

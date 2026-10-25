@@ -31,7 +31,7 @@ func TestChatGPTMethodDriverStartAndPoll(t *testing.T) {
 	}
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := u.Query().Get("state")
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/auth/chatgpt/callback?state="+url.QueryEscape(state)+"&code=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?state="+url.QueryEscape(state)+"&code=abc", nil)
 	rec := httptest.NewRecorder()
 	svc.HandleCallback(rec, req)
 	poll, err := driver.Poll(context.Background(), start.SessionID)

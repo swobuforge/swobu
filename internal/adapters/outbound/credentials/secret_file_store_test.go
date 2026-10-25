@@ -48,7 +48,7 @@ func TestSecretFileStore_IsProviderAgnostic(t *testing.T) {
 func TestSecretFileStore_CorruptFileFailsFast(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "swobu-home")
 	t.Setenv("SWOBU_HOME", root)
-	path := filepath.Join(root, "state", "auth", "chatgpt.json")
+	path := filepath.Join(root, "state", "secrets.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestSecretFileStore_CorruptFileFailsFast(t *testing.T) {
 func TestSecretFileStore_WritesPrivatePermissions(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "swobu-home")
 	t.Setenv("SWOBU_HOME", root)
-	path := filepath.Join(root, "state", "auth", "chatgpt.json")
+	path := filepath.Join(root, "state", "secrets.json")
 	store := secretFileStore{}
 	if err := store.Store("chatgpt/default", "token-123"); err != nil {
 		t.Fatalf("Store returned error: %v", err)

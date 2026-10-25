@@ -21,19 +21,8 @@ func TestToolSetRejectsSecondWebSearchDeclaration(t *testing.T) {
 	}
 }
 
-func TestWebSearchAccessModeIsCanonicalDeclarationIdentity(t *testing.T) {
-	cached, err := NewWebSearchDeclarationWithAccess(WebSearchAccessCached)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clone := cached.Clone()
-	if mode, ok := clone.WebSearchAccessMode(); !ok || mode != WebSearchAccessCached {
-		t.Fatalf("cloned access mode = %v, %v", mode, ok)
-	}
-	if cached.Equivalent(NewWebSearchDeclaration()) {
-		t.Fatal("cached and unrestricted declarations were equivalent")
-	}
-	if _, err := NewWebSearchDeclarationWithAccess(WebSearchAccessMode(255)); err == nil {
-		t.Fatal("invalid access mode was accepted")
+func TestWebSearchDeclarationIgnoresClientAccessHints(t *testing.T) {
+	if !NewWebSearchDeclaration().Equivalent(NewWebSearchDeclaration().Clone()) {
+		t.Fatal("web-search declaration clone changed semantic identity")
 	}
 }

@@ -14,9 +14,9 @@ func TestMalformedGenerateContentOperationsUseGoogleEnvelope(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/c/personal/v1beta/models/x:generateContent"},
-		{http.MethodPost, "/c/personal/v1beta/models/x:wrongAction"},
-		{http.MethodPost, "/c/personal/v1beta/models/:generateContent"},
+		{http.MethodGet, "/workspaces/personal/v1beta/models/x:generateContent"},
+		{http.MethodPost, "/workspaces/personal/v1beta/models/x:wrongAction"},
+		{http.MethodPost, "/workspaces/personal/v1beta/models/:generateContent"},
 	} {
 		response := httptest.NewRecorder()
 		newTestHandler(nil).ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))

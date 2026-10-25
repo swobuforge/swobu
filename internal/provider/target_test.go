@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/delivery"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 )
 
@@ -92,5 +94,43 @@ func TestTargetSnapshotEqualityUsesComparableConcreteOptions(t *testing.T) {
 	right := left.Clone()
 	if !left.Equal(right) {
 		t.Fatal("equal snapshots compare unequal")
+	}
+}
+
+func TestTargetSnapshotConnectionBindingIsExactAndImmutable(t *testing.T) {
+	id, err := connectionidentity.Parse("shared-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := NewTargetSnapshot("target", "openai", "https://example.test", "env:SYNTHETIC", protocolkind.Responses, "responses", delivery.BufferedDelivery())
+	bound, err := target.BindConnection(id, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, revision, ok := bound.ConnectionIdentity()
+	if !ok || got != id || revision != 3 {
+		t.Fatal("connection identity lost")
+	}
+	if _, _, ok := target.ConnectionIdentity(); ok {
+		t.Fatal("binding mutated source")
+	}
+	if target.Equal(bound) || !bound.Equal(bound.Clone()) {
+		t.Fatal("execution equality ignores binding")
+	}
+	if _, err := bound.BindConnection(id, 4); err == nil {
+		t.Fatal("frozen binding overwritten")
+	}
+	if _, err := target.BindConnection(connectionidentity.ID{}, 3); err == nil {
+		t.Fatal("empty identity accepted")
+	}
+	if _, err := target.BindConnection(id, 0); err == nil {
+		t.Fatal("zero revision accepted")
+	}
+	scope, err := bound.ConnectionCredentialScope()
+	if err != nil || scope.Kind() != credentialref.ScopeConnection || scope.Identifier() != id.String() {
+		t.Fatal("wrong credential owner")
+	}
+	if _, err := target.ConnectionCredentialScope(); err == nil {
+		t.Fatal("unbound snapshot inferred connection authority")
 	}
 }

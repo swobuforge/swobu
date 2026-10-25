@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -167,6 +168,9 @@ func TestRenderNoticeBlockAtWidth_StaysInsideNarrowTerminal(t *testing.T) {
 
 func TestNoticeWidth_UsesRealTerminalColumns(t *testing.T) {
 	ptmx, tty, err := pty.Open()
+	if errors.Is(err, pty.ErrUnsupported) {
+		t.Skip("PTY library does not support this operating system")
+	}
 	if err != nil {
 		t.Fatalf("open pty: %v", err)
 	}

@@ -1,6 +1,18 @@
 // Package executionevidence provides the bounded local lifecycle store for
 // immutable execution evidence. It groups facts by exchange rather than
 // evicting individual events, so active lifecycles are never orphaned.
+// Direct MCP operations have independent lifecycle identity and retain active
+// calls separately from bounded settled history; they do not fabricate model
+// traffic. Activity projections are local memory evidence, not durable Ledger.
+// Optional OfferMCP hands immutable completed facts to a non-blocking output
+// consumer after releasing the store lock. Capture rejection cannot rewrite
+// settlement; the consumer owns truthful capture-gap health and shutdown.
+// OfferExchange follows the same post-publication, outside-lock handoff for
+// immutable completed Exchange lifecycles; it does not invent parent Exchanges
+// for standalone operations.
+// Activity can merge immutable completed Exchange history without inserting it
+// into live storage or recapturing it. Exact live identity wins overlap; durable
+// and live rows reuse the same model-attempt and usage projection.
 package executionevidence
 
 import (
@@ -19,6 +31,8 @@ const (
 type Config struct {
 	SettledLimit   int
 	AdmissionLimit int
+	OfferMCP       func(domain.CompletedMCPOperation) bool
+	OfferExchange  func(domain.CompletedExchange) bool
 }
 
 type InvocationLifecycle struct {
@@ -41,6 +55,10 @@ type Store struct {
 	settled        map[execution.ExchangeID]ExchangeLifecycle
 	settledOrder   []execution.ExchangeID
 	admissions     []domain.ManagedAccessAdmissionRejected
+	mcpActive      map[string]MCPOperation
+	mcpSettled     []MCPOperation
+	offerMCP       func(domain.CompletedMCPOperation) bool
+	offerExchange  func(domain.CompletedExchange) bool
 }
 
 func NewStore(cfg Config) *Store {
@@ -52,7 +70,9 @@ func NewStore(cfg Config) *Store {
 	}
 	return &Store{
 		settledLimit: cfg.SettledLimit, admissionLimit: cfg.AdmissionLimit,
-		active: make(map[execution.ExchangeID]*ExchangeLifecycle), settled: make(map[execution.ExchangeID]ExchangeLifecycle),
+		offerMCP:      cfg.OfferMCP,
+		offerExchange: cfg.OfferExchange,
+		active:        make(map[execution.ExchangeID]*ExchangeLifecycle), settled: make(map[execution.ExchangeID]ExchangeLifecycle),
 	}
 }
 
@@ -63,7 +83,13 @@ func (s *Store) Append(event domain.Event) error {
 		return errors.New("nil execution evidence store")
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var captured *domain.CompletedExchange
+	defer func() {
+		s.mu.Unlock()
+		if captured != nil && s.offerExchange != nil {
+			s.offerExchange(*captured)
+		}
+	}()
 	switch e := event.(type) {
 	case domain.ManagedAccessAdmissionRejected:
 		s.admissions = append(s.admissions, e)
@@ -102,6 +128,21 @@ func (s *Store) Append(event domain.Event) error {
 			if invocation.Settled == nil {
 				return errors.New("exchange settlement requires every invocation to settle")
 			}
+		}
+		if s.offerExchange != nil {
+			invocations := make([]domain.InvocationLifecycle, 0, len(record.Invocations))
+			for _, invocation := range record.Invocations {
+				lifecycle, err := domain.NewInvocationLifecycle(invocation.Started, invocation.Settled)
+				if err != nil {
+					return err
+				}
+				invocations = append(invocations, lifecycle)
+			}
+			completed, err := domain.NewCompletedExchange(record.Started, invocations, e)
+			if err != nil {
+				return err
+			}
+			captured = &completed
 		}
 		record.Settled = &e
 		complete := cloneLifecycle(*record)
@@ -203,6 +244,28 @@ func (s *Store) Admissions() []domain.ManagedAccessAdmissionRejected {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]domain.ManagedAccessAdmissionRejected(nil), s.admissions...)
+}
+
+// Exchange returns detached live/settled lifecycle facts for one exact identity.
+// Absence only describes this bounded process-local store, not durable history.
+func (s *Store) Exchange(identity execution.ExchangeID) (ExchangeLifecycle, bool) {
+	if s == nil || !identity.Valid() {
+		return ExchangeLifecycle{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if record, found := s.active[identity]; found {
+		return cloneLifecycle(*record), true
+	}
+	record, found := s.settled[identity]
+	if !found {
+		return ExchangeLifecycle{}, false
+	}
+	if record.Settled != nil {
+		settled := *record.Settled
+		record.Settled = &settled
+	}
+	return cloneLifecycle(record), true
 }
 
 func cloneLifecycle(record ExchangeLifecycle) ExchangeLifecycle {

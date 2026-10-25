@@ -7,17 +7,17 @@ import (
 )
 
 func TestStoreMaterializedCredential_ValidatesInputs(t *testing.T) {
-	_, err := StoreMaterializedCredential("", "openrouter/default", "token", CredentialWritePolicyAuto)
+	_, err := StoreMaterializedCredential("", "openrouter/default", "token", CredentialWritePolicy("auto"))
 	if err == nil || !strings.Contains(err.Error(), "provider spec is required") {
 		t.Fatalf("err = %v, want provider-spec validation", err)
 	}
 
-	_, err = StoreMaterializedCredential("openrouter", "", "token", CredentialWritePolicyAuto)
+	_, err = StoreMaterializedCredential("openrouter", "", "token", CredentialWritePolicy("auto"))
 	if err == nil || !strings.Contains(err.Error(), "stored secret name is required") {
 		t.Fatalf("err = %v, want key-name validation", err)
 	}
 
-	_, err = StoreMaterializedCredential("openrouter", "openrouter/default", "", CredentialWritePolicyAuto)
+	_, err = StoreMaterializedCredential("openrouter", "openrouter/default", "", CredentialWritePolicy("auto"))
 	if err == nil || !strings.Contains(err.Error(), "stored secret value is required") {
 		t.Fatalf("err = %v, want key-value validation", err)
 	}
@@ -46,7 +46,7 @@ func TestStoreMaterializedCredential_WritesProviderScopedScope(t *testing.T) {
 		return nil
 	}
 
-	if _, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyAuto); err != nil {
+	if _, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyKeyring); err != nil {
 		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
 	}
 	if !called {
@@ -63,46 +63,44 @@ func TestStoreMaterializedCredential_CustomUsesCanonicalProviderScope(t *testing
 		}
 		return nil
 	}
-	if _, err := StoreMaterializedCredential("custom", "custom/default", "token-123", CredentialWritePolicyAuto); err != nil {
+	if _, err := StoreMaterializedCredential("custom", "custom/default", "token-123", CredentialWritePolicyKeyring); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestSecretReferenceDoesNotReadAutoFileFallback(t *testing.T) {
+func TestStoreMaterializedCredentialRejectsAmbiguousMCPProviderScope(t *testing.T) {
+	if _, err := StoreMaterializedCredential("mcp", "mcp/docs", "source-token", CredentialWritePolicyFile); err == nil {
+		t.Fatal("MCP source credential was accepted through provider-scoped storage")
+	}
+}
+
+func TestSecretReferenceDoesNotReadFileStore(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
 	origGet := keyringGet
 	t.Cleanup(func() { keyringGet = origGet })
 
-	keyringSet = func(scope, user, pass string) error {
-		return fmt.Errorf("backend unavailable")
-	}
+	keyringSet = func(scope, user, pass string) error { return fmt.Errorf("backend unavailable") }
 	keyringGet = func(scope, user string) (string, error) {
 		return "", fmt.Errorf("backend unavailable")
 	}
 
-	ref, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyAuto)
-	if err != nil {
-		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
-	}
-	if ref != "secretfile:openrouter/default" {
-		t.Fatalf("ref = %q, want file authority", ref)
+	if _, err := StoreMaterializedCredential("openrouter", "openrouter/default", "token-123", CredentialWritePolicyKeyring); err == nil {
+		t.Fatal("keyring failure was hidden")
 	}
 	if _, err := ResolveStoredSecretByRef("openrouter", "secret:openrouter/default"); err == nil {
 		t.Fatal("secret reference resolved through file fallback")
 	}
 }
 
-func TestStoreMaterializedCredential_AutoFallsBackToFile(t *testing.T) {
+func TestStoreMaterializedCredential_DefaultUsesFile(t *testing.T) {
 	t.Setenv("SWOBU_HOME", t.TempDir()+"/swobu-home")
 	orig := keyringSet
 	t.Cleanup(func() { keyringSet = orig })
-	keyringSet = func(scope, user, pass string) error {
-		return fmt.Errorf("backend unavailable")
-	}
+	keyringSet = func(scope, user, pass string) error { t.Fatal("unexpected keyring call"); return nil }
 
-	ref, err := StoreMaterializedCredential("chatgpt", "chatgpt/default", "token-123", CredentialWritePolicyAuto)
+	ref, err := StoreMaterializedCredential("chatgpt", "chatgpt/default", "token-123", "")
 	if err != nil {
 		t.Fatalf("StoreMaterializedCredential returned error: %v", err)
 	}

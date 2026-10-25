@@ -790,12 +790,6 @@ func DefaultToolLowering() ToolLowering {
 	return ToolLowering{
 		Function: function, Custom: omit,
 		WebSearch: func(_ ToolLoweringContext, tool canonical.ToolDeclaration) (ToolProjection, []compat.Change, error) {
-			mode, _ := tool.WebSearchAccessMode()
-			if mode != canonical.WebSearchAccessUnspecified {
-				return ToolProjection{}, nil, canonical.NotImplemented(
-					"selected Messages target cannot preserve the requested web-search access restriction",
-				)
-			}
 			return messagesHostedSearchProjection(nil), []compat.Change{compat.NewOmission(canonical.RequestToolsKind, canonical.ToolOccurrence(tool.Key()))}, nil
 		},
 		Discovery: discovery,

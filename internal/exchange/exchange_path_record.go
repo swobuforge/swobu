@@ -2,9 +2,12 @@ package exchange
 
 import (
 	"fmt"
+	"strconv"
 
+	"github.com/swobuforge/swobu/internal/connections"
 	"github.com/swobuforge/swobu/internal/delivery"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/profile"
 	"github.com/swobuforge/swobu/internal/provider"
 	"github.com/swobuforge/swobu/internal/routing"
@@ -19,8 +22,28 @@ type providerPath struct {
 	delivery delivery.Delivery
 }
 
-func resolveProviderPath(target routing.Target) (providerPath, error) {
-	routable, err := toProviderTarget(target)
+// ProviderTargetFromModelConnection projects one immutable registry value.
+// Callers capture that value once per attempt; subsequent registry rotation
+// cannot change its endpoint, credential binding or recorded Connection revision.
+// Model and target generation remain caller-owned target-local semantics.
+func ProviderTargetFromModelConnection(targetID string, connection connections.Connection, providerProtocol string) (provider.TargetSnapshot, error) {
+	spec, ok := connection.Spec().(connections.ModelSpec)
+	if !ok || connection.ID().String() == "" {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("Models Connection snapshot required")
+	}
+	snapshot, err := ProviderTargetFromConnection(targetID, spec.Upstream(), providerProtocol)
+	if err != nil {
+		return provider.TargetSnapshot{}, err
+	}
+	revision, err := strconv.ParseUint(connection.Revision().String(), 10, 64)
+	if err != nil {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("Models Connection revision is invalid")
+	}
+	return snapshot.BindConnection(connection.ID(), revision)
+}
+
+func resolveProviderPath(target routing.Target, lookup func(connectionidentity.ID) (connections.Connection, error)) (providerPath, error) {
+	routable, err := toProviderTarget(target, lookup)
 	if err != nil {
 		return providerPath{}, err
 	}
@@ -58,8 +81,18 @@ func bindRequestToTarget(request canonical.CanonicalRequest, modelID string) can
 
 // toProviderTarget is the single adapter from durable connection intent to
 // provider execution data. Derived URLs and auth modes never enter persistence.
-func toProviderTarget(target routing.Target) (provider.TargetSnapshot, error) {
-	snapshot, err := ProviderTargetFromConnection(target.ID().String(), target.Connection(), target.Protocol().String())
+func toProviderTarget(target routing.Target, lookup func(connectionidentity.ID) (connections.Connection, error)) (provider.TargetSnapshot, error) {
+	if lookup == nil {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("Models Connection lookup required")
+	}
+	connection, err := lookup(target.ConnectionID())
+	if err != nil || connection.ID() != target.ConnectionID() {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("referenced Models Connection unavailable")
+	}
+	if err := connections.ValidateModelTarget(target, connection); err != nil {
+		return provider.TargetSnapshot{}, canonical.BadEndpoint("invalid Models Connection reference")
+	}
+	snapshot, err := ProviderTargetFromModelConnection(target.ID().String(), connection, target.Protocol().String())
 	if err != nil {
 		return provider.TargetSnapshot{}, err
 	}

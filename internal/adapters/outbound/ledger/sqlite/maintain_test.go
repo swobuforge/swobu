@@ -83,6 +83,7 @@ func TestMaintainEnforcesSoftByteBudgetByWholeExchange(t *testing.T) {
 		t.Fatalf("bounded maintenance made no progress: before=%d/%d after=%d/%d", before, detailBefore, after, detail)
 	}
 	for i := 0; i < 32 && after > uint64(maximum*85/100) && detail > 0; i++ {
+		previousBytes, previousDetail := after, detail
 		if err := db.Maintain(ctx, time.Now().UTC()); err != nil {
 			t.Fatal(err)
 		}
@@ -93,8 +94,42 @@ func TestMaintainEnforcesSoftByteBudgetByWholeExchange(t *testing.T) {
 		if err := db.writer.QueryRowContext(ctx, `SELECT count(*) FROM swobu_ledger_exchanges`).Scan(&detail); err != nil {
 			t.Fatal(err)
 		}
+		if after >= previousBytes && detail >= previousDetail {
+			t.Fatalf("active pressure cycle stalled between watermarks: bytes=%d maximum=%d low=%d detail=%d", after, maximum, maximum*85/100, detail)
+		}
 	}
 	if after > uint64(maximum*85/100) && detail > 0 {
 		t.Fatalf("bounded maintenance did not converge: bytes=%d target=%d detail=%d", after, maximum*85/100, detail)
+	}
+	if db.bytePressure {
+		t.Fatal("completed pressure cycle remained active")
+	}
+}
+
+func TestByteBudgetDoesNotStartPressureBelowHighWatermark(t *testing.T) {
+	ctx := t.Context()
+	db, err := Open(ctx, testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.WriteBatch(ctx, []executionevidence.CompletedExchange{completedWithoutInvocations(t, time.Now().UTC(), delivery.Succeeded)}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := db.allocatedBytes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maximum := int64(current + 4096)
+	db.retention.SQLiteMaxBytes = &maximum
+	if err := db.enforceByteBudget(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var detail int
+	if err := db.writer.QueryRowContext(ctx, `SELECT count(*) FROM swobu_ledger_exchanges`).Scan(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail != 1 || db.bytePressure {
+		t.Fatal("fresh below-high budget evicted history or activated pressure")
 	}
 }

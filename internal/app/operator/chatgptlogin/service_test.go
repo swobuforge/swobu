@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -22,7 +23,7 @@ type captureWriter struct {
 	err      error
 }
 
-const daemonCallbackPath = "/_swobu/auth/chatgpt/callback"
+const callbackPathForTest = "/auth/callback"
 
 func (w *captureWriter) Store(providerSpec string, keyName string, secret string) (string, error) {
 	w.provider = providerSpec
@@ -80,7 +81,7 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
 	svc.HandleCallback(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callback status=%d", rec.Code)
@@ -104,11 +105,246 @@ func TestServiceStartCallbackAndSessionSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceLoopbackListenerCompletesBrowserSession(t *testing.T) {
+	t.Parallel()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		if !strings.Contains(string(body), "grant_type=authorization_code") {
+			t.Errorf("unexpected token request body=%s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at_loopback"}`))
+	}))
+	defer tokenSrv.Close()
+
+	store := &captureWriter{}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "127.0.0.1:0",
+		CredentialOut:      store,
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+	defer func() { _ = svc.Cancel(start.SessionID) }()
+
+	authorizeURL, err := url.Parse(start.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	redirect, err := url.Parse(authorizeURL.Query().Get("redirect_uri"))
+	if err != nil {
+		t.Fatalf("parse registered callback URL: %v", err)
+	}
+	if redirect.Scheme != "http" || redirect.Hostname() != "localhost" || redirect.Path != callbackPath || redirect.Port() == "" {
+		t.Fatalf("provider callback URL=%q", redirect)
+	}
+
+	callbackURL := *redirect
+	query := callbackURL.Query()
+	query.Set("state", authorizeURL.Query().Get("state"))
+	query.Set("code", "synthetic-code")
+	callbackURL.RawQuery = query.Encode()
+	legacyCallbackURL := callbackURL
+	legacyCallbackURL.Path = "/_swobu/auth/chatgpt/callback"
+	legacyResponse, err := http.Get(legacyCallbackURL.String())
+	if err != nil {
+		t.Fatalf("retired callback path request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, legacyResponse.Body)
+	_ = legacyResponse.Body.Close()
+	if legacyResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("retired callback path status=%d, want %d", legacyResponse.StatusCode, http.StatusNotFound)
+	}
+	response, err := http.Get(callbackURL.String())
+	if err != nil {
+		t.Fatalf("provider callback request to loopback listener: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("loopback callback status=%d", response.StatusCode)
+	}
+
+	status, err := svc.Session(context.Background(), start.SessionID)
+	if err != nil {
+		t.Fatalf("observe completed session: %v", err)
+	}
+	if status.State != SessionSucceeded || status.CredentialRef == "" || store.provider != "chatgpt" {
+		t.Fatalf("session=%+v stored_provider=%q", status, store.provider)
+	}
+}
+
+func TestServiceLoopbackCallbackRejectsCanceledBrowserSession(t *testing.T) {
+	t.Parallel()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"must-not-be-issued"}`))
+	}))
+	defer tokenSrv.Close()
+	store := &captureWriter{}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "127.0.0.1:0",
+		CredentialOut:      store,
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+	defer func() { _ = svc.Cancel(start.SessionID) }()
+	authorizeURL, err := url.Parse(start.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	callbackURL, err := url.Parse(authorizeURL.Query().Get("redirect_uri"))
+	if err != nil {
+		t.Fatalf("parse registered callback URL: %v", err)
+	}
+	query := callbackURL.Query()
+	query.Set("state", authorizeURL.Query().Get("state"))
+	query.Set("code", "canceled-synthetic-code")
+	callbackURL.RawQuery = query.Encode()
+	if err := svc.Cancel(start.SessionID); err != nil {
+		t.Fatalf("cancel browser session: %v", err)
+	}
+	response, err := http.Get(callbackURL.String())
+	if err != nil {
+		t.Fatalf("canceled callback request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusGone {
+		t.Fatalf("canceled callback status=%d, want %d", response.StatusCode, http.StatusGone)
+	}
+	status, err := svc.Session(context.Background(), start.SessionID)
+	if err != nil {
+		t.Fatalf("observe canceled session: %v", err)
+	}
+	if status.State != SessionCanceled || status.CredentialRef != "" || store.key != "" {
+		t.Fatalf("canceled callback changed auth result: session=%+v stored_key=%q", status, store.key)
+	}
+}
+
+func TestNewServiceLoopbackListenerRejectsPriorSessionState(t *testing.T) {
+	t.Parallel()
+
+	first := NewService(http.DefaultClient, ServiceConfig{
+		CallbackListenAddr: "127.0.0.1:0",
+		CallbackIdleTTL:    10 * time.Millisecond,
+	})
+	prior, err := first.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start original browser session: %v", err)
+	}
+	priorAuthorize, err := url.Parse(prior.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse original authorize URL: %v", err)
+	}
+	priorCallback, err := url.Parse(priorAuthorize.Query().Get("redirect_uri"))
+	if err != nil {
+		t.Fatalf("parse original callback URL: %v", err)
+	}
+	if err := first.Cancel(prior.SessionID); err != nil {
+		t.Fatalf("retire original browser session: %v", err)
+	}
+	priorAddr := net.JoinHostPort("127.0.0.1", priorCallback.Port())
+	waitForCallbackPortRelease(t, priorAddr, time.Second)
+
+	second := NewService(http.DefaultClient, ServiceConfig{
+		CallbackListenAddr: priorAddr,
+	})
+	current, err := second.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start replacement browser session: %v", err)
+	}
+	defer func() { _ = second.Cancel(current.SessionID) }()
+
+	stale := *priorCallback
+	staleQuery := stale.Query()
+	staleQuery.Set("state", priorAuthorize.Query().Get("state"))
+	staleQuery.Set("code", "prior-synthetic-code")
+	stale.RawQuery = staleQuery.Encode()
+	response, err := http.Get(stale.String())
+	if err != nil {
+		t.Fatalf("send prior redirect to replacement service: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("prior session state status=%d, want %d", response.StatusCode, http.StatusNotFound)
+	}
+	status, err := second.Session(context.Background(), current.SessionID)
+	if err != nil {
+		t.Fatalf("observe replacement session: %v", err)
+	}
+	if status.State != SessionPending || status.CredentialRef != "" {
+		t.Fatalf("prior redirect changed replacement session: %+v", status)
+	}
+}
+
+func TestServiceLoopbackCallbackRejectsExpiredBrowserSession(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"must-not-be-issued"}`))
+	}))
+	defer tokenSrv.Close()
+	store := &captureWriter{}
+	svc := NewService(http.DefaultClient, ServiceConfig{
+		TokenURL:           tokenSrv.URL,
+		CallbackListenAddr: "127.0.0.1:0",
+		SessionEvictEvery:  time.Hour,
+		Now:                func() time.Time { return now },
+		CredentialOut:      store,
+	})
+	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser auth: %v", err)
+	}
+	defer func() { _ = svc.Cancel(start.SessionID) }()
+
+	authorizeURL, err := url.Parse(start.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	callbackURL, err := url.Parse(authorizeURL.Query().Get("redirect_uri"))
+	if err != nil {
+		t.Fatalf("parse registered callback URL: %v", err)
+	}
+	query := callbackURL.Query()
+	query.Set("state", authorizeURL.Query().Get("state"))
+	query.Set("code", "expired-synthetic-code")
+	callbackURL.RawQuery = query.Encode()
+
+	now = now.Add(authSessionTTL + time.Second)
+	response, err := http.Get(callbackURL.String())
+	if err != nil {
+		t.Fatalf("expired callback request: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusGone {
+		t.Fatalf("expired callback status=%d, want %d", response.StatusCode, http.StatusGone)
+	}
+
+	status, err := svc.Session(context.Background(), start.SessionID)
+	if err != nil {
+		t.Fatalf("observe expired session: %v", err)
+	}
+	if status.State != SessionExpired || status.CredentialRef != "" || store.key != "" {
+		t.Fatalf("expired callback changed auth result: session=%+v stored_key=%q", status, store.key)
+	}
+}
+
 func TestServiceCallbackUnknownState(t *testing.T) {
 	t.Parallel()
 	svc := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "off"})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state=missing&code=x", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state=missing&code=x", nil)
 	svc.HandleCallback(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d", rec.Code)
@@ -132,7 +368,7 @@ func TestServiceCallbackOAuthErrorMarksSessionFailed(t *testing.T) {
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := u.Query().Get("state")
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&error=access_denied&request_id=req_123", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&error=access_denied&request_id=req_123", nil)
 	svc.HandleCallback(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d", rec.Code)
@@ -177,7 +413,7 @@ func TestServiceCallbackStateWithAppendedURLStillResolvesSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodGet,
-		daemonCallbackPath+"?state="+url.QueryEscape(state+"https://github.com/swobuforge/swobu")+"&error=access_denied",
+		callbackPathForTest+"?state="+url.QueryEscape(state+"https://github.com/swobuforge/swobu")+"&error=access_denied",
 		nil,
 	)
 	svc.HandleCallback(rec, req)
@@ -212,7 +448,7 @@ func TestServiceTokenExchangeFailureMarksFailed(t *testing.T) {
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := u.Query().Get("state")
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=abc", nil)
 	svc.HandleCallback(rec, req)
 	out, err := svc.Session(context.Background(), start.SessionID)
 	if err != nil {
@@ -248,7 +484,7 @@ func TestServiceCredentialStoreFailureMarksFailed(t *testing.T) {
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := u.Query().Get("state")
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=abc", nil)
 	svc.HandleCallback(rec, req)
 	out, err := svc.Session(context.Background(), start.SessionID)
 	if err != nil {
@@ -388,6 +624,18 @@ func TestServiceStartAuthorizeURL_UsesCodexCallbackPath(t *testing.T) {
 	}
 }
 
+func TestServiceCallbackRejectsRetiredDaemonMuxPath(t *testing.T) {
+	svc := NewService(nil, ServiceConfig{CallbackListenAddr: "off"})
+	for _, path := range []string{"/_swobu/auth/chatgpt/callback", "/auth/callback/", "/other/callback"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path+"?state=fixture&code=fixture", nil)
+		svc.HandleCallback(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("callback path %q status=%d, want 404", path, recorder.Code)
+		}
+	}
+}
+
 func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	t.Parallel()
 	var gotRedirectURI string
@@ -413,7 +661,7 @@ func TestServiceTokenExchange_UsesCodexCallbackRedirectURI(t *testing.T) {
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
 	svc.HandleCallback(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callback status=%d", rec.Code)
@@ -452,7 +700,7 @@ func TestServiceSessionSuccess_UnknownPlanDoesNotChangeCredentialNamespace(t *te
 	u, _ := url.Parse(start.AuthorizeURL)
 	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=code_123", nil)
 	svc.HandleCallback(rec, req)
 
 	status, err := svc.Session(context.Background(), start.SessionID)
@@ -474,7 +722,6 @@ func testJWTWithPlanType(plan string) string {
 }
 
 func TestServiceDeviceAuthStartSetsUserAgentHeader(t *testing.T) {
-	t.Parallel()
 	var seenUA string
 	deviceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		seenUA = strings.TrimSpace(req.Header.Get("User-Agent")) // swobu:io-string source=domain
@@ -542,6 +789,7 @@ func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPor
 
 	svc := NewService(nil, ServiceConfig{
 		CallbackListenAddr: "127.0.0.1:1455",
+		CallbackIdleTTL:    10 * time.Millisecond,
 	})
 	start, err := svc.Start(context.Background(), StartInput{AuthMode: "browser"})
 	if err == nil {
@@ -549,7 +797,18 @@ func TestServiceStartBrowser_WhenPrimaryCallbackPortBusy_FallsBackToSecondaryPor
 		if parseErr != nil {
 			t.Fatalf("parse authorize url: %v", parseErr)
 		}
-		if got := strings.TrimSpace(u.Query().Get("redirect_uri")); got != "http://localhost:1457"+callbackPath { // swobu:io-string source=domain
+		redirectURI, parseErr := url.Parse(strings.TrimSpace(u.Query().Get("redirect_uri"))) // swobu:io-string source=domain
+		if parseErr != nil || redirectURI.Port() == "" {
+			t.Fatalf("authorize URL omitted callback port: %v", parseErr)
+		}
+		callbackAddr := net.JoinHostPort("127.0.0.1", redirectURI.Port())
+		defer func() {
+			if err := svc.Cancel(start.SessionID); err != nil {
+				t.Errorf("cancel browser auth: %v", err)
+			}
+			waitForCallbackPortRelease(t, callbackAddr, time.Second)
+		}()
+		if got := redirectURI.String(); got != "http://localhost:1457"+callbackPath { // swobu:io-string source=domain
 			t.Fatalf("redirect_uri=%q", got)
 		}
 		return
@@ -592,14 +851,16 @@ func occupyPortIfAvailable(t *testing.T, addr string) net.Listener {
 
 func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T) {
 	now := time.Now().UTC()
-	callbackAddr := reserveCallbackAddr(t)
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		_, _ = w.Write([]byte(`{"access_token":"at_test"}`))
 	}))
 	defer tokenSrv.Close()
 	svc := NewService(http.DefaultClient, ServiceConfig{
-		TokenURL:           tokenSrv.URL,
-		CallbackListenAddr: callbackAddr,
+		TokenURL: tokenSrv.URL,
+		// Let the service atomically choose and retain its callback port. A
+		// reserve-close-rebind sequence can lose the ephemeral port to the
+		// httptest server (or another parallel test) before Start binds it.
+		CallbackListenAddr: "127.0.0.1:0",
 		CallbackIdleTTL:    20 * time.Millisecond,
 		Now:                func() time.Time { return now },
 		CredentialOut:      &captureWriter{},
@@ -609,9 +870,14 @@ func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T
 		t.Fatalf("start browser auth: %v", err)
 	}
 	u, _ := url.Parse(start.AuthorizeURL)
+	redirect, err := url.Parse(strings.TrimSpace(u.Query().Get("redirect_uri"))) // swobu:io-string source=domain
+	if err != nil || redirect.Port() == "" {
+		t.Fatalf("authorize URL omitted callback port: %v", err)
+	}
+	callbackAddr := net.JoinHostPort("127.0.0.1", redirect.Port())
 	state := strings.TrimSpace(u.Query().Get("state")) // swobu:io-string source=domain
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, daemonCallbackPath+"?state="+url.QueryEscape(state)+"&code=ok", nil)
+	req := httptest.NewRequest(http.MethodGet, callbackPathForTest+"?state="+url.QueryEscape(state)+"&code=ok", nil)
 	svc.HandleCallback(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callback status=%d", rec.Code)
@@ -624,14 +890,22 @@ func TestServiceCallbackServer_ShutsDownAfterTerminalBrowserSession(t *testing.T
 }
 
 func TestServiceCallbackServer_ShutsDownAfterAbandonedBrowserSessionExpiry(t *testing.T) {
+	var clockMu sync.Mutex
 	now := time.Now().UTC()
-	callbackAddr := reserveCallbackAddr(t)
+	readNow := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	}
 
 	svc := NewService(http.DefaultClient, ServiceConfig{
-		CallbackListenAddr: callbackAddr,
+		// Let the listener choose its port atomically. Reserving a port, closing
+		// it, and asking the service to rebind creates a race with parallel local
+		// HTTP test servers that also consume ephemeral ports.
+		CallbackListenAddr: "127.0.0.1:0",
 		CallbackIdleTTL:    15 * time.Millisecond,
 		SessionEvictEvery:  10 * time.Millisecond,
-		Now:                func() time.Time { return now },
+		Now:                readNow,
 	})
 
 	// Start browser login but never complete callback/poll (abandoned flow).
@@ -639,14 +913,26 @@ func TestServiceCallbackServer_ShutsDownAfterAbandonedBrowserSessionExpiry(t *te
 	if err != nil {
 		t.Fatalf("start browser auth: %v", err)
 	}
+	authorizeURL, err := url.Parse(started.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	redirectURL, err := url.Parse(authorizeURL.Query().Get("redirect_uri"))
+	if err != nil || redirectURL.Port() == "" {
+		t.Fatalf("authorize URL omitted callback port: %v", err)
+	}
+	callbackAddr := net.JoinHostPort("127.0.0.1", redirectURL.Port())
 
 	// Advance logical time past ttl so eviction loop reclaims stale session.
+	clockMu.Lock()
 	now = now.Add(authSessionTTL + 2*time.Second)
+	clockMu.Unlock()
 	time.Sleep(80 * time.Millisecond)
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		_, err := svc.Session(context.Background(), started.SessionID)
 		if err != nil {
+			waitForCallbackPortRelease(t, callbackAddr, time.Second)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -668,6 +954,36 @@ func TestServiceCancelBrowserSession_ReleasesCallbackPortPromptly(t *testing.T) 
 		t.Fatalf("cancel browser auth: %v", err)
 	}
 	waitForCallbackPortRelease(t, callbackAddr, time.Second)
+}
+
+func TestServiceShutdownCancelsSessionsAndReleasesCallbackListener(t *testing.T) {
+	service := NewService(http.DefaultClient, ServiceConfig{CallbackListenAddr: "127.0.0.1:0"})
+	started, err := service.Start(context.Background(), StartInput{AuthMode: "browser"})
+	if err != nil {
+		t.Fatalf("start browser session: %v", err)
+	}
+	service.mu.RLock()
+	addr := service.callbackListener.Addr().String()
+	service.mu.RUnlock()
+
+	if err := service.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown login service: %v", err)
+	}
+	status, err := service.Session(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatalf("observe shutdown session: %v", err)
+	}
+	if status.State != SessionCanceled {
+		t.Fatalf("shutdown session state=%q, want %q", status.State, SessionCanceled)
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("callback listener remains bound at %s: %v", addr, err)
+	}
+	_ = listener.Close()
+	if _, err := service.Start(context.Background(), StartInput{AuthMode: "browser"}); err == nil {
+		t.Fatal("login service accepted a new session after shutdown")
+	}
 }
 
 func TestServiceStartDeviceAuth_DoesNotBindCallbackPort(t *testing.T) {

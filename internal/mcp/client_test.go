@@ -84,6 +84,18 @@ func TestSDKCatalogBytesIncludeDroppedOutputAndExpandedDescription(t *testing.T)
 	}
 }
 
+func TestNativeDescriptorMetadataParticipatesInCatalogBounds(t *testing.T) {
+	tool := &mcp.Tool{Name: "search", Title: strings.Repeat("x", MaxCatalogBytesPerSource+1), InputSchema: json.RawMessage(`{"type":"object"}`)}
+	if _, err := sdkToolRetainedBytes("", tool); err == nil {
+		t.Fatal("oversized native title bypassed retained catalog limit")
+	}
+	tool.Title = ""
+	tool.Annotations = &mcp.ToolAnnotations{Title: strings.Repeat("x", MaxCatalogBytesPerSource+1)}
+	if _, err := sdkToolRetainedBytes("", tool); err == nil {
+		t.Fatal("oversized annotation bypassed retained catalog limit")
+	}
+}
+
 func TestMCPResponseAndSchemaLimits(t *testing.T) {
 	body := &maxBytesReadCloser{
 		source:    io.NopCloser(strings.NewReader(strings.Repeat("x", MaxHTTPResponseBytes+1))),
@@ -158,6 +170,36 @@ func TestHeaderTransportForwardsArbitraryHeadersOnlyToExactOrigin(t *testing.T) 
 	}
 }
 
+func TestSourceCredentialTransportResolvesPerRequestAndConfinesOrigin(t *testing.T) {
+	resolutions := 0
+	transport := sourceCredentialTransport{
+		origin: "https://source.example",
+		resolve: func(context.Context) (string, error) {
+			resolutions++
+			return "rotated-source-token", nil
+		},
+		next: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Host == "source.example" && request.Header.Get("Authorization") != "Bearer rotated-source-token" {
+				t.Errorf("source request authorization=%q", request.Header.Get("Authorization"))
+			}
+			if request.URL.Host == "other.example" && request.Header.Get("Authorization") != "" {
+				t.Errorf("cross-origin authorization=%q", request.Header.Get("Authorization"))
+			}
+			return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+		}),
+	}
+	for _, raw := range []string{"https://source.example/mcp", "https://source.example/mcp", "https://other.example/mcp"} {
+		endpoint, _ := url.Parse(raw)
+		request := &http.Request{Method: http.MethodPost, URL: endpoint, Header: make(http.Header)}
+		if _, err := transport.RoundTrip(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resolutions != 2 {
+		t.Fatalf("credential resolutions=%d, want two source-origin requests", resolutions)
+	}
+}
+
 func TestMCPToolOutputSchemaIsApproximationEvidence(t *testing.T) {
 	sourceKey, _ := canonical.NewToolKey("mcp", canonical.ToolKindMCP, "docs")
 	remote, _ := newTestMCPURL("https://mcp.example.test/rpc", canonical.Unspecified[[]string]())
@@ -205,6 +247,7 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	})
 	server.AddTool(&mcp.Tool{
 		Name: "fetch", Description: "Fetch",
+		Title: "Native Fetch", Annotations: &mcp.ToolAnnotations{Title: "annotation title", ReadOnlyHint: true},
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"object"}`),
 	}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -243,6 +286,16 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	if len(changes) != 1 || changes[0].Kind != compat.Approximation {
 		t.Fatalf("output-schema changes = %#v", changes)
 	}
+	var native mcp.Tool
+	if err := json.Unmarshal(activeSession.nativeTools["fetch"], &native); err != nil {
+		t.Fatal(err)
+	}
+	if native.Title != "Native Fetch" || native.OutputSchema == nil || native.Annotations == nil || !native.Annotations.ReadOnlyHint || native.Annotations.Title != "annotation title" {
+		t.Fatalf("source native metadata lost: %#v", native)
+	}
+	if len(activeSession.nativeTools) != 2 {
+		t.Fatal("native catalog bypassed selected allowlist")
+	}
 	first, _ := declarations[0].Function()
 	if first.Key().Name() != "fetch" {
 		t.Fatalf("allowed_tools order was lost: %#v", declarations)
@@ -271,9 +324,9 @@ func TestMCPSemanticToolLoopUsesOfficialSDKSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls, err := run.Calls(runtimeTestResponse(t, callItem))
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("provider call classification = %#v, %v", calls, err)
+	calls, caller := run.PartitionCalls(runtimeTestResponse(t, callItem))
+	if len(caller) != 0 || len(calls) != 1 {
+		t.Fatalf("provider call classification = %#v, caller=%#v", calls, caller)
 	}
 	if err := run.BeginBatch(calls); err != nil {
 		t.Fatal(err)

@@ -61,7 +61,7 @@ func TestOpenCodeFreshConfigurationIsMinimalAndConverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	for _, want := range []string{`"model":"swobu/default"`, `"npm":"@ai-sdk/openai"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"apiKey":"swobu"`, `"default":{`} {
+	for _, want := range []string{`"model":"swobu/coding"`, `"npm":"@ai-sdk/openai"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"apiKey":"test-workspace-credential"`, `"coding":{`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("fresh configuration missing %q:\n%s", want, text)
 		}
@@ -103,11 +103,11 @@ func TestOpenCodeDiscoveryUsesBinaryRegularFilesAndXDG(t *testing.T) {
 func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *testing.T) {
 	home := t.TempDir()
 	dir := openCodeConfigDir(home, nil)
-	low := writeOpenCodeConfig(t, dir, "config.json", `{"model":"other/model","provider":{"swobu":{"options":{"baseURL":"https://old","apiKey":"operator"},"models":{"default":{"limit":{"context":200000,"output":64000}}}}},"disabled_providers":["swobu"]}`)
-	middle := writeOpenCodeConfig(t, dir, "opencode.json", `{"model":"swobu/default","provider":{"swobu":{"npm":"@ai-sdk/openai","options":{"baseURL":"https://middle"}}},"experimental":{"policies":"opaque"}}`)
+	low := writeOpenCodeConfig(t, dir, "config.json", `{"model":"other/model","provider":{"swobu":{"options":{"baseURL":"https://old","apiKey":"operator"},"models":{"coding":{"limit":{"context":200000,"output":64000}}}}},"disabled_providers":["other"]}`)
+	middle := writeOpenCodeConfig(t, dir, "opencode.json", `{"model":"swobu/coding","provider":{"swobu":{"npm":"@ai-sdk/openai","options":{"baseURL":"https://middle"}}},"experimental":{"policies":"opaque"}}`)
 	high := writeOpenCodeConfig(t, dir, "opencode.jsonc", "{\n  // keep comment\n  \"unrelated\": true,\n}\n")
 	service := openCodeService(t, home, map[string]string{"OPENCODE_CONFIG": "ignored", "OPENCODE_CONFIG_DIR": "ignored", "OPENCODE_CONFIG_CONTENT": "ignored"}, false)
-	plan, err := service.Plan(context.Background(), ClientOpenCode, testTarget(t))
+	plan, err := service.Plan(context.Background(), ClientOpenCode, testTarget(t).WithAuthentication("test-principal", "operator"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *tes
 			t.Fatalf("highest-precedence unrelated config missing %q:\n%s", want, highAfter)
 		}
 	}
-	if !strings.Contains(string(middleAfter), testTarget(t).WorkspaceURL()) {
+	if !strings.Contains(string(middleAfter), testTarget(t).WithAuthentication("test-principal", "operator").WorkspaceURL()) {
 		t.Fatalf("provider schema file missing new endpoint:\n%s", middleAfter)
 	}
 	for _, unowned := range []string{`"apiKey"`, `"models"`, `"limit"`} {
@@ -139,7 +139,7 @@ func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *tes
 	v2Home := t.TempDir()
 	v2Path := writeOpenCodeConfig(t, openCodeConfigDir(v2Home, nil), "config.json", `{"model":"other/model","providers":{},"websearch":{"enabled":true,"provider":"exa","consent":"granted"},"unrelated":{"keep":true}}`)
 	v2Service := openCodeService(t, v2Home, nil, false)
-	v2Plan, err := v2Service.Plan(context.Background(), ClientOpenCode, testTarget(t))
+	v2Plan, err := v2Service.Plan(context.Background(), ClientOpenCode, testTarget(t).WithAuthentication("test-principal", "operator"))
 	if err != nil {
 		t.Fatalf("V2 plan error = %v", err)
 	}
@@ -153,7 +153,7 @@ func TestOpenCodeReadsOwnedLeavesByPrecedenceAndWritesHighestExistingFile(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"package":"@opencode/ai/providers/openai-compatible"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`, `"model":"swobu/default"`, `"websearch":{"enabled":true,"provider":"exa","consent":"granted"}`, `"unrelated":{"keep":true}`} {
+	for _, want := range []string{`"package":"@opencode/ai/providers/openai-compatible"`, `"baseURL":"` + testTarget(t).WithAuthentication("test-principal", "operator").WorkspaceURL() + `"`, `"model":"swobu/coding"`, `"websearch":{"enabled":true,"provider":"exa","consent":"granted"}`, `"unrelated":{"keep":true}`} {
 		if !strings.Contains(string(v2Raw), want) {
 			t.Fatalf("V2 configuration missing %q:\n%s", want, v2Raw)
 		}
@@ -188,7 +188,7 @@ func TestOpenCodeIntroducesV2SchemaInHighestPriorityConfigLayer(t *testing.T) {
 	}
 	highAfter, _ := os.ReadFile(high)
 	lowAfter, _ := os.ReadFile(low)
-	for _, want := range []string{"higher-priority operator layer", `"model": "swobu/default"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`} {
+	for _, want := range []string{"higher-priority operator layer", `"model": "swobu/coding"`, `"baseURL":"` + testTarget(t).WorkspaceURL() + `"`} {
 		if !strings.Contains(string(highAfter), want) {
 			t.Fatalf("highest-priority config missing %q:\n%s", want, highAfter)
 		}
@@ -220,5 +220,14 @@ func TestOpenCodeApplyRejectsBindingOrWriteLocusChange(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestOpenCodeExplicitlyDisabledProviderCannotBeConfigured(t *testing.T) {
+	home := t.TempDir()
+	writeOpenCodeConfig(t, openCodeConfigDir(home, nil), "opencode.json", `{"disabled_providers":["swobu"]}`)
+	service := openCodeService(t, home, nil, true)
+	if _, err := service.Plan(t.Context(), ClientOpenCode, testTarget(t)); err == nil {
+		t.Fatal("disabled provider accepted for configuration")
 	}
 }

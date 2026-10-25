@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 const ClientOpenCode ClientID = "opencode"
@@ -32,20 +33,21 @@ type openCodeLeaf struct {
 
 func openCodeLeaves(target Target) []openCodeLeaf {
 	return []openCodeLeaf{
-		{field: "backend", path: keyPath{"model"}, after: "swobu/default", replace: true},
+		{field: "backend", path: keyPath{"model"}, after: "swobu/" + target.ModelID(), replace: true},
 		{field: "API", path: keyPath{"provider", "swobu", "npm"}, after: "@ai-sdk/openai", replace: true},
 		{field: "endpoint", path: keyPath{"provider", "swobu", "options", "baseURL"}, after: target.WorkspaceURL(), replace: true},
-		{field: "API key", path: keyPath{"provider", "swobu", "options", "apiKey"}, after: "swobu"},
-		{field: "model", path: keyPath{"provider", "swobu", "models", "default"}, after: "default", encoded: []byte(`{}`)},
+		{field: "API key", path: keyPath{"provider", "swobu", "options", "apiKey"}, after: target.bearer, replace: true},
+		{field: "model", path: keyPath{"provider", "swobu", "models", target.ModelID()}, after: target.ModelID(), encoded: []byte(`{}`)},
 	}
 }
 
 func openCodeV2Leaves(target Target) []openCodeLeaf {
 	return []openCodeLeaf{
-		{field: "backend", path: keyPath{"model"}, after: "swobu/default", replace: true},
+		{field: "backend", path: keyPath{"model"}, after: "swobu/" + target.ModelID(), replace: true},
 		{field: "provider package", path: keyPath{"providers", "swobu", "package"}, after: "@opencode/ai/providers/openai-compatible"},
 		{field: "endpoint", path: keyPath{"providers", "swobu", "settings", "baseURL"}, after: target.WorkspaceURL(), replace: true},
-		{field: "model", path: keyPath{"providers", "swobu", "models", "default"}, after: "default", encoded: []byte(`{"name":"Swobu default"}`)},
+		{field: "API key", path: keyPath{"providers", "swobu", "settings", "apiKey"}, after: target.bearer, replace: true},
+		{field: "model", path: keyPath{"providers", "swobu", "models", target.ModelID()}, after: target.ModelID(), encoded: []byte(`{"name":"Swobu model"}`)},
 	}
 }
 
@@ -82,6 +84,17 @@ func planOpenCodeCurrent(_ context.Context, s *Service, target Target) (plannedM
 		if err != nil {
 			return plannedMutation{}, openCodeProblem(err)
 		}
+		if file.existed {
+			var disabled []string
+			if _, err := editor.Value(file.raw, keyPath{"disabled_providers"}, &disabled); err != nil {
+				return plannedMutation{}, openCodeProblem(err)
+			}
+			for _, provider := range disabled {
+				if provider == "swobu" {
+					return plannedMutation{}, openCodeProblem(fmt.Errorf("Swobu is explicitly disabled; remove it from disabled_providers before reviewing Connect"))
+				}
+			}
+		}
 		files[i] = file
 		if file.existed {
 			writeIndex = i
@@ -104,20 +117,30 @@ func planOpenCodeCurrent(_ context.Context, s *Service, target Target) (plannedM
 	}
 
 	var changes []Change
+	var credential string
 	for i, leaf := range leaves {
-		if leaf.replace {
+		if leaf.field == "API key" {
+			credential = values[i].value
+			if strings.HasPrefix(credential, "{env:") && strings.HasSuffix(credential, "}") {
+				credential = s.getenv(strings.TrimSuffix(strings.TrimPrefix(credential, "{env:"), "}"))
+			}
+			changes = append(changes, credentialChange(credential, values[i].exists, target)...)
+		} else if leaf.replace {
 			changes = append(changes, semanticChange(leaf.field, values[i].value, values[i].exists, leaf.after)...)
 		} else if !values[i].exists {
 			changes = append(changes, semanticChange(leaf.field, "", false, leaf.after)...)
 		}
 	}
-	plan := Plan{ConfigPaths: []string{writeFile.logical}, Target: target, Changes: changes}
+	plan := Plan{ConfigPaths: []string{writeFile.logical}, Target: target, Changes: changes, credential: credential}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
 	}
 
 	next := writeFile.raw
 	for i, leaf := range leaves {
+		if leaf.field == "API key" && credential == target.bearer && credential != "" {
+			continue
+		}
 		if values[i].exists && (!leaf.replace || values[i].value == leaf.after) {
 			continue
 		}

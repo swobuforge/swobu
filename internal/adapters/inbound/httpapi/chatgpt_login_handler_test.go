@@ -5,96 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 )
 
-func TestChatGPTLoginHandlerGenericStart(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthSessionHandler(
-		func(_ context.Context, in authplane.StartInput) (authplane.StartOutput, error) {
-			if in.ProviderSpec != "chatgpt" {
-				t.Fatalf("provider spec = %q", in.ProviderSpec)
-			}
-			if in.Workspace != "main" || in.Route != "chat" || in.TargetID != "target" {
-				t.Fatalf("target subject = %#v", in)
-			}
-			return authplane.StartOutput{
-				SessionID:    "sess-g1",
-				AuthorizeURL: "https://login.example",
-				ExpiresAt:    "2026-05-18T12:00:00Z",
-				State:        authplane.SessionStatePending,
-			}, nil
-		},
-		nil,
-		nil,
-		nil,
-	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","workspace":"main","route":"chat","target_id":"target","auth_mode":"browser","future_option":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["provider_spec"] != "chatgpt" {
-		t.Fatalf("provider_spec = %v", body["provider_spec"])
-	}
-	if body["expires_at"] != "2026-05-18T12:00:00Z" {
-		t.Fatalf("expires_at = %v", body["expires_at"])
-	}
-}
-
-func TestChatGPTLoginHandlerGenericStartRejectsMalformedBody(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthSessionHandler(
-		func(_ context.Context, _ authplane.StartInput) (authplane.StartOutput, error) {
-			t.Fatal("start should not be called for malformed JSON")
-			return authplane.StartOutput{}, nil
-		}, nil, nil, nil,
-	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"auth_mode":`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-}
-
-func TestChatGPTLoginHandlerGenericStart_RequiresExplicitAuthMode(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthSessionHandler(
-		func(_ context.Context, _ authplane.StartInput) (authplane.StartOutput, error) {
-			t.Fatal("start should not be called when auth_mode is missing")
-			return authplane.StartOutput{}, nil
-		},
-		nil,
-		nil,
-		nil,
-	)
-	req := httptest.NewRequest(http.MethodPost, "/_swobu/auth/sessions", strings.NewReader(`{"provider_spec":"chatgpt","endpoint_ref":"main/chatgpt"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if !strings.Contains(rec.Body.String(), "auth_mode is required") {
-		t.Fatalf("body = %q", rec.Body.String())
-	}
-}
-
 func TestChatGPTLoginHandlerGenericSession(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthSessionHandler(
-		nil,
 		func(_ context.Context, sessionID string) (authplane.SessionOutput, error) {
 			if sessionID != "sess-g1" {
 				t.Fatalf("session id = %q", sessionID)
@@ -105,13 +23,11 @@ func TestChatGPTLoginHandlerGenericSession(t *testing.T) {
 				State:         authplane.SessionStateSucceeded,
 				CredentialRef: "secret:chatgpt/default",
 			}, nil
-		},
-		nil,
-		nil,
+		}, nil,
 	)
-	req := httptest.NewRequest(http.MethodGet, "/_swobu/auth/sessions/sess-g1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth-sessions/sess-g1", nil)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	localAuthorityTestHandler(handler).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -128,52 +44,17 @@ func TestChatGPTLoginHandlerGenericCancel(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthSessionHandler(
 		nil,
-		nil,
 		func(_ context.Context, sessionID string) error {
 			if sessionID != "sess-g1" {
 				t.Fatalf("session id = %q", sessionID)
 			}
 			return nil
 		},
-		nil,
 	)
-	req := operatorJSONTestRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/cancel", "{}")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth-sessions/sess-g1", nil)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	localAuthorityTestHandler(handler).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-}
-
-func TestChatGPTLoginHandlerGenericRetry(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthSessionHandler(
-		nil,
-		nil,
-		nil,
-		func(_ context.Context, sessionID string) (authplane.StartOutput, error) {
-			if sessionID != "sess-g1" {
-				t.Fatalf("session id = %q", sessionID)
-			}
-			return authplane.StartOutput{
-				SessionID:    "sess-g2",
-				AuthorizeURL: "https://login.example/new",
-				ExpiresAt:    "2026-05-18T12:05:00Z",
-				State:        authplane.SessionStatePending,
-			}, nil
-		},
-	)
-	req := operatorJSONTestRequest(http.MethodPost, "/_swobu/auth/sessions/sess-g1/retry", "{}")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["expires_at"] != "2026-05-18T12:05:00Z" {
-		t.Fatalf("expires_at = %v", body["expires_at"])
 	}
 }

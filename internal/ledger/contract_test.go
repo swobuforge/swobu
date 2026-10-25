@@ -21,6 +21,16 @@ func TestExchangeFilterRejectsCrossKindFailureRequirements(t *testing.T) {
 }
 
 func TestCursorAndPageSizeContract(t *testing.T) {
+	mcp, err := NewMCPCursor(time.Unix(1, 2), "mcp_boundary")
+	if err != nil || !mcp.Valid() || mcp.OperationID() != "mcp_boundary" || !mcp.SettledAt().Equal(time.Unix(1, 2)) || (MCPCursor{}).Valid() {
+		t.Fatalf("MCP cursor=%#v err=%v", mcp, err)
+	}
+	if _, err := NewMCPCursor(time.Time{}, "mcp_boundary"); err == nil {
+		t.Fatal("zero settlement accepted")
+	}
+	if _, err := NewMCPCursor(time.Now(), ""); err == nil {
+		t.Fatal("empty MCP identity accepted")
+	}
 	id, _ := execution.NewExchangeID()
 	cursor, err := NewCursor(time.Unix(1, 2), id)
 	if err != nil || !cursor.Valid() || cursor.ExchangeID() != id || cursor.SettledAt() != time.Unix(1, 2) {

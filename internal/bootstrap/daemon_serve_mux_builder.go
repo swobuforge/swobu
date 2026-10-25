@@ -2,105 +2,377 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/swobuforge/swobu/internal/accessstate"
+	"github.com/swobuforge/swobu/internal/adapters/inbound/adminmcp"
 	"github.com/swobuforge/swobu/internal/adapters/inbound/httpapi"
 	credentialsadapter "github.com/swobuforge/swobu/internal/adapters/outbound/credentials"
 	executionevidence "github.com/swobuforge/swobu/internal/adapters/outbound/executionevidence"
-	executionevidencestore "github.com/swobuforge/swobu/internal/adapters/outbound/executionevidence"
-	ledgerpostgres "github.com/swobuforge/swobu/internal/adapters/outbound/ledger/postgres"
-	ledgersqlite "github.com/swobuforge/swobu/internal/adapters/outbound/ledger/sqlite"
 	mediaadapter "github.com/swobuforge/swobu/internal/adapters/outbound/media"
+	"github.com/swobuforge/swobu/internal/admission"
 	accessapp "github.com/swobuforge/swobu/internal/app/operator/access"
 	"github.com/swobuforge/swobu/internal/app/operator/authplane"
 	chatgptlogin "github.com/swobuforge/swobu/internal/app/operator/chatgptlogin"
 	connectapp "github.com/swobuforge/swobu/internal/app/operator/connect"
+	connectionapp "github.com/swobuforge/swobu/internal/app/operator/connections"
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
-	operatorwire "github.com/swobuforge/swobu/internal/app/operator/controlplane/schema/operatorwire"
-	"github.com/swobuforge/swobu/internal/app/operator/credentialfiles"
-	"github.com/swobuforge/swobu/internal/app/operator/credentialmaterialization"
+	limitapp "github.com/swobuforge/swobu/internal/app/operator/limits"
+	"github.com/swobuforge/swobu/internal/app/operator/managementaudit"
+	publicationapp "github.com/swobuforge/swobu/internal/app/operator/publication"
 	"github.com/swobuforge/swobu/internal/app/operator/routebindings"
-	"github.com/swobuforge/swobu/internal/app/operator/shares"
 	"github.com/swobuforge/swobu/internal/app/operator/workspaces"
 	"github.com/swobuforge/swobu/internal/clientconnect"
-	"github.com/swobuforge/swobu/internal/delivery"
-	executionevidenceDomain "github.com/swobuforge/swobu/internal/domain/executionevidence"
+	"github.com/swobuforge/swobu/internal/configstore"
+	"github.com/swobuforge/swobu/internal/domain/accessidentity"
+	"github.com/swobuforge/swobu/internal/domain/canonical"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
+	"github.com/swobuforge/swobu/internal/domain/credentialref"
+	"github.com/swobuforge/swobu/internal/domain/execution"
 	"github.com/swobuforge/swobu/internal/exchange"
-	"github.com/swobuforge/swobu/internal/export/ndjson"
-	"github.com/swobuforge/swobu/internal/export/otlp"
 	"github.com/swobuforge/swobu/internal/ledger"
-	"github.com/swobuforge/swobu/internal/observation"
+	"github.com/swobuforge/swobu/internal/mcp"
+	"github.com/swobuforge/swobu/internal/nodeauthority"
 	"github.com/swobuforge/swobu/internal/operatorweb"
-	"github.com/swobuforge/swobu/internal/outputruntime"
-	"github.com/swobuforge/swobu/internal/sharestate"
-	"github.com/swobuforge/swobu/internal/sharetransport"
-	"github.com/swobuforge/swobu/shareprotocol"
+	"github.com/swobuforge/swobu/internal/provider"
+	"github.com/swobuforge/swobu/internal/relaystate"
+	"github.com/swobuforge/swobu/internal/relaytransport"
+	"github.com/swobuforge/swobu/internal/routing"
+	"github.com/swobuforge/swobu/relayprotocol"
 )
 
+// buildDaemonServeMux wires the local control and operator endpoints around
+// the separate public Workspace data plane. Activity reads project the same
+// bounded execution-evidence store used by the request path.
 func buildDaemonServeMux(
 	daemon *Daemon,
 	addr string,
 	runtime daemonProviderModelCatalogComposition,
 	authCredentialWritePolicy credentialsadapter.CredentialWritePolicy,
-) (*http.ServeMux, *chatgptlogin.LoginService, error) {
-	executionEvidenceStore := executionevidencestore.NewStore(executionevidencestore.Config{})
-	daemon.executionEvidenceStore = executionEvidenceStore
-	ledgerWriter, ndjsonExporter, otlpExporter, err := composeM5Outputs(daemon, executionEvidenceStore)
-	daemon.ledgerWriter = ledgerWriter
-	daemon.ndjsonExporter = ndjsonExporter
-	daemon.otlpExporter = otlpExporter
-	if err != nil {
-		// Optional M5 outputs are fail-open; status exposes their degraded state
-		// while the gateway remains available for model/tool execution.
-		daemon.logger.Warn("M5 output degraded", "error", err.Error())
+) (http.Handler, *chatgptlogin.LoginService, error) {
+	limitAdmission := admission.New(func(slug routing.WorkspaceSlug) (string, routing.ServiceLimits, error) {
+		workspace, err := daemon.configStore.GetWorkspace(context.Background(), slug)
+		if err != nil {
+			return "", routing.ServiceLimits{}, err
+		}
+		return workspace.ManagementIncarnation(), workspace.ServiceLimits(), nil
+	})
+	var estimator exchange.PriceEstimator
+	if daemon.pricing != nil {
+		estimator = daemon.pricing
 	}
 	exchangeIngress := exchange.NewIngress(
 		daemon.configStore,
 		runtime,
 		exchange.RuntimePoliciesSpec{
+			ModelConnection: daemon.connectionStore.Get,
+			PublishRefreshedCredential: func(ctx context.Context, target provider.TargetSnapshot, material string) error {
+				if daemon.configStore.ReadOnly() {
+					return configstore.ErrReadOnly
+				}
+				return publishRefreshedConnection(ctx, daemon.connectionStore, target, material, authCredentialWritePolicy)
+			},
 			ImageFetcher:      mediaadapter.NewPublicImageFetcher(),
-			ExecutionEvidence: executionEvidenceStore,
+			ExecutionEvidence: daemon.executionEvidenceStore,
+			Accounting:        daemon.accountingStore,
+			PriceEstimator:    estimator,
+			WorkspaceToolCatalog: func(ctx context.Context, workspace routing.Workspace) ([]mcp.CatalogTool, error) {
+				if _, err := httpapi.WorkspaceServiceAuthorityFromContext(ctx, workspace.Slug(), routing.ServiceMCP); err != nil {
+					return nil, canonical.BadRequest("Workspace MCP tool access is not authorized")
+				}
+				return mcp.WorkspaceCatalog(workspace, daemon.workspaceMCPBindings(workspace))
+			},
+			WorkspaceToolCall: func(ctx context.Context, principal accessidentity.ID, frozenWorkspace routing.Workspace, tool mcp.CatalogTool, call canonical.ToolCallItem) (canonical.CanonicalItem, error) {
+				currentPrincipal, err := httpapi.WorkspaceServiceAuthorityFromContext(ctx, frozenWorkspace.Slug(), routing.ServiceMCP)
+				if err != nil || currentPrincipal != principal {
+					return canonical.CanonicalItem{}, canonical.BadRequest("Workspace MCP tool authority is no longer valid")
+				}
+				currentWorkspace, err := daemon.configStore.GetWorkspace(ctx, frozenWorkspace.Slug())
+				if err != nil || frozenWorkspace.ConfigurationRevision() == "" || currentWorkspace.ConfigurationRevision() != frozenWorkspace.ConfigurationRevision() {
+					return canonical.CanonicalItem{}, canonical.BadRequest("Workspace configuration changed; select the catalog again")
+				}
+				// Models composition uses this callback, independently of the direct
+				// MCP handler. Charge MCP at its effect boundary before dispatch.
+				if retry, err := httpapi.AdmitComposedServiceOperation(ctx, frozenWorkspace.Slug(), routing.ServiceMCP); err != nil {
+					if errors.Is(err, accessstate.ErrRequestRateLimited) {
+						return canonical.CanonicalItem{}, canonical.RequestRateLimited("Principal MCP request limit exceeded", retry)
+					}
+					return canonical.CanonicalItem{}, canonical.BadRequest("Workspace MCP tool authority is no longer valid")
+				}
+				release, retry, err := limitAdmission.Admit(frozenWorkspace.Slug(), routing.ServiceMCP)
+				if err != nil {
+					if errors.Is(err, admission.ErrExhausted) {
+						return canonical.CanonicalItem{}, canonical.RequestRateLimited("Workspace MCP operational limit exceeded", retry)
+					}
+					return canonical.CanonicalItem{}, canonical.InternalError("Workspace MCP operational admission unavailable")
+				}
+				defer release()
+				return mcp.CallWorkspaceToolResult(ctx, currentWorkspace, daemon.workspaceMCPBindings(currentWorkspace), tool, call)
+			},
 		},
 	)
-	shareTLS := &sharestate.TLSManager{Store: daemon.shareStore}
-	shareHandler := httpapi.NewShareHandler(daemon.shareStore, daemon.configStore, exchangeIngress)
-	relayAddress := strings.TrimSpace(os.Getenv("SWOBU_SHARE_RELAY_ADDR"))
-	if relayAddress == "" {
-		relayAddress = shareprotocol.RelayHostname + ":443"
+	relayTLS := &relaystate.TLSManager{Store: daemon.relayStore}
+	web, err := operatorweb.NewHandler()
+	if err != nil {
+		return nil, nil, fmt.Errorf("Web Operator assets: %w", err)
 	}
-	shareRuntime, err := sharetransport.NewOwnerRuntime(relayAddress, nil, daemon.shareStore, shareTLS, shareHandler)
+	mux := http.NewServeMux()
+	connectionCommands, err := connectionapp.NewCommands(daemon.connectionStore, daemon.connectionLifecycle)
 	if err != nil {
 		return nil, nil, err
 	}
-	daemon.shareRuntime = shareRuntime
-	mux := http.NewServeMux()
-	mux.Handle("/c/", httpapi.NewHandlerWithExecutionObservation(exchangeIngress, func(out exchange.RequestOutput, result delivery.Result, timing *observation.Timing) {
-		if daemon.telemetry == nil || out.ProductObservationInput == nil {
-			return
+	connectionControl := httpapi.NewConnectionControlHandler(daemon.connectionQueries, connectionCommands, func(ctx context.Context, id connectionidentity.ID, slot, secret string, fresh bool) (credentialref.Ref, error) {
+		if err := ctx.Err(); err != nil {
+			return credentialref.Ref{}, err
 		}
-		projected := exchange.BuildProductObservation(out.ProductObservationInput, result)
-		if projected == nil {
-			return
+		raw, err := credentialsadapter.MaterializeConnectionCredential(id.String(), slot, secret, authCredentialWritePolicy, fresh)
+		if errors.Is(err, credentialsadapter.ErrConnectionMaterialConflict) {
+			return credentialref.Ref{}, connectionapp.ErrMaterialConflict
 		}
-		if timing != nil {
-			if duration, known := timing.DurationMillis(); known {
-				projected.DurationMS = &duration
-			}
-			if firstByte, known := timing.TTFBMillis(); known {
-				projected.TTFBMS = &firstByte
-			}
+		return credentialref.Parse(raw), err
+	}, checkDaemonConnection)
+	// GET /api/v1/node projects only counts and the whole-file revision.
+	// It never exposes secret references, stored credential digests, or YAML.
+	nodeOverview := func(ctx context.Context) (nodeauthority.Overview, error) {
+		if err := ctx.Err(); err != nil {
+			return nodeauthority.Overview{}, err
 		}
-		daemon.telemetry.ObserveExecution(*projected)
+		if daemon.nodeFile == nil {
+			return nodeauthority.Overview{}, errors.New("Node file unavailable")
+		}
+		raw, revision, err := daemon.nodeFile.Snapshot()
+		if err != nil {
+			return nodeauthority.Overview{}, err
+		}
+		summary, err := nodeauthority.Validate(raw)
+		if err != nil {
+			return nodeauthority.Overview{}, err
+		}
+		mode := "managed"
+		if daemon.configStore.ReadOnly() {
+			mode = "externally_managed"
+		}
+		return nodeauthority.Overview{
+			Revision: revision, ConfigurationMode: mode,
+			Workspaces: summary.Workspaces, Connections: summary.Connections,
+			Principals: summary.Principals, Publications: summary.Publications,
+			BudgetPolicies: summary.BudgetPolicies,
+		}, nil
+	}
+	mux.Handle("GET /api/v1/node", httpapi.NewNodeOverviewHandler(nodeOverview))
+	mux.Handle("/api/v1/connections", connectionControl)
+	mux.Handle("/api/v1/connections/{id}/mcp-catalog", httpapi.NewConnectionMCPCatalogHandler(func(ctx context.Context, id connectionidentity.ID) ([]mcp.CatalogTool, error) {
+		return mcp.ConnectionCatalog(id.String(), daemon.currentMCPBindings(id.String()))
 	}))
-	mux.Handle("/_swobu/status", httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
+	mux.Handle("/api/v1/connections/", connectionControl)
+	bindingCoordinator := &routebindings.Coordinator{}
+	accessService, err := accessapp.NewService(daemon.accessStore, daemon.configStore, bindingCoordinator)
+	if err != nil {
+		return nil, nil, err
+	}
+	connectService, err := connectapp.NewService(clientconnect.NewService(), accessService)
+	if err != nil {
+		return nil, nil, err
+	}
+	mux.Handle("/api/v1/clients", httpapi.NewClientsHandler(connectService, "http://"+addr, func(request *http.Request, slug routing.WorkspaceSlug) bool {
+		_, err := daemon.configStore.GetWorkspace(request.Context(), slug)
+		return err == nil
+	}))
+	attemptDirectory := filepath.Join(daemon.runtimeDir, "connect-attempts")
+	if err := os.MkdirAll(attemptDirectory, 0700); err != nil {
+		return nil, nil, err
+	}
+	connectAttempts, err := connectapp.OpenAttempts(attemptDirectory)
+	if err != nil {
+		return nil, nil, err
+	}
+	mux.Handle("/api/v1/client-configurations", httpapi.NewClientConfigurationHandler(connectService, connectAttempts, "http://"+addr, func(request *http.Request, slug routing.WorkspaceSlug, modelID string) bool {
+		workspace, err := daemon.configStore.GetWorkspace(request.Context(), slug)
+		if err != nil {
+			return false
+		}
+		_, err = workspace.ResolveRoute(modelID)
+		return err == nil
+	}))
+	activityHandler := httpapi.NewActivityHandler(func(request *http.Request, scope executionevidence.ProjectionScope, page ledger.ActivityPageQuery) (executionevidence.ActivityProjection, error) {
+		if page.Limit != 0 {
+			return daemon.activityPage(request.Context(), scope, page)
+		}
+		return daemon.activity(request.Context(), scope)
+	})
+	mux.Handle("/api/v1/activity", activityHandler)
+	mux.Handle("GET /api/v1/activity/export", httpapi.NewActivityExportHandler(func(request *http.Request, scope executionevidence.ProjectionScope, page ledger.ActivityPageQuery) (executionevidence.ActivityProjection, error) {
+		return daemon.activityPage(request.Context(), scope, page)
+	}))
+	mux.Handle("/api/v1/activity/stream", httpapi.NewActivityStreamHandler(func(request *http.Request, scope executionevidence.ProjectionScope, _ ledger.ActivityPageQuery) (executionevidence.ActivityProjection, error) {
+		return daemon.activity(request.Context(), scope)
+	}))
+	mux.Handle("/api/v1/activity/operations/", httpapi.ActivityDetailHandler{Read: func(request *http.Request, identity string) (executionevidence.OperationDetail, bool, error) {
+		return daemon.activityDetail(request.Context(), identity)
+	}})
+	// Canonical Workspace data-plane projection is separately constructed from
+	// Node Control; no control or Web handlers are reachable beneath this root.
+	workspaceData := httpapi.NewWorkspaceDataHandler(exchangeIngress)
+	workspaceMCP := mcp.NewWorkspaceMCPHandler(mcp.WorkspaceServerConfig{
+		Authorize: httpapi.AuthorizeWorkspaceRequest,
+		Catalog: func(_ context.Context, slug string) ([]mcp.CatalogTool, error) {
+			workspaceSlug, err := routing.ParseWorkspaceSlug(slug)
+			if err != nil {
+				return nil, err
+			}
+			workspace, err := daemon.configStore.GetWorkspace(context.Background(), workspaceSlug)
+			if err != nil {
+				return nil, err
+			}
+			if !workspace.HasService(routing.ServiceMCP) {
+				return nil, routing.ErrServiceDisabled
+			}
+			return mcp.WorkspaceCatalog(workspace, daemon.workspaceMCPBindings(workspace))
+		},
+		Call: func(ctx context.Context, slug string, tool mcp.CatalogTool, args json.RawMessage) (*sdk.CallToolResult, error) {
+			workspaceSlug, err := routing.ParseWorkspaceSlug(slug)
+			if err != nil {
+				return nil, err
+			}
+			workspace, err := daemon.configStore.GetWorkspace(ctx, workspaceSlug)
+			if err != nil {
+				return nil, err
+			}
+			if !workspace.HasService(routing.ServiceMCP) {
+				return nil, routing.ErrServiceDisabled
+			}
+			principal, err := httpapi.WorkspaceAuthorityFromContext(ctx, workspaceSlug)
+			if err != nil {
+				return nil, err
+			}
+			currentBindings := daemon.workspaceMCPBindings(workspace)
+			bindings := make(map[string]mcp.SourceBinding, len(currentBindings))
+			for identity, binding := range currentBindings {
+				bindings[identity] = binding
+			}
+			binding, ok := bindings[tool.SourceID]
+			if !ok || binding.Call == nil {
+				return nil, fmt.Errorf("MCP source is unavailable")
+			}
+			call := binding.Call
+			binding.Call = func(callCtx context.Context, name string, arguments json.RawMessage) (*sdk.CallToolResult, error) {
+				currentPrincipal, err := httpapi.WorkspaceAuthorityFromContext(callCtx, workspaceSlug)
+				if err != nil || currentPrincipal != principal {
+					return nil, fmt.Errorf("MCP authority changed before dispatch")
+				}
+				if _, err := httpapi.AdmitComposedServiceOperation(callCtx, workspaceSlug, routing.ServiceMCP); err != nil {
+					return nil, fmt.Errorf("MCP tool request denied: %w", err)
+				}
+				// MCP discovery and initialization are free; one actual tools/call
+				// consumes one Workspace budget slot (including built-in sources).
+				release, retry, err := limitAdmission.Admit(workspaceSlug, routing.ServiceMCP)
+				if err != nil {
+					if errors.Is(err, admission.ErrExhausted) {
+						return nil, canonical.RequestRateLimited("Workspace MCP operational limit exceeded", retry)
+					}
+					return nil, canonical.InternalError("Workspace MCP operational admission unavailable")
+				}
+				defer release()
+				identity, err := daemon.executionEvidenceStore.BeginMCP(principal, workspaceSlug, tool.SourceID, name)
+				if err != nil {
+					return nil, err
+				}
+				if tool.SourceID == "builtin:"+routing.AdminMCPSource {
+					// Capture immutable intent and the admitted credential closure,
+					// never an HTTP local-host identity or bearer token. Config reads
+					// use the atomic snapshot and do not reenter its write mutex.
+					check := func(effectCtx context.Context) error {
+						identity, err := httpapi.WorkspaceServiceAuthorityFromContext(effectCtx, workspaceSlug, routing.ServiceMCP)
+						if err != nil || identity != principal {
+							return fmt.Errorf("Admin authority changed")
+						}
+						current, err := daemon.configStore.GetWorkspace(effectCtx, workspaceSlug)
+						if err != nil || !current.HasService(routing.ServiceMCP) || current.ConfigurationRevision() != workspace.ConfigurationRevision() {
+							return fmt.Errorf("Admin Workspace configuration changed; select the catalog again")
+						}
+						catalog, err := mcp.WorkspaceCatalog(current, bindings)
+						if err != nil {
+							return fmt.Errorf("Admin source unavailable")
+						}
+						for _, entry := range catalog {
+							if entry.Name == tool.Name && entry.SourceID == tool.SourceID {
+								return nil
+							}
+						}
+						return fmt.Errorf("Admin tool is no longer mounted")
+					}
+					callCtx = adminmcp.WithAuthority(callCtx, principal, check)
+				}
+				result, callErr := call(callCtx, name, arguments)
+				if result == nil && callErr == nil {
+					callErr = fmt.Errorf("MCP source returned no result")
+				}
+				outcome, occurrence := execution.Succeeded, execution.Occurred
+				if callErr != nil || result == nil {
+					outcome, occurrence = execution.Failed, execution.MayHaveOccurred
+					if errors.Is(callErr, context.Canceled) {
+						outcome = execution.Cancelled
+					}
+				} else if result.IsError {
+					outcome = execution.Failed
+				}
+				if settleErr := daemon.executionEvidenceStore.SettleMCP(identity, outcome, occurrence); settleErr != nil {
+					return nil, settleErr
+				}
+				return result, callErr
+			}
+			bindings[tool.SourceID] = binding
+			return mcp.CallWorkspaceTool(ctx, workspace, bindings, tool, args)
+		},
+	})
+	publicWorkspaceData := httpapi.NewWorkspaceDataHandler(exchangeIngress)
+	workspaceSearch := httpapi.NewWorkspaceSearchHandler(daemon.searchService, httpapi.AuthorizeWorkspaceRequest)
+	publicWorkspace := httpapi.NewPublicWorkspaceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/mcp") {
+			workspaceMCP.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/workspaces/"+r.PathValue("workspace")+"/search" {
+			workspaceSearch.ServeHTTP(w, r)
+			return
+		}
+		publicWorkspaceData.ServeHTTP(w, r)
+	}), daemon.accessStore, daemon.publicationStore, limitAdmission.Admit)
+	relayAddress := strings.TrimSpace(os.Getenv("SWOBU_RELAY_ADDR"))
+	if relayAddress == "" {
+		relayAddress = relayprotocol.RelayHostname + ":443"
+	}
+	publicHandler := publicWorkspace
+	relayRuntime, err := relaytransport.NewOwnerRuntime(relayAddress, nil, daemon.relayStore, relayTLS, publicHandler)
+	if err != nil {
+		return nil, nil, err
+	}
+	relayRuntime.HasPublicWorkspace = daemon.publicationStore.HasPublicWorkspace
+	daemon.relayRuntime = relayRuntime
+	daemon.publicHandler = publicHandler
+	mux.Handle("/workspaces/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SPA documents and client data share the Workspace path root, but
+		// must never share their authority or handler implementation.
+		if operatorweb.IsSPARoute(r.URL.EscapedPath()) {
+			web.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/mcp") {
+			workspaceMCP.ServeHTTP(w, r)
+			return
+		}
+		workspaceData.ServeHTTP(w, r)
+	}))
+	mux.Handle("/workspaces/{workspace}/search", workspaceSearch)
+	statusHandler := httpapi.NewStatusHandler(func(context.Context) (httpapi.StatusDocument, error) {
 		status, err := daemon.Status()
 		if err != nil {
 			return httpapi.StatusDocument{}, err
@@ -110,15 +382,10 @@ func buildDaemonServeMux(
 			WorkspaceCount:       status.WorkspaceCount,
 			ControlPlaneProtocol: controlplane.Protocol,
 			SwobuVersion:         controlplane.SwobuVersion(),
-			Ledger:               operatorHealth(status.Ledger),
-			NDJSON:               ndjsonHealth(status.NDJSON),
-			OTLP:                 otlpHealth(status.OTLP),
 		}, nil
-	}))
-	mux.Handle("/_swobu/activity", httpapi.NewActivityHandler(func(_ *http.Request, scope executionevidence.ProjectionScope) (executionevidence.ActivityProjection, error) {
-		return daemon.ActivityProjectionForScope(scope)
-	}))
-	mux.HandleFunc("/_swobu/telemetry-report", func(response http.ResponseWriter, request *http.Request) {
+	})
+	mux.Handle("/api/v1/status", statusHandler)
+	mux.HandleFunc("GET /api/v1/telemetry/report", func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet {
 			response.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -129,330 +396,158 @@ func buildDaemonServeMux(
 			return
 		}
 		response.Header().Set("Content-Type", "application/json")
+		response.Header().Set("Cache-Control", "no-store")
 		_, _ = response.Write(body)
 	})
-	mux.Handle("/_swobu/down", httpapi.NewShutdownHandler(func(context.Context) error {
+	mux.Handle("POST /api/v1/daemon/shutdown", httpapi.NewShutdownHandler(func(context.Context) error {
 		go func() { _ = daemon.Close() }()
 		return nil
 	}))
-	mux.Handle("/_swobu/target-probe", httpapi.NewTargetProbeHandler(runtime))
-	persistCredential := func(providerSpec string, keyName string, secret string) (string, error) {
-		return credentialsadapter.StoreMaterializedCredential(providerSpec, keyName, secret, authCredentialWritePolicy)
+	persistCredential := func(scope credentialref.Scope, keyName string, secret string) (string, error) {
+		if scope.Kind() != credentialref.ScopeProvider || !scope.Valid() {
+			return "", fmt.Errorf("credential scope is invalid")
+		}
+		return credentialsadapter.StoreMaterializedCredential(scope.Identifier(), keyName, secret, authCredentialWritePolicy)
 	}
-	credentialMaterializer, err := credentialmaterialization.NewService(persistCredential, func(providerSpec, credentialRef string) error {
-		return credentialsadapter.DeleteMaterializedCredential(providerSpec, credentialRef)
+	workspaceService, err := workspaces.NewService(daemon.configStore, workspaces.Dependencies{
+		Connections:  daemon.connectionStore,
+		Access:       daemon.accessStore,
+		Bindings:     bindingCoordinator,
+		Publications: daemon.publicationStore,
+		Accounting:   daemon.accountingStore,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := credentialMaterializer.SetPendingPath(daemon.configPath + ".credential-material.json"); err != nil {
-		return nil, nil, fmt.Errorf("open pending credential metadata: %w", err)
+	// Node Control is local and browser-protected. The public data-plane
+	// handler is separate and never receives this subtree.
+	nodeControl := httpapi.NewNodeControlAPIHandler(workspaceService)
+	mux.Handle("/api/v1/workspaces", nodeControl)
+	mux.Handle("/api/v1/workspaces/", nodeControl)
+	mux.Handle("/api/v1/search-evidence", httpapi.NewSearchEvidenceHandler(daemon.searchEvidence))
+	workspaceCatalog := func(ctx context.Context, slug string) ([]mcp.CatalogTool, error) {
+		workspaceSlug, err := routing.ParseWorkspaceSlug(slug)
+		if err != nil {
+			return nil, err
+		}
+		workspace, err := daemon.configStore.GetWorkspace(ctx, workspaceSlug)
+		if err != nil {
+			return nil, err
+		}
+		if !workspace.HasService(routing.ServiceMCP) {
+			return nil, routing.ErrServiceDisabled
+		}
+		return mcp.WorkspaceCatalog(workspace, daemon.workspaceMCPBindings(workspace))
 	}
-	daemon.materializer = &credentialMaterializer
-	if err := credentialMaterializer.Reconcile(credentialReferences(daemon.configStore.Config()), time.Now()); err != nil {
-		return nil, nil, fmt.Errorf("reconcile credential material registry: %w", err)
-	}
-	mux.Handle("/_swobu/credentials", httpapi.NewCredentialStoreHandler(credentialMaterializer.Materialize))
-	mux.Handle("/_swobu/credential-files", httpapi.NewCredentialFilesHandler(
-		func(_ context.Context, path string) (credentialfiles.Listing, error) {
-			return credentialfiles.Browse(path)
-		},
-	))
-	providerAuthoringHandler := httpapi.NewProviderCatalogHandler()
-	mux.Handle("/_swobu/provider-authoring", providerAuthoringHandler)
-	mux.Handle("/_swobu/provider-authoring/", providerAuthoringHandler)
-	connectService, err := connectapp.NewService(clientconnect.NewService())
-	if err != nil {
-		return nil, nil, fmt.Errorf("Connect service: %w", err)
-	}
-	bindingCoordinator := &routebindings.Coordinator{}
-	workspaceService, err := workspaces.NewService(daemon.configStore, daemon.shareStore, daemon.accessStore, daemon.shareRuntime, bindingCoordinator, &credentialMaterializer)
-	if err != nil {
-		return nil, nil, err
-	}
-	connectHandler := httpapi.NewConnectHandler(connectService, workspaceService)
-	mux.Handle("/_swobu/connect/", connectHandler)
-	workspaceControl := httpapi.NewWorkspaceControlHandler(workspaceService)
-	mux.Handle("/_swobu/workspaces", workspaceControl)
-	mux.Handle("/_swobu/workspaces/", workspaceControl)
-	accessService, err := accessapp.NewService(daemon.accessStore, daemon.configStore, bindingCoordinator)
-	if err != nil {
-		return nil, nil, err
-	}
+	mux.Handle("/api/v1/workspaces/{workspace}/tools", httpapi.NewWorkspaceToolsHandler(workspaceCatalog))
 	accessControl := httpapi.NewAccessControlHandler(accessService)
-	mux.Handle("/_swobu/access", accessControl)
-	mux.Handle("/_swobu/access/", accessControl)
-	shareService, err := shares.NewService(daemon.configStore, daemon.shareStore, daemon.shareRuntime, bindingCoordinator)
+	auditService, err := managementaudit.New(daemon.accessStore, daemon.accountingStore, connectAttempts, daemon.configStore, daemon.connectionStore)
 	if err != nil {
 		return nil, nil, err
 	}
-	mux.Handle("/_swobu/shares", httpapi.NewShareControlHandler(shareService))
-	daemon.shareRuntime.StartIfActive()
+	mux.Handle("/api/v1/audit/events", httpapi.NewAuditHandler(auditService))
+	mux.Handle("/api/v1/principals", accessControl)
+	mux.Handle("/api/v1/principals/", accessControl)
+	mux.Handle("/api/v1/workspaces/{workspace}/permissions/{principal}", accessControl)
+	workspaceExists := func(slug string) bool {
+		parsed, err := routing.ParseWorkspaceSlug(slug)
+		if err != nil {
+			return false
+		}
+		_, err = daemon.configStore.GetWorkspace(context.Background(), parsed)
+		return err == nil
+	}
+	publicationControl := httpapi.PublicationHandler{
+		Store:  daemon.publicationStore,
+		Exists: func(slug routing.WorkspaceSlug) bool { return workspaceExists(slug.String()) },
+		Ready: func(ctx context.Context) (func(), error) {
+			lease, err := daemon.relayRuntime.EnsurePublicWorkspaceLease(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return lease.Release, nil
+		},
+		StopIfInactive: daemon.relayRuntime.StopIfInactive,
+		RelayURL: func() string {
+			id, err := daemon.relayStore.EndpointID()
+			if err != nil {
+				return ""
+			}
+			return "https://" + relaystate.Hostname(id)
+		},
+	}
+	mux.Handle("GET /api/v1/remote-addresses", publicationControl)
+	mux.Handle("GET /api/v1/workspaces/{workspace}/publications", publicationControl)
+	mux.Handle("/api/v1/workspaces/{workspace}/publications/relay", publicationControl)
+	limitsHandler := httpapi.NewLimitsControlHandler(daemon.accountingStore, workspaceExists).WithApprovals(daemon.adminApprovals)
+	mux.Handle("/api/v1/workspaces/{workspace}/limits", limitsHandler)
+	mux.Handle("GET /api/v1/workspaces/{workspace}/limits/changes", limitsHandler)
+	mux.Handle("GET /api/v1/workspaces/{workspace}/limits/status", limitsHandler)
+	mux.Handle("/api/v1/workspaces/{workspace}/limits/preview", limitsHandler)
+	mux.Handle("/api/v1/workspaces/{workspace}/limits/apply", limitsHandler)
+	adminTools := adminmcp.WorkspaceTools(workspaceService)
+	adminTools = append(adminTools, adminmcp.WorkspaceCatalogTools(workspaceCatalog)...)
+	adminTools = append(adminTools, adminmcp.NodeTools(nodeOverview, func() (string, error) { status, err := daemon.Status(); return string(status.State), err })...)
+	adminTools = append(adminTools, adminmcp.MCPCatalogTools(func(ctx context.Context, id connectionidentity.ID) ([]mcp.CatalogTool, error) {
+		return mcp.ConnectionCatalog(id.String(), daemon.currentMCPBindings(id.String()))
+	})...)
+	adminTools = append(adminTools, adminmcp.ConnectionAuthoringTools(connectionCommands)...)
+	adminTools = append(adminTools, adminmcp.ConnectTools(connectService, "http://"+addr, daemon.configStore.GetWorkspace)...)
+	adminTools = append(adminTools, adminmcp.ConnectionTools(daemon.connectionQueries, connectionCommands, checkDaemonConnection)...)
+	adminTools = append(adminTools, adminmcp.AccessQueries(accessService)...)
+	adminTools = append(adminTools, adminmcp.SecretHandoffs(accessService, daemon.connectionQueries)...)
+	adminTools = append(adminTools, adminmcp.LimitTools(limitapp.New(daemon.accountingStore, daemon.adminApprovals, workspaceExists))...)
+	adminTools = append(adminTools, adminmcp.PublicationTools(publicationapp.Service{Store: publicationControl.Store, Exists: publicationControl.Exists, Ready: publicationControl.Ready, StopIfInactive: publicationControl.StopIfInactive, RelayURL: publicationControl.RelayURL})...)
+	adminTools = append(adminTools, adminmcp.ActivityTools(func(ctx context.Context, scope executionevidence.ProjectionScope, page ledger.ActivityPageQuery) (executionevidence.ActivityProjection, error) {
+		if page.Limit != 0 {
+			return daemon.activityPage(ctx, scope, page)
+		}
+		return daemon.activity(ctx, scope)
+	}, daemon.activityDetail)...)
+	daemon.adminMCPBinding, err = mcp.NewAdminSourceBinding(adminTools)
+	if err != nil {
+		return nil, nil, err
+	}
+	daemon.relayRuntime.StartIfActive()
 	chatGPTLogin := chatgptlogin.NewService(newProviderHTTPClient(), chatgptlogin.ServiceConfig{
 		PublicBaseURL: daemonPublicBaseURLFromAddr(addr),
-		CredentialOut: chatgptlogin.CredentialWriterFunc(persistCredential),
+		CredentialOut: chatgptlogin.CredentialWriterFunc(func(providerSpec, keyName, secret string) (string, error) {
+			scope, err := credentialref.NewProviderScope(providerSpec)
+			if err != nil {
+				return "", err
+			}
+			return persistCredential(scope, keyName, secret)
+		}),
 	})
 	authDriver, err := authplane.NewChatGPTAuthMethodDriver(chatGPTLogin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("auth session driver: %w", err)
 	}
-	mux.HandleFunc("/_swobu/auth/chatgpt/callback", chatGPTLogin.HandleCallback)
-	authStore := authplane.NewTargetCredentialStore(workspaceService)
-	authManager, err := authplane.NewAuthSessionManager(authDriver, authStore)
+	authManager, err := authplane.NewAuthSessionManager(authDriver)
 	if err != nil {
 		return nil, nil, fmt.Errorf("auth session manager: %w", err)
 	}
-	authSessionHandler := httpapi.NewAuthSessionHandler(authManager.Start, authManager.Poll, authManager.Cancel, authManager.Retry)
-	mux.Handle("/_swobu/auth/sessions", authSessionHandler)
-	mux.Handle("/_swobu/auth/sessions/", authSessionHandler)
-	web, err := operatorweb.NewHandler()
-	if err != nil {
-		return nil, nil, fmt.Errorf("Web Operator assets: %w", err)
+	authAttemptDirectory := filepath.Join(daemon.runtimeDir, "auth-start-attempts")
+	if err := os.MkdirAll(authAttemptDirectory, 0700); err != nil {
+		return nil, nil, err
 	}
+	authAttempts, err := authplane.OpenStartAttempts(authAttemptDirectory)
+	if err != nil {
+		return nil, nil, err
+	}
+	authSessionHandler := httpapi.NewAuthSessionHandler(authManager.Poll, authManager.Cancel).WithStartAttempts(authManager, authAttempts)
+	mux.Handle("/api/v1/auth-sessions", authSessionHandler)
+	mux.Handle("/api/v1/auth-sessions/", authSessionHandler)
 	mux.Handle("/", web)
+	// The collection document is an exact UI route. Without this registration,
+	// ServeMux redirects it into the Workspace data subtree before SPA fallback.
+	mux.Handle("/workspaces", web)
 
-	protected := httpapi.NewLocalBrowserHandler(mux, daemon.accessStore, executionEvidenceStore)
-	outer := http.NewServeMux()
-	outer.Handle("/", protected)
-	return outer, chatGPTLogin, nil
-}
-
-func operatorHealth(value *ledger.Health) *operatorwire.RuntimeSubsystemHealth {
-	if value == nil {
-		return nil
+	// Admission must be the outermost handler: a wrapping ServeMux would clean
+	// ambiguous paths and redirect them before credential/path admission runs.
+	var handler http.Handler = mux
+	if daemon.configStore.ReadOnly() {
+		handler = readOnlyNodeControlGate(handler)
 	}
-	return &operatorwire.RuntimeSubsystemHealth{State: string(value.State), QueueDepth: value.QueueDepth, QueueCapacity: value.QueueCapacity, OfferedExchangesTotal: int(value.OfferedExchangesTotal), CommittedExchangesTotal: int(value.CommittedExchangesTotal), DroppedExchangesTotal: int(value.DroppedExchangesTotal), LastError: string(value.LastError)}
-}
-func ndjsonHealth(value *ndjson.Health) *operatorwire.RuntimeSubsystemHealth {
-	if value == nil {
-		return nil
-	}
-	return &operatorwire.RuntimeSubsystemHealth{State: string(value.State), QueueDepth: value.QueueDepth, QueueCapacity: value.QueueCapacity, Offered: int(value.Offered), Exported: int(value.Exported), Dropped: int(value.Dropped), LastError: string(value.LastError)}
-}
-func otlpHealth(value *otlp.Health) *operatorwire.RuntimeSubsystemHealth {
-	if value == nil {
-		return nil
-	}
-	return &operatorwire.RuntimeSubsystemHealth{State: string(value.State), QueueDepth: value.QueueDepth, QueueCapacity: value.QueueCapacity, Offered: int(value.Offered), Exported: int(value.Exported), Dropped: int(value.Dropped), LastError: string(value.LastError)}
-}
-
-func composeM5Outputs(daemon *Daemon, evidenceStore *executionevidencestore.Store) (*ledger.Writer, *ndjson.Exporter, *otlp.Exporter, error) {
-	config := configuredM5()
-	return composeConfiguredM5Outputs(daemon, evidenceStore, config)
-}
-
-// m5Config is the single bootstrap-owned snapshot of M5 environment policy.
-// Constructors receive typed values and never rediscover process environment.
-type m5Config struct {
-	Backend      string
-	LedgerPath   string
-	PostgresDSN  string
-	Retention    ledger.RetentionConfig
-	NDJSONPath   string
-	OTLPEnabled  bool
-	OTLPEndpoint string
-	LedgerErr    error
-	OTLPErr      error
-}
-
-func configuredM5() m5Config {
-	backend := strings.ToLower(strings.TrimSpace(os.Getenv("SWOBU_LEDGER")))
-	if backend == "" {
-		backend = "sqlite"
-	}
-	retention, retentionErr := configuredRetention(backend)
-	c := m5Config{Backend: backend, LedgerPath: strings.TrimSpace(os.Getenv("SWOBU_LEDGER_PATH")), PostgresDSN: os.Getenv("SWOBU_LEDGER_POSTGRES_DSN"), Retention: retention, LedgerErr: retentionErr, NDJSONPath: strings.TrimSpace(os.Getenv("SWOBU_NDJSON_PATH"))}
-	if c.Backend != "off" && c.Backend != "sqlite" && c.Backend != "postgres" {
-		c.LedgerErr = fmt.Errorf("invalid SWOBU_LEDGER value %q", backend)
-	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("SWOBU_OTEL")), "otlp") {
-		c.OTLPEnabled = true
-		c.OTLPEndpoint, c.OTLPErr = configuredOTLPEndpoint()
-	} else if raw := strings.TrimSpace(os.Getenv("SWOBU_OTEL")); raw != "" && !strings.EqualFold(raw, "off") {
-		c.OTLPErr = fmt.Errorf("invalid SWOBU_OTEL value %q", raw)
-	}
-	return c
-}
-
-func composeConfiguredM5Outputs(daemon *Daemon, evidenceStore *executionevidencestore.Store, config m5Config) (*ledger.Writer, *ndjson.Exporter, *otlp.Exporter, error) {
-	var exporter *ndjson.Exporter
-	var otlpExporter *otlp.Exporter
-	var startupErr error
-	if path := config.NDJSONPath; path != "" {
-		var err error
-		exporter, err = ndjson.New(ndjson.Config{Path: path})
-		if err != nil {
-			startupErr = err
-			daemon.ndjsonStartupHealth = &ndjson.Health{State: ndjson.StateDegraded, LastError: outputruntime.ErrorExportFailed}
-			exporter = nil
-		} else {
-		}
-	}
-	if config.LedgerErr != nil && config.Backend != "off" {
-		startupErr = config.LedgerErr
-		code := ledger.ErrorInvalidConfig
-		daemon.ledgerStartupHealth = &ledger.Health{State: ledger.StateDegraded, LastError: code}
-	}
-	if config.OTLPEnabled {
-		if config.OTLPErr != nil {
-			if startupErr == nil {
-				startupErr = config.OTLPErr
-			}
-			config.OTLPEnabled = false
-			daemon.otlpStartupHealth = &otlp.Health{State: otlp.StateDegraded, LastError: outputruntime.ErrorExportFailed}
-		}
-	}
-	if config.OTLPEnabled {
-		var err error
-		otlpExporter, err = otlp.New(context.Background(), otlp.Config{ServiceVersion: controlplane.SwobuVersion(), Endpoint: config.OTLPEndpoint})
-		if err != nil {
-			if startupErr == nil {
-				startupErr = err
-			}
-			otlpExporter = nil
-		}
-	}
-	backend := config.Backend
-	if config.LedgerErr != nil {
-		backend = "off"
-	}
-	if backend == "off" {
-		if exporter != nil || otlpExporter != nil {
-			evidenceStore.SetOnCompleted(func(completed executionevidenceDomain.CompletedExchange) {
-				if exporter != nil {
-					exporter.Offer(completed)
-				}
-				if otlpExporter != nil {
-					otlpExporter.Offer(completed)
-				}
-			})
-		}
-		return nil, exporter, otlpExporter, startupErr
-	}
-	if backend == "" {
-		backend = "sqlite"
-	}
-	observeExports := func(completed executionevidenceDomain.CompletedExchange) {
-		if exporter != nil {
-			exporter.Offer(completed)
-		}
-		if otlpExporter != nil {
-			otlpExporter.Offer(completed)
-		}
-	}
-	var store ledger.Store
-	var err error
-	switch backend {
-	case "sqlite":
-		path := config.LedgerPath
-		if path == "" {
-			path = filepath.Join(filepath.Dir(daemon.configPath), strings.TrimSuffix(filepath.Base(daemon.configPath), filepath.Ext(daemon.configPath))+".ledger.sqlite3")
-		}
-		store, err = ledgersqlite.Open(context.Background(), ledgersqlite.Config{Path: path, CreatedByVersion: controlplane.SwobuVersion(), Retention: config.Retention})
-	case "postgres":
-		store, err = ledgerpostgres.Open(context.Background(), ledgerpostgres.Config{DSN: config.PostgresDSN, CreatedByVersion: controlplane.SwobuVersion(), Retention: config.Retention})
-	default:
-		evidenceStore.SetOnCompleted(observeExports)
-		if startupErr == nil {
-			startupErr = fmt.Errorf("invalid SWOBU_LEDGER value %q", backend)
-		}
-		return nil, exporter, otlpExporter, startupErr
-	}
-	if err != nil {
-		evidenceStore.SetOnCompleted(observeExports)
-		var sqliteErr *ledgersqlite.OpenError
-		var postgresErr *ledgerpostgres.OpenError
-		code := ledger.ErrorOpenFailed
-		if errors.As(err, &sqliteErr) {
-			code = sqliteErr.Code
-		}
-		if errors.As(err, &postgresErr) {
-			code = postgresErr.Code
-		}
-		daemon.ledgerStartupHealth = &ledger.Health{State: ledger.StateDegraded, LastError: code}
-		if startupErr == nil {
-			startupErr = err
-		}
-		return nil, exporter, otlpExporter, startupErr
-	}
-	writer, err := ledger.NewWriter(store, ledger.WriterConfig{})
-	if err != nil {
-		_ = store.Close()
-		evidenceStore.SetOnCompleted(observeExports)
-		if startupErr == nil {
-			startupErr = err
-		}
-		return nil, exporter, otlpExporter, startupErr
-	}
-	// The M4 store remains the sole lifecycle assembler. Each enabled M5
-	// sibling receives the immutable completion after the Store unlocks.
-	evidenceStore.SetOnCompleted(func(completed executionevidenceDomain.CompletedExchange) {
-		writer.Offer(completed)
-		observeExports(completed)
-	})
-	return writer, exporter, otlpExporter, startupErr
-}
-
-func configuredOTLPEndpoint() (string, error) {
-	protocol := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"))
-	if protocol == "" {
-		protocol = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
-	}
-	protocol = strings.ToLower(protocol)
-	if protocol != "" && protocol != "http/protobuf" {
-		return "", errors.New("OTLP protocol must be http/protobuf")
-	}
-	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"))
-	if endpoint == "" {
-		endpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
-		if endpoint != "" {
-			endpoint = strings.TrimRight(endpoint, "/") + "/v1/traces"
-		}
-	}
-	if endpoint == "" {
-		return "", errors.New("OTLP endpoint is required")
-	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", errors.New("OTLP endpoint is invalid")
-	}
-	return endpoint, nil
-}
-
-func configuredRetention(backend string) (ledger.RetentionConfig, error) {
-	var retention ledger.RetentionConfig
-	if backend == "postgres" {
-		retention = ledger.DefaultPostgresRetention()
-	} else {
-		retention = ledger.DefaultSQLiteRetention()
-	}
-	parse := func(name string, current int) (int, error) {
-		raw, ok := os.LookupEnv(name)
-		if !ok || strings.TrimSpace(raw) == "" {
-			return current, nil
-		}
-		value, err := strconv.Atoi(strings.TrimSpace(raw))
-		if err != nil || value <= 0 {
-			return 0, fmt.Errorf("%s must be a positive integer", name)
-		}
-		return value, nil
-	}
-	var err error
-	if retention.DetailDays, err = parse("SWOBU_LEDGER_DETAIL_RETENTION_DAYS", retention.DetailDays); err != nil {
-		return ledger.RetentionConfig{}, err
-	}
-	if raw, ok := os.LookupEnv("SWOBU_LEDGER_MAX_BYTES"); ok && strings.TrimSpace(raw) != "" {
-		if backend == "postgres" {
-			return ledger.RetentionConfig{}, errors.New("SWOBU_LEDGER_MAX_BYTES is SQLite-only")
-		}
-		value, parseErr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-		if parseErr != nil || value <= 0 {
-			return ledger.RetentionConfig{}, errors.New("SWOBU_LEDGER_MAX_BYTES must be a positive integer")
-		}
-		retention.SQLiteMaxBytes = &value
-	}
-	if err := retention.Validate(); err != nil {
-		return ledger.RetentionConfig{}, err
-	}
-	return retention, nil
+	return httpapi.NewLocalAdmissionHandler(httpapi.NewBrowserSessions().Protect(handler), daemon.accessStore, limitAdmission.Admit), chatGPTLogin, nil
 }

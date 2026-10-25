@@ -1,6 +1,6 @@
 # OpenAI backend
 
-Select OpenAI in Cockpit, add an API-key credential, and choose a model and
+Select OpenAI in the Web Operator, add an API-key credential, and choose a model and
 protocol.
 
 If failures occur, capture:

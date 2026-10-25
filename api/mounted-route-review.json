@@ -1,0 +1,640 @@
+{
+  "scope": "Reviewed final-state mounted HTTP dispatch contract. Source mounts are checked exactly once against current Go AST; local operator admission and public Workspace admission are separate, with no legacy /c/, Share or Exposure mounts.",
+  "groups": {
+    "web": {
+      "dispatch_source": "internal/operatorweb/handler.go",
+      "method_contract": "GET/HEAD: SPA documents selected by spaRoute; /assets/ files. Other methods 405. Root fallback does not admit arbitrary paths.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/workspaces\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "access": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+      "method_contract": "Canonical /api/v1 Principals, credentials and Workspace permission routes. Legacy /_swobu/access is absent.",
+      "registrations": [
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"DELETE /api/v1/principals/{access}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"DELETE /api/v1/principals/{access}/credentials/{credential}\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}/permissions/{principal}\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"GET /api/v1/principals\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"GET /api/v1/principals/{access}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"GET /api/v1/principals/{access}/credentials\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/permissions/{principal}\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"PATCH /api/v1/principals/{access}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"POST /api/v1/principals\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"POST /api/v1/principals/{access}/credentials\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/access_control_handler.go",
+          "function": "NewAccessControlHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/permissions/{principal}\"",
+          "migration_owner": "G01"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/principals\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/principals/\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/permissions/{principal}\"",
+          "migration_owner": "G01"
+        }
+      ]
+    },
+    "workspace": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+      "method_contract": "Canonical /api/v1 Workspace resources only. Model-route PUT/DELETE and priority PATCH require strong revision and trusted local admission. Model-match GET previews the Go matcher without dispatch. Legacy /_swobu Workspace and unreviewed /routes paths are absent. Workspace /service-limits uses local authority, a strong management ETag on PUT, and the current Workspace admission policy; distinct from USD /limits.",
+      "registrations": [
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}/mcp-mounts/{alias}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}/model-routes/{route}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}/search-route\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"DELETE /api/v1/workspaces/{workspace}/services/{service}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/mcp-mounts\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/mcp-mounts/{alias}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/model-routes\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/model-routes/{route}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/search-route\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/service-limits\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/services\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PATCH /api/v1/workspaces/{workspace}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"POST /api/v1/workspaces\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/mcp-mounts/{alias}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/model-routes/{route}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/search-route\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/service-limits\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PUT /api/v1/workspaces/{workspace}/services/{service}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"PATCH /api/v1/workspaces/{workspace}/model-routes\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/workspace_control_handler.go",
+          "function": "NewNodeControlAPIHandler",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/model-match\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "shutdown": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/shutdown_control.go",
+      "method_contract": "POST /api/v1/daemon/shutdown only; local operator authority and browser CSRF protection; no legacy alias.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"POST /api/v1/daemon/shutdown\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "status": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/status.go",
+      "method_contract": "GET /api/v1/status only. Legacy status alias absent.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/status\"",
+          "migration_owner": "M01"
+        }
+      ]
+    },
+    "telemetry": {
+      "dispatch_source": "internal/bootstrap/daemon_serve_mux_builder.go",
+      "method_contract": "GET /api/v1/telemetry/report only; locally admitted JSON with no-store; no legacy alias.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/telemetry/report\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "activity": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/activity.go",
+      "method_contract": "GET only; query scope validated by Activity parser.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/activity\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "activity-stream": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/activity_stream.go",
+      "method_contract": "GET only; bounded snapshot SSE, scope/query validation.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/activity/stream\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "activity-detail": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/activity_detail.go",
+      "method_contract": "GET /api/v1/activity/operations/{identity}; exact path and identity validation; other methods 405.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/activity/operations/\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "auth-session": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/auth_session_handler.go",
+      "method_contract": "POST exact collection; GET/DELETE exact valid session ID; no query/escaped path; all other methods rejected.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/auth-sessions\"",
+          "migration_owner": "C01"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/auth-sessions/\"",
+          "migration_owner": "C01"
+        }
+      ]
+    },
+    "audit": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/audit_handler.go",
+      "method_contract": "GET only; exact optional Workspace query scope.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/audit/events\"",
+          "migration_owner": "M01"
+        }
+      ]
+    },
+    "clients": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/clients_handler.go",
+      "method_contract": "GET only; exact Workspace query required.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/clients\"",
+          "migration_owner": "E02"
+        }
+      ]
+    },
+    "client-config": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/client_configuration_handler.go",
+      "method_contract": "POST only; preview/apply semantics remain application-owned.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/client-configurations\"",
+          "migration_owner": "E02"
+        }
+      ]
+    },
+    "search-evidence": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/search_evidence_handler.go",
+      "method_contract": "GET only with live local authority.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/search-evidence\"",
+          "migration_owner": "M01"
+        }
+      ]
+    },
+    "node-overview": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/node_overview_handler.go",
+      "method_contract": "GET only; returns redacted Node counts and strong revision ETag.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/node\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "limits": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/limits_control_handler.go",
+      "method_contract": "GET/PUT Workspace limit; GET changes/status; POST preview/apply. Explicit mounts select path values and stronger method patterns.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/limits\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/limits/apply\"",
+          "migration_owner": "G02"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/limits/preview\"",
+          "migration_owner": "G02"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/limits/changes\"",
+          "migration_owner": "G02"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/limits/status\"",
+          "migration_owner": "G02"
+        }
+      ]
+    },
+    "tools": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/workspace_tools_handler.go",
+      "method_contract": "GET only for path-bound Workspace.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/tools\"",
+          "migration_owner": "M01"
+        }
+      ]
+    },
+    "data": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/handler.go",
+      "method_contract": "Workspace and legacy roots use splitProtocolPath, canonical.ParseClientOperation, models GET and responses WebSocket dispatch. /workspaces suffix /mcp delegates to internal/mcp/server.go; exact /search mount GET/POST overrides subtree. Method/path grammar remains protocol-owned, not a REST cartesian product.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/workspaces/\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "search": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/search_handler.go",
+      "method_contract": "GET query/limit or POST JSON; path-bound Workspace authority required. Both forms use the same Principal and Workspace request ceilings, Search accounting, fallback and evidence.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/workspaces/{workspace}/search\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "callback": {
+      "dispatch_source": "internal/app/operator/chatgptlogin/callback_handler.go",
+      "method_contract": "GET /auth/callback on separate OAuth loopback listener; exact path, query and live unpredictable state required. callbackPath constant in service.go.",
+      "registrations": [
+        {
+          "source": "internal/app/operator/chatgptlogin/callback_server.go",
+          "function": "ensureCallbackServerStartedLocked",
+          "expression": "callbackPath",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "connections": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+      "method_contract": "Canonical Connection list/detail/reference GET and detail DELETE require trusted local operator context inside BrowserSessions. Reads redact configuration and emit no-store; detail carries a strong revision ETag. DELETE requires exact strong If-Match, repeats live admission in the checked lifecycle transaction, refuses exact consumers with 409, returns a redacted reload summary on 412, and removes without cascade with 204; repeat after removal returns 404 without another fact. Other methods reject with canonical Problems. POST /api/v1/connections/{id}/credential-replacements requires strong If-Match, Idempotency-Key, closed bounded secret-bearing JSON and unchanged-identity assertion. It stages immutable material with durable retry reuse, then checked revision publication and audit; errors/results are redacted and no-store. POST collection creates from a closed typed draft with durable retry receipt and redacted 201/Location/ETag. PATCH detail requires strong If-Match, complete typed spec and same-identity assertion; publication reauthorizes and audits. POST /api/v1/connections/{id}/checks requires strong If-Match and no body. It probes the admitted snapshot outside registry locks, rechecks authority/revision before ephemeral observation publication, returns sanitized no-store health without ETag, and rejects stale completion with 412. All four spec shapes dispatch through daemon-owned bounded adapters; checks never mutate configuration or credentials.",
+      "registrations": [
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"GET /api/v1/connections\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"GET /api/v1/connections/{id}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"GET /api/v1/connections/{id}/references\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/connections\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/connections/\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"DELETE /api/v1/connections/{id}\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"POST /api/v1/connections/{id}/credential-replacements\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "operation",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/adapters/inbound/httpapi/connection_control_handler.go",
+          "function": "NewConnectionControlHandler",
+          "expression": "\"POST /api/v1/connections/{id}/checks\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/connections/{id}/mcp-catalog\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "publication": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/publication_handler.go",
+      "method_contract": "GET lists configured relay address and publication state; PUT and DELETE toggle Workspace reachability with a strong revision. Local Node operator only; Workspace data-plane permission is independent.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"/api/v1/workspaces/{workspace}/publications/relay\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/remote-addresses\"",
+          "migration_owner": "retain"
+        },
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/workspaces/{workspace}/publications\"",
+          "migration_owner": "retain"
+        }
+      ]
+    },
+    "activity-export": {
+      "dispatch_source": "internal/adapters/inbound/httpapi/activity_export.go",
+      "method_contract": "GET /api/v1/activity/export; authenticated local Control only, content-free retained Exchange or MCP CSV/NDJSON with bounded pagination. Never mounted on public ingress.",
+      "registrations": [
+        {
+          "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+          "function": "buildDaemonServeMux",
+          "expression": "\"GET /api/v1/activity/export\"",
+          "migration_owner": "retain"
+        }
+      ]
+    }
+  },
+  "middleware_operations": [
+    {
+      "source": "internal/adapters/inbound/httpapi/browser_session.go",
+      "method": "POST",
+      "path": "/api/v1/browser-launches",
+      "authority": "native local operator",
+      "migration_owner": "retain"
+    },
+    {
+      "source": "internal/adapters/inbound/httpapi/browser_session.go",
+      "method": "POST",
+      "path": "/api/v1/browser-session",
+      "authority": "same-origin local exchange with single-use token",
+      "migration_owner": "retain"
+    },
+    {
+      "source": "internal/adapters/inbound/httpapi/browser_session.go",
+      "method": "GET",
+      "path": "/open",
+      "authority": "bootstrap document; no control authority",
+      "migration_owner": "retain"
+    },
+    {
+      "source": "internal/adapters/inbound/httpapi/browser_session.go",
+      "method": "GET",
+      "path": "/operator-bootstrap.js",
+      "authority": "fragment-clearing exchange script; no control authority",
+      "migration_owner": "retain"
+    }
+  ],
+  "public_listener": {
+    "source": "internal/bootstrap/daemon_serve_mux_builder.go",
+    "composition": "NewOwnerPublicHandler(shareHandler, publicWorkspace); publicWorkspace is NewPublicWorkspaceHandler around protocol-only handler, not local mux",
+    "methods": "Workspace public protocol admission is separate and tested by plane_isolation_matrix_test.go. Publication and current Workspace Service permission precede operation admission; explicitly selected swobu-admin tools use the ordinary MCP call boundary and shared Workspace quota. No Node Control route is public."
+  }
+}

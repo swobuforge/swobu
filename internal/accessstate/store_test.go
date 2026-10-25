@@ -3,6 +3,7 @@ package accessstate
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,8 +22,8 @@ func testWorkspace(t *testing.T, raw string) routing.WorkspaceSlug {
 }
 
 func TestCreatePersistsDigestAndAuthenticatesAfterRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "access.json")
-	store, err := Open(path)
+	path := filepath.Join(t.TempDir(), "principals.json")
+	store, err := openTestStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestCreatePersistsDigestAndAuthenticatesAfterRestart(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %o", info.Mode().Perm())
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,12 +66,15 @@ func TestCreatePersistsDigestAndAuthenticatesAfterRestart(t *testing.T) {
 }
 
 func TestRotationRevocationAndWorkspaceReconciliation(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "access.json"))
+	store, err := openTestStore(filepath.Join(t.TempDir(), "principals.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	access, first, err := store.Create("backend", testWorkspace(t, "production"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.GrantPermission(access.ID, testWorkspace(t, "staging")); err != nil {
 		t.Fatal(err)
 	}
 	second, err := store.IssueCredential(access.ID, testWorkspace(t, "staging"))
@@ -98,8 +102,135 @@ func TestRotationRevocationAndWorkspaceReconciliation(t *testing.T) {
 	}
 }
 
+func TestDestroyedWorkspacePermissionCannotAuthorizeRecreatedSlug(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "principals.json")
+	store, err := openTestStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug := testWorkspace(t, "research")
+	access, issued, err := store.Create("consumer", slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Permission-only state is still revoked explicitly after removing a bearer.
+	if _, err := store.RevokeCredential(access.ID, issued.Credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := store.RevokeWorkspace(slug); err != nil || !changed {
+		t.Fatalf("revoke permission: %v %v", changed, err)
+	}
+	store, err = openTestStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IssueCredential(access.ID, slug); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("destroyed permission authorized recreated slug: %v", err)
+	}
+	if list := store.List(); len(list) != 1 || list[0].ID != access.ID || len(list[0].Permissions) != 0 {
+		t.Fatalf("forensic identity or permission state=%#v", list)
+	}
+	if err := store.GrantPermission(access.ID, slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IssueCredential(access.ID, slug); err != nil {
+		t.Fatalf("fresh explicit permission did not authorize: %v", err)
+	}
+}
+
+func TestPermissionLifecycleIsIndependentFromCredentialIssuance(t *testing.T) {
+	store, _ := openTestStore(filepath.Join(t.TempDir(), "principals.json"))
+	workspace := testWorkspace(t, "production")
+	access, issued, err := store.Create("operator", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokePermission(access.ID, workspace); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Authenticate(issued.Token); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("revoked permission auth=%v", err)
+	}
+	if _, err := store.IssueCredential(access.ID, workspace); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("issued without permission=%v", err)
+	}
+	if err := store.GrantPermission(access.ID, workspace); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := store.IssueCredential(access.ID, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Token == issued.Token || len(store.List()[0].Credentials) != 2 {
+		t.Fatalf("rotation=%#v", rotated)
+	}
+}
+
+func TestPermissionMutationRejectsStaleRevision(t *testing.T) {
+	store, _ := openTestStore(filepath.Join(t.TempDir(), "principals.json"))
+	workspace := testWorkspace(t, "production")
+	access, _, err := store.Create("operator", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := store.Revision()
+	if err := store.GrantPermission(access.ID, testWorkspace(t, "staging")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckRevision(revision); err == nil {
+		t.Fatal("stale revision accepted")
+	}
+}
+
+func TestConcurrentReviewedPermissionGrantsAdmitOnlyOneRevision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "principals.json")
+	store, err := openTestStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, _, err := store.Create("operator", testWorkspace(t, "production"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := store.Revision()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, slug := range []string{"staging", "research"} {
+		workspace := testWorkspace(t, slug)
+		go func() { <-start; results <- store.GrantPermissionAtRevision(identity.ID, workspace, revision) }()
+	}
+	close(start)
+	success, conflict := 0, 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			success++
+		} else if errors.Is(err, ErrRevisionConflict) {
+			conflict++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatalf("success/conflict=%d/%d", success, conflict)
+	}
+	if err := store.RevokePermissionAtRevision(identity.ID, testWorkspace(t, "production"), revision); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale revoke=%v", err)
+	}
+	reopened, err := openTestStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Revision() != store.Revision() {
+		t.Fatal("revision did not survive reopen")
+	}
+	if err := reopened.GrantPermissionAtRevision(identity.ID, testWorkspace(t, "extra"), revision); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("reopened stale grant=%v", err)
+	}
+}
+
 func TestRevokeAccessPreservesIdentityAndPreventsIssuance(t *testing.T) {
-	store, _ := Open(filepath.Join(t.TempDir(), "access.json"))
+	store, _ := openTestStore(filepath.Join(t.TempDir(), "principals.json"))
 	access, issued, err := store.Create("backend", testWorkspace(t, "production"))
 	if err != nil {
 		t.Fatal(err)
@@ -119,59 +250,50 @@ func TestRevokeAccessPreservesIdentityAndPreventsIssuance(t *testing.T) {
 	}
 }
 
-func TestReconcileWorkspacesRevokesOnlyMissingWorkspaceCredentials(t *testing.T) {
-	store, _ := Open(filepath.Join(t.TempDir(), "access.json"))
+func TestRevokeWorkspacePreservesOtherWorkspaceCredentials(t *testing.T) {
+	store, _ := openTestStore(filepath.Join(t.TempDir(), "principals.json"))
 	access, missing, err := store.Create("backend", testWorkspace(t, "removed"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.GrantPermission(access.ID, testWorkspace(t, "production")); err != nil {
 		t.Fatal(err)
 	}
 	retained, err := store.IssueCredential(access.ID, testWorkspace(t, "production"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := testWorkspace(t, "production")
-	route, _ := routing.ParseRouteName("chat")
-	targetID, _ := routing.ParseTargetID("primary")
-	model, _ := routing.ParseUpstreamModel("model")
-	provider, _ := routing.ParseProvider("openai", func(string) bool { return true })
-	protocol, _ := routing.ParseProtocol("responses", provider, func(routing.Provider, string) bool { return true })
-	connection, err := routing.NewStandardConnection(provider, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	target, err := routing.NewTarget(targetID, model, protocol, connection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tier, _ := routing.NewTier([]routing.Target{target})
-	configuredRoute, _ := routing.NewRoute(route, []routing.Tier{tier})
-	configuredWorkspace, _ := routing.NewWorkspace(workspace, route, []routing.Route{configuredRoute})
-	config, _ := routing.NewConfig([]routing.Workspace{configuredWorkspace})
-	changed, err := store.ReconcileWorkspaces(config)
-	if err != nil || !changed {
-		t.Fatalf("ReconcileWorkspaces=%v,%v", changed, err)
+	if changed, err := store.RevokeWorkspace(testWorkspace(t, "removed")); err != nil || !changed {
+		t.Fatalf("RevokeWorkspace=%v,%v", changed, err)
 	}
 	if _, err := store.Authenticate(missing.Token); err == nil {
-		t.Fatal("missing Workspace credential survived reconciliation")
+		t.Fatal("removed Workspace credential survived")
 	}
 	if _, err := store.Authenticate(retained.Token); err != nil {
-		t.Fatalf("existing Workspace credential revoked: %v", err)
+		t.Fatalf("live credential revoked: %v", err)
+	}
+	if _, err := store.IssueCredential(access.ID, testWorkspace(t, "removed")); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("removed permission survived: %v", err)
+	}
+	if _, err := store.IssueCredential(access.ID, testWorkspace(t, "production")); err != nil {
+		t.Fatalf("live sibling permission removed: %v", err)
 	}
 }
 
 func TestOpenRejectsCorruptUnsupportedOrFutureShapedState(t *testing.T) {
 	for name, raw := range map[string]string{
 		"corrupt":     `{`,
-		"unsupported": `{"schema_version":2,"access":[]}`,
-		"unknown":     `{"schema_version":1,"access":[],"future_field":true}`,
-		"trailing":    `{"schema_version":1,"access":[]} {}`,
+		"unsupported": `{"schema_version":4,"access":[]}`,
+		"unknown":     `{"schema_version":3,"access":[],"future_field":true}`,
+		"obsolete":    `{"schema_version":2,"access":[]}`,
+		"trailing":    `{"schema_version":3,"access":[]} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "access.json")
+			path := filepath.Join(t.TempDir(), "principals.json")
 			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Open(path); err == nil {
+			if _, err := openTestStore(path); err == nil {
 				t.Fatal("Open unexpectedly succeeded")
 			}
 		})

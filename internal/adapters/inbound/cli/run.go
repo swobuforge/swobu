@@ -18,12 +18,12 @@ import (
 	"github.com/swobuforge/swobu/internal/app/operator/controlplane"
 	"github.com/swobuforge/swobu/internal/app/operator/daemonlifecycle"
 	"github.com/swobuforge/swobu/internal/bootstrap"
-	"github.com/swobuforge/swobu/internal/cockpit"
 	platformconfig "github.com/swobuforge/swobu/internal/platform/config"
-	platformlogging "github.com/swobuforge/swobu/internal/platform/logging"
 	"github.com/swobuforge/swobu/internal/producttelemetry"
-	"golang.org/x/term"
 )
+
+const operatorRequestTimeout = 2 * time.Second
+const connectReviewTimeout = 2 * time.Minute
 
 // ExitCode is contract-bearing for `swobu status`: healthy=0, uninitialized=1, daemon unreachable=2.
 type ExitCode int
@@ -37,29 +37,22 @@ const (
 
 type StatusPayload = daemonlifecycle.StatusPayload
 type Runner struct {
-	Stdin               io.Reader
-	Stdout              io.Writer
-	Stderr              io.Writer
-	HTTPClient          *http.Client
-	Addr                string // explicit interactive launcher address; zero resolves SWOBU_ADDR or the local default
-	ConfigPath          string // explicit interactive launcher config path; zero resolves SWOBU_CONFIG_PATH or the platform default
-	Start               func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
-	IsInteractive       func() bool
-	AttachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
-	LaunchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer, string) error
-	StartupHandoffFloor time.Duration
-	Sleep               func(time.Duration)
-	ConnectOperations   connectOperations
-	ConnectAttach       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
-	ConnectWorkspaces   connectWorkspaceLister
-	UpdateExecutable    func() (string, error)
-	RunInstaller        func(context.Context, *http.Client, string, io.Writer, io.Writer) error
+	Stdin            io.Reader
+	Stdout           io.Writer
+	Stderr           io.Writer
+	HTTPClient       *http.Client
+	Addr             string // explicit local Web Operator address; zero resolves SWOBU_ADDR or the local default
+	ConfigPath       string // explicit local Web Operator config path; zero resolves SWOBU_CONFIG_PATH or the platform default
+	Start            func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error)
+	IsInteractive    func() bool
+	AttachOrStart    func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
+	OpenBrowser      func(string) error // injectable OS opener; the URL is a one-use launch capability
+	UpdateExecutable func() (string, error)
+	RunInstaller     func(context.Context, *http.Client, string, io.Writer, io.Writer) error
 }
 
-// Run dispatches explicit CLI commands or starts the interactive Cockpit.
-// Explicit commands retain their own exit-code and output contracts; the
-// argument-free path attaches to or starts the daemon before handing the same
-// process streams to Cockpit.
+// Run dispatches explicit commands or opens the authenticated local Web Operator.
+// Bare swobu is the same operation as swobu open, with the root flags applied.
 func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if r.Stdin == nil {
 		r.Stdin = os.Stdin
@@ -72,7 +65,7 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	}
 	client := r.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Second}
+		client = &http.Client{Timeout: operatorRequestTimeout}
 	}
 	start := r.Start
 	if start == nil {
@@ -81,157 +74,70 @@ func (r Runner) Run(ctx context.Context, args []string) ExitCode {
 	if len(args) != 0 {
 		return dispatchSubcommand(ctx, args, start, client, r.Stdout, r.Stderr, r)
 	}
-	startupConfig, err := platformconfig.ResolveStartupConfig(r.Addr)
-	if err != nil {
-		_, _ = fmt.Fprintln(r.Stderr, err.Error())
-		return ExitDown
-	}
-	configPath := platformconfig.ResolveConfigPath(r.ConfigPath)
-	isInteractive := r.IsInteractive
-	if isInteractive == nil {
-		isInteractive = defaultIsInteractive
-	}
-	launchInteractive := r.LaunchInteractive
-	if launchInteractive == nil {
-		// V0: direct launch into the active go-tui Cockpit.
-		// We import internal/cockpit — the canonical operator TUI authority —
-		// because it owns the interactive workspace surface.
-		launchInteractive = func(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer, addr string) error {
-			return cockpit.Run(ctx, addr, stdin, stdout, stderr)
-		}
-	}
-	attachOrStart := r.AttachOrStart
-	if attachOrStart == nil {
-		attachOrStart = defaultAttachOrStart
-	}
-	startupHandoffFloor := r.StartupHandoffFloor
-	if startupHandoffFloor <= 0 {
-		startupHandoffFloor = 1500 * time.Millisecond
-	}
-	sleep := r.Sleep
-	if sleep == nil {
-		sleep = time.Sleep
-	}
-
-	return runInteractiveDefault(ctx, interactiveDefaultRunSpec{
-		stdin:               r.Stdin,
-		stdout:              r.Stdout,
-		stderr:              r.Stderr,
-		client:              client,
-		addr:                startupConfig.Addr,
-		configPath:          configPath,
-		attachOrStart:       attachOrStart,
-		launchInteractive:   launchInteractive,
-		isInteractive:       isInteractive,
-		startupHandoffFloor: startupHandoffFloor,
-		sleep:               sleep,
-	})
-}
-
-type interactiveDefaultRunSpec struct {
-	stdin               io.Reader
-	stdout              io.Writer
-	stderr              io.Writer
-	client              *http.Client
-	addr                string
-	configPath          string
-	attachOrStart       func(context.Context, io.Writer, io.Writer, *http.Client, string, string) error
-	launchInteractive   func(context.Context, io.Reader, io.Writer, io.Writer, string) error
-	isInteractive       func() bool
-	startupHandoffFloor time.Duration
-	sleep               func(time.Duration)
-}
-
-func runInteractiveDefault(ctx context.Context, spec interactiveDefaultRunSpec) ExitCode {
-	if !spec.isInteractive() {
-		_, _ = fmt.Fprintln(spec.stderr, "interactive cockpit requires a terminal; use `swobu status` or `swobu daemon --config <path>`")
-		return ExitDown
-	}
-	startupOut := spec.stdout
-	startupErr := spec.stderr
-	startupReporterFromWriter(startupOut).Report(daemonlifecycle.StartupEvent{Kind: daemonlifecycle.StartupEventSplash})
-	versionDecision := emitVersionNoticeIfConfigured(startupOut)
-	if versionDecision.show {
-		if err := waitForVersionNoticeContinue(spec.stdin, startupOut); err != nil {
-			if !errors.Is(err, errVersionNoticeAcknowledgmentUnavailable) {
-				_, _ = fmt.Fprintln(startupErr, err.Error())
-				return ExitDown
-			}
-		}
-	}
-	if err := ensureTelemetryNoticeBeforeDaemonStart(startupOut); err != nil {
-		_, _ = fmt.Fprintln(startupErr, err.Error())
-		return ExitDown
-	}
-	if err := spec.attachOrStart(ctx, startupOut, startupErr, spec.client, spec.addr, spec.configPath); err != nil {
-		_, _ = fmt.Fprintln(startupErr, err.Error())
-		return ExitDown
-	}
-	spec.sleep(spec.startupHandoffFloor)
-	debugHandoff := platformconfig.EnvTruthy(os.Getenv("SWOBU_E2E_DEBUG_HANDOFF"))
-	if debugHandoff {
-		_, _ = fmt.Fprintln(startupOut, "swobu handoff: starting interactive cockpit")
-		_, _ = fmt.Fprintln(startupErr, "swobu handoff: starting interactive cockpit")
-	}
-	clearInteractiveScreen(spec.stdout)
-	prevLogger := slog.Default()
-	bufferedHandler := platformlogging.NewBufferedHandler(prevLogger.Handler())
-	slog.SetDefault(slog.New(bufferedHandler))
-	defer slog.SetDefault(prevLogger)
-	if debugHandoff {
-		_, _ = fmt.Fprintln(startupOut, "swobu handoff: launching cockpit interactive app")
-		_, _ = fmt.Fprintln(startupErr, "swobu handoff: launching cockpit interactive app")
-	}
-	if err := spec.launchInteractive(ctx, spec.stdin, spec.stdout, spec.stderr, spec.addr); err != nil {
-		bufferedHandler.Flush(context.Background())
-		// Mirror launch failure into stderr; if the cockpit failed before drawing,
-		// operators would otherwise only see the handoff failure indirectly.
-		_, _ = fmt.Fprintln(startupErr, err.Error())
-		return ExitDown
-	}
-	bufferedHandler.Flush(context.Background())
-	if debugHandoff {
-		_, _ = fmt.Fprintln(startupOut, "swobu handoff: cockpit interactive app exited cleanly")
-		_, _ = fmt.Fprintln(startupErr, "swobu handoff: cockpit interactive app exited cleanly")
-	}
-	return ExitHealthy
-}
-
-func clearInteractiveScreen(out io.Writer) {
-	file, ok := out.(*os.File)
-	if !ok || file == nil || !term.IsTerminal(int(file.Fd())) {
-		return
-	}
-	_, _ = out.Write([]byte("\x1b[2J\x1b[H"))
+	return runOpen(ctx, client, r.Stdout, r.Stderr, nil, r)
 }
 
 func dispatchSubcommand(ctx context.Context, args []string, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), client *http.Client, stdout io.Writer, stderr io.Writer, runner Runner) ExitCode {
 	subcommand := args[0] // swobu:io-string source=cli-args
 	switch subcommand {
+	case "open":
+		return runOpen(ctx, client, stdout, stderr, args[1:], runner)
 	case "--version", "-v", "version":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "version takes no arguments")
+			return ExitDown
+		}
 		_, _ = fmt.Fprintln(stdout, controlplane.SwobuVersion())
 		return ExitHealthy
+	case "config":
+		return runConfig(ctx, stdout, stderr, args[1:])
 	case "daemon":
 		if len(args) > 1 && args[1] == "down" {
-			return runDown(ctx, client, stdout, stderr, args[2:])
+			return runDown(ctx, client, stdout, stderr, args[2:], runner.Addr)
 		}
-		return runDaemon(ctx, start, stdout, stderr, args[1:])
+		return runDaemon(ctx, start, stdout, stderr, args[1:], runner.Addr, runner.ConfigPath)
 	case "status":
-		return runStatus(ctx, client, stdout, stderr, args[1:])
+		return runStatus(ctx, client, stdout, stderr, args[1:], runner.Addr)
 	case "telemetry":
-		return runTelemetry(ctx, client, stdout, stderr, args[1:])
+		return runTelemetry(ctx, client, stdout, stderr, args[1:], runner.Addr)
 	case "update":
 		return runUpdate(ctx, stdout, stderr, args[1:], runner)
 	case "connect":
-		return runConnect(ctx, client, stdout, stderr, args[1:], runner)
-	case "share":
-		return runShare(ctx, client, stdout, stderr, args[1:])
-	case "access":
-		return runAccess(ctx, client, stdout, stderr, args[1:])
+		return runConnect(ctx, withClientTimeout(client, connectReviewTimeout), stdout, stderr, args[1:], runner)
+	case "credential":
+		return runCredential(ctx, client, stdout, stderr, args[1:], runner)
+	case "principal":
+		return runPrincipal(ctx, client, stdout, stderr, args[1:], runner)
+	case "workspace":
+		if len(args) > 1 && args[1] == "limits" {
+			return runWorkspaceLimits(ctx, client, stdout, stderr, args[2:], runner)
+		}
+		if len(args) > 1 && args[1] == "create" {
+			return runWorkspaceCreate(ctx, client, stdout, stderr, args[2:], runner)
+		}
+		if len(args) > 1 && args[1] == "display-name" {
+			return runWorkspaceDisplayName(ctx, client, stdout, stderr, args[2:], runner)
+		}
+		if len(args) > 1 && args[1] == "permission" {
+			return runWorkspacePermission(ctx, client, stdout, stderr, args[2:], runner)
+		}
+		if len(args) > 1 && args[1] == "delete" {
+			return runWorkspaceDelete(ctx, client, stdout, stderr, args[2:], runner)
+		}
+		fmt.Fprintln(stderr, "usage: swobu workspace create|display-name|delete|permission|limits [args]")
+		return ExitDown
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", subcommand)
 		return ExitDown
 	}
+}
+
+func withClientTimeout(client *http.Client, timeout time.Duration) *http.Client {
+	copy := *client
+	if copy.Timeout > 0 && copy.Timeout < timeout {
+		copy.Timeout = timeout
+	}
+	return &copy
 }
 
 // rejectUnexpectedPositionalArgs reports whether fs still holds positional
@@ -247,16 +153,17 @@ func rejectUnexpectedPositionalArgs(fs *flag.FlagSet, out io.Writer) bool {
 	return true
 }
 
-func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string) ExitCode {
+func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartInput) (*bootstrap.Daemon, error), stdout io.Writer, stderr io.Writer, args []string, defaultAddr, defaultConfigPath string) ExitCode {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>] [--addr <host:port>]")
+		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon [--config <path>] [--addr <host:port>] [--config-read-only]")
 		fs.PrintDefaults()
 		_, _ = fmt.Fprintln(stderr, "\ncommands:\n  down    Request daemon shutdown")
 	}
-	configPath := fs.String("config", "", fmt.Sprintf("root daemon config path (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
-	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	configPath := fs.String("config", defaultConfigPath, fmt.Sprintf("root daemon config path (env: %s) (default: %s)", platformconfig.EnvConfigPath, platformconfig.DefaultConfigPath()))
+	addr := fs.String("addr", defaultAddr, fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	configReadOnly := fs.Bool("config-read-only", false, "run with existing externally managed Node YAML; refuse configuration writes")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -286,7 +193,7 @@ func runDaemon(ctx context.Context, start func(context.Context, bootstrap.StartI
 	})
 
 	logger := slog.Default()
-	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, StartupConfig: startupConfig, Logger: logger})
+	daemon, err := start(ctx, bootstrap.StartInput{ConfigPath: resolvedConfigPath, ReadOnlyConfig: *configReadOnly, StartupConfig: startupConfig, Logger: logger})
 	if err != nil {
 		next := []string{
 			"check daemon config path and values",
@@ -339,14 +246,14 @@ func ensureTelemetryNoticeBeforeDaemonStart(out io.Writer) error {
 	return nil
 }
 
-func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.Writer, args []string) ExitCode {
+func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string, defaultAddr string) ExitCode {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(stdout, "usage: swobu status [--addr <host:port>]")
 		fs.PrintDefaults()
 	}
-	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	addr := fs.String("addr", defaultAddr, fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -359,6 +266,7 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 
 	startupConfig, err := platformconfig.ResolveStartupConfig(*addr)
 	if err != nil {
+		fmt.Fprintln(stderr, err)
 		return ExitDown
 	}
 	payload, exitCode := fetchStatus(ctx, client, startupConfig.Addr)
@@ -366,14 +274,14 @@ func runStatus(ctx context.Context, client *http.Client, stdout io.Writer, _ io.
 	return exitCode
 }
 
-func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Writer, args []string) ExitCode {
+func runDown(ctx context.Context, client *http.Client, _ io.Writer, stderr io.Writer, args []string, defaultAddr string) ExitCode {
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(stderr, "usage: swobu daemon down [--addr <host:port>] [--timeout <duration>]")
 		fs.PrintDefaults()
 	}
-	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	addr := fs.String("addr", defaultAddr, fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	timeout := fs.Duration("timeout", 5*time.Second, "time to wait for graceful shutdown")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

@@ -107,7 +107,11 @@ func (e BackendAdapter) Send(ctx context.Context, target provider.TargetSnapshot
 	}
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 
-	if err := applyBedrockAuth(ctx, e.credentials, target.CredentialRef, httpReq, wireReqBody, target.BedrockRegion()); err != nil {
+	resolved, err := resolveBedrockAuth(ctx, e.credentials, target, target.BedrockRegion())
+	if err != nil {
+		return nil, provider.AttemptNotDispatched(err)
+	}
+	if err := applyResolvedBedrockAuth(ctx, resolved, httpReq, wireReqBody, target.BedrockRegion()); err != nil {
 		return nil, provider.AttemptNotDispatched(err)
 	}
 
@@ -165,7 +169,7 @@ func (e BackendAdapter) ListDeployments(ctx context.Context, target provider.Tar
 		return nil, canonical.BadEndpoint("bedrock signing region is required")
 	}
 	region := bedrockSigningRegionForTarget(target)
-	resolved, err := resolveBedrockAuth(ctx, e.credentials, target.CredentialRef, region)
+	resolved, err := resolveBedrockAuth(ctx, e.credentials, target, region)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +255,7 @@ func (e BackendAdapter) ProbeTarget(ctx context.Context, target provider.TargetS
 	if region == "" {
 		return provider.TargetProbeResult{}, canonical.BadEndpoint("bedrock signing region is required")
 	}
-	resolved, err := resolveBedrockAuth(ctx, e.credentials, target.CredentialRef, region)
+	resolved, err := resolveBedrockAuth(ctx, e.credentials, target, region)
 	if err != nil {
 		authentication := bedrockAuthAWSIdentity.String()
 		if strings.TrimSpace(target.CredentialRef) != "" {

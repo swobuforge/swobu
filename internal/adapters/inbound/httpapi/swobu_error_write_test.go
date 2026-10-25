@@ -21,6 +21,8 @@ func TestStatusCodeForSwobuError_UsesRecoveryOwnership(t *testing.T) {
 		{name: "temporary target availability", code: canonical.ErrorCodeNoAvailableTarget, want: http.StatusServiceUnavailable},
 		{name: "provider timeout", code: canonical.ErrorCodeProviderTimeout, want: http.StatusGatewayTimeout},
 		{name: "provider unavailable", code: canonical.ErrorCodeProviderUnavailable, want: http.StatusServiceUnavailable},
+		{name: "cost unavailable", code: canonical.ErrorCodeCostUnavailable, want: http.StatusPaymentRequired},
+		{name: "budget exceeded", code: canonical.ErrorCodeBudgetExceeded, want: http.StatusPaymentRequired},
 		{name: "Swobu invariant", code: canonical.ErrorCodeInternal, want: http.StatusInternalServerError},
 	}
 

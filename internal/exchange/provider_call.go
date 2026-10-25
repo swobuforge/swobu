@@ -24,7 +24,7 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 	if !ok {
 		return providerCall{}, provider.TargetSnapshot{}, nil, s.mediaFetchCache, fmt.Errorf("exchange invariant: provider candidate index %d is outside route plan", selection.candidateIndex)
 	}
-	path, err := resolveProviderPath(target)
+	path, err := resolveProviderPath(target, runner.ModelConnection)
 	if err != nil {
 		return providerCall{}, provider.TargetSnapshot{}, nil, s.mediaFetchCache, err
 	}
@@ -131,6 +131,8 @@ func prepareProviderCall(ctx context.Context, s exchangeState, selection provide
 		resolvedFrom:       s.resolvedFrom,
 		executionAffinity:  s.executionAffinity,
 		delayClientHandoff: delayClientHandoff,
+		localToolStreaming: s.mcp != nil && s.mcp.CanExecute() && s.input.clientDelivery.Mode == delivery.Streaming,
+		ownsLocalCall:      s.mcp.OwnsCall,
 		providerRound:      len(s.providerUsage),
 	}, path.target, requestChanges, fetchCache, nil
 }
@@ -217,15 +219,37 @@ func completeProviderCall(ctx context.Context, call providerCall, ingress provid
 	}
 	if call.delayClientHandoff {
 		defer events.Close(ctx)
-		envelope, err := canonical.ReadClosedEnvelope(ctx, events, canonical.EnvResponse)
+		if call.localToolStreaming && runner.localToolDelivery != nil {
+			runner.localToolDelivery.projection.ownsTool = call.ownsLocalCall
+		}
+		// Fold the round as it arrives. Retaining every argument/text delta is
+		// unnecessary: tool ownership needs the completed items, not an event log.
+		projector := canonical.NewResponseProjector(binding)
+		var response *canonical.CanonicalResponse
+		var err error
+		for {
+			var event canonical.Event
+			event, err = events.Next(ctx)
+			if err != nil {
+				break
+			}
+			if err = projector.Apply(event); err != nil {
+				break
+			}
+			if call.localToolStreaming && runner.localToolDelivery != nil {
+				if err = runner.localToolDelivery.apply(ctx, call, runner, event); err != nil {
+					break
+				}
+			}
+			if event.Kind == canonical.EventEnvelopeEnd {
+				response, err = projector.Done()
+				break
+			}
+		}
 		if err != nil {
 			if err == io.EOF {
 				err = canonical.InternalError("provider response ended before a complete tool round")
 			}
-			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
-		}
-		response, err := envelope.ProjectResponse()
-		if err != nil {
 			return nil, nil, compatibility, responseFailure("canonical_response_validation", err)
 		}
 		clientResponse := response.Clone()

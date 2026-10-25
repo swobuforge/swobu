@@ -49,7 +49,7 @@ func (r chatCompletionsBackendResolver) ResolveBackend(target provider.TargetSna
 			ResponsesDialect: protocolcodec.ResponsesDialect{
 				CaptureResponsesContinuation: true,
 				Tools: protocolcodec.ResponsesToolLowering{
-					WebSearch: protocolcodec.ResponsesHostedSearchWithAccessTool("web_search", true),
+					WebSearch: protocolcodec.ResponsesHostedSearchTool("web_search", true),
 				},
 				DecorateAttempt: decorateOpenAIAttempt,
 			},

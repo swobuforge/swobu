@@ -13,7 +13,7 @@ import (
 	"github.com/swobuforge/swobu/internal/producttelemetry"
 )
 
-func runTelemetry(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string) ExitCode {
+func runTelemetry(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string, defaultAddr string) ExitCode {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "telemetry subcommand required: status|on|off|inspect")
 		return ExitDown
@@ -28,17 +28,17 @@ func runTelemetry(ctx context.Context, client *http.Client, stdout io.Writer, st
 	case "off":
 		return runTelemetrySetEnabled(stdout, stderr, false, args[1:])
 	case "inspect":
-		return runTelemetryInspect(ctx, client, stdout, stderr, args[1:])
+		return runTelemetryInspect(ctx, client, stdout, stderr, args[1:], defaultAddr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown telemetry subcommand %q\n", telemetrySubcommand)
 		return ExitDown
 	}
 }
 
-func runTelemetryInspect(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string) ExitCode {
+func runTelemetryInspect(ctx context.Context, client *http.Client, stdout io.Writer, stderr io.Writer, args []string, defaultAddr string) ExitCode {
 	fs := flag.NewFlagSet("telemetry inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	addr := fs.String("addr", "", fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
+	addr := fs.String("addr", defaultAddr, fmt.Sprintf("address (env: %s) (default: %s)", platformconfig.EnvAddr, platformconfig.DefaultAddr()))
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitHealthy
@@ -53,7 +53,7 @@ func runTelemetryInspect(ctx context.Context, client *http.Client, stdout io.Wri
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(startup.Addr)+"/_swobu/telemetry-report", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, platformconfig.BaseURL(startup.Addr)+"/api/v1/telemetry/report", nil)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
 		return ExitDown

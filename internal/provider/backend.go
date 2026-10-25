@@ -74,6 +74,9 @@ type Backend struct {
 	Target    TargetSnapshot
 	Codec     Codec
 	Transport Transport
+	// RefreshCredential exchanges the captured bundle without storage or request
+	// replay. Only providers supporting revisioned Connection refresh set it.
+	RefreshCredential func(context.Context) (string, error)
 }
 
 // TargetFactCharacterizer owns isolated, target-local fixture execution for

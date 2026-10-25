@@ -77,7 +77,7 @@ func readInvocations(ctx context.Context, q queryer, exchangeID execution.Exchan
 	rows, err := q.QueryContext(ctx, `SELECT i.invocation_id, i.kind, i.started_at_ns, i.settled_at_ns, i.duration_ns, i.outcome, i.execution_state, i.failure_class,
 i.route_name, i.target_id, i.target_version_dec, i.provider_spec, i.provider_protocol, i.provider_model, i.purpose,
 i.input_tokens, i.output_tokens, i.reasoning_tokens, i.cache_read_tokens, i.cache_write_tokens,
-i.source_tool_key, i.tool_key
+i.source_tool_key, i.tool_key, i.connection_id, i.connection_revision_dec
 FROM swobu_ledger_invocations i
 WHERE i.exchange_id = ? ORDER BY i.ordinal`, exchangeID.String())
 	if err != nil {
@@ -90,10 +90,10 @@ WHERE i.exchange_id = ? ORDER BY i.ordinal`, exchangeID.String())
 		var startedNS, settledNS, durationNS int64
 		var failure, routeRaw, targetRaw, versionRaw, providerRaw, providerProtocolRaw, modelRaw, purposeRaw sql.NullString
 		var input, output, reasoning, cacheRead, cacheWrite sql.NullInt64
-		var sourceToolRaw, toolRaw sql.NullString
+		var sourceToolRaw, toolRaw, connectionIDRaw, connectionRevisionRaw sql.NullString
 		if err := rows.Scan(&idRaw, &kind, &startedNS, &settledNS, &durationNS, &outcomeRaw, &occurrenceRaw, &failure,
 			&routeRaw, &targetRaw, &versionRaw, &providerRaw, &providerProtocolRaw, &modelRaw, &purposeRaw,
-			&input, &output, &reasoning, &cacheRead, &cacheWrite, &sourceToolRaw, &toolRaw); err != nil {
+			&input, &output, &reasoning, &cacheRead, &cacheWrite, &sourceToolRaw, &toolRaw, &connectionIDRaw, &connectionRevisionRaw); err != nil {
 			return nil, err
 		}
 		id, err := execution.ParseInvocationID(idRaw)
@@ -101,7 +101,7 @@ WHERE i.exchange_id = ? ORDER BY i.ordinal`, exchangeID.String())
 			return nil, errors.New("persisted Invocation identity is invalid")
 		}
 		outcome, occurrence := execution.Outcome(outcomeRaw), execution.Occurrence(occurrenceRaw)
-		row := rowcodec.Invocation{Kind: kind, Route: routeRaw.String, Target: targetRaw.String, Version: versionRaw.String, Provider: providerRaw.String, Protocol: providerProtocolRaw.String, Model: modelRaw.String, Purpose: purposeRaw.String, SourceTool: sourceToolRaw.String, Tool: toolRaw.String, Input: nullIntPtr(input), Output: nullIntPtr(output), Reasoning: nullIntPtr(reasoning), CacheRead: nullIntPtr(cacheRead), CacheWrite: nullIntPtr(cacheWrite)}
+		row := rowcodec.Invocation{ConnectionID: connectionIDRaw.String, ConnectionRevision: connectionRevisionRaw.String, Kind: kind, Route: routeRaw.String, Target: targetRaw.String, Version: versionRaw.String, Provider: providerRaw.String, Protocol: providerProtocolRaw.String, Model: modelRaw.String, Purpose: purposeRaw.String, SourceTool: sourceToolRaw.String, Tool: toolRaw.String, Input: nullIntPtr(input), Output: nullIntPtr(output), Reasoning: nullIntPtr(reasoning), CacheRead: nullIntPtr(cacheRead), CacheWrite: nullIntPtr(cacheWrite)}
 		completed, err := row.Restore(id, fromUnixNano(startedNS), fromUnixNano(settledNS), time.Duration(durationNS), outcome, occurrence, failure.String)
 		if err != nil {
 			return nil, err

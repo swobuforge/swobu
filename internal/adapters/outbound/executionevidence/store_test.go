@@ -1,6 +1,7 @@
 package executionevidence
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -9,13 +10,96 @@ import (
 	"github.com/swobuforge/swobu/internal/domain/accessidentity"
 	"github.com/swobuforge/swobu/internal/domain/canonical"
 	"github.com/swobuforge/swobu/internal/domain/clientfamily"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"github.com/swobuforge/swobu/internal/domain/execution"
 	domain "github.com/swobuforge/swobu/internal/domain/executionevidence"
 	"github.com/swobuforge/swobu/internal/domain/protocolkind"
 	"github.com/swobuforge/swobu/internal/routing"
 )
 
+func TestExchangeSettlementOffersHistoryOnceOutsideLock(t *testing.T) {
+	var store *Store
+	var captured []domain.CompletedExchange
+	store = NewStore(Config{OfferExchange: func(exchange domain.CompletedExchange) bool {
+		if len(store.Settled()) != 1 {
+			t.Fatal("history offered before terminal publication")
+		}
+		captured = append(captured, exchange)
+		return false
+	}})
+	started, invocation, terminal, settled := lifecycle(t, 1)
+	for _, event := range []domain.Event{started, invocation} {
+		if err := store.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Append(settled); err == nil {
+		t.Fatal("unsettled Invocation entered history")
+	}
+	if len(captured) != 0 {
+		t.Fatal("invalid Exchange offered")
+	}
+	if err := store.Append(terminal); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(settled); err != nil {
+		t.Fatalf("capture rejection changed Exchange: %v", err)
+	}
+	if len(captured) != 1 || captured[0].ID() != started.ID() || len(captured[0].Invocations()) != 1 || captured[0].Started().AccessID() != started.AccessID() {
+		t.Fatalf("capture=%#v", captured)
+	}
+	if err := store.Append(settled); err == nil {
+		t.Fatal("duplicate settlement accepted")
+	}
+	if len(captured) != 1 {
+		t.Fatal("duplicate capture offer")
+	}
+}
+
+func TestActivityProjectsDurableExchangeUsingExistingLifecycleSemantics(t *testing.T) {
+	started, invocation, terminal, settled := lifecycle(t, 2)
+	completedInvocation, err := domain.NewInvocationLifecycle(invocation, terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := domain.NewCompletedExchange(started, []domain.InvocationLifecycle{completedInvocation}, settled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(Config{})
+	for _, event := range []domain.Event{started, invocation, terminal, settled} {
+		if err := store.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := store.ProjectActivity(ProjectionInput{})
+	merged := store.ProjectActivity(ProjectionInput{History: []domain.CompletedExchange{completed}})
+	if !reflect.DeepEqual(merged, want) {
+		t.Fatalf("overlap changed projection: %#v", merged)
+	}
+	restarted := NewStore(Config{}).ProjectActivity(ProjectionInput{History: []domain.CompletedExchange{completed}})
+	if !reflect.DeepEqual(restarted, want) {
+		t.Fatalf("durable projection differs from live: %#v", restarted)
+	}
+	activeStore := NewStore(Config{})
+	if err := activeStore.Append(started); err != nil {
+		t.Fatal(err)
+	}
+	active := activeStore.ProjectActivity(ProjectionInput{History: []domain.CompletedExchange{completed}})
+	if len(active.Exchanges) != 1 || active.Exchanges[0].State != "in_progress" {
+		t.Fatalf("durable overlap replaced live active truth: %#v", active)
+	}
+	other := NewStore(Config{}).ProjectActivity(ProjectionInput{Scope: ProjectionScope{Kind: ProjectionScopeWorkspace, Workspace: "other"}, History: []domain.CompletedExchange{completed}})
+	if len(other.Exchanges) != 0 {
+		t.Fatal("durable Exchange crossed Workspace scope")
+	}
+}
+
 func lifecycle(t *testing.T, seed byte) (domain.ExchangeStarted, domain.InvocationStartedEvent, domain.InvocationSettledEvent, domain.ExchangeSettled) {
+	return lifecycleForAccess(t, seed, accessidentity.Local)
+}
+
+func lifecycleForAccess(t *testing.T, seed byte, access accessidentity.ID) (domain.ExchangeStarted, domain.InvocationStartedEvent, domain.InvocationSettledEvent, domain.ExchangeSettled) {
 	t.Helper()
 	id, err := execution.NewExchangeID()
 	if err != nil {
@@ -25,7 +109,7 @@ func lifecycle(t *testing.T, seed byte) (domain.ExchangeStarted, domain.Invocati
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := domain.NewExchangeStarted(id, accessidentity.Local, workspace, time.Unix(int64(seed), 0), clientfamily.Codex, "responses", canonical.NormalizedPathResponses)
+	started, err := domain.NewExchangeStarted(id, access, workspace, time.Unix(int64(seed), 0), clientfamily.Codex, "responses", canonical.NormalizedPathResponses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +138,32 @@ func lifecycle(t *testing.T, seed byte) (domain.ExchangeStarted, domain.Invocati
 		t.Fatal(err)
 	}
 	return started, invocation, settledInvocation, settledExchange
+}
+
+func TestActivityProjectionPreservesDistinctActorAttribution(t *testing.T) {
+	store := NewStore(Config{})
+	for seed, access := range []accessidentity.ID{accessidentity.Local, accessidentity.NewManaged([16]byte{2})} {
+		started, _, _, settled := lifecycleForAccess(t, byte(seed+40), access)
+		if err := store.Append(started); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Append(settled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := store.ProjectActivity(ProjectionInput{}).Exchanges
+	if len(rows) != 2 {
+		t.Fatalf("rows=%d, want two historical actor records", len(rows))
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.AccessID] = true
+	}
+	for _, access := range []accessidentity.ID{accessidentity.Local, accessidentity.NewManaged([16]byte{2})} {
+		if !seen[access.String()] {
+			t.Fatalf("projection lost immutable historical actor %q: %#v", access, rows)
+		}
+	}
 }
 
 func TestActivityFailedWithoutHTTPStatusUsesLifecycleState(t *testing.T) {
@@ -101,6 +211,27 @@ func TestStorePreservesExchangeGlobalMixedCausalOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	connectionID, _ := connectionidentity.Parse("cn_shared")
+	resource, err = resource.BindConnection(connectionID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		record, found := store.Exchange(started.ID())
+		if !found {
+			t.Fatal("missing retained exchange")
+		}
+		detail := ProjectExchangeDetail(record, "memory")
+		for _, invocation := range detail.Exchange.Invocations {
+			if invocation.Kind == "model" && (invocation.ConnectionID != "cn_shared" || invocation.ConnectionRevision != 4 || invocation.Version != 3) {
+				t.Fatal("detail lost composite identity")
+			}
+		}
+		activity := store.ProjectActivity(ProjectionInput{Scope: ProjectionScope{Kind: ProjectionScopeAll}})
+		if len(activity.Exchanges) != 1 || activity.Exchanges[0].ConnectionID != "cn_shared" || activity.Exchanges[0].ConnectionRevision != 4 {
+			t.Fatal("Activity lost Connection identity")
+		}
+	}()
 	ids := make([]execution.InvocationID, 0, 3)
 	for i := 0; i < 3; i++ {
 		id, err := execution.NewInvocationID(started.ID(), uint64(i+1))
@@ -408,5 +539,51 @@ func TestStore100KSequentialLifecycleOperations(t *testing.T) {
 	}
 	if got := len(store.Settled()); got != 128 {
 		t.Fatalf("settled retention after stress = %d, want 128", got)
+	}
+}
+
+func TestZeroResolutionMCPSettlesAndOffersCompletedExchange(t *testing.T) {
+	started, originalInvocation, _, _ := lifecycle(t, 89)
+	at := started.StartedAt()
+	original := originalInvocation.(domain.MCPInvocationStarted)
+	invocation, err := domain.NewMCPInvocationStarted(original.ID(), at, original.MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := domain.NewMCPInvocationSettled(original.ID(), at, execution.Succeeded, execution.Occurred, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled, err := domain.NewExchangeSettled(started.ID(), at, delivery.Succeeded, 200, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offered []domain.CompletedExchange
+	store := NewStore(Config{OfferExchange: func(e domain.CompletedExchange) bool {
+		offered = append(offered, e)
+		return true
+	}})
+	if err := store.Append(terminal); err == nil {
+		t.Fatal("settlement before its start was accepted despite equal timestamps")
+	}
+	if err := store.Append(started); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Append(terminal); err == nil {
+		t.Fatal("invocation settlement before invocation start was accepted")
+	}
+	for _, event := range []domain.Event{invocation, terminal, settled} {
+		if err := store.Append(event); err != nil {
+			t.Fatalf("event %T rejected at zero observed resolution: %v", event, err)
+		}
+	}
+	if len(offered) != 1 || offered[0].Duration() != 0 || len(offered[0].Invocations()) != 1 || offered[0].Invocations()[0].Duration() != 0 {
+		t.Fatalf("zero-resolution Exchange not offered: %#v", offered)
+	}
+	if got := store.Settled(); len(got) != 1 || len(got[0].Invocations) != 1 {
+		t.Fatalf("settled activity lost: %#v", got)
+	}
+	if err := store.Append(settled); err == nil {
+		t.Fatal("duplicate Exchange settlement accepted")
 	}
 }

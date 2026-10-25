@@ -2,9 +2,31 @@ package routing
 
 import (
 	"errors"
+	"github.com/swobuforge/swobu/internal/domain/connectionidentity"
 	"strings"
 	"testing"
 )
+
+func TestWorkspaceMCPMountAliasesFollowPublishedIdentityGrammar(t *testing.T) {
+	slug, err := ParseWorkspaceSlug("research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{"1docs", "docs\t", "docs:extra", "é", strings.Repeat("a", 33), "swobu"} {
+		t.Run(alias, func(t *testing.T) {
+			_, err := RestoreWorkspaceWithMCPMounts(slug, nil, nil, map[string]MCPMount{alias: {ConnectionID: "docs", AllowedTools: []string{"search"}}})
+			if err == nil {
+				t.Fatal("Workspace accepted an unpublishable MCP alias")
+			}
+		})
+	}
+	for _, alias := range []string{"a", "docs-2", strings.Repeat("a", 32)} {
+		workspace, err := RestoreWorkspaceWithMCPMounts(slug, nil, nil, map[string]MCPMount{alias: {ConnectionID: "docs", AllowedTools: []string{"search"}}})
+		if err != nil || workspace.MCPMounts()[alias].ConnectionID != "docs" {
+			t.Fatalf("valid alias %q changed: %v", alias, err)
+		}
+	}
+}
 
 func testProtocol(t *testing.T, provider Provider, raw string) Protocol {
 	t.Helper()
@@ -22,10 +44,7 @@ func testTarget(t *testing.T, id string) Target {
 	targetID, _ := ParseTargetID(id)
 	model, _ := ParseUpstreamModel("upstream-" + id)
 	provider, _ := ParseProvider("openai", func(string) bool { return true })
-	connection, err := NewStandardConnection(provider, "", "env:OPENAI_API_KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection, _ := connectionidentity.Parse("cn_shared")
 	target, err := NewTarget(targetID, model, testProtocol(t, provider, "responses"), connection)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +64,7 @@ func testConfig(t *testing.T, targets ...Target) Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := NewWorkspace(slug, name, []Route{route})
+	workspace, err := NewWorkspace(slug, []Route{route})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +83,7 @@ func TestConfigAllowsTargetIDsToRepeatAcrossWorkspaces(t *testing.T) {
 		name, _ := ParseRouteName("route-" + rawSlug)
 		tier, _ := NewTier([]Target{target})
 		route, _ := NewRoute(name, []Tier{tier})
-		workspace, _ := NewWorkspace(slug, name, []Route{route})
+		workspace, _ := NewWorkspace(slug, []Route{route})
 		workspaces = append(workspaces, workspace)
 	}
 	if _, err := NewConfig(workspaces); err != nil {
@@ -79,15 +98,14 @@ func TestRestoreWorkspaceRejectsActiveGenerationLedgerMismatch(t *testing.T) {
 	tier, _ := NewTier([]Target{target})
 	route, _ := NewRoute(name, []Tier{tier})
 	for _, version := range []TargetVersion{2, 3} {
-		if _, err := RestoreWorkspace(slug, name, []Route{route}, map[TargetID]TargetVersion{target.id: version}); !errors.Is(err, ErrInvalidConfig) {
+		if _, err := RestoreWorkspace(slug, []Route{route}, map[TargetID]TargetVersion{target.id: version}); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("ledger version %d error = %v, want mismatch rejection", version, err)
 		}
 	}
 }
 
-func TestTargetGenerationHistorySurvivesRouteDeletionAndWorkspaceRename(t *testing.T) {
+func TestTargetGenerationHistorySurvivesRouteDeletionAndDisplayEdit(t *testing.T) {
 	slug, _ := ParseWorkspaceSlug("dev")
-	renamed, _ := ParseWorkspaceSlug("renamed")
 	firstName, _ := ParseRouteName("first")
 	secondName, _ := ParseRouteName("second")
 	x := testTarget(t, "x")
@@ -96,22 +114,22 @@ func TestTargetGenerationHistorySurvivesRouteDeletionAndWorkspaceRename(t *testi
 	secondTier, _ := NewTier([]Target{keep})
 	first, _ := NewRoute(firstName, []Tier{firstTier})
 	second, _ := NewRoute(secondName, []Tier{secondTier})
-	workspace, _ := NewWorkspace(slug, secondName, []Route{first, second})
+	workspace, _ := NewWorkspace(slug, []Route{first, second})
 	config, _ := NewConfig([]Workspace{workspace})
 
-	withoutRoute, err := config.DeleteRoute(slug, firstName, nil)
+	withoutRoute, err := config.DeleteRoute(slug, firstName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	renamedConfig, err := withoutRoute.RenameWorkspace(slug, renamed)
+	updatedConfig, err := withoutRoute.SetWorkspaceDisplayName(slug, "Research")
 	if err != nil {
 		t.Fatal(err)
 	}
-	recreated, err := renamedConfig.CreateRoute(renamed, firstName, x)
+	recreated, err := updatedConfig.CreateRoute(slug, firstName, x)
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, _ = recreated.Workspace(renamed)
+	workspace, _ = recreated.Workspace(slug)
 	route, _ := workspace.Route(firstName)
 	if got := route.Tiers()[0].Targets()[0].Version(); got != 2 {
 		t.Fatalf("recreated route target generation = %d, want 2", got)
@@ -145,15 +163,15 @@ func TestWorkspaceRejectsDuplicateTargetIDsAcrossRoutes(t *testing.T) {
 	tier, _ := NewTier([]Target{target})
 	first, _ := NewRoute(firstName, []Tier{tier})
 	second, _ := NewRoute(secondName, []Tier{tier})
-	if _, err := NewWorkspace(slug, firstName, []Route{first, second}); !errors.Is(err, ErrInvalidConfig) {
+	if _, err := NewWorkspace(slug, []Route{first, second}); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("NewWorkspace error = %v, want duplicate target rejection", err)
 	}
 }
 
-func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
-	valid := []string{"a", "Model.Name-1_v2", strings.Repeat("x", 128)}
-	invalid := []string{"", ".", "..", "foo/bar", "a?b", "a b", " padded", strings.Repeat("x", 129)}
-	for _, raw := range valid {
+func TestModelPatternsAndTargetIDsHaveIndependentGrammars(t *testing.T) {
+	validShared := []string{"a", "Model.Name-1_v2", strings.Repeat("x", 128)}
+	invalidShared := []string{"", ".", "..", "a b", " padded", strings.Repeat("x", 129)}
+	for _, raw := range validShared {
 		if _, err := ParseRouteName(raw); err != nil {
 			t.Errorf("ParseRouteName(%q): %v", raw, err)
 		}
@@ -161,7 +179,7 @@ func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
 			t.Errorf("ParseTargetID(%q): %v", raw, err)
 		}
 	}
-	for _, raw := range invalid {
+	for _, raw := range invalidShared {
 		if _, err := ParseRouteName(raw); err == nil {
 			t.Errorf("ParseRouteName(%q) unexpectedly succeeded", raw)
 		}
@@ -169,26 +187,31 @@ func TestCommandIdentifiersUseURLSegmentGrammar(t *testing.T) {
 			t.Errorf("ParseTargetID(%q) unexpectedly succeeded", raw)
 		}
 	}
+	for _, raw := range []string{"foo/bar", "a?b", "claude-*", "gpt-[45]*"} {
+		if _, err := ParseRouteName(raw); err != nil {
+			t.Errorf("valid model glob %q: %v", raw, err)
+		}
+		if _, err := ParseTargetID(raw); err == nil {
+			t.Errorf("Target ID cannot be glob %q", raw)
+		}
+	}
 	if _, err := ParseRouteName("swobu"); err != nil {
-		t.Errorf("ParseRouteName(\"swobu\"): %v", err)
+		t.Errorf("valid model name: %v", err)
 	}
-	if _, err := ParseRouteName(PublicDefaultRouteID); err == nil {
-		t.Errorf("ParseRouteName(%q) unexpectedly accepted the reserved default-model ID", PublicDefaultRouteID)
-	}
-	if _, err := ParseTargetID(PublicDefaultRouteID); err != nil {
-		t.Errorf("ParseTargetID(%q): %v", PublicDefaultRouteID, err)
+	if _, err := ParseRouteName("default"); err != nil {
+		t.Errorf("default is an ordinary exact route pattern: %v", err)
 	}
 }
 
-func TestWorkspaceResolveRouteUsesExactNameThenConfiguredDefault(t *testing.T) {
-	defaultName, _ := ParseRouteName("chat")
+func TestWorkspaceResolveRouteRequiresExactPattern(t *testing.T) {
+	chatName, _ := ParseRouteName("chat")
 	exactName, _ := ParseRouteName("exact")
-	defaultTier, _ := NewTier([]Target{testTarget(t, "default-target")})
+	chatTier, _ := NewTier([]Target{testTarget(t, "chat-target")})
 	exactTier, _ := NewTier([]Target{testTarget(t, "exact-target")})
-	defaultRoute, _ := NewRoute(defaultName, []Tier{defaultTier})
+	chatRoute, _ := NewRoute(chatName, []Tier{chatTier})
 	exactRoute, _ := NewRoute(exactName, []Tier{exactTier})
 	slug, _ := ParseWorkspaceSlug("dev")
-	workspace, err := NewWorkspace(slug, defaultName, []Route{defaultRoute, exactRoute})
+	workspace, err := NewWorkspace(slug, []Route{chatRoute, exactRoute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,19 +221,44 @@ func TestWorkspaceResolveRouteUsesExactNameThenConfiguredDefault(t *testing.T) {
 		want      string
 	}{
 		{requested: "exact", want: "exact"},
-		{requested: PublicDefaultRouteID, want: "chat"},
-		{requested: "fixed-client-model", want: "chat"},
-		{requested: "provider/model:not-a-route", want: "chat"},
+		{requested: "chat", want: "chat"},
 	} {
 		route, err := workspace.ResolveRoute(test.requested)
 		if err != nil || route.Name().String() != test.want {
 			t.Fatalf("ResolveRoute(%q) = %q, %v, want %q", test.requested, route.Name().String(), err, test.want)
 		}
 	}
+	for _, requested := range []string{"fixed-client-model", "provider/model:not-a-route", "default"} {
+		if _, err := workspace.ResolveRoute(requested); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("ResolveRoute(%q) error = %v, want ErrNotFound", requested, err)
+		}
+	}
 	for _, requested := range []string{"", " \t"} {
 		if _, err := workspace.ResolveRoute(requested); !errors.Is(err, ErrEmptyRequestedRoute) {
 			t.Fatalf("ResolveRoute(%q) error = %v, want ErrEmptyRequestedRoute", requested, err)
 		}
+	}
+}
+
+func TestEmptyWorkspaceIsValidButHasNoResolvableRoute(t *testing.T) {
+	slug, err := ParseWorkspaceSlug("research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := NewConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err = config.CreateEmptyWorkspace(EmptyWorkspaceSeed{Slug: slug})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, ok := config.Workspace(slug)
+	if !ok || len(workspace.Routes()) != 0 {
+		t.Fatalf("routes=%d", len(workspace.Routes()))
+	}
+	if _, err := workspace.ResolveRoute("default"); !errors.Is(err, ErrServiceDisabled) {
+		t.Fatalf("ResolveRoute error=%v, want ErrNoRoute", err)
 	}
 }
 
@@ -240,7 +288,7 @@ func TestConfigCloneOwnsNestedTargetStorage(t *testing.T) {
 	workspace, _ := clone.Workspace(slug)
 	route, _ := workspace.Route(routeName)
 	spec := route.Spec()
-	spec.Tiers[0].Targets[0].Settings = TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), Connection: replacement.Connection()}
+	spec.Tiers[0].Targets[0].Settings = TargetSettings{Model: replacement.Model(), Protocol: replacement.Protocol(), ConnectionID: replacement.ConnectionID()}
 	if _, err := clone.ApplyRouteSpec(slug, routeName, spec); err != nil {
 		t.Fatal(err)
 	}

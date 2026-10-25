@@ -115,7 +115,7 @@ func (e BackendAdapter) getModelCatalog(ctx context.Context, target provider.Tar
 	httpReq.Header.Set("User-Agent", swobuCallerUAHeaderValue)
 	// Model catalog reads are an OpenAI-family endpoint, independent of the
 	// target's selected inference protocol and its protocol-only headers.
-	if err := e.applyCredential(ctx, httpReq, target.ProviderID(), target.CredentialRef, target.AuthHeader(), protocolkind.ChatCompletions); err != nil {
+	if err := e.applyCredential(ctx, httpReq, target, target.AuthHeader(), protocolkind.ChatCompletions); err != nil {
 		return nil, err
 	}
 	resp, err := e.client.Do(httpReq)

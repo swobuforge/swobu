@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -28,9 +29,9 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 	if err != nil {
 		return plannedMutation{}, openClawProblem(err)
 	}
-	locus := strings.TrimSpace(string(locusRaw))
-	if locus == "" {
-		return plannedMutation{}, openClawProblem(fmt.Errorf("config file returned no path"))
+	locus, err := resolveOpenClawConfigPath(string(locusRaw), s)
+	if err != nil {
+		return plannedMutation{}, openClawProblem(err)
 	}
 
 	modelRef, source, modelExists, err := readModelRef(ctx, s)
@@ -50,11 +51,30 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 
 	api, apiExists := observedProvider["api"].(string)
 	apiKey, apiKeyExists := observedProvider["apiKey"].(string)
+	if value, exists := observedProvider["apiKey"]; exists && value != nil && !apiKeyExists {
+		return plannedMutation{}, openClawProblem(fmt.Errorf("external credential references require manual configuration; Connect cannot validate this binding"))
+	}
+	configFile, err := inspectForeignFile(locus, nil)
+	if err != nil {
+		return plannedMutation{}, openClawProblem(err)
+	}
+	// OpenClaw deliberately redacts CLI reads. Read only its reported private
+	// file for Access evidence; never use the display marker as a credential.
+	if apiKey == "__OPENCLAW_REDACTED__" {
+		apiKey, apiKeyExists, err = (jsonEditor{allowComments: true}).String(configFile.raw, keyPath{"models", "providers", "swobu", "apiKey"})
+		if err != nil {
+			return plannedMutation{}, openClawProblem(fmt.Errorf("cannot inspect credential binding in configuration"))
+		}
+	}
+	credentialBinding := apiKey
+	if strings.HasPrefix(apiKey, "${") && strings.HasSuffix(apiKey, "}") {
+		apiKey = s.getenv(strings.TrimSuffix(strings.TrimPrefix(apiKey, "${"), "}"))
+	}
 	beforeEndpoint, endpointExists := observedProvider["baseUrl"].(string)
 	defaultExists := false
 	if models, ok := observedProvider["models"].([]any); ok {
 		for _, item := range models {
-			if object, ok := item.(map[string]any); ok && object["id"] == "default" {
+			if object, ok := item.(map[string]any); ok && object["id"] == target.ModelID() {
 				defaultExists = true
 			}
 		}
@@ -62,18 +82,16 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 
 	allowlistSatisfied := true
 	if allowlistExists {
-		_, allowlistSatisfied = allowlist["swobu/default"]
+		_, allowlistSatisfied = allowlist["swobu/"+target.ModelID()]
 	}
 
-	changes := semanticChange("backend", modelRef, modelExists, "swobu/default")
+	changes := semanticChange("backend", modelRef, modelExists, "swobu/"+target.ModelID())
 	changes = append(changes, semanticChange("endpoint", beforeEndpoint, endpointExists, target.WorkspaceURL())...)
 	changes = append(changes, semanticChange("protocol", api, apiExists, "openai-completions")...)
-	if !apiKeyExists || apiKey == "" {
-		changes = append(changes, semanticChange("API key placeholder", "", false, "swobu")...)
-	}
-	changes = append(changes, semanticChange("default model", fmt.Sprint(defaultExists), defaultExists, "true")...)
+	changes = append(changes, credentialChange(apiKey, apiKeyExists, target)...)
+	changes = append(changes, semanticChange("selected model", fmt.Sprint(defaultExists), defaultExists, "true")...)
 	if allowlistExists && !allowlistSatisfied {
-		changes = append(changes, Change{Field: "allowlist membership", After: "swobu/default"})
+		changes = append(changes, Change{Field: "allowlist membership", After: "swobu/" + target.ModelID()})
 	}
 
 	plan := Plan{
@@ -82,6 +100,7 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 		ConfigPaths: []string{locus},
 		Target:      target,
 		Changes:     changes,
+		credential:  apiKey,
 	}
 	if plan.AlreadyConfigured() {
 		return plannedMutation{plan: plan}, nil
@@ -97,29 +116,30 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 			providerValue := map[string]any{
 				"baseUrl": target.WorkspaceURL(),
 				"api":     "openai-completions",
-				"apiKey":  "swobu",
-				"models":  []any{map[string]any{"id": "default", "name": "Swobu default"}},
+				"apiKey":  target.bearer,
+				"models":  []any{map[string]any{"id": target.ModelID(), "name": target.ModelID()}},
 			}
 			if freshProviderExists && freshProvider != nil {
 				providerValue = cloneMap(freshProvider)
 				providerValue["baseUrl"], providerValue["api"] = target.WorkspaceURL(), "openai-completions"
-				if k, ok := providerValue["apiKey"].(string); !ok || k == "" {
-					providerValue["apiKey"] = "swobu"
-				}
+				providerValue["apiKey"] = target.bearer
 				models, ok := providerValue["models"].([]any)
 				if providerValue["models"] != nil && !ok {
 					return openClawProblem(fmt.Errorf("models.providers.swobu.models is not an array"))
 				}
 				found := false
 				for _, item := range models {
-					if object, ok := item.(map[string]any); ok && object["id"] == "default" {
+					if object, ok := item.(map[string]any); ok && object["id"] == target.ModelID() {
 						found = true
 					}
 				}
 				if !found {
-					models = append(models, map[string]any{"id": "default", "name": "Swobu default"})
+					models = append(models, map[string]any{"id": target.ModelID(), "name": target.ModelID()})
 				}
 				providerValue["models"] = models
+			}
+			if apiKey != "" && apiKey == target.bearer {
+				providerValue["apiKey"] = credentialBinding
 			}
 			providerJSON, _ := json.Marshal(providerValue)
 
@@ -136,14 +156,27 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 				if updatedAllowlist == nil {
 					updatedAllowlist = make(map[string]any)
 				}
-				if _, present := updatedAllowlist["swobu/default"]; !present {
-					updatedAllowlist["swobu/default"] = map[string]any{}
+				if _, present := updatedAllowlist["swobu/"+target.ModelID()]; !present {
+					updatedAllowlist["swobu/"+target.ModelID()] = map[string]any{}
 				}
 				encoded, _ := json.Marshal(updatedAllowlist)
 				sets = append(sets, []string{"config", "set", "agents.defaults.models", string(encoded), "--json"})
 			}
 
-			sets = append(sets, []string{"config", "set", source, "swobu/default"})
+			sets = append(sets, []string{"config", "set", source, "swobu/" + target.ModelID()})
+			// OpenClaw owns writes through its configuration command, so the
+			// foreign-file replacement helper cannot publish the recovery copy.
+			// Preserve the exact current file before the first command may mutate
+			// it; a fresh installation has no prior bytes to recover.
+			configFile, err := inspectForeignFile(locus, nil)
+			if err != nil {
+				return openClawProblem(fmt.Errorf("inspect configuration before mutation: %w", err))
+			}
+			if configFile.existed {
+				if err := backupForeignFile(configFile.physical, configFile.raw, configFile.mode); err != nil {
+					return openClawProblem(fmt.Errorf("backup configuration before mutation: %w", err))
+				}
+			}
 			for _, args := range sets {
 				_, code, runErr := s.run(ctx, "openclaw", args...)
 				if runErr != nil {
@@ -156,6 +189,38 @@ func planOpenClawCurrent(ctx context.Context, s *Service, target Target) (planne
 			return nil
 		},
 	}, nil
+}
+
+// resolveOpenClawConfigPath expands only the home markers OpenClaw's config
+// file command uses for display. Treating those markers as literal paths makes
+// the preview disagree with the file the same OpenClaw process reads and writes.
+func resolveOpenClawConfigPath(raw string, service *Service) (string, error) {
+	locus := strings.TrimSpace(raw)
+	if locus == "" {
+		return "", fmt.Errorf("config file returned no path")
+	}
+	var home string
+	switch {
+	case locus == "$OPENCLAW_HOME", strings.HasPrefix(locus, "$OPENCLAW_HOME/"), strings.HasPrefix(locus, "$OPENCLAW_HOME\\"):
+		home = strings.TrimSpace(service.getenv("OPENCLAW_HOME"))
+		if home == "" {
+			return "", fmt.Errorf("config file returned an OPENCLAW_HOME path but OPENCLAW_HOME is unset")
+		}
+		locus = strings.TrimLeft(strings.TrimPrefix(locus, "$OPENCLAW_HOME"), `/\\`)
+	case locus == "~", strings.HasPrefix(locus, "~/"), strings.HasPrefix(locus, "~\\"):
+		home = strings.TrimSpace(service.getenv("OPENCLAW_HOME"))
+		if home == "" {
+			var err error
+			home, err = service.homeDir()
+			if err != nil {
+				return "", fmt.Errorf("resolve home for OpenClaw config path: %w", err)
+			}
+		}
+		locus = strings.TrimLeft(strings.TrimPrefix(locus, "~"), `/\\`)
+	default:
+		return filepath.Abs(filepath.Clean(locus))
+	}
+	return filepath.Abs(filepath.Join(home, locus))
 }
 
 func readModelRef(ctx context.Context, s *Service) (model string, source string, exists bool, err error) {
